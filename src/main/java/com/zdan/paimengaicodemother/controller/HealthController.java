@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 健康检查
  *
- * @author ZDAN
+ * @author LXH
  */
 @RestController
 @RequestMapping("/health")
