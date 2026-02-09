@@ -23,7 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static com.zdan.paimengaicodemother.model.constant.UserConstant.USER_LOGIN_STATE;
+import static com.zdan.paimengaicodemother.constant.UserConstant.USER_LOGIN_STATE;
 
 /**
  * 用户 服务层实现
@@ -147,7 +147,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     @Override
     public String getEncryptPassword(String userPassword) {
         // 盐值，混淆密码
-        final String salt = "ZDAN-GHN";
+        final String salt = "LXH-GHN";
         return DigestUtils.md5DigestAsHex((salt + userPassword).getBytes());
     }
 
