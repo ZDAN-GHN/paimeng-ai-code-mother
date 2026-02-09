@@ -8,6 +8,8 @@ spring:
     url: jdbc:mysql://localhost:3306/paimeng_ai_code_mother
     username: root
     password: root
+  profiles:
+    active: local
 
 # 端口 根路径
 server:

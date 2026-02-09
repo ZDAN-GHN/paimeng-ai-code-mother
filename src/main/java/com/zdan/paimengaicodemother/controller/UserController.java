@@ -9,7 +9,7 @@ import com.zdan.paimengaicodemother.common.ResultUtils;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.exception.ThrowUtils;
-import com.zdan.paimengaicodemother.model.constant.UserConstant;
+import com.zdan.paimengaicodemother.constant.UserConstant;
 import com.zdan.paimengaicodemother.model.dto.UserLoginRequest;
 import com.zdan.paimengaicodemother.model.dto.UserQueryRequest;
 import com.zdan.paimengaicodemother.model.dto.UserRegisterRequest;

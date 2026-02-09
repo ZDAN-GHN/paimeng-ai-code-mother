@@ -1,4 +1,4 @@
-package com.zdan.paimengaicodemother.model.constant;
+package com.zdan.paimengaicodemother.constant;
 
 /**
  * 用户模块常量
