@@ -17,6 +17,10 @@ import GlobalFooter from '@/components/GlobalFooter.vue'
 </script>
 
 <style scoped>
+#basicLayout {
+  background: none;
+}
+
 #basicLayout .header {
   background: white;
   color: unset;
@@ -25,14 +29,14 @@ import GlobalFooter from '@/components/GlobalFooter.vue'
 }
 /* 页面主体 */
 #basicLayout .content {
-  padding: 20px;
-  background: linear-gradient(to right, #fefefe, #fff);
+  width: 100%;
+  padding: 0;
+  background: none;
+  margin: 0;
 }
 /* 页脚 */
 #basicLayout .footer {
-  background-color: #efefef;
   padding: 16px;
-  position: fixed;
   bottom: 0;
   left: 0;
   right: 0;

@@ -1,6 +1,6 @@
 <template>
   <div id="userLoginPage">
-    <h2 class="title" style="color: indianred">派蒙 AI 应用生成 - 用户登录</h2>
+    <h2 class="title">鱼皮 AI 应用生成 - 用户登录</h2>
     <div class="desc">不写一行代码，生成完整应用</div>
     <a-form :model="formState" name="basic" autocomplete="off" @finish="handleSubmit">
       <a-form-item name="userAccount" :rules="[{ required: true, message: '请输入账号' }]">
@@ -45,21 +45,17 @@ const loginUserStore = useLoginUserStore()
  * @param values
  */
 const handleSubmit = async (values: any) => {
-  try {
-    const res = await userLogin(values)
-    // 登录成功，把登录态保存到全局状态中
-    if (res.data.code === 0 && res.data.data) {
-      await loginUserStore.fetchLoginUser()
-      message.success('登录成功')
-      router.push({
-        path: '/',
-        replace: true,
-      })
-    } else {
-      message.error('登录失败 ' + res.data.message)
-    }
-  } catch (e: any) {
-    message.error('请求失败 ' + e.message)
+  const res = await userLogin(values)
+  // 登录成功，把登录态保存到全局状态中
+  if (res.data.code === 0 && res.data.data) {
+    await loginUserStore.fetchLoginUser()
+    message.success('登录成功')
+    router.push({
+      path: '/',
+      replace: true,
+    })
+  } else {
+    message.error('登录失败，' + res.data.message)
   }
 }
 </script>
