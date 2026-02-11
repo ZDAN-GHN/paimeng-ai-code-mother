@@ -5,6 +5,7 @@ import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
 import com.zdan.paimengaicodemother.utils.ClazzScanner;
 import jakarta.annotation.PostConstruct;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
@@ -17,13 +18,14 @@ import java.util.Set;
  *
  * @author LXH
  */
+@Slf4j
 @Component
 public class AiCodeGenServiceExecutor {
 
     private final Map<String, IAiCodeGenService> aiCodeGenServiceMap;
 
     {
-        this.aiCodeGenServiceMap= new HashMap<>();
+        this.aiCodeGenServiceMap = new HashMap<>();
     }
 
     private final AiCodeGenServiceFactory aiCodeGenServiceFactory;
@@ -44,6 +46,8 @@ public class AiCodeGenServiceExecutor {
             String domainType = clazz.getAnnotation(AiCodeGenService.class).codeGenTypeEnum().getValue();
             IAiCodeGenService aiCodeGenService = aiCodeGenServiceFactory.createAiCodeGenService(clazz);
             aiCodeGenServiceMap.put(domainType, aiCodeGenService);
+            log.info("codeGenService registration completed: domainType = {}, bean = {} ", domainType,
+                    aiCodeGenService.getClass().getName());
         }
     }
 

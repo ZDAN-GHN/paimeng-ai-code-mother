@@ -1,9 +1,11 @@
 package com.zdan.paimengaicodemother.core.saver;
 
 import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.util.StrUtil;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeansException;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
@@ -20,6 +22,7 @@ import java.util.Map;
  * @author LXH
  */
 @Component
+@Slf4j
 public class CodeFileSaverExecutor implements ApplicationContextAware {
 
     private final Map<String, BaseCodeFileSaver> codeFileSaverMap = new HashMap<>();
@@ -27,16 +30,17 @@ public class CodeFileSaverExecutor implements ApplicationContextAware {
     /**
      * 执行代码保存
      *
-     * @param codeResult  代码结果对象
+     * @param codeResult      代码结果对象
      * @param codeGenTypeEnum 代码生成类型
+     * @param appId           应用 id
      * @return 保存的目录
      */
-    public File executeSaver(Object codeResult, CodeGenTypeEnum codeGenTypeEnum) {
+    public File executeSaver(Object codeResult, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
         BaseCodeFileSaver codeFileSaver = this.codeFileSaverMap.get(codeGenTypeEnum.getValue());
         if (null == codeFileSaver) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "不支持的代码生成类型：" + codeGenTypeEnum);
         }
-        return codeFileSaver.saveCode(codeResult);
+        return codeFileSaver.saveCode(codeResult, appId);
     }
 
     @Override
@@ -48,13 +52,14 @@ public class CodeFileSaverExecutor implements ApplicationContextAware {
                 Class<?> beanClass = bean.getClass();
                 // 根据 class 获取到类的注册消息，这里是获取到注解
                 CodeFileSaver annotation = beanClass.getAnnotation(CodeFileSaver.class);
-                String parseType = annotation.codeGenTypeEnum().getValue();
+                String saveType = annotation.codeGenTypeEnum().getValue();
                 if (bean instanceof BaseCodeFileSaver) {
-                    codeFileSaverMap.put(parseType, (BaseCodeFileSaver) bean);
-                    System.out.println("策略注册成功：parseType = " + parseType + "，bean = " + beanClass.getName());
+                    codeFileSaverMap.put(saveType, (BaseCodeFileSaver) bean);
+                    log.info("saver registration completed: saveType = {}, bean = {} ", saveType, beanClass.getName());
                 } else {
                     throw new IllegalArgumentException(
-                            "类 " + beanClass.getName() + " 标注了 @CodeParser，但未继承 BaseCodeFileSaver 抽象类");
+                            StrUtil.format("[{}] is annotated with @CodeParser, but missing implementing ICodeParser", beanClass.getName())
+                    );
                 }
             }
         }

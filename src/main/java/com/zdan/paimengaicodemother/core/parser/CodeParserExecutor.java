@@ -2,9 +2,11 @@ package com.zdan.paimengaicodemother.core.parser;
 
 
 import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.util.StrUtil;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeansException;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
@@ -20,6 +22,7 @@ import java.util.Map;
  * @author LXH
  */
 @Component
+@Slf4j
 public class CodeParserExecutor implements ApplicationContextAware {
 
     private final Map<String, ICodeParser> codeParserMap = new HashMap<>();
@@ -51,10 +54,11 @@ public class CodeParserExecutor implements ApplicationContextAware {
                 String parseType = annotation.codeGenTypeEnum().getValue();
                 if (bean instanceof ICodeParser) {
                     codeParserMap.put(parseType, (ICodeParser) bean);
-                    System.out.println("策略注册成功：parseType = " + parseType + "，bean = " + beanClass.getName());
+                    log.info("parser registration completed: parseType = {}, bean = {} ", parseType, beanClass.getName());
                 } else {
                     throw new IllegalArgumentException(
-                            "类 " + beanClass.getName() + " 标注了 @CodeParser，但未实现 ICodeParser 接口");
+                            StrUtil.format("[{}] is annotated with @CodeParser, but missing implementing ICodeParser", beanClass.getName())
+                    );
                 }
             }
         }

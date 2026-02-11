@@ -8,7 +8,7 @@ import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.mapper.UserMapper;
-import com.zdan.paimengaicodemother.model.dto.UserQueryRequest;
+import com.zdan.paimengaicodemother.model.dto.user.UserQueryRequest;
 import com.zdan.paimengaicodemother.model.entity.User;
 import com.zdan.paimengaicodemother.model.enums.UserRoleEnum;
 import com.zdan.paimengaicodemother.model.vo.LoginUserVO;
@@ -147,7 +147,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     @Override
     public String getEncryptPassword(String userPassword) {
         // 盐值，混淆密码
-        final String salt = "LXH-GHN";
+        final String salt = "ZDAN-GHN";
         return DigestUtils.md5DigestAsHex((salt + userPassword).getBytes());
     }
 

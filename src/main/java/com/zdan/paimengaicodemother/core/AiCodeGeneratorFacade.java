@@ -17,8 +17,8 @@ import java.io.File;
  *
  * @author LXH
  */
-@Slf4j
 @Service
+@Slf4j
 public class AiCodeGeneratorFacade {
 
     private final AiCodeGenServiceExecutor aiCodeGenServiceExecutor;
@@ -38,12 +38,13 @@ public class AiCodeGeneratorFacade {
      *
      * @param userMessage     用户提示词
      * @param codeGenTypeEnum 生成类型
+     * @param appId           应用 id
      * @return 保存的目录
      */
-    public File generateAndSaveCode(String userMessage, CodeGenTypeEnum codeGenTypeEnum) {
+    public File generateAndSaveCode(String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
         validateCodeGenType(codeGenTypeEnum);
         Object result = aiCodeGenServiceExecutor.executeCodeGen(userMessage, codeGenTypeEnum);
-        File file = codeFileSaverExecutor.executeSaver(result, CodeGenTypeEnum.HTML);
+        File file = codeFileSaverExecutor.executeSaver(result, CodeGenTypeEnum.HTML, appId);
         return file;
     }
 
@@ -54,10 +55,10 @@ public class AiCodeGeneratorFacade {
      * @param codeGenTypeEnum 生成类型
      * @return 保存的目录
      */
-    public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum) {
+    public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
         validateCodeGenType(codeGenTypeEnum);
         Flux<String> codeStream = aiCodeGenServiceExecutor.executeCodeGenStream(userMessage, codeGenTypeEnum);
-        return processCodeStream(codeStream, codeGenTypeEnum);
+        return processCodeStream(codeStream, codeGenTypeEnum, appId);
     }
 
     /**
@@ -65,9 +66,10 @@ public class AiCodeGeneratorFacade {
      *
      * @param codeStream      代码流
      * @param codeGenTypeEnum 代码生成类型
+     * @param appId           应用 id
      * @return 流式响应
      */
-    private Flux<String> processCodeStream(Flux<String> codeStream, CodeGenTypeEnum codeGenTypeEnum) {
+    private Flux<String> processCodeStream(Flux<String> codeStream, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
         // 字符串拼接器，用于当流式返回所有的代码之后，再保存代码
         StringBuilder codeBuilder = new StringBuilder();
         return codeStream
@@ -80,10 +82,10 @@ public class AiCodeGeneratorFacade {
                         // 使用执行器解析代码
                         Object parsedResult = codeParserExecutor.executeParser(completeCode, codeGenTypeEnum);
                         // 使用执行器保存代码
-                        File saveDir = codeFileSaverExecutor.executeSaver(parsedResult, codeGenTypeEnum);
-                        log.info("saving code file completed, saveDir: {}", saveDir.getAbsolutePath());
+                        File saveDir = codeFileSaverExecutor.executeSaver(parsedResult, codeGenTypeEnum, appId);
+                        log.info("saving code file completed, savePath: {}, saveDir: {} ", saveDir.getAbsolutePath(), saveDir);
                     } catch (Exception e) {
-                        log.error("failed to save code file with exception: {}", e.getMessage());
+                        log.error("failed to save code file with exception: {} ", e.getMessage());
                     }
                 });
     }
