@@ -2,7 +2,7 @@ package com.zdan.paimengaicodemother.service;
 
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.core.service.IService;
-import com.zdan.paimengaicodemother.model.dto.UserQueryRequest;
+import com.zdan.paimengaicodemother.model.dto.user.UserQueryRequest;
 import com.zdan.paimengaicodemother.model.entity.User;
 import com.zdan.paimengaicodemother.model.vo.LoginUserVO;
 import com.zdan.paimengaicodemother.model.vo.UserVO;

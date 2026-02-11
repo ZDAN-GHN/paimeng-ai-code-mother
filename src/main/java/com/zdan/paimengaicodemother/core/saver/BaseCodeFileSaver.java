@@ -1,14 +1,15 @@
 package com.zdan.paimengaicodemother.core.saver;
 
 import cn.hutool.core.io.FileUtil;
-import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
+import com.zdan.paimengaicodemother.constant.AppConstant;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
+
 
 /**
  * 抽象代码文件保存器 - 模板方法模式
@@ -20,19 +21,20 @@ public abstract class BaseCodeFileSaver {
     /**
      * 文件保存根目录
      */
-    private static final String FILE_SAVE_ROOT_DIR = System.getProperty("user.dir") + "/tmp/coede_out_put";
+    private static final String FILE_SAVE_ROOT_DIR = AppConstant.CODE_OUTPUT_ROOT_DIR;
 
     /**
      * 模板方法：保存代码的标准流程
      *
      * @param result 代码结果对象
+     * @param appId  应用 id
      * @return 保存的目录
      */
-    public final File saveCode(Object result) {
+    public final File saveCode(Object result, Long appId) {
         // 1. 验证输入
-        validateInput(result);
+        validateInput(result, appId);
         // 2. 构建唯一目录
-        String uniqueDir = buildUniqueDir();
+        String uniqueDir = buildUniqueDir(appId);
         // 3. 保存文件（具体实现交给子类）
         saveFiles(result, uniqueDir);
         // 4. 返回文件目录对象
@@ -57,10 +59,14 @@ public abstract class BaseCodeFileSaver {
      * 验证输入参数（可由子类覆盖）
      *
      * @param result 代码结果对象
+     * @param appId  应用 id
      */
-    protected void validateInput(Object result) {
+    protected void validateInput(Object result, Long appId) {
         if (result == null) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "代码结果对象不能为空");
+        }
+        if (appId == null) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "应用id不能为空");
         }
     }
 
@@ -69,13 +75,15 @@ public abstract class BaseCodeFileSaver {
      *
      * @return 目录路径
      */
-    protected String buildUniqueDir() {
+    protected String buildUniqueDir(Long appId) {
         String codeType = getCodeType().getValue();
-        String uniqueDirName = StrUtil.format("{}_{}", codeType, IdUtil.getSnowflakeNextIdStr());
+        String uniqueDirName = StrUtil.format("{}_{}", codeType, appId);
         String dirPath = FILE_SAVE_ROOT_DIR + File.separator + uniqueDirName;
         FileUtil.mkdir(dirPath);
         return dirPath;
     }
+
+    // region --- 抽象方法，模板子类实现
 
     /**
      * 保存文件（具体实现交给子类）
@@ -91,4 +99,5 @@ public abstract class BaseCodeFileSaver {
      * @return 代码生成类型枚举
      */
     protected abstract CodeGenTypeEnum getCodeType();
+    // endregion 抽象方法，模板子类实现
 }
