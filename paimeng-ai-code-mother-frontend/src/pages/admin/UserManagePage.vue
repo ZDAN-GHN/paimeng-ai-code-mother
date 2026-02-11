@@ -136,7 +136,6 @@ const doDelete = async (id: string) => {
   if (!id) {
     return
   }
-  // @ts-ignore
   const res = await deleteUser({ id })
   if (res.data.code === 0) {
     message.success('删除成功')
@@ -157,6 +156,5 @@ onMounted(() => {
 #userManagePage {
   padding: 24px;
   background: white;
-  margin-top: 16px;
 }
 </style>

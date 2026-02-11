@@ -7,8 +7,8 @@ import { useLoginUserStore } from '@/stores/loginUser.ts'
 const customTheme = {
   algorithm: antdTheme.defaultAlgorithm,
   token: {
-    colorPrimary: 'indianred',
-    colorInfo: 'indianred',
+    colorPrimary: '#cb573e',
+    colorInfo: '#cb573e',
   },
 }
 // 项目加载的时候默认出用户
