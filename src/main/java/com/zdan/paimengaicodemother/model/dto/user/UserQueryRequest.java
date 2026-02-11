@@ -1,4 +1,4 @@
-package com.zdan.paimengaicodemother.model.dto;
+package com.zdan.paimengaicodemother.model.dto.user;
 
 import com.zdan.paimengaicodemother.common.PageRequest;
 import lombok.Data;
