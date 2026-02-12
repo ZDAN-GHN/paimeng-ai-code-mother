@@ -3,6 +3,7 @@ package com.zdan.paimengaicodemother.service;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.core.service.IService;
 import com.zdan.paimengaicodemother.model.dto.app.AppQueryRequest;
+import com.zdan.paimengaicodemother.model.dto.chathistory.ChatHistoryQueryRequest;
 import com.zdan.paimengaicodemother.model.entity.App;
 import com.zdan.paimengaicodemother.model.entity.User;
 import com.zdan.paimengaicodemother.model.vo.AppVO;
@@ -17,7 +18,23 @@ import java.util.List;
  */
 public interface AppService extends IService<App> {
 
+    /**
+     * 部署应用
+     *
+     * @param appId     应用 id
+     * @param loginUser 当前登录用户
+     * @return 应用访问 url
+     */
     String deployApp(Long appId, User loginUser);
+
+    /**
+     * 通过对话生成应用代码
+     *
+     * @param appId     应用 id
+     * @param message   提示词
+     * @param loginUser 当前登录用户
+     */
+    Flux<String> chatToGenCode(Long appId, String message, User loginUser);
 
     /**
      * 获取应用封装类
@@ -39,13 +56,4 @@ public interface AppService extends IService<App> {
      * @param appQueryRequest 应用查询请求
      */
     QueryWrapper getQueryWrapper(AppQueryRequest appQueryRequest);
-
-    /**
-     * 通过对话生成应用代码
-     *
-     * @param appId     应用 id
-     * @param message   提示词
-     * @param loginUser 当前登录用户
-     */
-    Flux<String> chatToGenCode(Long appId, String message, User loginUser);
 }

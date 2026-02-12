@@ -3,7 +3,6 @@ package com.zdan.paimengaicodemother.generator;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.setting.yaml.YamlUtil;
 import com.mybatisflex.codegen.Generator;
-import com.mybatisflex.codegen.config.ColumnConfig;
 import com.mybatisflex.codegen.config.GlobalConfig;
 import com.zaxxer.hikari.HikariDataSource;
 
@@ -17,7 +16,7 @@ import java.util.Map;
 public class MybatisFlexCodeGenerator {
 
     // 要生成的表名称
-    private static final String[] TABLE_NAMES = {"app"};
+    private static final String[] TABLE_NAMES = {"chat_history"};
 
     public static void main(String[] args) {
         // 获取数据源元信息
