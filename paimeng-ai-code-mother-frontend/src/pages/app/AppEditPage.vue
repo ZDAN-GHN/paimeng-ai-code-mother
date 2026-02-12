@@ -145,7 +145,7 @@ const formData = reactive({
   priority: 0,
   initPrompt: '',
   codeGenType: '',
-  deployKey: '',
+  deployKey: ''
 })
 
 // 是否为管理员
@@ -157,10 +157,10 @@ const isAdmin = computed(() => {
 const rules = {
   appName: [
     { required: true, message: '请输入应用名称', trigger: 'blur' },
-    { min: 1, max: 50, message: '应用名称长度在1-50个字符', trigger: 'blur' },
+    { min: 1, max: 50, message: '应用名称长度在1-50个字符', trigger: 'blur' }
   ],
   cover: [{ type: 'url', message: '请输入有效的URL', trigger: 'blur' }],
-  priority: [{ type: 'number', min: 0, max: 99, message: '优先级范围0-99', trigger: 'blur' }],
+  priority: [{ type: 'number', min: 0, max: 99, message: '优先级范围0-99', trigger: 'blur' }]
 }
 
 // 获取应用信息
@@ -218,13 +218,13 @@ const handleSubmit = async () => {
         id: appInfo.value.id,
         appName: formData.appName,
         cover: formData.cover,
-        priority: formData.priority,
+        priority: formData.priority
       })
     } else {
       // 普通用户只能修改应用名称
       res = await updateApp({
         id: appInfo.value.id,
-        appName: formData.appName,
+        appName: formData.appName
       })
     }
 
@@ -256,7 +256,12 @@ const resetForm = () => {
 // 进入对话页面
 const goToChat = () => {
   if (appInfo.value?.id) {
-    router.push(`/app/chat/${appInfo.value.id}`)
+    router.push({
+      path: `/app/chat/${appInfo.value.id}`,
+      query: {
+        view: 1
+      }
+    })
   }
 }
 

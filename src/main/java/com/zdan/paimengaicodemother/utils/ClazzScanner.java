@@ -25,7 +25,7 @@ public class ClazzScanner {
     /**
      * 从项目根包下查找
      */
-    public static <T> Set<Class<T>> scanInterfaces(
+    public static <T> Set<Class<? extends T>> scanInterfaces(
             Class<? extends Annotation> annotationClass,
             Class<T> interfaceClass
     ) {
@@ -40,7 +40,7 @@ public class ClazzScanner {
      * @param interfaceClass  筛选的父接口类型（null表示不按父接口筛选）
      * @return 符合条件的接口集合
      */
-    public static <T> Set<Class<T>> scanInterfaces(
+    public static <T> Set<Class<? extends T>> scanInterfaces(
             String basePackage,
             Class<? extends Annotation> annotationClass,
             Class<T> interfaceClass
@@ -67,8 +67,8 @@ public class ClazzScanner {
             return anInterface && hasAnnotation && extendInterface;
         };
 
-        // 执行扫描：使用Hutool的ClassScanner，传入筛选条件
-        Set<Class<T>> scanResult = ClassScanner.scanPackage(basePackage, clazzFilter).stream()
+        // 执行扫描：使用 Hutool 的 ClassScanner，传入筛选条件
+        Set<Class<? extends T>> scanResult = ClassScanner.scanPackage(basePackage, clazzFilter).stream()
                 .map(clazz -> (Class<T>) clazz)
                 .collect(Collectors.toSet());
 
