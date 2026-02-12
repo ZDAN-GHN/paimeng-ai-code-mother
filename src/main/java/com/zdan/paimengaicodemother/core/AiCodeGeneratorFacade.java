@@ -43,7 +43,7 @@ public class AiCodeGeneratorFacade {
      */
     public File generateAndSaveCode(String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
         validateCodeGenType(codeGenTypeEnum);
-        Object result = aiCodeGenServiceExecutor.executeCodeGen(userMessage, codeGenTypeEnum);
+        Object result = aiCodeGenServiceExecutor.executeCodeGen(userMessage, codeGenTypeEnum, appId);
         File file = codeFileSaverExecutor.executeSaver(result, CodeGenTypeEnum.HTML, appId);
         return file;
     }
@@ -57,7 +57,7 @@ public class AiCodeGeneratorFacade {
      */
     public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
         validateCodeGenType(codeGenTypeEnum);
-        Flux<String> codeStream = aiCodeGenServiceExecutor.executeCodeGenStream(userMessage, codeGenTypeEnum);
+        Flux<String> codeStream = aiCodeGenServiceExecutor.executeCodeGenStream(userMessage, codeGenTypeEnum, appId);
         return processCodeStream(codeStream, codeGenTypeEnum, appId);
     }
 
@@ -75,7 +75,7 @@ public class AiCodeGeneratorFacade {
         return codeStream
                 // 实时收集代码片段
                 .doOnNext(codeBuilder::append)
-                // 回复
+                // 回复结束后解析代码
                 .doOnComplete(() -> {
                     try {
                         String completeCode = codeBuilder.toString();

@@ -47,6 +47,7 @@ public class App implements Serializable {
     /**
      * 应用封面
      */
+    @Column("cover")
     private String cover;
 
     /**
@@ -76,6 +77,7 @@ public class App implements Serializable {
     /**
      * 优先级
      */
+    @Column("priority")
     private Integer priority;
 
     /**
