@@ -4,6 +4,7 @@ import com.zdan.paimengaicodemother.model.entity.User;
 import com.zdan.paimengaicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.zdan.paimengaicodemother.service.ChatHistoryService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
 /**
@@ -13,8 +14,8 @@ import reactor.core.publisher.Flux;
  * @author LXH
  */
 @Slf4j
+@Component
 public class SimpleTextStreamHandler {
-
 
     /**
      * 处理传统流（HTML, MULTI_FILE）

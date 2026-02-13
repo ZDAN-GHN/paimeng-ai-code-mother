@@ -13,13 +13,19 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 
 /**
- * 文件写入工具
+ * 工程文件写入工具
  * 支持 AI 通过工具调用的方式写入文件
  *
  * @author LXH
  */
 @Slf4j
-public class FileWriteTool {
+public class ProjectFileWriteTool {
+
+    private final String projectType;
+
+    public ProjectFileWriteTool(String projectType) {
+        this.projectType = projectType;
+    }
 
     @Tool("写入文件到指定路径")
     public String writeFile(
@@ -31,7 +37,7 @@ public class FileWriteTool {
             Path path = Paths.get(relativeFilePath);
             if (!path.isAbsolute()) {
                 // 相对路径处理，创建基于 appId 的项目目录
-                String projectDirName = "vue_project_" + appId;
+                String projectDirName = projectType + "_" + appId;
                 Path projectRoot = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, projectDirName);
                 path = projectRoot.resolve(relativeFilePath);
             }
