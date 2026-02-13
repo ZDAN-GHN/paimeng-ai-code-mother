@@ -1,11 +1,19 @@
 package com.zdan.paimengaicodemother.core;
 
+import cn.hutool.json.JSONUtil;
 import com.zdan.paimengaicodemother.ai.codegen.AiCodeGenServiceExecutor;
+import com.zdan.paimengaicodemother.ai.model.message.AiResponseMessage;
+import com.zdan.paimengaicodemother.ai.model.message.ToolExecutedMessage;
+import com.zdan.paimengaicodemother.ai.model.message.ToolRequestMessage;
 import com.zdan.paimengaicodemother.core.parser.CodeParserExecutor;
 import com.zdan.paimengaicodemother.core.saver.CodeFileSaverExecutor;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
+import com.zdan.paimengaicodemother.exception.ThrowUtils;
 import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.service.TokenStream;
+import dev.langchain4j.service.tool.ToolExecution;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -57,22 +65,67 @@ public class AiCodeGeneratorFacade {
      */
     public Flux<String> generateAndSaveCodeStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
         validateCodeGenType(codeGenTypeEnum);
-        Flux<String> codeStream = aiCodeGenServiceExecutor.executeCodeGenStream(userMessage, codeGenTypeEnum, appId);
-        return processCodeStream(codeStream, codeGenTypeEnum, appId);
+        Object abstractStream = aiCodeGenServiceExecutor.executeCodeGenStream(userMessage, codeGenTypeEnum, appId);
+        return processStream(abstractStream, codeGenTypeEnum, appId);
     }
 
     /**
-     * 通用流式代码处理方法
+     * 流处理统一入口
      *
-     * @param codeStream      代码流
+     * @param stream          代码流
      * @param codeGenTypeEnum 代码生成类型
      * @param appId           应用 id
-     * @return 流式响应
+     * @return 统一返回 Flux 流
      */
-    private Flux<String> processCodeStream(Flux<String> codeStream, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
+    private Flux<String> processStream(Object stream, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
+        if (stream instanceof Flux<?>) {
+            return processFluxStream((Flux<String>) stream, codeGenTypeEnum, appId);
+        } else if (stream instanceof TokenStream) {
+            return processTokenStream((TokenStream) stream, codeGenTypeEnum, appId);
+        }
+        log.error("the given stream is not supported: stream: {}, class: {}", stream, stream.getClass().getName());
+        ThrowUtils.throwForOperation("系统异常");
+        return null;
+    }
+
+    /**
+     * 处理 langchain4j 提供的 TokenStream
+     */
+    private Flux<String> processTokenStream(TokenStream tokenStream, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
+        return Flux.create(
+                sink -> {
+                    // 监听 tokenStream，对响应碎片做转换，并将转换结果传递给下游 Flux 对象
+                    tokenStream.onPartialResponse((String partialResponse) -> {
+                                AiResponseMessage aiResponseMessage = new AiResponseMessage(partialResponse);
+                                sink.next(JSONUtil.toJsonStr(aiResponseMessage));
+                            })
+                            .onPartialToolExecutionRequest((index, toolExecutionRequest) -> {
+                                ToolRequestMessage toolRequestMessage = new ToolRequestMessage(toolExecutionRequest);
+                                sink.next(JSONUtil.toJsonStr(toolRequestMessage));
+                            })
+                            .onToolExecuted((ToolExecution toolExecution) -> {
+                                ToolExecutedMessage toolExecutedMessage = new ToolExecutedMessage(toolExecution);
+                                sink.next(JSONUtil.toJsonStr(toolExecutedMessage));
+                            })
+                            .onCompleteResponse((ChatResponse response) -> {
+                                sink.complete();
+                            })
+                            .onError((Throwable error) -> {
+                                log.error("failed to process tokenStream, cause by ", error);
+                                ThrowUtils.throwForOperation("响应流处理异常");
+                            })
+                            .start();
+                }
+        );
+    }
+
+    /**
+     * 处理 Flux 流
+     */
+    private Flux<String> processFluxStream(Flux<String> stringFlux, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
         // 字符串拼接器，用于当流式返回所有的代码之后，再保存代码
         StringBuilder codeBuilder = new StringBuilder();
-        return codeStream
+        return stringFlux
                 // 实时收集代码片段
                 .doOnNext(codeBuilder::append)
                 // 回复结束后解析代码
