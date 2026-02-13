@@ -1,13 +1,12 @@
 package com.zdan.paimengaicodemother.ai.codegen;
 
-import com.zdan.paimengaicodemother.ai.tools.FileWriteTool;
+import com.zdan.paimengaicodemother.ai.tools.ProjectFileWriteTool;
 import com.zdan.paimengaicodemother.model.enums.AiModeEnum;
 import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
 import dev.langchain4j.service.MemoryId;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.TokenStream;
 import dev.langchain4j.service.UserMessage;
-import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 
@@ -22,10 +21,15 @@ import java.util.ArrayList;
 )
 public interface VueCodeGenService extends IAiCodeGenService {
 
+    /**
+     * 生成的项目类型
+     */
+    String PROJECT_TYPE = VueCodeGenService.class.getAnnotation(AiCodeGenService.class).codeGenTypeEnum().getValue();
+
     @Override
     default Object[] getTools() {
         ArrayList<Object> tools = new ArrayList<>();
-        tools.add(new FileWriteTool());
+        tools.add(new ProjectFileWriteTool(PROJECT_TYPE));
         return tools.toArray();
     }
 
