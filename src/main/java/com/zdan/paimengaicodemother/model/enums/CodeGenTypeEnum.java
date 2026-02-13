@@ -11,19 +11,19 @@ import lombok.Getter;
 @Getter
 public enum CodeGenTypeEnum {
 
-    HTML("原生 HTML 模式", "html", StreamTypeEnum.FLUX),
-    MULTI_FILE("原生多文件模式", "multi_file", StreamTypeEnum.FLUX),
-    VUE_PROJECT("Vue 工程模式", "vue_project", StreamTypeEnum.TOKEN),
+    HTML("原生 HTML 模式", "html", BuildTypeEnum.NONE),
+    MULTI_FILE("原生多文件模式", "multi_file", BuildTypeEnum.NONE),
+    VUE_PROJECT("Vue 工程模式", "vue_project", BuildTypeEnum.NPM),
     ;
 
     private final String text;
     private final String value;
-    private final StreamTypeEnum streamType;
+    private final BuildTypeEnum buildType;
 
-    CodeGenTypeEnum(String text, String value, StreamTypeEnum streamType) {
+    CodeGenTypeEnum(String text, String value, BuildTypeEnum buildType) {
         this.text = text;
         this.value = value;
-        this.streamType = streamType;
+        this.buildType = buildType;
     }
 
     /**
@@ -45,22 +45,21 @@ public enum CodeGenTypeEnum {
     }
 
     /**
-     * AI 响应流类型枚举
+     * 生成代码构建方式
      *
      * @author LXH
      */
     @Getter
-    public enum StreamTypeEnum {
+    public enum BuildTypeEnum {
 
-
-        FLUX("使用 Flux ", "flux"),
-        TOKEN("使用 TokenStream ", "token"),
+        NONE("不需要构建", "none"),
+        NPM("使用 npm 构建 ", "npm"),
         ;
 
         private final String text;
         private final String value;
 
-        StreamTypeEnum(String text, String value) {
+        BuildTypeEnum(String text, String value) {
             this.text = text;
             this.value = value;
         }
@@ -71,11 +70,11 @@ public enum CodeGenTypeEnum {
          * @param value 枚举值的value
          * @return 枚举值
          */
-        public static StreamTypeEnum getEnumByValue(String value) {
+        public static BuildTypeEnum getEnumByValue(String value) {
             if (ObjUtil.isEmpty(value)) {
                 return null;
             }
-            for (StreamTypeEnum anEnum : StreamTypeEnum.values()) {
+            for (BuildTypeEnum anEnum : BuildTypeEnum.values()) {
                 if (anEnum.value.equals(value)) {
                     return anEnum;
                 }

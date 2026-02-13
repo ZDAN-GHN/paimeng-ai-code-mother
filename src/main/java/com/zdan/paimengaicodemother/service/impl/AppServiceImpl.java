@@ -10,6 +10,7 @@ import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.zdan.paimengaicodemother.constant.AppConstant;
 import com.zdan.paimengaicodemother.core.AiCodeGeneratorFacade;
+import com.zdan.paimengaicodemother.core.builder.BuilderExecutor;
 import com.zdan.paimengaicodemother.core.handler.StreamHandlerExecutor;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
@@ -110,6 +111,13 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         if (!sourceDir.exists() || !FileUtil.isDirectory(sourceDir)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用代码路径不存在，请先生成应用");
         }
+        // 构建项目，将项目构建结果作为部署源
+        sourceDir = BuilderExecutor.doBuild(
+                Objects.requireNonNull(
+                        CodeGenTypeEnum.getEnumByValue(codeGenType)
+                ),
+                sourceDirPath
+        );
         // 复制文件到部署目录 todo 后续可能是上传到其他的服务器上
         String deployDirPath = AppConstant.CODE_DEPLOY_ROOT_DIR + File.separator + deployKey;
         try {
