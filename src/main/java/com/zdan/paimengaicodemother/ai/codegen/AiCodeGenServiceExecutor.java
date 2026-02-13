@@ -68,9 +68,9 @@ public class AiCodeGenServiceExecutor {
      * @param codeGenTypeEnum 生成代码类型枚举
      * @param appId
      */
-    public Flux<String> executeCodeGenStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
+    public <T> T executeCodeGenStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
         IAiCodeGenService aiCodeGenService = getAiCodeGenService(codeGenTypeEnum, appId);
-        return aiCodeGenService.generateCodeStream(userMessage);
+        return aiCodeGenService.generateCodeStream(appId, userMessage);
     }
 
     /**
