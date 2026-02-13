@@ -10,13 +10,13 @@ import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.zdan.paimengaicodemother.constant.AppConstant;
 import com.zdan.paimengaicodemother.core.AiCodeGeneratorFacade;
+import com.zdan.paimengaicodemother.core.handler.StreamHandlerExecutor;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.exception.ThrowUtils;
 import com.zdan.paimengaicodemother.mapper.AppMapper;
 import com.zdan.paimengaicodemother.model.dto.app.AppQueryRequest;
 import com.zdan.paimengaicodemother.model.entity.App;
-import com.zdan.paimengaicodemother.model.entity.ChatHistory;
 import com.zdan.paimengaicodemother.model.entity.User;
 import com.zdan.paimengaicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
@@ -25,7 +25,6 @@ import com.zdan.paimengaicodemother.model.vo.UserVO;
 import com.zdan.paimengaicodemother.service.AppService;
 import com.zdan.paimengaicodemother.service.ChatHistoryService;
 import com.zdan.paimengaicodemother.service.UserService;
-import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -48,13 +47,17 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private final UserService userService;
     private final ChatHistoryService chatHistoryService;
     private final AiCodeGeneratorFacade aiCodeGeneratorFacade;
+    private final StreamHandlerExecutor streamHandlerExecutor;
+
 
     public AppServiceImpl(UserService userService,
                           ChatHistoryService chatHistoryService,
-                          AiCodeGeneratorFacade aiCodeGeneratorFacade) {
+                          AiCodeGeneratorFacade aiCodeGeneratorFacade,
+                          StreamHandlerExecutor streamHandlerExecutor) {
         this.userService = userService;
         this.chatHistoryService = chatHistoryService;
         this.aiCodeGeneratorFacade = aiCodeGeneratorFacade;
+        this.streamHandlerExecutor = streamHandlerExecutor;
     }
 
     @Override
@@ -150,7 +153,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         // 调用 AI 生成代码
         Flux<String> contentFlux = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
         // 保存会话消息后返回
-        return saveAiResponseBeforeReturn(contentFlux, appId, loginUser);
+        return streamHandlerExecutor.doHandle(contentFlux, chatHistoryService, appId, loginUser, codeGenTypeEnum);
     }
 
     /**
@@ -171,8 +174,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     }
 
     /**
-     * 返回 AI 响应流之前，保存对话历史
+     * 返回 AI 响应流之前，保存对话历史 - 弃用，现已使用处理器处理
      */
+    @Deprecated
     private Flux<String> saveAiResponseBeforeReturn(Flux<String> contentFlux, Long appId, User loginUser) {
         // 字符串拼接器，用于当流式返回所有的代码之后，再保存代码
         StringBuilder aiResponseBuilder = new StringBuilder();

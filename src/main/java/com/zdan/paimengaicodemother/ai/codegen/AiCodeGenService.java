@@ -1,5 +1,6 @@
 package com.zdan.paimengaicodemother.ai.codegen;
 
+import com.zdan.paimengaicodemother.model.enums.AiModeEnum;
 import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
 import java.lang.annotation.*;
 
@@ -14,4 +15,6 @@ import java.lang.annotation.*;
 public @interface AiCodeGenService {
 
     CodeGenTypeEnum codeGenTypeEnum();
+
+    AiModeEnum aiMode() default AiModeEnum.CHAT;
 }
