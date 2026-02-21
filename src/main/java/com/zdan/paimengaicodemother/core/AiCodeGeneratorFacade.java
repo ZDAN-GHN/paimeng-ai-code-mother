@@ -3,6 +3,7 @@ package com.zdan.paimengaicodemother.core;
 import cn.hutool.json.JSONUtil;
 import com.zdan.paimengaicodemother.ai.codegen.AiCodeGenServiceExecutor;
 import com.zdan.paimengaicodemother.ai.model.message.AiResponseMessage;
+import com.zdan.paimengaicodemother.ai.model.message.AiThinkingMessage;
 import com.zdan.paimengaicodemother.ai.model.message.ToolExecutedMessage;
 import com.zdan.paimengaicodemother.ai.model.message.ToolRequestMessage;
 import com.zdan.paimengaicodemother.core.parser.CodeParserExecutor;
@@ -12,13 +13,17 @@ import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.exception.ThrowUtils;
 import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.PartialThinking;
+import dev.langchain4j.model.chat.response.PartialToolCall;
 import dev.langchain4j.service.TokenStream;
+import dev.langchain4j.service.tool.BeforeToolExecution;
 import dev.langchain4j.service.tool.ToolExecution;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
 import java.io.File;
+import java.util.function.Consumer;
 
 /**
  * AI 代码生成门面类，组合 代码生成 和 代码保存
@@ -99,8 +104,12 @@ public class AiCodeGeneratorFacade {
                                 AiResponseMessage aiResponseMessage = new AiResponseMessage(partialResponse);
                                 sink.next(JSONUtil.toJsonStr(aiResponseMessage));
                             })
-                            .onPartialToolExecutionRequest((index, toolExecutionRequest) -> {
-                                ToolRequestMessage toolRequestMessage = new ToolRequestMessage(toolExecutionRequest);
+                            .onPartialThinking((PartialThinking partialThinking) -> {
+                                AiThinkingMessage aiThinkingMessage = new AiThinkingMessage(partialThinking.text());
+                                sink.next(JSONUtil.toJsonStr(aiThinkingMessage));
+                            })
+                            .onPartialToolCall((PartialToolCall partialToolCall) -> {
+                                ToolRequestMessage toolRequestMessage = new ToolRequestMessage(partialToolCall);
                                 sink.next(JSONUtil.toJsonStr(toolRequestMessage));
                             })
                             .onToolExecuted((ToolExecution toolExecution) -> {

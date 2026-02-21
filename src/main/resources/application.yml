@@ -45,3 +45,8 @@ knife4j:
   enable: true
   setting:
     language: zh_cn
+
+
+#logging:
+#  level:
+#    dev.langchain4j: DEBUG

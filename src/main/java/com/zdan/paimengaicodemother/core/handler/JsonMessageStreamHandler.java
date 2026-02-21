@@ -5,6 +5,7 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.zdan.paimengaicodemother.ai.model.message.*;
+import com.zdan.paimengaicodemother.exception.ThrowUtils;
 import com.zdan.paimengaicodemother.model.entity.User;
 import com.zdan.paimengaicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.zdan.paimengaicodemother.service.ChatHistoryService;
@@ -55,10 +56,12 @@ public class JsonMessageStreamHandler {
                     String aiResponse = chatHistoryStringBuilder.toString();
                     chatHistoryService.addChatMessage(appId, aiResponse, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser);
                 })
-                .doOnError(error -> {
+                .onErrorResume(error -> {
                     // 如果AI回复失败，也要记录错误消息
                     String errorMessage = "AI回复失败: " + error.getMessage();
                     chatHistoryService.addChatMessage(appId, errorMessage, ChatHistoryMessageTypeEnum.AI.getValue(), loginUser);
+                    // 返回一个包含错误信息的Flux，而不是抛出异常
+                    return Flux.just(errorMessage);
                 });
     }
 
@@ -70,13 +73,20 @@ public class JsonMessageStreamHandler {
         // 解析 JSON
         StreamMessage streamMessage = JSONUtil.toBean(chunk, StreamMessage.class);
         StreamMessageTypeEnum typeEnum = StreamMessageTypeEnum.getEnumByValue(streamMessage.getType());
-        switch (Objects.requireNonNull(typeEnum)) {
+        switch (typeEnum) {
             case AI_RESPONSE -> {
                 AiResponseMessage aiMessage = JSONUtil.toBean(chunk, AiResponseMessage.class);
                 String data = aiMessage.getData();
                 // 直接拼接响应
                 chatHistoryStringBuilder.append(data);
                 return data;
+            }
+            case AI_THINkING -> {
+                AiThinkingMessage aiThinkingMessage = JSONUtil.toBean(chunk, AiThinkingMessage.class);
+                String text = aiThinkingMessage.getText();
+                // 直接拼接响应
+                chatHistoryStringBuilder.append(text);
+                return text;
             }
             case TOOL_REQUEST -> {
                 ToolRequestMessage toolRequestMessage = JSONUtil.toBean(chunk, ToolRequestMessage.class);
