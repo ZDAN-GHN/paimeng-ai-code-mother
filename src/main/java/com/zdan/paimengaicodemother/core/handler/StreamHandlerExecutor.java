@@ -52,7 +52,7 @@ public class StreamHandlerExecutor {
         return Objects.requireNonNull(afterParse).doOnComplete(
                 () -> BuilderExecutor.doBuildAsync(
                         codeGenType,
-                        StrUtil.format("{}/{}_project_{}", AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenType.getValue(), appId)
+                        StrUtil.format("{}/{}_{}", AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenType.getValue(), appId)
                 )
         );
     }
