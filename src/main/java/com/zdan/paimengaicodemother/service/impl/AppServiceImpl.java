@@ -3,11 +3,11 @@ package com.zdan.paimengaicodemother.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.io.FileUtil;
-import cn.hutool.core.thread.ThreadUtil;
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
+import com.zdan.paimengaicodemother.ai.codegen.route.AiCodeGenTypeRoutingService;
 import com.zdan.paimengaicodemother.constant.AppConstant;
 import com.zdan.paimengaicodemother.core.AiCodeGeneratorFacade;
 import com.zdan.paimengaicodemother.core.builder.BuilderExecutor;
@@ -16,6 +16,7 @@ import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.exception.ThrowUtils;
 import com.zdan.paimengaicodemother.mapper.AppMapper;
+import com.zdan.paimengaicodemother.model.dto.app.AppAddRequest;
 import com.zdan.paimengaicodemother.model.dto.app.AppQueryRequest;
 import com.zdan.paimengaicodemother.model.entity.App;
 import com.zdan.paimengaicodemother.model.entity.User;
@@ -51,17 +52,45 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private final AiCodeGeneratorFacade aiCodeGeneratorFacade;
     private final StreamHandlerExecutor streamHandlerExecutor;
     private final ScreenshotService screenshotService;
+    private final AiCodeGenTypeRoutingService aiCodeGenTypeRoutingService;
 
     public AppServiceImpl(UserService userService,
                           ChatHistoryService chatHistoryService,
                           AiCodeGeneratorFacade aiCodeGeneratorFacade,
                           StreamHandlerExecutor streamHandlerExecutor,
-                          ScreenshotService screenshotService) {
+                          ScreenshotService screenshotService,
+                          AiCodeGenTypeRoutingService aiCodeGenTypeRoutingService) {
         this.userService = userService;
         this.chatHistoryService = chatHistoryService;
         this.aiCodeGeneratorFacade = aiCodeGeneratorFacade;
         this.streamHandlerExecutor = streamHandlerExecutor;
         this.screenshotService = screenshotService;
+        this.aiCodeGenTypeRoutingService =  aiCodeGenTypeRoutingService;
+    }
+
+    @Override
+    public Long createApp(AppAddRequest appAddRequest, User loginUser) {
+        // 参数校验
+        String initPrompt = appAddRequest.getInitPrompt();
+        ThrowUtils.throwIf(StrUtil.isBlank(initPrompt), ErrorCode.PARAMS_ERROR, "初始化prompt不能为空");
+
+        // 构造入库对象
+        App app = new App();
+        BeanUtil.copyProperties(appAddRequest, app);
+        app.setUserId(loginUser.getId());
+
+        // 应用名称暂时为 initPrompt 前 12 位
+        app.setAppName(initPrompt.substring(0, Math.min(initPrompt.length(), 12)));
+
+        // 使用 AI 智能选择代码生成类型
+        CodeGenTypeEnum selectedCodeGenType = aiCodeGenTypeRoutingService.routeCodeGenType(initPrompt);
+        app.setCodeGenType(selectedCodeGenType.getValue());
+
+        // 插入数据库
+        boolean result = this.save(app);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        log.info("应用创建成功，ID: {}，类型: {}", app.getId(), selectedCodeGenType.getValue());
+        return app.getId();
     }
 
     @Override

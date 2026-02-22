@@ -19,13 +19,13 @@ import static com.zdan.paimengaicodemother.utils.WebScreenshotUtils.initChromeDr
 @Component
 public class ScreenshotManager {
 
-    private static final WebDriver webDriver = initChromeDriver();
+    private static final WebDriver WEB_DRIVER = initChromeDriver();
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     public CompletableFuture<String> takeScreenshot(String url) {
         return CompletableFuture.supplyAsync(() -> {
-            webDriver.get(url);
-            return doScreenshot(webDriver);
+            WEB_DRIVER.get(url);
+            return doScreenshot(WEB_DRIVER);
         }, executor);
     }
 }

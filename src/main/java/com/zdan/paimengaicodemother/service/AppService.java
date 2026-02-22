@@ -2,6 +2,7 @@ package com.zdan.paimengaicodemother.service;
 
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.core.service.IService;
+import com.zdan.paimengaicodemother.model.dto.app.AppAddRequest;
 import com.zdan.paimengaicodemother.model.dto.app.AppQueryRequest;
 import com.zdan.paimengaicodemother.model.dto.chathistory.ChatHistoryQueryRequest;
 import com.zdan.paimengaicodemother.model.entity.App;
@@ -17,6 +18,15 @@ import java.util.List;
  * @author LXH
  */
 public interface AppService extends IService<App> {
+
+    /**
+     * 创建应用
+     *
+     * @param appAddRequest 创建应用请求 dto
+     * @param loginUser     当前登录用户
+     * @return 应用 id
+     */
+    Long createApp(AppAddRequest appAddRequest, User loginUser);
 
     /**
      * 部署应用
