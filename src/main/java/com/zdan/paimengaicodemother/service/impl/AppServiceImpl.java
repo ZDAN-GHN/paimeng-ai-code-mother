@@ -25,6 +25,7 @@ import com.zdan.paimengaicodemother.model.vo.AppVO;
 import com.zdan.paimengaicodemother.model.vo.UserVO;
 import com.zdan.paimengaicodemother.service.AppService;
 import com.zdan.paimengaicodemother.service.ChatHistoryService;
+import com.zdan.paimengaicodemother.service.ScreenshotService;
 import com.zdan.paimengaicodemother.service.UserService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -49,16 +50,18 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private final ChatHistoryService chatHistoryService;
     private final AiCodeGeneratorFacade aiCodeGeneratorFacade;
     private final StreamHandlerExecutor streamHandlerExecutor;
-
+    private final ScreenshotService screenshotService;
 
     public AppServiceImpl(UserService userService,
                           ChatHistoryService chatHistoryService,
                           AiCodeGeneratorFacade aiCodeGeneratorFacade,
-                          StreamHandlerExecutor streamHandlerExecutor) {
+                          StreamHandlerExecutor streamHandlerExecutor,
+                          ScreenshotService screenshotService) {
         this.userService = userService;
         this.chatHistoryService = chatHistoryService;
         this.aiCodeGeneratorFacade = aiCodeGeneratorFacade;
         this.streamHandlerExecutor = streamHandlerExecutor;
+        this.screenshotService = screenshotService;
     }
 
     @Override
@@ -74,8 +77,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         if (!super.removeById(id)) {
             ThrowUtils.throwForOperation("删除应用失败");
         }
-        // 另外开启线程进行垃圾清理（删除对应的会话历史）
-        ThreadUtil.execAsync(() -> {
+        // 开启虚拟线程进行垃圾清理（删除对应的会话历史）
+        Thread.startVirtualThread(() -> {
             try {
                 chatHistoryService.removeByAppId(appId);
             } catch (Exception e) {
@@ -132,7 +135,22 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         boolean updateRes = this.updateById(app);
         ThrowUtils.throwIf(!updateRes, ErrorCode.OPERATION_ERROR, "更新应用部署信息失败");
         // 返回可访问的 URL 路径
-        return StrUtil.format("{}/{}", AppConstant.CODE_DEPLOY_HOST, deployKey);
+        String appDeployUrl = StrUtil.format("{}/{}", AppConstant.CODE_DEPLOY_HOST, deployKey);
+        // 异步执行截图并更新应用封面
+        generateAppScreenshotAsync(appId, appDeployUrl);
+        return appDeployUrl;
+    }
+
+    @Override
+    public void generateAppScreenshotAsync(Long appId, String appDeployUrl) {
+        Thread.startVirtualThread(() -> {
+            String screenshotWebUrl = screenshotService.generateAndUploadScreenshot(appDeployUrl);
+            App updateApp = new App();
+            updateApp.setId(appId);
+            updateApp.setCover(screenshotWebUrl);
+            boolean updated = this.updateById(updateApp);
+            ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "更新应用封面字段失败");
+        });
     }
 
     /**
