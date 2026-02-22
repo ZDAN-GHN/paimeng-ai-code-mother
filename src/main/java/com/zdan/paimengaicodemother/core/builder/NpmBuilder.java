@@ -118,7 +118,7 @@ public class NpmBuilder {
      */
     private boolean executeCommand(File workingDir, String command, int timeoutSeconds) {
         try {
-            log.info("在目录 {} 中执行命令：{}", workingDir.getAbsolutePath(), command);
+            log.info("run command: {} in {}", command, workingDir.getAbsolutePath());
             Process process = RuntimeUtil.exec(
                     null,
                     workingDir,
@@ -134,10 +134,10 @@ public class NpmBuilder {
             }
             int exitCode = process.exitValue();
             if (exitCode == 0) {
-                log.info("命令执行成功：{}", command);
+                log.info("command execution completed: {}", command);
                 return true;
             } else {
-                log.error("命令执行失败，退出码：{}", exitCode);
+                log.error("failed to execute command, exit code: {}", exitCode);
                 return false;
             }
         } catch (Exception e) {
