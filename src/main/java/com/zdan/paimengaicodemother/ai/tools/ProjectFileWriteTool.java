@@ -1,10 +1,13 @@
 package com.zdan.paimengaicodemother.ai.tools;
 
+import cn.hutool.core.io.FileUtil;
+import cn.hutool.json.JSONObject;
 import com.zdan.paimengaicodemother.constant.AppConstant;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolMemoryId;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -19,12 +22,18 @@ import java.nio.file.StandardOpenOption;
  * @author LXH
  */
 @Slf4j
-public class ProjectFileWriteTool {
+@Component
+public class ProjectFileWriteTool extends BaseProjectFileTool {
 
-    private final String projectType;
+    /**
+     * 此构造方法仅用于注册到 spring 容器，作为本类的代表实例
+     */
+    private ProjectFileWriteTool() {
+        this("template");
+    }
 
     public ProjectFileWriteTool(String projectType) {
-        this.projectType = projectType;
+        super(projectType);
     }
 
     @Tool("写入文件到指定路径")
@@ -37,7 +46,7 @@ public class ProjectFileWriteTool {
             Path path = Paths.get(relativeFilePath);
             if (!path.isAbsolute()) {
                 // 相对路径处理，创建基于 appId 的项目目录
-                String projectDirName = projectType + "_" + appId;
+                String projectDirName = super.getProjectDirName(appId);
                 Path projectRoot = Paths.get(AppConstant.CODE_OUTPUT_ROOT_DIR, projectDirName);
                 path = projectRoot.resolve(relativeFilePath);
             }
@@ -58,5 +67,28 @@ public class ProjectFileWriteTool {
             log.error(errorMessage, e);
             return errorMessage;
         }
+    }
+
+    @Override
+    public String getToolName() {
+        return "writeFile";
+    }
+
+    @Override
+    public String getDisplayName() {
+        return "写入文件";
+    }
+
+    @Override
+    public String generateToolExecutedResult(JSONObject arguments) {
+        String relativeFilePath = arguments.getStr("relativeFilePath");
+        String suffix = FileUtil.getSuffix(relativeFilePath);
+        String content = arguments.getStr("content");
+        return String.format("""
+                [工具调用] %s %s
+                ```%s
+                %s
+                ```
+                """, getDisplayName(), relativeFilePath, suffix, content);
     }
 }
