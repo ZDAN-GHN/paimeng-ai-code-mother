@@ -1,24 +1,27 @@
-package com.zdan.paimengaicodemother.model.enums;
+package com.zdan.paimengaicodemother.langgraph4j.model.enums;
 
 import cn.hutool.core.util.ObjUtil;
 import lombok.Getter;
 
 /**
- * AI 模式枚举
+ * 图片类型枚举
  *
  * @author LXH
  */
 @Getter
-public enum AiModeEnum {
+public enum ImageCategoryEnum {
 
+    CONTENT("内容图片", "CONTENT"),
+    LOGO("LOGO图片", "LOGO"),
+    ILLUSTRATION("插画图片", "ILLUSTRATION"),
+    ARCHITECTURE("架构图片", "ARCHITECTURE");
 
-    CHAT("对话模式", "chat"),
-    REASONING("推理模式", "reasoning");
 
     private final String text;
+
     private final String value;
 
-    AiModeEnum(String text, String value) {
+    ImageCategoryEnum(String text, String value) {
         this.text = text;
         this.value = value;
     }
@@ -29,11 +32,11 @@ public enum AiModeEnum {
      * @param value 枚举值的value
      * @return 枚举值
      */
-    public static AiModeEnum getEnumByValue(String value) {
+    public static ImageCategoryEnum getEnumByValue(String value) {
         if (ObjUtil.isEmpty(value)) {
             return null;
         }
-        for (AiModeEnum anEnum : AiModeEnum.values()) {
+        for (ImageCategoryEnum anEnum : ImageCategoryEnum.values()) {
             if (anEnum.value.equals(value)) {
                 return anEnum;
             }
