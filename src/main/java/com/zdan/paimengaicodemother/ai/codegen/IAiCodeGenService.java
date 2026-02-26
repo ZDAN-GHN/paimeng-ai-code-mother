@@ -11,7 +11,7 @@ public interface IAiCodeGenService {
      * 获取工具列表 （默认没有）
      */
     default Object[] getTools() {
-        return new Object[]{};
+        return new Object[0];
     }
 
     /**

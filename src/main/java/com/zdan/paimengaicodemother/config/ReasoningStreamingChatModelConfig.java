@@ -6,6 +6,7 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Scope;
 
 /**
  * 流式返回推理模型
@@ -13,7 +14,7 @@ import org.springframework.context.annotation.Configuration;
  * @author LXH
  */
 @Configuration
-@ConfigurationProperties(prefix = "langchain4j.open-ai.chat-model")
+@ConfigurationProperties(prefix = "langchain4j.open-ai.reasoning-streaming-chat-model")
 @Data
 public class ReasoningStreamingChatModelConfig {
 
@@ -21,30 +22,40 @@ public class ReasoningStreamingChatModelConfig {
 
     private String apiKey;
 
+    private String modelName;
+
+    private Integer maxTokens;
+
+    private Double temperature;
+
+    private Boolean logRequests = false;
+
+    private Boolean logResponses = false;
+
+    private Boolean accumulateToolCallId = true;
+
+    private Boolean sendThinking = false;
+
+    private Boolean returnThinking = false;
+
     @Bean
-    public StreamingChatModel reasoningStreamingChatModel() {
-        // 开发环境
-        boolean thinking = false;
-        final String modelName = "deepseek-chat";
-        final int maxTokens = 8192;
-        // 生产环境
-//        boolean thinking = true;
-//        final String modelName = "deepseek-reasoner";
-//        final int maxTokens = 32768;
+    @Scope("prototype")
+    public StreamingChatModel reasoningStreamingChatModelPrototype() {
         return OpenAiStreamingChatModel.builder()
-                .baseUrl(baseUrl)
                 .apiKey(apiKey)
+                .baseUrl(baseUrl)
                 .modelName(modelName)
                 .maxTokens(maxTokens)
-                .logRequests(true)
-                .logResponses(true)
+                .temperature(temperature)
+                .logRequests(logRequests)
+                .logResponses(logResponses)
                 // 工具调用 id 是否增量构造，deepseek 即便在流式调用中，也是完整返回工具调用 id，所以为 false
-                .accumulateToolCallId(false)
+                .accumulateToolCallId(accumulateToolCallId)
                 /*  下面两项需要同时开启（因为回传就必须要接收到思考内容才能回传） */
                 // 将接收到的思考文本回传给 ai，字段名设置为 deepseek 的规定的名称（虽然默认就是这个字段）
-                .sendThinking(thinking, "reasoning_content")
+                .sendThinking(sendThinking, "reasoning_content")
                 // 解析并接收 ai 回复的思考文本（如果有的话）
-                .returnThinking(thinking)
+                .returnThinking(returnThinking)
                 .build();
     }
 }

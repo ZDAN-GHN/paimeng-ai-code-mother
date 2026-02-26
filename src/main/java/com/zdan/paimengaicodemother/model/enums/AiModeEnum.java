@@ -5,6 +5,7 @@ import lombok.Getter;
 
 /**
  * AI 模式枚举
+ *
  * @author LXH
  */
 @Getter

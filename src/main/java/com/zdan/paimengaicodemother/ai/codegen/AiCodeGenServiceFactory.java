@@ -1,15 +1,13 @@
 package com.zdan.paimengaicodemother.ai.codegen;
 
 import cn.hutool.aop.ProxyUtil;
-import cn.hutool.core.convert.Convert;
-import cn.hutool.core.util.ReflectUtil;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
-import com.zdan.paimengaicodemother.exception.ThrowUtils;
 import com.zdan.paimengaicodemother.model.enums.AiModeEnum;
 import com.zdan.paimengaicodemother.service.ChatHistoryService;
+import com.zdan.paimengaicodemother.utils.SpringContextUtil;
 import dev.langchain4j.community.store.memory.chat.redis.RedisChatMemoryStore;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
@@ -20,11 +18,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Configuration;
 
 import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.util.Objects;
-import java.util.Optional;
 
 /**
  * ai 代码生成服务创建工厂
@@ -65,23 +60,20 @@ public class AiCodeGenServiceFactory {
     }
 
     // 阻塞调用对象，阻塞调用大模型，直至回复结果生成结束
-    private final ChatModel chatModel;
+    private final ChatModel openAiChatModel;
     // 流式调用对象，异步调用大模型，直接返回响应式对象，使用其他线程完成 ai 回复内容的接收
-    private final StreamingChatModel openAiStreamingChatModel;
-    private final StreamingChatModel reasoningStreamingChatModel;
+    private final StreamingChatModel openAiStreamingChatModel; // 该对象已弃用，后续代码不会使用到此对象（单例无法实现并发执行 ai 对话）
     // redis 会话记忆存储
     private final RedisChatMemoryStore redisChatMemoryStoreForCodeGen;
     // 会话历史记录服务
     private final ChatHistoryService chatHistoryService;
 
-    public AiCodeGenServiceFactory(ChatModel chatModel,
+    public AiCodeGenServiceFactory(ChatModel openAiChatModel,
                                    StreamingChatModel openAiStreamingChatModel,
-                                   StreamingChatModel reasoningStreamingChatModel,
                                    RedisChatMemoryStore redisChatMemoryStoreForCodeGen,
                                    ChatHistoryService chatHistoryService) {
-        this.chatModel = chatModel;
+        this.openAiChatModel = openAiChatModel;
         this.openAiStreamingChatModel = openAiStreamingChatModel;
-        this.reasoningStreamingChatModel = reasoningStreamingChatModel;
         this.redisChatMemoryStoreForCodeGen = redisChatMemoryStoreForCodeGen;
         this.chatHistoryService = chatHistoryService;
     }
@@ -124,12 +116,16 @@ public class AiCodeGenServiceFactory {
             log.info("@AiCodeGenService annotations are missing, check class {}", clazz);
         }
         AiModeEnum aiModeEnum = Objects.requireNonNull(annotation).aiMode();
+        // 根据服务指定的模型枚举类型动态选择对应的模型多例对象（每个模型对象都持有一个 SpringRestClient （可理解为只有一个工作线程的 ExecutorService），
+        // 底层的 SpringRestClient.execute() 方法内部实际上是同步解析数据流的，导致了串行执行问题，通过多例化 StreamingChatModel 便可以轻松解决这个问题）
         StreamingChatModel streamingChatModel = switch (aiModeEnum) {
-            case CHAT -> openAiStreamingChatModel;
-            case REASONING -> reasoningStreamingChatModel;
+            case CHAT -> // 对话模型（普通模型）
+                    SpringContextUtil.getBean("chatStreamingChatModelPrototype", StreamingChatModel.class);
+            case REASONING -> // 推理模型
+                    SpringContextUtil.getBean("reasoningStreamingChatModelPrototype", StreamingChatModel.class);
             default -> {
                 log.error("user tried to select unsupported ai mode: {}", aiModeEnum);
-                throw new BusinessException(ErrorCode.OPERATION_ERROR);
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR);
             }
         };
         // 从数据库获取数据并加载到会话记忆中
@@ -137,7 +133,7 @@ public class AiCodeGenServiceFactory {
         // 从接口的 default 方法中获取工具列表（通过动态代理）
         Object[] tools = getTools(clazz);
         return AiServices.builder(clazz)
-                .chatModel(chatModel)
+                .chatModel(openAiChatModel)
                 .streamingChatModel(streamingChatModel)
                 // 由于 Langchain4j 规定了如果要使用 @MemoryId 就必须要使用 chatMemoryProvider 来提供会话记忆，这里统一直接使用 chatMemoryProvider 以兼容需要使用上下文的服务
                 .chatMemoryProvider(memoryId -> chatMemory)
@@ -196,7 +192,7 @@ public class AiCodeGenServiceFactory {
     @Deprecated
     public IAiCodeGenService createAiCodeGenService(Class<? extends IAiCodeGenService> clazz) {
         return AiServices.builder(clazz)
-                .chatModel(chatModel)
+                .chatModel(openAiChatModel)
                 .streamingChatModel(openAiStreamingChatModel)
                 .build();
     }
