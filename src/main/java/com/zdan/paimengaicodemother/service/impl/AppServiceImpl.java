@@ -8,6 +8,7 @@ import cn.hutool.core.util.StrUtil;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.zdan.paimengaicodemother.ai.codegen.route.AiCodeGenTypeRoutingService;
+import com.zdan.paimengaicodemother.ai.codegen.route.AiCodeGenTypeRoutingServiceFactory;
 import com.zdan.paimengaicodemother.constant.AppConstant;
 import com.zdan.paimengaicodemother.core.AiCodeGeneratorFacade;
 import com.zdan.paimengaicodemother.core.builder.BuilderExecutor;
@@ -52,20 +53,20 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private final AiCodeGeneratorFacade aiCodeGeneratorFacade;
     private final StreamHandlerExecutor streamHandlerExecutor;
     private final ScreenshotService screenshotService;
-    private final AiCodeGenTypeRoutingService aiCodeGenTypeRoutingService;
+    private final AiCodeGenTypeRoutingServiceFactory aiCodeGenTypeRoutingServiceFactory;
 
     public AppServiceImpl(UserService userService,
                           ChatHistoryService chatHistoryService,
                           AiCodeGeneratorFacade aiCodeGeneratorFacade,
                           StreamHandlerExecutor streamHandlerExecutor,
                           ScreenshotService screenshotService,
-                          AiCodeGenTypeRoutingService aiCodeGenTypeRoutingService) {
+                          AiCodeGenTypeRoutingServiceFactory aiCodeGenTypeRoutingServiceFactory) {
         this.userService = userService;
         this.chatHistoryService = chatHistoryService;
         this.aiCodeGeneratorFacade = aiCodeGeneratorFacade;
         this.streamHandlerExecutor = streamHandlerExecutor;
         this.screenshotService = screenshotService;
-        this.aiCodeGenTypeRoutingService =  aiCodeGenTypeRoutingService;
+        this.aiCodeGenTypeRoutingServiceFactory = aiCodeGenTypeRoutingServiceFactory;
     }
 
     @Override
@@ -82,7 +83,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         // 应用名称暂时为 initPrompt 前 12 位
         app.setAppName(initPrompt.substring(0, Math.min(initPrompt.length(), 12)));
 
-        // 使用 AI 智能选择代码生成类型
+        // 使用 AI 智能选择代码生成类型（多例模式）
+        AiCodeGenTypeRoutingService aiCodeGenTypeRoutingService = aiCodeGenTypeRoutingServiceFactory.createAiCodeGenTypeRoutingService();
         CodeGenTypeEnum selectedCodeGenType = aiCodeGenTypeRoutingService.routeCodeGenType(initPrompt);
         app.setCodeGenType(selectedCodeGenType.getValue());
 
