@@ -36,7 +36,8 @@ public interface VueCodeGenService extends IAiCodeGenService {
                         new ProjectFileReadTool(PROJECT_TYPE),
                         new ProjectFileModifyTool(PROJECT_TYPE),
                         new ProjectFileDirReadTool(PROJECT_TYPE),
-                        new ProjectFileDeleteTool(PROJECT_TYPE)
+                        new ProjectFileDeleteTool(PROJECT_TYPE),
+                        new ExitTool()
                 )
         );
         return tools.toArray();
