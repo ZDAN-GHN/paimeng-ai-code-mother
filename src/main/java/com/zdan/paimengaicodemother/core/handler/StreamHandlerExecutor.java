@@ -5,7 +5,7 @@ import com.zdan.paimengaicodemother.constant.AppConstant;
 import com.zdan.paimengaicodemother.core.builder.BuilderExecutor;
 import com.zdan.paimengaicodemother.exception.ThrowUtils;
 import com.zdan.paimengaicodemother.model.entity.User;
-import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 import com.zdan.paimengaicodemother.service.ChatHistoryService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -50,7 +50,8 @@ public class StreamHandlerExecutor {
                                  long appId, User loginUser, CodeGenTypeEnum codeGenType) {
         Flux<String> afterParse = parseStringFlux(originFlux, chatHistoryService, appId, loginUser, codeGenType);
         return Objects.requireNonNull(afterParse).doOnComplete(
-                () -> BuilderExecutor.doBuildAsync(
+                // 改为通过执行构造，以满足前端能够实时展示构建好的工程
+                () -> BuilderExecutor.doBuild(
                         codeGenType,
                         StrUtil.format("{}/{}_{}", AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenType.getValue(), appId)
                 )

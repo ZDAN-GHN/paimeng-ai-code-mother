@@ -4,7 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import com.zdan.paimengaicodemother.ai.model.MultiFileCodeResult;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
-import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 
 /**
  * 多文件代码保存器

@@ -1,7 +1,7 @@
 package com.zdan.paimengaicodemother.core.parser;
 
 import com.zdan.paimengaicodemother.ai.model.HtmlCodeResult;
-import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;

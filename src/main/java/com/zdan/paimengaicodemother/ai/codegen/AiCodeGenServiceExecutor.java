@@ -1,12 +1,11 @@
 package com.zdan.paimengaicodemother.ai.codegen;
 
 import com.zdan.paimengaicodemother.exception.ThrowUtils;
-import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 import com.zdan.paimengaicodemother.utils.ClazzScanner;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
-import reactor.core.publisher.Flux;
 
 import java.util.HashMap;
 import java.util.Map;

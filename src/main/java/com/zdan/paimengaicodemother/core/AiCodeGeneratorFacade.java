@@ -11,19 +11,17 @@ import com.zdan.paimengaicodemother.core.saver.CodeFileSaverExecutor;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.exception.ThrowUtils;
-import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.PartialThinking;
 import dev.langchain4j.model.chat.response.PartialToolCall;
 import dev.langchain4j.service.TokenStream;
-import dev.langchain4j.service.tool.BeforeToolExecution;
 import dev.langchain4j.service.tool.ToolExecution;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
 import java.io.File;
-import java.util.function.Consumer;
 
 /**
  * AI 代码生成门面类，组合 代码生成 和 代码保存

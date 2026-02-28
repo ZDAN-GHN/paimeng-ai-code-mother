@@ -2,7 +2,7 @@ package com.zdan.paimengaicodemother.langgraph4j.node;
 
 import com.zdan.paimengaicodemother.core.builder.BuilderExecutor;
 import com.zdan.paimengaicodemother.langgraph4j.state.WorkflowContext;
-import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.AsyncNodeAction;
 import org.bsc.langgraph4j.prebuilt.MessagesState;

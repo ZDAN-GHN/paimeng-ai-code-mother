@@ -2,6 +2,11 @@ package com.zdan.paimengaicodemother.exception;
 
 import lombok.Getter;
 
+/**
+ * 异常状态码枚举
+ *
+ * @author LXH
+ */
 @Getter
 public enum ErrorCode {
 

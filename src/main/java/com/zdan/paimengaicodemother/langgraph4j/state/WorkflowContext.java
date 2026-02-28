@@ -3,7 +3,7 @@ package com.zdan.paimengaicodemother.langgraph4j.state;
 import com.zdan.paimengaicodemother.langgraph4j.model.ImageCollectionPlan;
 import com.zdan.paimengaicodemother.langgraph4j.model.ImageResource;
 import com.zdan.paimengaicodemother.langgraph4j.model.QualityResult;
-import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;

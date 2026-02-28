@@ -38,6 +38,12 @@ public class ReasoningStreamingChatModelConfig {
 
     private Boolean returnThinking = false;
 
+    private String thinkingField = "reasoning_content";
+
+    private Double presencePenalty;
+
+    private Double frequencyPenalty;
+
     @Bean
     @Scope("prototype")
     public StreamingChatModel reasoningStreamingChatModelPrototype() {
@@ -53,9 +59,18 @@ public class ReasoningStreamingChatModelConfig {
                 .accumulateToolCallId(accumulateToolCallId)
                 /*  下面两项需要同时开启（因为回传就必须要接收到思考内容才能回传） */
                 // 将接收到的思考文本回传给 ai，字段名设置为 deepseek 的规定的名称（虽然默认就是这个字段）
-                .sendThinking(sendThinking, "reasoning_content")
+                .sendThinking(sendThinking, thinkingField)
                 // 解析并接收 ai 回复的思考文本（如果有的话）
                 .returnThinking(returnThinking)
+                // 并行工具调用
+                .parallelToolCalls(true)
+                // 以下两个配置均为减少生成重复配置
+                // 存在惩罚：控制 token “是否出现过”，施加固定惩罚，与出现次数无关
+                .presencePenalty(presencePenalty)
+                // 频率惩罚：控制 token “出现多少次”，惩罚随次数线性累积
+                .frequencyPenalty(frequencyPenalty)
+                // 开启工具调用参数严格 json 格式，减少自动化过程工具调用错误传参，保证自动化的可靠性
+                .strictTools(true)
                 .build();
     }
 }

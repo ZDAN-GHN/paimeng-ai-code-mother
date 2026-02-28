@@ -2,7 +2,7 @@ package com.zdan.paimengaicodemother.core.builder;
 
 import cn.hutool.core.io.FileUtil;
 import com.zdan.paimengaicodemother.exception.ThrowUtils;
-import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.File;
