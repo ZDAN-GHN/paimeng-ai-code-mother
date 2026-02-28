@@ -3,9 +3,10 @@ package com.zdan.paimengaicodemother.ai.codegen;
 import cn.hutool.aop.ProxyUtil;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.zdan.paimengaicodemother.ai.enums.AiModeEnum;
+import com.zdan.paimengaicodemother.ai.guardrail.PromptSafetyInputGuardrail;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
-import com.zdan.paimengaicodemother.ai.enums.AiModeEnum;
 import com.zdan.paimengaicodemother.service.ChatHistoryService;
 import com.zdan.paimengaicodemother.utils.SpringContextUtil;
 import dev.langchain4j.community.store.memory.chat.redis.RedisChatMemoryStore;
@@ -147,6 +148,10 @@ public class AiCodeGenServiceFactory {
                                         "Error: there is no tool called" + toolExecutionRequest.name()
                                 )
                 )
+                // 最大工具调用次数
+                .maxSequentialToolsInvocations(50)
+                // 输入护轨（对提示词做安全检查）
+                .inputGuardrails(new PromptSafetyInputGuardrail())
                 .build();
     }
 

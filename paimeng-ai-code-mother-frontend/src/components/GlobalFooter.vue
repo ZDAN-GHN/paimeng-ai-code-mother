@@ -8,7 +8,7 @@
           rel="noopener noreferrer"
           class="author-link"
         >
-          code by ZDAN-GHN
+          Code by ZDAN-GHN
         </a>
       </p>
     </div>
