@@ -1,6 +1,6 @@
 package com.zdan.paimengaicodemother.ai.codegen.route;
 
-import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 import dev.langchain4j.service.SystemMessage;
 
 /**

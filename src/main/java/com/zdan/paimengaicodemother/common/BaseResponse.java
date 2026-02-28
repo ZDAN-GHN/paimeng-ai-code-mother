@@ -8,8 +8,8 @@ import java.io.Serializable;
 /**
  * 通过响应类
  *
- * @author LXH
  * @param <T>
+ * @author LXH
  */
 @Data
 public class BaseResponse<T> implements Serializable {
@@ -19,6 +19,13 @@ public class BaseResponse<T> implements Serializable {
     private T data;
 
     private String message;
+
+    /**
+     * 该方法仅用于 @Cacheable 反序列化 redis 存储值时，
+     * 反射调用无参构造方法创建对象，所以设置为 private
+     */
+    private BaseResponse() {
+    }
 
     public BaseResponse(int code, T data, String message) {
         this.code = code;

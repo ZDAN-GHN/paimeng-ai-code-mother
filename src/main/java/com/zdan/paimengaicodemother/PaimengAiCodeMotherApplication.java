@@ -4,12 +4,14 @@ import dev.langchain4j.community.store.embedding.redis.spring.RedisEmbeddingStor
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cache.annotation.EnableCaching;
 
 /**
  * 派蒙零代码应用生成后端入口
  *
  * @author LXH
  */
+@EnableCaching
 @SpringBootApplication(exclude = {
         // 排除 Langchain4j-Redis 依赖的默认向量加载配置（目前不需要 rag 知识库）
         RedisEmbeddingStoreAutoConfiguration.class

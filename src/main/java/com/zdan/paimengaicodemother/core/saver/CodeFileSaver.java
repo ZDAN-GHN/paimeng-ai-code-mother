@@ -1,6 +1,6 @@
 package com.zdan.paimengaicodemother.core.saver;
 
-import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 import org.springframework.stereotype.Component;
 
 import java.lang.annotation.*;

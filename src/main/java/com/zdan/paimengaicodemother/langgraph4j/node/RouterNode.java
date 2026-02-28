@@ -2,7 +2,7 @@ package com.zdan.paimengaicodemother.langgraph4j.node;
 
 import com.zdan.paimengaicodemother.ai.codegen.route.AiCodeGenTypeRoutingService;
 import com.zdan.paimengaicodemother.langgraph4j.state.WorkflowContext;
-import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 import com.zdan.paimengaicodemother.utils.SpringContextUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.AsyncNodeAction;

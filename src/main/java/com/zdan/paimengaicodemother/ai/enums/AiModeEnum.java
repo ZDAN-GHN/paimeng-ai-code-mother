@@ -1,4 +1,4 @@
-package com.zdan.paimengaicodemother.model.enums;
+package com.zdan.paimengaicodemother.ai.enums;
 
 import cn.hutool.core.util.ObjUtil;
 import lombok.Getter;

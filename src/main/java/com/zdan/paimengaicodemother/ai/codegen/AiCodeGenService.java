@@ -1,7 +1,7 @@
 package com.zdan.paimengaicodemother.ai.codegen;
 
-import com.zdan.paimengaicodemother.model.enums.AiModeEnum;
-import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.ai.enums.AiModeEnum;
+import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 import java.lang.annotation.*;
 
 /**
