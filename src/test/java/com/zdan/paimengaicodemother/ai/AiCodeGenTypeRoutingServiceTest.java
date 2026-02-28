@@ -1,7 +1,7 @@
 package com.zdan.paimengaicodemother.ai;
 
 import com.zdan.paimengaicodemother.ai.codegen.route.AiCodeGenTypeRoutingService;
-import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;

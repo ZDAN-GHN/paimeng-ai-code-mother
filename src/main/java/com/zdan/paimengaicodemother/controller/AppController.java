@@ -5,7 +5,6 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
-import com.zdan.paimengaicodemother.ai.codegen.route.AiCodeGenTypeRoutingService;
 import com.zdan.paimengaicodemother.annotation.AuthCheck;
 import com.zdan.paimengaicodemother.common.BaseResponse;
 import com.zdan.paimengaicodemother.common.DeleteRequest;
@@ -18,13 +17,15 @@ import com.zdan.paimengaicodemother.exception.ThrowUtils;
 import com.zdan.paimengaicodemother.model.dto.app.*;
 import com.zdan.paimengaicodemother.model.entity.App;
 import com.zdan.paimengaicodemother.model.entity.User;
-import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
 import com.zdan.paimengaicodemother.model.vo.AppVO;
+import com.zdan.paimengaicodemother.ratelimiter.annotaion.RateLimit;
+import com.zdan.paimengaicodemother.ratelimiter.enums.RateLimitType;
 import com.zdan.paimengaicodemother.service.AppService;
 import com.zdan.paimengaicodemother.service.ProjectDownloadService;
 import com.zdan.paimengaicodemother.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.*;
@@ -122,6 +123,8 @@ public class AppController {
      * ai 对话生成代码
      */
     @GetMapping(value = "/chat/gen/code", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    // 1 分钟内最多允许请求 5 次，采用根据用户类型进行限流
+    @RateLimit(limitType = RateLimitType.USER, rate = 1, rateInterval = 60, message = "AI 对话请求过于频繁，请稍后再试")
     public Flux<ServerSentEvent<String>> chatToGenCode(@RequestParam Long appId,
                                                        @RequestParam String message,
                                                        HttpServletRequest request) {
@@ -282,6 +285,11 @@ public class AppController {
      * @return 精选应用列表
      */
     @PostMapping("/good/list/page/vo")
+    @Cacheable(
+            value = "good_app_page", // 缓存空间（key 的前缀）
+            key = "T(com.zdan.paimengaicodemother.utils.CacheKeyUtils).generateKey(#appQueryRequest)", // 空间下的键名
+            condition = "#appQueryRequest.pageNum <= 10" // 触发查询缓存的条件（缓存如果未命中就执行方法之后将返回值缓存，这个注解本质是 aop 切面）
+    )
     public BaseResponse<Page<AppVO>> listGoodAppVOByPage(@RequestBody AppQueryRequest appQueryRequest) {
         ThrowUtils.throwIf(appQueryRequest == null, ErrorCode.PARAMS_ERROR);
         // 限制每页最多 20 个

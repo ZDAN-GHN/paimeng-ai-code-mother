@@ -5,7 +5,7 @@ import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.langgraph4j.model.QualityResult;
 import com.zdan.paimengaicodemother.langgraph4j.node.*;
 import com.zdan.paimengaicodemother.langgraph4j.state.WorkflowContext;
-import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.*;
 import org.bsc.langgraph4j.prebuilt.MessagesState;

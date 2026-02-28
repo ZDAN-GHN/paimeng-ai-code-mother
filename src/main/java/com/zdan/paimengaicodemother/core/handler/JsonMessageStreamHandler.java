@@ -1,13 +1,11 @@
 package com.zdan.paimengaicodemother.core.handler;
 
-import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.zdan.paimengaicodemother.ai.model.message.*;
 import com.zdan.paimengaicodemother.ai.tools.BaseTool;
 import com.zdan.paimengaicodemother.ai.tools.ToolManager;
-import com.zdan.paimengaicodemother.exception.ThrowUtils;
 import com.zdan.paimengaicodemother.model.entity.User;
 import com.zdan.paimengaicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.zdan.paimengaicodemother.service.ChatHistoryService;
@@ -17,7 +15,6 @@ import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
 import java.util.HashSet;
-import java.util.Objects;
 import java.util.Set;
 
 /**

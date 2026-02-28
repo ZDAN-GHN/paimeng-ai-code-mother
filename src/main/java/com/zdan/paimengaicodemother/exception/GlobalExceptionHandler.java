@@ -3,8 +3,6 @@ package com.zdan.paimengaicodemother.exception;
 import cn.hutool.json.JSONUtil;
 import com.zdan.paimengaicodemother.common.BaseResponse;
 import com.zdan.paimengaicodemother.common.ResultUtils;
-import com.zdan.paimengaicodemother.exception.BusinessException;
-import com.zdan.paimengaicodemother.exception.ErrorCode;
 import io.swagger.v3.oas.annotations.Hidden;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -17,6 +15,11 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import java.io.IOException;
 import java.util.Map;
 
+/**
+ * 全局异常处理器
+ *
+ * @author LXH
+ */
 @Hidden
 @RestControllerAdvice
 @Slf4j
@@ -46,7 +49,7 @@ public class GlobalExceptionHandler {
     /**
      * 处理SSE请求的错误响应
      *
-     * @param errorCode 错误码
+     * @param errorCode    错误码
      * @param errorMessage 错误信息
      * @return true表示是SSE请求并已处理，false表示不是SSE请求
      */
@@ -57,11 +60,12 @@ public class GlobalExceptionHandler {
         }
         HttpServletRequest request = attributes.getRequest();
         HttpServletResponse response = attributes.getResponse();
-        // 判断是否是SSE请求（通过Accept头或URL路径）
         String accept = request.getHeader("Accept");
         String uri = request.getRequestURI();
-        if ((accept != null && accept.contains("text/event-stream")) ||
-                uri.contains("/chat/gen/code")) {
+        // 判断是否是SSE请求（通过Accept头或URL路径）
+        boolean isSseRequest =
+                (accept != null && accept.contains("text/event-stream")) || uri.contains("/chat/gen/code");
+        if (isSseRequest) {
             try {
                 // 设置SSE响应头
                 response.setContentType("text/event-stream");

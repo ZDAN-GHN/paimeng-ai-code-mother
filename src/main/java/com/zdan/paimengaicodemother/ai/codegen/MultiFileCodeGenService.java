@@ -1,7 +1,7 @@
 package com.zdan.paimengaicodemother.ai.codegen;
 
 import com.zdan.paimengaicodemother.ai.model.MultiFileCodeResult;
-import com.zdan.paimengaicodemother.model.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 import dev.langchain4j.service.MemoryId;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.UserMessage;
