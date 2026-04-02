@@ -1,12 +1,12 @@
-package com.zdan.paimengaicodemother.service.impl;
+package com.zdan.paimengaicodescreenshot.service.impl;
 
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.exception.ThrowUtils;
 import com.zdan.paimengaicodemother.manager.CosManager;
-import com.zdan.paimengaicodemother.manager.ScreenshotManager;
-import com.zdan.paimengaicodemother.service.ScreenshotService;
+import com.zdan.paimengaicodescreenshot.manager.ScreenshotManager;
+import com.zdan.paimengaicodescreenshot.service.ScreenshotService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
