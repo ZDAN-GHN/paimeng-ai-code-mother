@@ -7,7 +7,6 @@ import com.zdan.paimengaicodemother.exception.ThrowUtils;
 import com.zdan.paimengaicodemother.manager.CosManager;
 import com.zdan.paimengaicodemother.manager.ScreenshotManager;
 import com.zdan.paimengaicodemother.service.ScreenshotService;
-import com.zdan.paimengaicodemother.utils.WebScreenshotUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -16,7 +15,6 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 
 /**
  * 截图服务实现

@@ -1,0 +1,29 @@
+spring:
+  # 项目名称
+  application:
+    name: paimeng-code-screenshot
+  profiles:
+    active: local
+
+# 端口 根路径
+server:
+  port: 8127
+  servlet:
+    context-path: /api
+    # session 管理配置 - 前端：设置 cookie 过期时间（30天），不设置的话前端不会将 cookie 持久化，关闭浏览器后登录态丢失
+    session:
+      cookie:
+        max-age: 2592000s
+
+# springdoc
+springdoc:
+  group-configs:
+    - group: 'default'
+      paths-to-match: '/**'
+      packages-to-scan: com.zdan.paimengaicodescreenshot.controller
+
+# knife4j
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn

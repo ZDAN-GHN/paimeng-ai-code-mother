@@ -1,0 +1,45 @@
+spring:
+  # 项目名称
+  application:
+    name: paimeng-code-user
+  # session 管理配置 - 后端
+  session:
+    store-type: redis
+    timeout: 2592000s
+  # mysql
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/paimeng_ai_code_mother
+    username: root
+    password: root
+  # redis
+  data:
+    redis:
+      host: localhost
+      password:
+      port: 6379
+      ttl: 3600
+      database: 0
+
+# 端口 根路径
+server:
+  port: 8124
+  servlet:
+    context-path: /api
+    # session 管理配置 - 前端：设置 cookie 过期时间（30天），不设置的话前端不会将 cookie 持久化，关闭浏览器后登录态丢失
+    session:
+      cookie:
+        max-age: 2592000s
+
+# springdoc
+springdoc:
+  group-configs:
+    - group: 'default'
+      paths-to-match: '/**'
+      packages-to-scan: com.zdan.paimengaicodeuser.controller
+
+# knife4j
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn

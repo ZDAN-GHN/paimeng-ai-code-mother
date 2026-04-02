@@ -89,6 +89,7 @@ public class AiCodeGenServiceFactory {
     public IAiCodeGenService getAiCodeGenService(Class<? extends IAiCodeGenService> clazz, Long appId) {
         // 从内存中获取服务实例，如果没有则调用 lambda 创建 键值对（相当于 Map 的 computeIfAbsent）
         return aiCodeGenServiceCache.get(appId,
+                // 同一个 key 的 mappingFunction 只会被调用一次，当多个线程同时请求同一个不存在的 key 时，只有一个线程会执行 mappingFunction，其他线程会阻塞等待结果
                 key -> {
                     IAiCodeGenService aiCodeGenService = createAiCodeGenService(clazz, key);
                     log.debug("instanced aiCodeGenService, appId: {}, aiCodeGenService: {}", key, aiCodeGenService);
