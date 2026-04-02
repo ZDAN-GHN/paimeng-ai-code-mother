@@ -1,13 +1,15 @@
-package com.zdan.paimengaicodemother.ai.codegen;
+package com.zdan.paimengaicodeapp.ai;
 
 import cn.hutool.aop.ProxyUtil;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.zdan.paimengaicodeapp.service.ChatHistoryService;
+import com.zdan.paimengaicodemother.ai.codegen.AiCodeGenService;
+import com.zdan.paimengaicodemother.ai.codegen.IAiCodeGenService;
 import com.zdan.paimengaicodemother.ai.enums.AiModeEnum;
 import com.zdan.paimengaicodemother.ai.guardrail.PromptSafetyInputGuardrail;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
-import com.zdan.paimengaicodemother.service.ChatHistoryService;
 import com.zdan.paimengaicodemother.utils.SpringContextUtil;
 import dev.langchain4j.community.store.memory.chat.redis.RedisChatMemoryStore;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
