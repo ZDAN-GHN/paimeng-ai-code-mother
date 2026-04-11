@@ -127,7 +127,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         App app = Optional.ofNullable(this.getById(appId))
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAMS_ERROR, "应用不存在"));
         if (!app.getUserId().equals(loginUser.getId())) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "无权限生成代码");
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "无权限部署应用");
         }
         // 检查是否已有 deployKey
         String deployKey = app.getDeployKey();

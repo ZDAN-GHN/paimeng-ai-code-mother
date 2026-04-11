@@ -1,7 +1,7 @@
 package com.zdan.paimengaicodemother.ai.codegen;
 
-import com.zdan.paimengaicodemother.exception.ThrowUtils;
 import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.exception.ThrowUtils;
 import com.zdan.paimengaicodemother.utils.ClazzScanner;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -21,7 +21,7 @@ import java.util.Set;
 public class AiCodeGenServiceExecutor {
 
     // 保存策略对应的 class 对象
-    private final Map<String, Class<? extends IAiCodeGenService>> aiCodeGenServiceClazzMap;
+    private final Map<String, Class<? extends AiCodeGenService>> aiCodeGenServiceClazzMap;
 
     {
         this.aiCodeGenServiceClazzMap = new HashMap<>();
@@ -38,11 +38,11 @@ public class AiCodeGenServiceExecutor {
      */
     @PostConstruct
     private void afterConstruct() {
-        Set<Class<? extends IAiCodeGenService>> clazzSet = ClazzScanner.scanInterfaces(AiCodeGenService.class.getPackageName(),
-                AiCodeGenService.class,
-                IAiCodeGenService.class);
-        for (Class<? extends IAiCodeGenService> clazz : clazzSet) {
-            String domainType = clazz.getAnnotation(AiCodeGenService.class).codeGenTypeEnum().getValue();
+        Set<Class<? extends AiCodeGenService>> clazzSet = ClazzScanner.scanInterfaces(AiCodeGenService.class.getPackageName(),
+                CodeGenType.class,
+                AiCodeGenService.class);
+        for (Class<? extends AiCodeGenService> clazz : clazzSet) {
+            String domainType = clazz.getAnnotation(CodeGenType.class).codeGenTypeEnum().getValue();
             aiCodeGenServiceClazzMap.put(domainType, clazz);
             log.info("aiCodeGenService registration completed, domainType : {}, serviceClass : {}", domainType, clazz);
         }
@@ -56,7 +56,7 @@ public class AiCodeGenServiceExecutor {
      * @param appId
      */
     public <T> T executeCodeGen(String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
-        IAiCodeGenService aiCodeGenService = getAiCodeGenService(codeGenTypeEnum, appId);
+        AiCodeGenService aiCodeGenService = getAiCodeGenService(codeGenTypeEnum, appId);
         return aiCodeGenService.generateCode(userMessage);
     }
 
@@ -68,7 +68,7 @@ public class AiCodeGenServiceExecutor {
      * @param appId
      */
     public <T> T executeCodeGenStream(String userMessage, CodeGenTypeEnum codeGenTypeEnum, Long appId) {
-        IAiCodeGenService aiCodeGenService = getAiCodeGenService(codeGenTypeEnum, appId);
+        AiCodeGenService aiCodeGenService = getAiCodeGenService(codeGenTypeEnum, appId);
         return aiCodeGenService.generateCodeStream(appId, userMessage);
     }
 
@@ -77,11 +77,11 @@ public class AiCodeGenServiceExecutor {
      *
      * @param codeGenTypeEnum 生成代码类型枚举
      */
-    private IAiCodeGenService getAiCodeGenService(CodeGenTypeEnum codeGenTypeEnum, Long appId) {
+    private AiCodeGenService getAiCodeGenService(CodeGenTypeEnum codeGenTypeEnum, Long appId) {
         if (codeGenTypeEnum == null) {
             ThrowUtils.throwForParam("代码生成类型不能为空");
         }
-        Class<? extends IAiCodeGenService> aiCodeGenServiceClazz = aiCodeGenServiceClazzMap.get(codeGenTypeEnum.getValue());
+        Class<? extends AiCodeGenService> aiCodeGenServiceClazz = aiCodeGenServiceClazzMap.get(codeGenTypeEnum.getValue());
         if (aiCodeGenServiceClazz == null) {
             log.error("failed to generate code, unsupported code generation type : {}", codeGenTypeEnum);
             ThrowUtils.throwForParam("不支持的代码生成类型");

@@ -1,20 +1,28 @@
 package com.zdan.paimengaicodemother.ai.codegen;
 
-import com.zdan.paimengaicodemother.ai.enums.AiModeEnum;
-import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
-import java.lang.annotation.*;
+import com.zdan.paimengaicodemother.ai.PaimengAiService;
 
 /**
- * AI 代码应用生成服务注解
+ * ai 代码生成服务
  *
  * @author LXH
  */
-@Target({ElementType.TYPE}) // 仅作用于类
-@Retention(RetentionPolicy.RUNTIME) // 运行时保留，可通过反射获取
-@Documented // 标记注解会被包含在 JavaDoc 文档中
-public @interface AiCodeGenService {
+public interface AiCodeGenService extends PaimengAiService {
 
-    CodeGenTypeEnum codeGenTypeEnum();
+    /**
+     * 生成代码
+     *
+     * @param userMessage 用户提示词
+     * @return AI 输出结果（非流对象）
+     */
+    <T> T generateCode(String userMessage);
 
-    AiModeEnum aiMode() default AiModeEnum.CHAT;
+    /**
+     * 生成代码（流式）
+     *
+     * @param appId       应用 id
+     * @param userMessage 用户提示词
+     * @return AI 输出结果（流式对象）
+     */
+    <S> S generateCodeStream(Long appId, String userMessage);
 }

@@ -9,7 +9,7 @@ import lombok.Getter;
  * @author LXH
  */
 @Getter
-public enum AiModeEnum {
+public enum AiGenerateModeEnum {
 
 
     CHAT("对话模式", "chat"),
@@ -18,7 +18,7 @@ public enum AiModeEnum {
     private final String text;
     private final String value;
 
-    AiModeEnum(String text, String value) {
+    AiGenerateModeEnum(String text, String value) {
         this.text = text;
         this.value = value;
     }
@@ -29,11 +29,11 @@ public enum AiModeEnum {
      * @param value 枚举值的value
      * @return 枚举值
      */
-    public static AiModeEnum getEnumByValue(String value) {
+    public static AiGenerateModeEnum getEnumByValue(String value) {
         if (ObjUtil.isEmpty(value)) {
             return null;
         }
-        for (AiModeEnum anEnum : AiModeEnum.values()) {
+        for (AiGenerateModeEnum anEnum : AiGenerateModeEnum.values()) {
             if (anEnum.value.equals(value)) {
                 return anEnum;
             }

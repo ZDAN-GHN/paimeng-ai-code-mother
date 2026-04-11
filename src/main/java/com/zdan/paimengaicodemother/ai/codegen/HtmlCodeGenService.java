@@ -1,7 +1,7 @@
 package com.zdan.paimengaicodemother.ai.codegen;
 
-import com.zdan.paimengaicodemother.ai.model.HtmlCodeResult;
 import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.ai.model.HtmlCodeResult;
 import dev.langchain4j.service.MemoryId;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.UserMessage;
@@ -12,8 +12,8 @@ import reactor.core.publisher.Flux;
  *
  * @author LXH
  */
-@AiCodeGenService(codeGenTypeEnum = CodeGenTypeEnum.HTML)
-public interface HtmlCodeGenService extends IAiCodeGenService {
+@CodeGenType(codeGenTypeEnum = CodeGenTypeEnum.HTML)
+public interface HtmlCodeGenService extends AiCodeGenService {
 
     /**
      * 生成 HTML 代码
