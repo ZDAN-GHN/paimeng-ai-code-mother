@@ -3,7 +3,7 @@ package com.zdan.paimengaicodemother.ai.codegen;
 import cn.hutool.aop.ProxyUtil;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.zdan.paimengaicodemother.ai.enums.AiModeEnum;
+import com.zdan.paimengaicodemother.ai.enums.AiGenerateModeEnum;
 import com.zdan.paimengaicodemother.ai.guardrail.PromptSafetyInputGuardrail;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
@@ -16,11 +16,11 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.service.AiServices;
 import lombok.extern.slf4j.Slf4j;
+import org.jetbrains.annotations.Nullable;
 import org.springframework.context.annotation.Configuration;
 
 import java.lang.reflect.InvocationHandler;
 import java.time.Duration;
-import java.util.Objects;
 
 /**
  * ai 代码生成服务创建工厂
@@ -31,9 +31,11 @@ import java.util.Objects;
 @Slf4j
 public class AiCodeGenServiceFactory {
 
-    // caffeine 缓存，缓存 ai 服务
-    private final Cache<Long, IAiCodeGenService> aiCodeGenServiceCache;
-    private final Cache<String, IAiCodeGenService> aiCodeGenServiceProxyCache;
+
+    // caffeine 缓存，缓存 LangCain4j 生成的 ai 服务代理对象
+    private final Cache<Long, AiCodeGenService> aiCodeGenServiceCache;
+    // caffeine 缓存，缓存 ai 服务的假实现
+    private final Cache<String, AiCodeGenService> aiCodeGenServiceFakeInstanceCache;
 
     {
         aiCodeGenServiceCache = Caffeine.newBuilder()
@@ -47,7 +49,7 @@ public class AiCodeGenServiceFactory {
                                 log.debug("Removed AI CodeGenService from cache, appId: {}, cause: {}", key, cause)
                 )
                 .build();
-        aiCodeGenServiceProxyCache = Caffeine.newBuilder()
+        aiCodeGenServiceFakeInstanceCache = Caffeine.newBuilder()
                 .maximumSize(1000)
                 // 写入 30 分钟后过期
                 .expireAfterWrite(Duration.ofMinutes(30))
@@ -86,12 +88,12 @@ public class AiCodeGenServiceFactory {
      * @param appId 应用 id
      * @return AI 服务实体
      */
-    public IAiCodeGenService getAiCodeGenService(Class<? extends IAiCodeGenService> clazz, Long appId) {
+    public AiCodeGenService getAiCodeGenService(Class<? extends AiCodeGenService> clazz, Long appId) {
         // 从内存中获取服务实例，如果没有则调用 lambda 创建 键值对（相当于 Map 的 computeIfAbsent）
         return aiCodeGenServiceCache.get(appId,
                 // 同一个 key 的 mappingFunction 只会被调用一次，当多个线程同时请求同一个不存在的 key 时，只有一个线程会执行 mappingFunction，其他线程会阻塞等待结果
                 key -> {
-                    IAiCodeGenService aiCodeGenService = createAiCodeGenService(clazz, key);
+                    AiCodeGenService aiCodeGenService = createAiCodeGenService(clazz, key);
                     log.debug("instanced aiCodeGenService, appId: {}, aiCodeGenService: {}", key, aiCodeGenService);
                     return aiCodeGenService;
                 }
@@ -105,7 +107,7 @@ public class AiCodeGenServiceFactory {
      * @param appId 应用 id
      * @return AI 服务实体
      */
-    public IAiCodeGenService createAiCodeGenService(Class<? extends IAiCodeGenService> clazz, Long appId) {
+    public AiCodeGenService createAiCodeGenService(Class<? extends AiCodeGenService> clazz, Long appId) {
         final int maxMessages = 20;
         MessageWindowChatMemory chatMemory = MessageWindowChatMemory.builder()
                 .id(appId)
@@ -113,20 +115,20 @@ public class AiCodeGenServiceFactory {
                 .maxMessages(maxMessages)
                 .build();
         // 根据指定的 ai 模式选择 streamingChatModel
-        AiCodeGenService annotation = clazz.getAnnotation(AiCodeGenService.class);
-        if (annotation == null) {
+        CodeGenType codeGenType = clazz.getAnnotation(CodeGenType.class);
+        if (codeGenType == null) {
             log.info("@AiCodeGenService annotations are missing, check class {}", clazz);
         }
-        AiModeEnum aiModeEnum = Objects.requireNonNull(annotation).aiMode();
+        AiGenerateModeEnum aiGenerateModeEnum = getAiWorkMode(clazz);
         // 根据服务指定的模型枚举类型动态选择对应的模型多例对象（每个模型对象都持有一个 SpringRestClient （可理解为只有一个工作线程的 ExecutorService），
         // 底层的 SpringRestClient.execute() 方法内部实际上是同步解析数据流的，导致了串行执行问题，通过多例化 StreamingChatModel 便可以轻松解决这个问题）
-        StreamingChatModel streamingChatModel = switch (aiModeEnum) {
+        StreamingChatModel streamingChatModel = switch (aiGenerateModeEnum) {
             case CHAT -> // 对话模型（普通模型）
                     SpringContextUtil.getBean("chatStreamingChatModelPrototype", StreamingChatModel.class);
             case REASONING -> // 推理模型
                     SpringContextUtil.getBean("reasoningStreamingChatModelPrototype", StreamingChatModel.class);
             default -> {
-                log.error("user tried to select unsupported ai mode: {}", aiModeEnum);
+                log.error("user tried to select unsupported ai mode: {}", aiGenerateModeEnum);
                 throw new BusinessException(ErrorCode.SYSTEM_ERROR);
             }
         };
@@ -160,11 +162,45 @@ public class AiCodeGenServiceFactory {
      * 利用反射，从代码生成服务接口的 class 对象中获取工具集合
      *
      * @param clazz 代码生成服务接口的 class 对象
+     * @return AI 工作模式
+     */
+    private AiGenerateModeEnum getAiWorkMode(Class<? extends AiCodeGenService> clazz) {
+        AiGenerateModeEnum aiMode;
+        AiCodeGenService fakeService = getAiCodeServiceFakeInstance(clazz);
+        if (fakeService != null) {
+            aiMode = fakeService.getAiGenerateMode();
+        } else {
+            // 保证返回非 null 对象
+            aiMode = AiGenerateModeEnum.CHAT;
+        }
+        return aiMode;
+    }
+
+    /**
+     * 利用反射，从代码生成服务接口的 class 对象中获取工具集合
+     *
+     * @param clazz 代码生成服务接口的 class 对象
      * @return 工具集合
      */
-    private Object[] getTools(Class<? extends IAiCodeGenService> clazz) {
+    private Object[] getTools(Class<? extends AiCodeGenService> clazz) {
         Object[] tools;
-        IAiCodeGenService tempService = aiCodeGenServiceProxyCache.get(clazz.getName(), key -> {
+        AiCodeGenService fakeService = getAiCodeServiceFakeInstance(clazz);
+        if (fakeService != null) {
+            tools = fakeService.getTools();
+        } else {
+            // 保证返回非 null 对象
+            tools = new Object[]{};
+        }
+        return tools;
+    }
+
+    /**
+     * 获取 AI 代码生成服务的假实现，生成的对象只用于的执行 default 方法
+     * @param clazz 代码生成服务接口的 class 对象
+     * @return 该 class 的假实体
+     */
+    private @Nullable AiCodeGenService getAiCodeServiceFakeInstance(Class<? extends AiCodeGenService> clazz) {
+        return aiCodeGenServiceFakeInstanceCache.get(clazz.getName(), key -> {
             try {
                 // 通过动态代理创建接口的临时实例，用于执行方法的默认实现
                 return ProxyUtil.newProxyInstance((proxy, method, args) -> {
@@ -180,13 +216,6 @@ public class AiCodeGenServiceFactory {
             }
             return null;
         });
-        if (tempService != null) {
-            tools = tempService.getTools();
-        } else {
-            // 保证返回非 null 对象
-            tools = new Object[]{};
-        }
-        return tools;
     }
 
     /**
@@ -196,7 +225,7 @@ public class AiCodeGenServiceFactory {
      * @return AI 服务实体
      */
     @Deprecated
-    public IAiCodeGenService createAiCodeGenService(Class<? extends IAiCodeGenService> clazz) {
+    public AiCodeGenService createAiCodeGenService(Class<? extends AiCodeGenService> clazz) {
         return AiServices.builder(clazz)
                 .chatModel(openAiChatModel)
                 .streamingChatModel(openAiStreamingChatModel)
