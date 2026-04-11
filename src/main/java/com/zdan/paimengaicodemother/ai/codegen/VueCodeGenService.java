@@ -1,8 +1,8 @@
 package com.zdan.paimengaicodemother.ai.codegen;
 
-import com.zdan.paimengaicodemother.ai.tools.*;
-import com.zdan.paimengaicodemother.ai.enums.AiModeEnum;
+import com.zdan.paimengaicodemother.ai.enums.AiGenerateModeEnum;
 import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.ai.tools.*;
 import dev.langchain4j.service.MemoryId;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.TokenStream;
@@ -17,16 +17,18 @@ import java.util.List;
  *
  * @author LXH
  */
-@AiCodeGenService(
-        codeGenTypeEnum = CodeGenTypeEnum.VUE_PROJECT,
-        aiMode = AiModeEnum.REASONING
-)
-public interface VueCodeGenService extends IAiCodeGenService {
+@CodeGenType(codeGenTypeEnum = CodeGenTypeEnum.VUE_PROJECT)
+public interface VueCodeGenService extends AiCodeGenService {
+
+    @Override
+    default AiGenerateModeEnum getAiGenerateMode() {
+        return AiGenerateModeEnum.REASONING;
+    }
 
     /**
      * 生成的项目类型
      */
-    String PROJECT_TYPE = VueCodeGenService.class.getAnnotation(AiCodeGenService.class).codeGenTypeEnum().getValue();
+    String PROJECT_TYPE = VueCodeGenService.class.getAnnotation(CodeGenType.class).codeGenTypeEnum().getValue();
 
     @Override
     default Object[] getTools() {

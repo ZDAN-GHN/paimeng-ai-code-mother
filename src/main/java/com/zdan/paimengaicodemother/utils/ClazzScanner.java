@@ -4,8 +4,8 @@ import cn.hutool.core.collection.CollectionUtil;
 import cn.hutool.core.lang.ClassScanner;
 import cn.hutool.core.lang.Filter;
 import com.zdan.paimengaicodemother.PaimengAiCodeMotherApplication;
+import com.zdan.paimengaicodemother.ai.codegen.CodeGenType;
 import com.zdan.paimengaicodemother.ai.codegen.AiCodeGenService;
-import com.zdan.paimengaicodemother.ai.codegen.IAiCodeGenService;
 
 import java.lang.annotation.Annotation;
 import java.util.HashSet;
@@ -78,6 +78,6 @@ public class ClazzScanner {
 
     // ========== 测试示例 ==========
     public static void main(String[] args) {
-        scanInterfaces(AiCodeGenService.class.getPackageName(), AiCodeGenService.class, IAiCodeGenService.class);
+        scanInterfaces(CodeGenType.class.getPackageName(), CodeGenType.class, AiCodeGenService.class);
     }
 }
