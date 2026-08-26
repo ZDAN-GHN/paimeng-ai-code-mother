@@ -13,7 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 内容图؜片收集节点
+ * 内容图片收集节点
  *
  * @author LXH
  */

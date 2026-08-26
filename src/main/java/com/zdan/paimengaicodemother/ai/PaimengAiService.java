@@ -3,7 +3,7 @@ package com.zdan.paimengaicodemother.ai;
 import com.zdan.paimengaicodemother.ai.enums.AiGenerateModeEnum;
 
 /**
- * Paiemng 项目的通用 AI 服务接口，所有的 AI 服务接口都必须继承它
+ * Paimeng 项目的通用 AI 服务接口，所有的 AI 服务接口都必须继承它
  *
  * @author LXH
  */
