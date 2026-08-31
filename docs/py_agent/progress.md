@@ -40,6 +40,15 @@
   - 命令证据：`uv run pytest tests/test_codegen.py` → **14 passed**；`uv run pytest` 全量 → **43 passed**。
 - 提交：`d482a60 feat: Python Agent 阶段 2（T6-T7）文件工具与 CodeGen 服务`（`DSH Web/ZDAN <zdan60661@gmail.com>`）。
 
+## 2026-08-31 — 阶段 2（T8）完成
+
+- **T8（图片采集与质量检查服务）✅**：
+  - `app/services/images.py`：`ImageCategory/ImageResource/ImageCollectionPlan` 数据模型（camelCase alias 对齐提示词 JSON）；`plan_image_collection`（规划提示词驱动模型 → 结构化计划，解析失败回退空计划）；`collect_images`（模型自主调用 4 个图片工具，汇总 `ImageResource`）；`ImageTools` 四个工具绑定（`searchContentImages` Pexels / `searchIllustrations` Undraw / `generateArchitectureDiagram` mmdc→SVG / `generateLogos` DashScope 文生图），工具名对齐 Java `@Tool`。对齐 Java `langgraph4j/ai/ImageCollectionPlanService`、`ImageCollectionService` 与 `langgraph4j/tools/*`。注意：`MermaidDiagramTool` 的 COS 上传属 Java 云端基建，未迁移（Python 侧以 `file://` 本地路径回填）。
+  - `app/services/quality.py`：`QualityResult` 模型 + `check_code_quality`（质检提示词驱动模型 → 结构化结果，异常按通过处理）+ `read_and_concatenate_code_files`（只拼代码扩展名文件，跳过隐藏与 node_modules/dist/target/.git，对齐 Java `CodeQualityCheckNode`）。
+  - `config.py`/`.env.example`：新增 `PEXELS_API_KEY`（对齐 Java `pexels.api-key`）。
+  - 命令证据：`uv run pytest tests/test_images.py tests/test_quality.py` → **12 passed**；`uv run pytest` 全量 → **55 passed**。
+- 提交：`T8 图片采集与质量检查服务`（`DSH Web/ZDAN <zdan60661@gmail.com>`）。
+
 ## 下一步
 
-- 阶段 2 续：T8（图片收集与代码质量检查服务）、T9（Guardrail，对齐 Java `PromptSafetyInputGuardrail`）、T10（代码解析 + 工作区写入集成）、T11（graph.py 工作流编排）、T12（streaming.py SSE 事件流）、T13（callback.py 回调），每完成一个任务在此追加一行（含日期与命令证据）。
+- 阶段 2 续：T9（Guardrail，对齐 Java `PromptSafetyInputGuardrail`）、T10（代码解析 + 工作区写入集成）、T11（graph.py 工作流编排）、T12（streaming.py SSE 事件流）、T13（callback.py 回调），每完成一个任务在此追加一行（含日期与命令证据）。
