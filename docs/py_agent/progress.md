@@ -27,6 +27,19 @@
 - 依赖锁定（§8）：fastapi 0.141.1 / starlette 1.6.0 / langgraph 1.2.11 / langgraph-checkpoint-postgres 3.1.2 / pydantic 2.13.5，`uv.lock` 固定，`pip check` 全绿。
 - 环境说明：本机无 PostgreSQL 实例，T19 checkpoint 恢复测试待 Postgres 就绪后执行；`PythonAgentClient.stream()` 尚未被业务调用（阶段 3 接入）。
 
+## 2026-08-31 — 阶段 2（T6-T7）完成
+
+- **T6（文件类 Tools）✅**：`app/tools/file_tools.py` 定义 `FileTools`（绑定工作区并在构造时二次校验沙箱）；`_resolve` 路径穿越守卫；`write_file/read_file/modify_file/delete_file/read_dir/exit_tool`；`IGNORED_NAMES/IGNORED_EXTENSIONS/IMPORTANT_FILES` 对齐 Java `ai/tools` 与 `core/saver` 清单（`index.html/style.css/script.js/package.json` 等不可删除）。命令证据：`uv run pytest tests/test_tools.py` → **11 passed**。
+- **T7（codegen 服务）✅**：
+  - `app/services/llm.py`：`create_chat_model(reasoning=False, temperature=0.7)` → ChatOpenAI（`MODEL_BASE_URL/MODEL_API_KEY/MODEL_NAME/REASONING_MODEL_NAME` 从 config 读取）；`load_prompt(name)` 读 `app/prompts/`。
+  - `app/prompts/`：迁移自 `src/main/resources/prompt/*.txt` 的 7 份提示词（含 `codegen-vue-project-system-prompt.txt`）。
+  - `app/services/codegen/parsing.py`：`parse_html_code`（```` ```html ```` 块抽取，回退全文）、`parse_multi_file_code`（html/css/js 三段）、`to_files`（去空行）→ `HtmlCodeResult`/`MultiFileCodeResult`，正则对齐 Java `core/parser`。
+  - `app/services/codegen/html.py`/`multi_file.py`：ChatOpenAI 文本流式生成（系统提示词 + `stream()` 逐块产出文本事件），`__init__.py` 中 `CodeGenServiceFactory` 与 `CodeGenServiceExecutor.stream(...)` 按类型分派。
+  - `app/services/codegen/vue.py`：`VueCodeGenService(FileTools)`，6 个 langchain 工具绑定（write/read/modify/delete/read_dir/exit），reasoning 模型 `bind_tools` 循环（`MAX_TOOL_CALLS=50`）产出 `tool_request`/`tool_executed`/`ai_thinking`/`ai_response` 事件字典；`_execute()` 按名分派；`stream()` 抛 `NotImplementedError`（由 executor 走 `run()`）。
+  - `app/services/codegen/routing.py`：`route_code_gen_type` 关键词路由（vue_project/multi_file/html，兜底 html），对齐 Java `RouterNode` 与 `PaimengAiService#getAiGenerateMode`。
+  - 命令证据：`uv run pytest tests/test_codegen.py` → **14 passed**；`uv run pytest` 全量 → **43 passed**。
+- 提交：`d482a60 feat: Python Agent 阶段 2（T6-T7）文件工具与 CodeGen 服务`（`DSH Web/ZDAN <zdan60661@gmail.com>`）。
+
 ## 下一步
 
-- 阶段 2：T6-T13（文件类 Tools、codegen 服务、图片/质检/Guardrail、代码解析+工作区写入、graph、streaming、callback），每完成一个任务在此追加一行（含日期与命令证据）。
+- 阶段 2 续：T8（图片收集与代码质量检查服务）、T9（Guardrail，对齐 Java `PromptSafetyInputGuardrail`）、T10（代码解析 + 工作区写入集成）、T11（graph.py 工作流编排）、T12（streaming.py SSE 事件流）、T13（callback.py 回调），每完成一个任务在此追加一行（含日期与命令证据）。

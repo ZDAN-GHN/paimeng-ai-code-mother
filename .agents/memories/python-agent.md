@@ -2,14 +2,14 @@
 
 > Python Agent（FastAPI + LangGraph + LangChain）侧的工作记忆。权威契约见 `docs/py_agent/task_plan.md` §1；任务分解见 §4。
 
-## 当前状态（2026-08-31 阶段 1 完成核对）
+## 当前状态（2026-08-31 阶段 2 T6-T7 完成核对）
 
 | 项 | 状态 |
 |---|---|
 | `paimeng-ai-code-agent/` | **已创建**（`pyproject.toml`/`uv.lock`/`.python-version`/`app/`/`tests/`） |
 | 技术基线 | Python 3.13.15（`.python-version` 锁定）+ FastAPI 0.141.1 + LangGraph 1.2.11 + Pydantic 2.13.5，`uv` 管理 |
 | 依赖坑 | 已规避：fastapi 0.141.1 与 starlette 1.6.0 `pip check` 全绿（不再存在 0.115/1.0 不兼容） |
-| T1-T5 | **全部完成**，`uv run pytest` 18 passed（含 `-m contract` 11 passed） |
+| T1-T7 | **全部完成**，`uv run pytest` **43 passed**（`-m contract` 11 passed） |
 | langgraph-checkpoint-postgres | 3.1.2，`PostgresSaver(pool)` 接受 psycopg `ConnectionPool`；`setup()`/`get_tuple()` 已确认 |
 | PostgreSQL 实例 | 本机未安装/未启动（T19 checkpoint 恢复测试待环境就绪后跑） |
 
@@ -21,7 +21,11 @@
 - `app/sse.py`：SSE 序列化（§1.3 A5：空行分隔、data 逐行拆分）
 - `app/workspace.py`：`validate_workspace_path`（沙箱，防路径穿越→400）+ `atomic_write_files`（临时子目录→原子 move，失败回滚旧目录）
 - `app/state.py`：`PostgresSaver` 装配 + `thread_config`（`thread_id=app:{appId}`）+ `has_checkpoint`（首次判定，§1.5）
-- `tests/`：`conftest.py`（预置 `PYTHON_AGENT_TOKEN=test-token`、`WORKSPACE_ROOT=/tmp/paimeng-test-workspace`）+ 契约/SSE/工作区测试
+- `app/tools/file_tools.py`（T6）：`FileTools` 绑定工作区 + 构造二次沙箱校验；`_resolve` 路径穿越守卫；`write/read/modify/delete_file/read_dir/exit_tool`；`IGNORED_NAMES/IGNORED_EXTENSIONS/IMPORTANT_FILES` 对齐 Java（`index.html/style.css/script.js/package.json` 等不可删）
+- `app/services/llm.py`（T7）：`create_chat_model(reasoning=False, temperature=0.7)` → ChatOpenAI（config `MODEL_*`）；`load_prompt(name)` 读 `app/prompts/`
+- `app/prompts/`（T7）：7 份提示词，源 `src/main/resources/prompt/*.txt`
+- `app/services/codegen/`（T7）：`parsing.py`（HTML/MultiFile 解析正则对齐 Java `core/parser`）、`html.py`/`multi_file.py`（ChatOpenAI 文本流）、`vue.py`（reasoning 模型 + 6 工具 `bind_tools` 循环，`MAX_TOOL_CALLS=50`）、`routing.py`（关键词路由兜底 html）、`__init__.py`（`CodeGenServiceFactory` + `CodeGenServiceExecutor.stream`：vue→`run()`，其余→`stream()`）
+- `tests/`：`conftest.py`（预置 `PYTHON_AGENT_TOKEN=test-token`、`WORKSPACE_ROOT=/tmp/paimeng-test-workspace`）+ 契约/SSE/工作区/工具/代码生成测试
 
 ## 踩坑与规避
 
@@ -36,12 +40,10 @@
 
 ## 下一步任务
 
-阶段 2（T6-T13）：
-- **T6**：文件类 Tools 迁移（读/写/改/删/列目录/退出 + 工作区沙箱校验）
-- **T7**：代码生成服务迁移（html/multi_file/vue + 路由，prompt 源在 `src/main/resources/prompt/*.txt`）
-- **T8**：图片采集与质量检查服务迁移
+阶段 2（T8-T13）：
+- **T8**：图片采集与质量检查服务迁移（对齐 Java `ai/codegen` 的 ImageCollectorNode / code_quality_check）
 - **T9**：Guardrail 迁移（`PromptSafetyInputGuardrail`）
-- **T10**：代码解析与工作区写入（`workspace.py` 已具备原子写基础）
+- **T10**：代码解析与工作区写入（`workspace.py` 已具备原子写基础，`parsing.py` 的 `to_files` 就绪）
 - **T11-T13**：LangGraph 工作流编排、SSE 流式输出适配、完成回调客户端（`app/callback.py`）
 
 ## 鉴权与工作区
