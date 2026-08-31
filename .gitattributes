@@ -1,2 +1,35 @@
+# =========================================================
+# 换行符（Line Ending）统一策略
+# ---------------------------------------------------------
+# 仓库内所有文本文件一律以 LF 存储（index/blob 均为 LF），
+# 并在 Windows 与 WSL/Linux 两端都检出为 LF，保证两端字节一致，
+# 避免 CRLF/LF 不一致导致的假 diff 与反复"整文件被修改"。
+# 生效后如仓库有历史 CRLF 文件，执行：git add --renormalize .
+# =========================================================
+
+# 统一规则：文本文件以 LF 归一化存储与检出
+* text=auto eol=lf
+
+# Shell 脚本必须保持 LF（在 Windows 上也检出 LF，保证 /bin/sh 兼容）
 /mvnw text eol=lf
+*.sh text eol=lf
+
+# Windows 批处理脚本：在 Windows 检出为 CRLF（cmd.exe 兼容）
 *.cmd text eol=crlf
+*.bat text eol=crlf
+
+# 二进制文件：不做任何换行转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.jar binary
+*.zip binary
+*.gz binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
