@@ -46,11 +46,30 @@ class _FakeExecutor:
         yield from self._items
 
 
-def _collect(request, executor, guardrail=None) -> str:
+class _RecordingCallback:
+    """记录完成回调的假回调函数。"""
+
+    def __init__(self) -> None:
+        self.calls = []
+
+    def __call__(self, *, request, status, message=""):
+        self.calls.append((request, status, message))
+        return True
+
+
+def _collect(request, executor, guardrail=None, callback=None) -> str:
     """收集 stream_events 的完整 SSE 输出。"""
 
     async def _run() -> str:
-        parts = [s async for s in stream_events(request, executor=executor, guardrail=guardrail or _FakeGuardrail())]
+        parts = [
+            s
+            async for s in stream_events(
+                request,
+                executor=executor,
+                guardrail=guardrail or _FakeGuardrail(),
+                callback=callback,
+            )
+        ]
         return "".join(parts)
 
     return asyncio.run(_run())
@@ -119,3 +138,35 @@ def test_generation_exception_emits_error_event():
     out = _collect(req, _FakeExecutor(error=RuntimeError("模型调用失败")))
     assert "event: error" in out
     assert "模型调用失败" in out
+
+
+def test_success_callback_fired_after_workspace_write():
+    """html 成功：工作区落盘后触发 success 回调。"""
+    req = _request(codeGenType="html", workspacePath=f"{WORKSPACE_ROOT}/stream_cb")
+    cb = _RecordingCallback()
+    _collect(req, _FakeExecutor(items=["```html\n<h1>hi</h1>\n```"]), callback=cb)
+    assert len(cb.calls) == 1
+    request, status, message = cb.calls[0]
+    assert status == "success"
+    assert message == ""
+    assert (Path(WORKSPACE_ROOT) / "stream_cb" / "index.html").exists()
+
+
+def test_failed_callback_fired_on_generation_error():
+    """生成异常：触发 failed 回调并携带 message。"""
+    req = _request()
+    cb = _RecordingCallback()
+    _collect(req, _FakeExecutor(error=RuntimeError("模型调用失败")), callback=cb)
+    assert len(cb.calls) == 1
+    request, status, message = cb.calls[0]
+    assert status == "failed"
+    assert "模型调用失败" in message
+
+
+def test_failed_callback_on_guardrail_rejection():
+    """护轨拒绝：触发 failed 回调。"""
+    req = _request()
+    cb = _RecordingCallback()
+    _collect(req, _FakeExecutor(items=["x"]), guardrail=_FakeGuardrail(allowed=False), callback=cb)
+    assert len(cb.calls) == 1
+    assert cb.calls[0][1] == "failed"

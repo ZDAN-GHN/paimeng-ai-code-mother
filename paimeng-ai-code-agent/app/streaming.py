@@ -4,12 +4,14 @@
 - vue_project：结构化 StreamMessage JSON（ai_response/ai_thinking/tool_request/tool_executed）。
 - html/multi_file：纯文本增量块（不套 JSON）。
 - guardrail 拒绝或生成失败：`event: error` + `data: {"message":"..."}`（§1.3），Java 映射为 business-error。
+- 完成回调（T13）：工作区落盘成功后调 success；失败调 failed + message（§1.4，唯一完成信号）。
 """
 
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
+from app.callback import CallbackStatus, send_request_callback
 from app.guardrails import PromptSafetyInputGuardrail
 from app.models import (
     AgentRequest,
@@ -58,20 +60,24 @@ async def stream_events(
     *,
     executor: CodeGenServiceExecutor | None = None,
     guardrail: PromptSafetyInputGuardrail | None = None,
+    callback: Callable[..., bool] | None = None,
 ) -> AsyncIterator[str]:
-    """驱动代码生成并产出 SSE 事件流（§1.3）。
+    """驱动代码生成并产出 SSE 事件流（§1.3），完成后按 §1.4 发回调。
 
     :param request: 主通道请求（§1.2）
     :param executor: 代码生成执行器（测试可注入）
     :param guardrail: 输入护轨（测试可注入）
+    :param callback: 完成回调函数（测试可注入），默认 send_request_callback
     :return: SSE 文本流
     """
+    callback = callback or send_request_callback
     guardrail = guardrail or PromptSafetyInputGuardrail()
 
     # 1. 输入护轨：拒绝则发 error 事件并终止（不再发业务事件）
     guardrail_result = guardrail.validate(request.message)
     if not guardrail_result.is_allowed:
         yield _error_event(guardrail_result.reason)
+        _fire_callback(callback, request, "failed", message=guardrail_result.reason)
         return
 
     executor = executor or CodeGenServiceExecutor()
@@ -98,6 +104,24 @@ async def stream_events(
         # 2. html/multi_file：文本收集完整后解析并原子落盘工作区（§1.5）
         if code_gen_type in ("html", "multi_file") and text_parts:
             write_generated_code(request.workspacePath, code_gen_type, "".join(text_parts))
-    except Exception as exc:  # noqa: BLE001 - 生成异常转 error 事件
+
+        # 3. 完成回调（success）：工作区已落盘，通知 Java 继续构建（§1.4）
+        _fire_callback(callback, request, "success")
+    except Exception as exc:  # noqa: BLE001 - 生成异常转 error 事件 + failed 回调
         logger.exception("代码生成失败: %s", exc)
         yield _error_event(str(exc))
+        _fire_callback(callback, request, "failed", message=str(exc))
+
+
+def _fire_callback(
+    callback: Callable[..., bool],
+    request: AgentRequest,
+    status: CallbackStatus,
+    *,
+    message: str = "",
+) -> None:
+    """触发完成回调并记录失败日志（回调自身不阻断主流程）。"""
+    try:
+        callback(request=request, status=status, message=message)
+    except Exception as exc:  # noqa: BLE001 - 回调异常不影响 SSE 流
+        logger.error("完成回调触发失败: %s", exc)
