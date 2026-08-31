@@ -5,7 +5,7 @@
 
 ## 一句话现状
 
-Java (Spring Boot) + Python (FastAPI) **双后端重构中**。阶段 1（T0-T5）与阶段 2（T6-T12）已全部落地并验证：`./mvnw compile` 通过（JDK 21）、`paimeng-ai-code-agent` 子项目已建（`uv run pytest` 75 passed）。下一步进入阶段 2 收尾（T13）与阶段 3（Java 接入）。
+Java (Spring Boot) + Python (FastAPI) **双后端重构中**。阶段 1（T0-T5）与阶段 2（T6-T13）已全部落地并验证：`./mvnw compile` 通过（JDK 21）、`paimeng-ai-code-agent` 子项目已建（`uv run pytest` 82 passed）。下一步进入阶段 3（T14-T18，Java 接入）。
 
 ## 领域记忆（`.agents/memories/`）
 
@@ -28,4 +28,4 @@ Java (Spring Boot) + Python (FastAPI) **双后端重构中**。阶段 1（T0-T5�
 
 ## 下一步
 
-阶段 2：**T13**（callback）→ 阶段 3（T14-T18，Java 接入）。每完成一个任务：更新 `.agents/memories/` 对应文档 + 在 `docs/py_agent/progress.md` 追加一行（含日期与命令证据）。
+阶段 3：**T14a**（基线快照）→ T14-T18（PythonAgentClient/SseAdapter/回调 endpoint/错误映射/灰度开关）。每完成一个任务：更新 `.agents/memories/` 对应文档 + 在 `docs/py_agent/progress.md` 追加一行（含日期与命令证据）。

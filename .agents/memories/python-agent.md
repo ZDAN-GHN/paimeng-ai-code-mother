@@ -9,7 +9,7 @@
 | `paimeng-ai-code-agent/` | **已创建**（`pyproject.toml`/`uv.lock`/`.python-version`/`app/`/`tests/`） |
 | 技术基线 | Python 3.13.15（`.python-version` 锁定）+ FastAPI 0.141.1 + LangGraph 1.2.11 + Pydantic 2.13.5，`uv` 管理 |
 | 依赖坑 | 已规避：fastapi 0.141.1 与 starlette 1.6.0 `pip check` 全绿（不再存在 0.115/1.0 不兼容） |
-| T1-T12 | **全部完成**，`uv run pytest` **75 passed**（`-m contract` 11 passed） |
+| T1-T13 | **全部完成**，`uv run pytest` **82 passed**（`-m contract` 11 passed）；阶段 2（T6-T13）全部落地 |
 | langgraph-checkpoint-postgres | 3.1.2，`PostgresSaver(pool)` 接受 psycopg `ConnectionPool`；`setup()`/`get_tuple()` 已确认 |
 | PostgreSQL 实例 | 本机未安装/未启动（T19 checkpoint 恢复测试待环境就绪后跑） |
 
@@ -24,6 +24,7 @@
 - `app/tools/file_tools.py`（T6）：`FileTools` 绑定工作区 + 构造二次沙箱校验；`_resolve` 路径穿越守卫；`write/read/modify/delete_file/read_dir/exit_tool`；`IGNORED_NAMES/IGNORED_EXTENSIONS/IMPORTANT_FILES` 对齐 Java（`index.html/style.css/script.js/package.json` 等不可删）
 - `app/services/llm.py`（T7）：`create_chat_model(reasoning=False, temperature=0.7)` → ChatOpenAI（config `MODEL_*`）；`load_prompt(name)` 读 `app/prompts/`
 - `app/prompts/`（T7）：7 份提示词，源 `src/main/resources/prompt/*.txt`
+- `app/callback.py`（T13）：`send_callback`/`send_request_callback`（§1.4，POST `{JAVA_BASE_URL}/api/app/chat/gen/code/callback`，Bearer + runId 幂等由 Java 保证）；`stream_events` 成功发 success / 失败发 failed 回调
 - `app/streaming.py`（T12）：`stream_events` 主通道 SSE（vue→StreamMessage JSON / html/multi→文本块 / error 事件），html/multi 完成后原子落盘
 - `app/graph.py`（T11）：`CodeGenWorkflow`（guardrail→image_collector→prompt_enhancer→router→code_generator→code_quality_check，质检失败有界重试；无 project_builder——构建留 Java）
 - `app/workspace.py`（T10）：`write_generated_code` 集成入口（沙箱校验→html/multi_file 解析→原子落盘）

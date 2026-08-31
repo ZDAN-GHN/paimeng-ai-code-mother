@@ -69,6 +69,13 @@
 - **T12（SSE 流式输出适配）✅**：`app/streaming.py` 定义 `stream_events(request, *, executor, guardrail)` 异步生成器——vue_project 发四类 StreamMessage JSON（`_normalize_vue_event` 逐字段归一化）；html/multi_file 发纯文本增量块（换行拆分 data: 行）；guardrail 拒绝或生成异常发 `event: error` + `data:{"message":...}`（§1.3，Java 映射 business-error），且 error 后不再发业务事件。html/multi_file 文本收集完整后调用 `write_generated_code` 原子落盘（§1.5）。`app/api.py` 主通道 `/v1/agent/stream` 已替换占位流为真实 `stream_events`。命令证据：`uv run pytest tests/test_streaming.py` → **5 passed**；`tests/test_contract.py`（含合法令牌流式用例，mock 生成器避免在线调用）→ **11 passed**；全量 → **75 passed**。
 - 提交：`T12 SSE 流式输出适配`（`DSH Web/ZDAN <zdan60661@gmail.com>`）。
 
+## 2026-08-31 — 阶段 2（T13）完成 · 阶段 2 全部落地
+
+- **T13（完成回调客户端）✅**：`app/callback.py` 定义 `send_callback`（§1.4 字段 + Bearer 头，POST `{JAVA_BASE_URL}/api/app/chat/gen/code/callback`，`runId` 透传，幂等由 Java 侧保证；非 2xx 返回 False 不抛出）+ `send_request_callback`（按 AgentRequest 便捷发送）。`app/streaming.py` 的 `stream_events` 接入回调：工作区落盘成功后发 `success`；guardrail 拒绝/生成异常发 `failed` + message（§1.4 唯一完成信号，回调注入可测试）。
+- 命令证据：`uv run pytest tests/test_callback.py tests/test_streaming.py` → **12 passed**；全量 → **82 passed**；`JAVA_HOME=.../java/current ./mvnw compile` → **BUILD SUCCESS**（MVN_EXIT=0，基线保持）。
+- 提交：`T13 完成回调客户端`（`DSH Web/ZDAN <zdan60661@gmail.com>`）。
+- **阶段 2（T6-T13）全部完成**：文件工具、codegen 服务、图片/质检、Guardrail、代码解析+落盘、LangGraph 工作流、SSE 适配、完成回调均已落地并单测覆盖。
+
 ## 下一步
 
-- 阶段 2 收尾：T13（callback.py 完成回调客户端 §1.4，`runId` 透传），完成此任务后阶段 2 全部落地，进入阶段 3（Java 接入）。
+- 阶段 3（Java 接入）：T14a（先录制浏览器事件基线快照，必须在 T15/T17 改动 `AppServiceImpl` 之前）→ T14（`PythonAgentClient` WebClient POST + SSE 解码）→ T15（`PythonAgentSseAdapter` 事件分流到 `JsonMessageStreamHandler`/`SimpleTextStreamHandler`）→ T16（回调 endpoint + runId 幂等 + callback-timeout-ms 兜底）→ T17（错误/超时映射）→ T18（灰度开关校验）。
