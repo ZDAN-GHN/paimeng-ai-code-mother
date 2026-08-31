@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     dashscope_api_key: str = ""
     image_model: str = "wan2.2-t2i-flash"
 
+    # Pexels（内容图片搜索，与 Java 侧 pexels.api-key 同值）
+    pexels_api_key: str = ""
+
     # 主通道流式响应缓冲区大小（字节）
     sse_buffer_size: int = 1024
 
