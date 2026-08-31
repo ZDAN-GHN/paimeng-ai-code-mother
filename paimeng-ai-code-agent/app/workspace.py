@@ -58,3 +58,28 @@ def atomic_write_files(workspace_path: Path, files: dict[str, str]) -> Path:
         if backup.exists():
             shutil.rmtree(backup)
     return workspace_path
+
+
+def write_generated_code(workspace_path: str, code_gen_type: str, output_text: str) -> Path:
+    """解析生成结果并原子写入工作区（T10 集成入口）。
+
+    html/multi_file 模式把 LLM 流式产出解析为文件集后落盘；
+    vue_project 模式由文件工具直接建项目，此处不适用。
+
+    :param workspace_path: 工作区绝对路径
+    :param code_gen_type: 代码生成类型（html / multi_file）
+    :param output_text: LLM 生成的代码文本
+    :return: 目标工作区路径
+    :raises ValueError: 路径不合法或类型不支持
+    :raises OSError: 写入失败
+    """
+    from app.services.codegen.parsing import parse_html_code, parse_multi_file_code, to_files
+
+    validated = validate_workspace_path(workspace_path)
+    if code_gen_type == "html":
+        files = to_files(parse_html_code(output_text))
+    elif code_gen_type == "multi_file":
+        files = to_files(parse_multi_file_code(output_text))
+    else:
+        raise ValueError(f"write_generated_code 不支持的类型: {code_gen_type}")
+    return atomic_write_files(validated, files)
