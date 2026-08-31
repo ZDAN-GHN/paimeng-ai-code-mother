@@ -54,6 +54,11 @@
 - **T9（Guardrail）✅**：`app/guardrails.py` 定义 `PromptSafetyInputGuardrail`（`validate(input_text)` 返回 `GuardrailResult{is_allowed,reason}`）+ 模块级 `validate_prompt`；四类校验与 Java `ai/guardrail/PromptSafetyInputGuardrail` 逐条对齐：长度>1000 字、空输入、敏感词（忽略之前的指令/ignore previous instructions/破解/hack/绕过/bypass/越狱/jailbreak）、注入模式（ignore\s+previous.../pretend as if/system: you are/new instructions: 等 5 条正则）。命令证据：`uv run pytest tests/test_guardrails.py` → **6 passed**；全量 → **61 passed**。
 - 提交：`T9 提示词安全输入护轨`（`DSH Web/ZDAN <zdan60661@gmail.com>`）。
 
+## 2026-08-31 — 阶段 2（T10）完成
+
+- **T10（代码解析与工作区写入集成）✅**：`app/workspace.py` 新增 `write_generated_code(workspace_path, code_gen_type, output_text)`——沙箱校验 → html/multi_file 解析（复用 `parsing.to_files`）→ `atomic_write_files` 原子落盘（临时子目录 → 原子 move，§1.5）；不支持的生成类型抛 `ValueError`（vue_project 由文件工具直接建项目，不适用）。命令证据：`uv run pytest tests/test_workspace.py` → **7 passed**；全量 → **64 passed**。
+- 提交：`T10 代码解析与工作区写入集成`（`DSH Web/ZDAN <zdan60661@gmail.com>`）。
+
 ## 下一步
 
-- 阶段 2 续：T10（代码解析 + 工作区写入集成）、T11（graph.py 工作流编排）、T12（streaming.py SSE 事件流）、T13（callback.py 回调），每完成一个任务在此追加一行（含日期与命令证据）。
+- 阶段 2 续：T11（graph.py 工作流编排）、T12（streaming.py SSE 事件流）、T13（callback.py 回调），每完成一个任务在此追加一行（含日期与命令证据）。
