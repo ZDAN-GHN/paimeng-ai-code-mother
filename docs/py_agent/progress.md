@@ -59,6 +59,11 @@
 - **T10（代码解析与工作区写入集成）✅**：`app/workspace.py` 新增 `write_generated_code(workspace_path, code_gen_type, output_text)`——沙箱校验 → html/multi_file 解析（复用 `parsing.to_files`）→ `atomic_write_files` 原子落盘（临时子目录 → 原子 move，§1.5）；不支持的生成类型抛 `ValueError`（vue_project 由文件工具直接建项目，不适用）。命令证据：`uv run pytest tests/test_workspace.py` → **7 passed**；全量 → **64 passed**。
 - 提交：`T10 代码解析与工作区写入集成`（`DSH Web/ZDAN <zdan60661@gmail.com>`）。
 
+## 2026-08-31 — 阶段 2（T11）完成
+
+- **T11（LangGraph 工作流编排）✅**：`app/graph.py` 定义 `CodeGenWorkflow`（`CodeGenState` TypedDict 状态 + 六个节点 + 条件边）：`guardrail → image_collector → prompt_enhancer → router → code_generator → code_quality_check`；guardrail 拒绝→END（带 error）；质检失败且有界重试（`MAX_QUALITY_RETRIES`=2，即初始 1 次 + 重试 2 次）→ 回 `code_generator`，通过或超限→END。对齐 Java `langgraph4j/CodeGenWorkflow`：图片收集为「规划→顺序执行四类工具」简化版（并发 fan-out 非必要）；不含 `project_builder`（构建留 Java）；依赖全部可注入（executor/guardrail/image_tools/image_plan/quality_check/router）便于离线测试。命令证据：`uv run pytest tests/test_graph.py` → **6 passed**；全量 → **70 passed**。
+- 提交：`T11 LangGraph 工作流编排`（`DSH Web/ZDAN <zdan60661@gmail.com>`）。
+
 ## 下一步
 
-- 阶段 2 续：T11（graph.py 工作流编排）、T12（streaming.py SSE 事件流）、T13（callback.py 回调），每完成一个任务在此追加一行（含日期与命令证据）。
+- 阶段 2 续：T12（streaming.py SSE 事件流适配 §1.3）、T13（callback.py 完成回调客户端 §1.4），每完成一个任务在此追加一行（含日期与命令证据）。
