@@ -38,3 +38,8 @@ build/
 
 ## Trae ##
 .trae/
+
+## Claude Code ##
+.claude/cache/
+.claude/statsig/
+.claude/logs/

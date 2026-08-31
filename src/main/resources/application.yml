@@ -34,6 +34,14 @@ server:
       cookie:
         max-age: 2592000s
 
+# Python Agent 迁移开关。生产通过环境变量覆盖 token/base-url。
+python-agent:
+  enabled: ${PYTHON_AGENT_ENABLED:false}
+  base-url: ${PYTHON_AGENT_BASE_URL:http://localhost:8090}
+  token: ${PYTHON_AGENT_TOKEN:}
+  connect-timeout-ms: ${PYTHON_AGENT_CONNECT_TIMEOUT_MS:3000}
+  read-timeout-ms: ${PYTHON_AGENT_READ_TIMEOUT_MS:300000}
+
 # springdoc
 springdoc:
   group-configs:

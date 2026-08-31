@@ -46,6 +46,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <!-- Python Agent SSE 客户端 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
         <!-- 腾讯云对象存储 https://cloud.tencent.com.cn/document/product/436/9511 -->
         <dependency>
             <groupId>com.qcloud</groupId>

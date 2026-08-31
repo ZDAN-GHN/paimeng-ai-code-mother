@@ -1,6 +1,6 @@
 ---
 name: project-comment-style
-description: Write comments according to the annotation habits of LXH, the author of this project.Use it when you need to add or complete comments, write class-level Javadocs, method Javadocs, field descriptions, in-line explanations, or review whether comments conform to the project style.
+description: 遵循本项目作者LXH的注释习惯编写注释。当需要添加或完成注释，编写类级Javadocs，方法Javadocs，字段描述，行内解释或查看注释是否符合项目样式时使用它。
 ---
 
 # 项目注释风格
