@@ -9,7 +9,7 @@
 | `paimeng-ai-code-agent/` | **已创建**（`pyproject.toml`/`uv.lock`/`.python-version`/`app/`/`tests/`） |
 | 技术基线 | Python 3.13.15（`.python-version` 锁定）+ FastAPI 0.141.1 + LangGraph 1.2.11 + Pydantic 2.13.5，`uv` 管理 |
 | 依赖坑 | 已规避：fastapi 0.141.1 与 starlette 1.6.0 `pip check` 全绿（不再存在 0.115/1.0 不兼容） |
-| T1-T13 | **全部完成**，`uv run pytest` **82 passed**（`-m contract` 11 passed）；阶段 2（T6-T13）全部落地 |
+| T1-T13 | **全部完成**，`uv run pytest` **84 passed**（`-m contract` 11 passed）；阶段 2（T6-T13）全部落地，含离线 e2e（golden 夹具） |
 | langgraph-checkpoint-postgres | 3.1.2，`PostgresSaver(pool)` 接受 psycopg `ConnectionPool`；`setup()`/`get_tuple()` 已确认 |
 | PostgreSQL 实例 | 本机未安装/未启动（T19 checkpoint 恢复测试待环境就绪后跑） |
 

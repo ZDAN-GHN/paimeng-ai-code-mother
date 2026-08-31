@@ -75,6 +75,7 @@
 - 命令证据：`uv run pytest tests/test_callback.py tests/test_streaming.py` → **12 passed**；全量 → **82 passed**；`JAVA_HOME=.../java/current ./mvnw compile` → **BUILD SUCCESS**（MVN_EXIT=0，基线保持）。
 - 提交：`T13 完成回调客户端`（`DSH Web/ZDAN <zdan60661@gmail.com>`）。
 - **阶段 2（T6-T13）全部完成**：文件工具、codegen 服务、图片/质检、Guardrail、代码解析+落盘、LangGraph 工作流、SSE 适配、完成回调均已落地并单测覆盖。
+- **阶段 2 离线 e2e（§5）✅**：`tests/fixtures/golden_html.json`/`golden_multi_file.json` 固定夹具快照（文件清单 + 关键片段）+ `tests/test_e2e.py`（mock 生成器，不依赖在线模型）断言产出工作区文件；`uv run pytest` → **84 passed**；`uv pip check` 64 包全兼容。
 
 ## 下一步
 
