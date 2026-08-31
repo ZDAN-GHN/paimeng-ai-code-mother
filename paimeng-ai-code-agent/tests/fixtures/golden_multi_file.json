@@ -1,0 +1,15 @@
+{
+  "code_gen_type": "multi_file",
+  "generated_text": "```html\n<!DOCTYPE html>\n<html>\n<head><title>多文件页面</title></head>\n<body>\n<div id=\"app\">多文件应用</div>\n</body>\n</html>\n```\n```css\nbody { margin: 0; }\n#app { color: red; }\n```\n```javascript\nconst app = document.getElementById('app');\napp.addEventListener('click', () => alert('ok'));\n```",
+  "expected_files": {
+    "index.html": [
+      "<div id=\"app\">多文件应用</div>"
+    ],
+    "style.css": [
+      "#app { color: red; }"
+    ],
+    "script.js": [
+      "app.addEventListener('click', () => alert('ok'));"
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "code_gen_type": "html",
+  "generated_text": "这是一个红包雨页面。\n```html\n<!DOCTYPE html>\n<html>\n<head><title>红包雨</title></head>\n<body>\n<h1>红包雨</h1>\n<button id=\"start\">点击开始</button>\n<script>startRain();</script>\n</body>\n</html>\n```",
+  "expected_files": {
+    "index.html": [
+      "<h1>红包雨</h1>",
+      "<button id=\"start\">点击开始</button>"
+    ]
+  }
+}
