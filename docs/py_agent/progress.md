@@ -20,6 +20,13 @@
 - 第 2 轮审查修订（2026-08-31）：补回调等待超时 `callback-timeout-ms`（§1.5，默认 60s，T0 绑定、T16 落地）、离线端到端改固定夹具快照（§5 阶段 2）、基线录制提前至 T14a（§4 阶段 3）、落实 A3-A9 建议（§1.3/§1.4/§4/§5）。
 - 待办起点：从 `task_plan.md` 阶段 1 的 T0（恢复 Java 编译）与 T1-T5（Python 骨架）开始。
 
+## 2026-08-31 — 阶段 1（T0-T5）完成
+
+- **T0（恢复编译基线）✅**：新建 `config/PythonAgentProperties.java`（绑定 `python-agent` 段，含新增键 `callback-timeout-ms`，默认 60000）、`ai/python/PythonAgentRequest.java`（§1.2 字段 + `HistoryItem`）、`ai/python/PythonAgentClient.java`（WebClient，`health()` 可用，`stream()` 阶段 3 前抛明确 BusinessException）；`application.yml` 补 `callback-timeout-ms: ${PYTHON_AGENT_CALLBACK_TIMEOUT_MS:60000}`。命令证据：`JAVA_HOME=/home/zdan/.sdkman/candidates/java/current ./mvnw compile` → BUILD SUCCESS（注：`<java.version>21</java.version>` 需 JDK 21，sdkman 已装 `21.0.12+1.1-tem`）。
+- **T1-T5（Python 骨架）✅**：`uv init` 建 `paimeng-ai-code-agent/`（`pyproject.toml` + `uv.lock` + `.python-version`=3.13.15）；`app/config.py`（pydantic-settings，§9 键）+ `.env.example`；`app/main.py`（`/healthz`）+ `app/api.py`（`POST /v1/agent/stream` SSE）+ `app/auth.py`（Bearer 校验）；`app/models.py`（§1.2 请求 / §1.3 四类事件 / §1.4 回调）；`app/state.py`（PostgresSaver 装配 + `thread_id=app:{appId}` + `has_checkpoint` 首次判定）。命令证据：`cd paimeng-ai-code-agent && uv run pytest` → **18 passed**（`-m contract` 11 passed）；实测 `curl http://localhost:8090/healthz` → 200 `{"status":"ok"}`、无 Bearer 调 `/v1/agent/stream` → 401、越界 `workspacePath` → 400。
+- 依赖锁定（§8）：fastapi 0.141.1 / starlette 1.6.0 / langgraph 1.2.11 / langgraph-checkpoint-postgres 3.1.2 / pydantic 2.13.5，`uv.lock` 固定，`pip check` 全绿。
+- 环境说明：本机无 PostgreSQL 实例，T19 checkpoint 恢复测试待 Postgres 就绪后执行；`PythonAgentClient.stream()` 尚未被业务调用（阶段 3 接入）。
+
 ## 下一步
 
-- 按 `task_plan.md` §4 执行 T0-T21；每完成一个任务在此追加一行（含日期与命令证据）。
+- 阶段 2：T6-T13（文件类 Tools、codegen 服务、图片/质检/Guardrail、代码解析+工作区写入、graph、streaming、callback），每完成一个任务在此追加一行（含日期与命令证据）。

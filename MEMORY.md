@@ -5,7 +5,7 @@
 
 ## 一句话现状
 
-Java (Spring Boot) + Python (FastAPI) **双后端重构中**。Python Agent 子项目 `paimeng-ai-code-agent` 尚未创建；`./mvnw compile` 当前不通过（T0 待办）。设计已过第 2 轮审查（PASS-WITH-FIXES，H4/M6/A3-A9 全部落实），可开工阶段 1 T0/T1-T5。
+Java (Spring Boot) + Python (FastAPI) **双后端重构中**。阶段 1（T0-T5）已全部落地并验证：`./mvnw compile` 通过（JDK 21）、`paimeng-ai-code-agent` 子项目已建（`uv run pytest` 18 passed）。下一步进入阶段 2（T6-T13，Agent 能力迁移）。
 
 ## 领域记忆（`.agents/memories/`）
 
@@ -28,4 +28,4 @@ Java (Spring Boot) + Python (FastAPI) **双后端重构中**。Python Agent 子�
 
 ## 下一步
 
-从 `task_plan.md` 阶段 1 开工：**T0**（恢复 Java 编译 + 绑定 `callback-timeout-ms`）→ **T1-T5**（Python 骨架、配置、FastAPI 应用、模型、PostgresSaver）。每完成一个任务：更新 `.agents/memories/` 对应文档 + 在 `docs/py_agent/progress.md` 追加一行（含日期与命令证据）。
+阶段 2：**T6**（文件类 Tools + 沙箱）→ **T7**（codegen 服务迁移，prompt 源 `src/main/resources/prompt/`）→ **T8/T9**（图片/质检/Guardrail）→ **T10**（代码解析+工作区写入）→ **T11-T13**（graph/streaming/callback）。每完成一个任务：更新 `.agents/memories/` 对应文档 + 在 `docs/py_agent/progress.md` 追加一行（含日期与命令证据）。

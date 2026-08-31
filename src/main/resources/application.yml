@@ -41,6 +41,8 @@ python-agent:
   token: ${PYTHON_AGENT_TOKEN:}
   connect-timeout-ms: ${PYTHON_AGENT_CONNECT_TIMEOUT_MS:3000}
   read-timeout-ms: ${PYTHON_AGENT_READ_TIMEOUT_MS:300000}
+  # 主通道结束后等待完成回调的最长时间，超时未收到回调则判定失败
+  callback-timeout-ms: ${PYTHON_AGENT_CALLBACK_TIMEOUT_MS:60000}
 
 # springdoc
 springdoc:

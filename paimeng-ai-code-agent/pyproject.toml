@@ -1,0 +1,40 @@
+[project]
+name = "paimeng-ai-code-agent"
+version = "0.1.0"
+description = "派蒙 AI 应用工坊 Python Agent：承载 AI 能力（模型调用、LangGraph 工作流、工具执行、代码解析、工作区落盘）"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    # Web 框架：FastAPI ↔ Starlette 必须 pip check 全绿（规避 FastAPI 0.115 / Starlette 1.0 不兼容）
+    "fastapi>=0.116.0",
+    "uvicorn[standard]>=0.34.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    # LangGraph 1.x（PostgreSQL checkpoint）
+    "langgraph>=1.0.0",
+    "langgraph-checkpoint-postgres>=2.0.0",
+    "psycopg[binary]>=3.2.0",
+    # LangChain + DeepSeek（OpenAI 兼容规范）
+    "langchain>=0.3.0",
+    "langchain-openai>=0.3.0",
+    # 完成回调客户端
+    "httpx>=0.28.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.25.0",
+    "pytest-mock>=3.14.0",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "contract: Java↔Python 内部契约相关测试",
+    "sse: SSE wire 测试",
+    "tool: 工具行为测试",
+    "checkpoint: PostgreSQL checkpoint 恢复测试",
+    "workspace: 工作区原子写入测试",
+    "e2e: 端到端测试",
+]
+addopts = "-ra"

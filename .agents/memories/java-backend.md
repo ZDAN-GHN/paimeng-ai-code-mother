@@ -2,19 +2,21 @@
 
 > Java Spring Boot 侧的工作记忆。权威细节见 `docs/py_agent/task_plan.md` §1.6/§7 与 `AGENTS.md`。
 
-## 当前状态（2026-08-31 核对）
+## 当前状态（2026-08-31 T0 完成核对）
 
 | 项 | 状态 |
 |---|---|
-| `./mvnw compile` | **不通过**（T0 待办） |
-| `ai/python/` | 空目录，`PythonAgentProperties`/`PythonAgentClient`/`PythonAgentRequest` 缺失 |
-| `AppServiceImpl` | 已引用上述缺失类（迁移残留） |
-| `application.yml` `python-agent` 段 | 已存在（未提交）：`enabled/base-url/token/connect-timeout-ms/read-timeout-ms`；`callback-timeout-ms` 待 T0 新增 |
+| `./mvnw compile` | **通过**（需 JDK 21；本机 sdkman 已装 `21.0.12+1.1-tem`，当前 JDK 17 会报 `release version 21 not supported`） |
+| `ai/python/` | `PythonAgentProperties`/`PythonAgentClient`/`PythonAgentRequest` 已创建（T0 完成） |
+| `AppServiceImpl` | **无** Python 分支引用（此前迁移残留已随提交清除，当前走旧 Java AI 链路） |
+| `application.yml` `python-agent` 段 | `enabled/base-url/token/connect-timeout-ms/read-timeout-ms` + **新增 `callback-timeout-ms`**（默认 60000） |
 | 旧 AI 链路 `ai/` + `langgraph4j/` | 完整存在（迁移对象，`task_plan.md` §3 清单） |
 
 ## 编译红线
 
-- 任何阶段的第一个任务都必须保证 `./mvnw compile` 通过；当前第一步是 **T0**：补 `config/PythonAgentProperties.java`（含 `callback-timeout-ms`）、`ai/python/PythonAgentRequest.java`、`ai/python/PythonAgentClient.java`。
+- **JDK 21 是硬要求**（`<java.version>21</java.version>`）：用 `JAVA_HOME=/home/zdan/.sdkman/candidates/java/current`（sdkman 默认已切到 21）执行 `./mvnw compile`。
+- T0 已落地：`config/PythonAgentProperties.java`（含 `callback-timeout-ms`）、`ai/python/PythonAgentRequest.java`（§1.2 字段 + `HistoryItem`）、`ai/python/PythonAgentClient.java`（WebClient，`health()` 可用；`stream()` 阶段 3 前抛明确 BusinessException）。
+- `PythonAgentClient.stream()` 尚未被任何业务代码调用（`AppServiceImpl` 无 Python 分支），阶段 3（T14-T18）再接。
 
 ## 关键事实（实现时直接依赖）
 
