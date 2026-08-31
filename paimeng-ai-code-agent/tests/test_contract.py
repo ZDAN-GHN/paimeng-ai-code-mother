@@ -64,8 +64,14 @@ def test_stream_with_wrong_token(client):
 
 
 @pytest.mark.contract
-def test_stream_with_valid_token(client):
-    """合法令牌返回 SSE 流（§1.3 骨架占位流）。"""
+def test_stream_with_valid_token(client, monkeypatch):
+    """合法令牌返回 SSE 流（§1.3，mock 生成器避免在线调用）。"""
+
+    class _FakeExec:
+        def stream(self, code_gen_type, user_message, file_tools=None):
+            yield "```html\n<h1>hi</h1>\n```"
+
+    monkeypatch.setattr("app.streaming.CodeGenServiceExecutor", _FakeExec)
     resp = client.post(
         "/v1/agent/stream",
         json=_valid_payload(),
@@ -74,6 +80,7 @@ def test_stream_with_valid_token(client):
     assert resp.status_code == 200
     assert "text/event-stream" in resp.headers["content-type"]
     assert "data:" in resp.text
+    assert "<h1>hi</h1>" in resp.text
 
 
 @pytest.mark.contract
