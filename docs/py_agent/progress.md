@@ -77,6 +77,19 @@
 - **阶段 2（T6-T13）全部完成**：文件工具、codegen 服务、图片/质检、Guardrail、代码解析+落盘、LangGraph 工作流、SSE 适配、完成回调均已落地并单测覆盖。
 - **阶段 2 离线 e2e（§5）✅**：`tests/fixtures/golden_html.json`/`golden_multi_file.json` 固定夹具快照（文件清单 + 关键片段）+ `tests/test_e2e.py`（mock 生成器，不依赖在线模型）断言产出工作区文件；`uv run pytest` → **84 passed**；`uv pip check` 64 包全兼容。
 
-## 下一步
+## 2026-08-31 — 阶段 3（T14a-T18）Java 接入落地（实现 + 编译 + 纯逻辑单测）
 
-- 阶段 3（Java 接入）：T14a（先录制浏览器事件基线快照，必须在 T15/T17 改动 `AppServiceImpl` 之前）→ T14（`PythonAgentClient` WebClient POST + SSE 解码）→ T15（`PythonAgentSseAdapter` 事件分流到 `JsonMessageStreamHandler`/`SimpleTextStreamHandler`）→ T16（回调 endpoint + runId 幂等 + callback-timeout-ms 兜底）→ T17（错误/超时映射）→ T18（灰度开关校验）。
+- **T14a（基线快照）✅（结构性）**：`docs/py_agent/sse_baseline.snapshot` 由现有 handler/controller 代码推导冻结浏览器 SSE 契约（`data: {"d":...}` 文本事件、`event: done`、`event: business-error`、vue 工具展示模板表、html/multi 透传）。**实机 curl -N 录制被环境阻断**：本机无 MySQL/Redis（无 root 无法安装、Docker WSL 集成未激活），无法启动旧 Java AI 链路；文件内已附待环境就绪后的补录命令，T20 用 `sse_baseline.py` 逐事件比较。
+- **T14（PythonAgentClient）✅**：`stream()` 用 WebClient POST `/v1/agent/stream`，`ParameterizedTypeReference<ServerSentEvent<String>>` 解码 SSE（event 名 + data 载荷），连接/读超时取自配置；未启用时抛明确 `BusinessException`（早暴露误配置）。命令证据：`./mvnw test -Dtest=PythonAgentClientTest` → **5 passed**（JDK HttpServer 模拟 Python SSE，不依赖 Spring/DB）。
+- **T15（PythonAgentSseAdapter）✅**：`adapt()` 按 `buildType` 分流——NPM(vue)→`JsonMessageStreamHandler`（工具 id 去重 + `ToolManager` 展示重组）、NONE(html/multi)→`SimpleTextStreamHandler`（透传）；`error` 事件过滤不进展示流。
+- **T16（回调 endpoint + runId 注册表）✅**：`RunIdSinkRegistry`（runId→浏览器终端信号 Sinks.One + appId/codeGenType/workspacePath/loginUser + `AtomicBoolean` 幂等）；`AppController` 新增 `POST /app/chat/gen/code/callback`（对外全路径 `/api/app/chat/gen/code/callback`）——Bearer-only（不取 session，A4）、status 仅 success/failed（A9，非法 400）、runId 幂等（重复/迟到回调 200 丢弃）、success→`BuilderExecutor.doBuild`+done、failed→错误历史+business-error。
+- **T17（错误/超时映射）✅**：Python `error` 事件 → `businessErrorSse` + 幂等失败历史；主通道结束后 `awaitTerminal` 等待回调，`callback-timeout-ms` 超时 → 幂等错误历史 + `business-error`（§1.5 H4）。命令证据：`./mvnw test -Dtest=RunIdSinkRegistryTest` → **6 passed**（幂等/终端/超时兜底）。
+- **T18（灰度开关）✅（代码）**：`AppServiceImpl.chatToGenCode` 按 `python-agent.enabled` 分支——false 走旧链路（浏览器字节与迁移前一致），true 走 Python 链路（主通道事件分流 + 回调终端）。**实机校验待 MySQL/Redis + 登录态 + Python Agent 联调**（见下）。
+- **历史写入选型澄清（记录）**：Python 链路成功时 AI 历史由 handler 在流结束写入（与旧链路一致），回调 success 不再重复写；失败/超时由回调/超时兜底幂等写错误历史。避免与「复用现有 handler」冲突导致重复写。此澄清待 T20 实机核对。
+- 编译：`JAVA_HOME=.../java/current ./mvnw compile` → **BUILD SUCCESS**；`./mvnw test -Dtest=PythonAgentClientTest,RunIdSinkRegistryTest` → **11 passed**（其余 `@SpringBootTest` 用例需 DB 环境，跳过）。
+
+## 下一步（环境就绪项）
+
+- **需 MySQL/Redis 实机**：T14a 实机补录基线（三类各录一次）→ T18 灰度开关 live 校验 → T20 逐事件比较（`sse_baseline.py`）。
+- **需 PostgreSQL**：T19 checkpoint 恢复测试（同一 thread_id 第二次请求不重复 bootstrap）。
+- T21（删除旧 AI 实现）：按「稳定」定义（开发环境灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1）后执行。

@@ -5,7 +5,7 @@
 
 ## 一句话现状
 
-Java (Spring Boot) + Python (FastAPI) **双后端重构中**。阶段 1（T0-T5）与阶段 2（T6-T13）已全部落地并验证：`./mvnw compile` 通过（JDK 21）、`paimeng-ai-code-agent` 子项目已建（`uv run pytest` 82 passed）。下一步进入阶段 3（T14-T18，Java 接入）。
+Java (Spring Boot) + Python (FastAPI) **双后端重构中**。阶段 1-3（T0-T18）实现已全部落地：Python 侧 `uv run pytest` 84 passed；Java 侧 `./mvnw compile` 通过 + 纯逻辑单测 11 passed（T14/T16）。剩余为环境就绪项（MySQL/Redis/PostgreSQL 实机校验 T14a/T18/T19/T20）与稳定后 T21。
 
 ## 领域记忆（`.agents/memories/`）
 
@@ -28,4 +28,4 @@ Java (Spring Boot) + Python (FastAPI) **双后端重构中**。阶段 1（T0-T5�
 
 ## 下一步
 
-阶段 3：**T14a**（基线快照）→ T14-T18（PythonAgentClient/SseAdapter/回调 endpoint/错误映射/灰度开关）。每完成一个任务：更新 `.agents/memories/` 对应文档 + 在 `docs/py_agent/progress.md` 追加一行（含日期与命令证据）。
+阶段 3：T14a-T18 代码落地完成；待实机校验（T14a 补录基线 / T18 灰度 / T19 checkpoint / T20 逐事件比较）。每完成一个任务：更新 `.agents/memories/` 对应文档 + 在 `docs/py_agent/progress.md` 追加一行（含日期与命令证据）。
