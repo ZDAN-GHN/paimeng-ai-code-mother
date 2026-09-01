@@ -142,6 +142,18 @@
   - **1 failure 为环境依赖**：`WebScreenshotUtilsTest`（需真实 Chrome 截图 `baidu.com`；本机无 Chrome 二进制——本轮环境自适应改动只是把原类加载异常降级为 null 返回，非回归）。
 - **T21 删除方案定稿（`docs/py_agent/t21_delete_plan.md`）**：依赖分析结论——`langgraph4j/*` 零外部引用可直删；`ai/codegen/*` 引用方（`AiCodeGeneratorFacade`/`RouterNode`/`AppServiceImpl`/`ClazzScanner`）全在删除/改动清单内；`ai/guardrail`、`core/parser`/`core/saver`、`utils/ClazzScanner` 删除后变死代码一并删；保留 `ai/tools`（展示格式）、`core/handler/*`、`BuilderExecutor`、`ai/python/*`、`ai/enums/CodeGenTypeEnum`。`AppServiceImpl` 需移除 3 个构造参数 + 旧链路分支；`createApp` 的 codeGenType 来源（删掉 AI 路由后）为**未决决策**，候选：默认 html / `AppAddRequest` 增字段 / Python 侧路由，默认预判 1。T21 按 §5 门禁（灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1）执行，门禁放行后为机械性操作。
 
+## 2026-09-01 — 阶段 5 续：T20 三类全类型实机复验（灰度期间 fresh 证据）
+
+- **三类实时捕获（Python 灰度链路，本次会话新录制）**：
+  - html（app 4/user1）：`/tmp/live_r6_html.raw` 77058B / 4181 data 行 / `event: done` / 0 error；工作区 `html_4/index.html`；历史 1 user + 1 ai。
+  - multi_file（app 5/user2）：`/tmp/live_r7_multi.raw` 91846B / 4984 data / `event: done` / 0 error；工作区 `multi_file_5/`（index.html+script.js+style.css）；历史 1+1。
+  - vue_project（app 6/user3）：`/tmp/live_r7_vue.raw` 38979B / 33 data / `event: done` / 0 error；工具序列 15×写入文件 + 退出工具调用 + 执行结束；工作区 `vue_project_6/` 完整工程 + `dist/` npm 构建成功；历史 1+1（ai 行为 `[工具调用] 写入文件 package.json` 展示格式）。
+- **T20 逐事件结构比较（`sse_baseline.py`）→ 三类 `DIFF 为空`（exit=0）**：
+  - html：data 2612→4181，done，无错误（文本内容不比较，仅结构）
+  - multi_file：data 4439→4984，done，无错误
+  - vue_project：工具标记 ⊆ 契约全集 {写入文件,退出工具调用}，执行结束=True，done
+- 意义：灰度期间（T21 门禁第 2 项「T19/T20 回归全绿」）的实时证据；三类从浏览器视角与 T14a 基线结构一致，历史/工作区/构建副作用正确。
+
 ## 2026-09-01 — 阶段 5 续：门禁前回归复验 + T21 删除范围决策
 
 - **门禁前回归复验（fresh）**：`uv run pytest`（`paimeng_test`）→ **87 passed**；`./mvnw test -Dtest=PythonAgentClientTest,RunIdSinkRegistryTest,PythonAgentSseAdapterTest` → **14 passed**。实时证据，非历史结论。
