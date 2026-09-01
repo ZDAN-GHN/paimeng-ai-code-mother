@@ -1,13 +1,13 @@
 ---
-name: create-skill
-description: 按业界最佳实践创建、设计或重构 Agent Skill（技能）。
+name: create-sop-skill
+description: 按业界最佳实践创建、设计或重构 SOP 类 Agent Skill（技能）。
 user-invocable: true
 disable-model-invocation: true
 ---
 
-# Create Skill（技能设计指南）
+# Create SOP Skill（SOP 类技能设计指南）
 
-把用户要封装的提示词、经验或工作流，设计成符合业界最佳实践的 Agent Skill。每个 skill 都必须做到：**何时触发清晰、步骤有序、每步有完成标准、有红线、可自检**。
+把用户要封装的提示词、经验或工作流，设计成符合业界最佳实践的 Agent SOP Skill。每个 skill 都必须做到：**何时触发清晰、步骤有序、每步有完成标准、有红线、可自检**。
 
 ## 设计流程
 
