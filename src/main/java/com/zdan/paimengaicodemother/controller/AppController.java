@@ -5,26 +5,33 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
+import com.zdan.paimengaicodemother.ai.python.PythonAgentCallbackRequest;
+import com.zdan.paimengaicodemother.ai.python.RunIdSinkRegistry;
 import com.zdan.paimengaicodemother.annotation.AuthCheck;
 import com.zdan.paimengaicodemother.common.BaseResponse;
 import com.zdan.paimengaicodemother.common.DeleteRequest;
 import com.zdan.paimengaicodemother.common.ResultUtils;
+import com.zdan.paimengaicodemother.config.PythonAgentProperties;
 import com.zdan.paimengaicodemother.constant.AppConstant;
 import com.zdan.paimengaicodemother.constant.UserConstant;
+import com.zdan.paimengaicodemother.core.builder.BuilderExecutor;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.exception.ThrowUtils;
 import com.zdan.paimengaicodemother.model.dto.app.*;
 import com.zdan.paimengaicodemother.model.entity.App;
 import com.zdan.paimengaicodemother.model.entity.User;
+import com.zdan.paimengaicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.zdan.paimengaicodemother.model.vo.AppVO;
 import com.zdan.paimengaicodemother.ratelimiter.annotaion.RateLimit;
 import com.zdan.paimengaicodemother.ratelimiter.enums.RateLimitType;
 import com.zdan.paimengaicodemother.service.AppService;
+import com.zdan.paimengaicodemother.service.ChatHistoryService;
 import com.zdan.paimengaicodemother.service.ProjectDownloadService;
 import com.zdan.paimengaicodemother.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
@@ -36,12 +43,14 @@ import java.io.File;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * 应用 控制层。
  *
  * @author LXH
  */
+@Slf4j
 @RestController
 @RequestMapping("/app")
 public class AppController {
@@ -49,13 +58,22 @@ public class AppController {
     private final AppService appService;
     private final UserService userService;
     private final ProjectDownloadService projectDownloadService;
+    private final PythonAgentProperties pythonAgentProperties;
+    private final RunIdSinkRegistry runIdSinkRegistry;
+    private final ChatHistoryService chatHistoryService;
 
     public AppController(AppService appService,
                          UserService userService,
-                         ProjectDownloadService projectDownloadService) {
+                         ProjectDownloadService projectDownloadService,
+                         PythonAgentProperties pythonAgentProperties,
+                         RunIdSinkRegistry runIdSinkRegistry,
+                         ChatHistoryService chatHistoryService) {
         this.appService = appService;
         this.userService = userService;
         this.projectDownloadService = projectDownloadService;
+        this.pythonAgentProperties = pythonAgentProperties;
+        this.runIdSinkRegistry = runIdSinkRegistry;
+        this.chatHistoryService = chatHistoryService;
     }
 
     /**
@@ -136,26 +154,84 @@ public class AppController {
         }
         // 获取当前用户
         User loginUser = userService.getLoginUser(request);
-        // 调用服务生成代码（ SSE 流式返回）
-        Flux<String> contentFlux = appService.chatToGenCode(appId, message, loginUser);
-        // 对返回结果进行处理（封装为 json，避免传递到前端后出现空格丢失）
-        return contentFlux
-                .map(chunk -> {
-                    Map<String, String> chunkJsonMap = Map.of("d", chunk);
-                    String chunkJson = JSONUtil.toJsonStr(chunkJsonMap);
-                    return ServerSentEvent.<String>builder()
-                            .data(chunkJson)
-                            .build();
-                })
-                .concatWith(
-                        // 发送结束事件（前端不区分异常和正常结束，两种方式的结束都会触发 onClos 事件，
-                        //             自定义结束事件便于前端判断流式数据的结束）
-                        Mono.just(
-                                ServerSentEvent.<String>builder()
-                                        .event("done")
-                                        .build()
-                        )
-                );
+        // 调用服务生成代码（SSE 流式返回，含文本事件与终端 done / business-error）
+        return appService.chatToGenCode(appId, message, loginUser);
+    }
+
+    /**
+     * Python Agent 完成回调（§1.4，内部接口）
+     * 不走用户鉴权（Python 无 session Cookie），仅校验 Bearer；runId 幂等；
+     * 首次处理：success → 构建 + 向浏览器发 done；failed → 写错误历史 + business-error
+     *
+     * @param body          回调请求体
+     * @param authorization Authorization 头
+     * @return 处理结果
+     */
+    @PostMapping("/chat/gen/code/callback")
+    public BaseResponse<Boolean> pythonAgentCallback(@RequestBody PythonAgentCallbackRequest body,
+                                                     @RequestHeader(value = "Authorization", required = false) String authorization) {
+        // 仅校验内部 Bearer 令牌（A4：回调 handler 不取 session）
+        String expected = "Bearer " + pythonAgentProperties.getToken();
+        if (StrUtil.isBlank(pythonAgentProperties.getToken()) || !expected.equals(authorization)) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "非法调用");
+        }
+        ThrowUtils.throwIf(body == null || StrUtil.isBlank(body.getRunId()), ErrorCode.PARAMS_ERROR, "runId 不能为空");
+        // status 仅接受 success/failed（A9），非法值返回 400
+        String status = body.getStatus();
+        if (!"success".equals(status) && !"failed".equals(status)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "status 仅接受 success/failed");
+        }
+        String runId = body.getRunId();
+        // 幂等：已处理过 / 已超时移除 / 不存在 → 直接返回 200 丢弃（防重试 / 超时兜底重复处理）
+        if (!runIdSinkRegistry.tryMarkProcessed(runId)) {
+            return ResultUtils.success(true);
+        }
+        Optional<RunIdSinkRegistry.Entry> entryOpt = runIdSinkRegistry.get(runId);
+        if (entryOpt.isEmpty()) {
+            // 条目已被移除（如超时兜底已处理），迟到的回调直接丢弃
+            return ResultUtils.success(true);
+        }
+        RunIdSinkRegistry.Entry entry = entryOpt.get();
+        if ("success".equals(status)) {
+            // 成功历史已在主通道流结束时由 handler 写入（与旧链路一致，见 docs/py_agent/progress.md）
+            // 此处执行构建并向浏览器发送 done
+            try {
+                BuilderExecutor.doBuild(entry.getCodeGenType(), entry.getWorkspacePath());
+            } catch (Exception e) {
+                log.error("回调构建失败，runId: {}, cause: {}", runId, e.getMessage());
+            }
+            runIdSinkRegistry.complete(runId, doneSse());
+        } else {
+            // 失败：写错误历史 + 浏览器 business-error
+            String errorMessage = StrUtil.blankToDefault(body.getMessage(), "生成失败");
+            chatHistoryService.addChatMessage(entry.getAppId(), "生成失败：" + errorMessage,
+                    ChatHistoryMessageTypeEnum.AI.getValue(), entry.getLoginUser());
+            runIdSinkRegistry.complete(runId, businessErrorSse(ErrorCode.OPERATION_ERROR, errorMessage));
+        }
+        return ResultUtils.success(true);
+    }
+
+    /**
+     * 完成事件（event: done）
+     *
+     * @return SSE 事件
+     */
+    private ServerSentEvent<String> doneSse() {
+        return ServerSentEvent.<String>builder().event("done").build();
+    }
+
+    /**
+     * 业务错误事件（event: business-error）
+     *
+     * @param code    错误码
+     * @param message 错误消息
+     * @return SSE 事件
+     */
+    private ServerSentEvent<String> businessErrorSse(ErrorCode code, String message) {
+        return ServerSentEvent.<String>builder()
+                .event("business-error")
+                .data(JSONUtil.toJsonStr(Map.of("error", true, "code", code.getCode(), "message", message)))
+                .build();
     }
 
     /**

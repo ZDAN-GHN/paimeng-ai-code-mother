@@ -1,0 +1,69 @@
+# 浏览器 SSE 事件基线快照（T14a）
+
+> 来源：由现有 Java handler/controller 代码**推导的结构性基线**（`AppController.chatToGenCode`、`StreamHandlerExecutor`、`JsonMessageStreamHandler`、`SimpleTextStreamHandler`、`ToolManager`/`BaseTool`、`BuilderExecutor`）。
+> 状态：**env 阻断，暂以结构性基线冻结契约** —— 本机无 MySQL/Redis（且无 root 无法安装、Docker WSL 集成未激活），无法启动旧 Java AI 链路，故**未做 curl -N 实机录制**。本文件在 T15/T17 改动 `AppServiceImpl` 前落地，用于冻结浏览器侧事件契约；待环境就绪后按 §5 命令补录三类实机快照，T20 用 `sse_baseline.py` 做逐事件比较。
+
+## 1. 浏览器侧 wire 契约（Java 原样负责，Python 不直接接触，§1.6）
+
+- 主通道：`GET /api/app/chat/gen/code?appId={appId}&message={message}`，`Accept: text/event-stream`。
+- 每个事件：`data: {"d":"<显示文本>"}`（`ServerSentEvent.data` 为 `{"d": chunk}` 的 JSON；多行文本经 SSE 框架按 `data:` 行序列化）。
+- 终止事件：`event: done`（无 data）。
+- 错误事件：`event: business-error` + `data: {"error":true,"code":<code>,"message":"..."}`。
+
+## 2. 事件序列模板（按 codeGenType）
+
+### 2.1 html / multi_file（buildType=NONE → SimpleTextStreamHandler）
+
+浏览器逐块收到 `data: {"d":"<文本增量>"}`，文本块原样透传（不做 JSON 解析/重组）；流结束（旧链路）或回调完成（Python 链路）后发 `event: done`。
+
+```
+data: {"d":"<!DOCTYPE html>"}
+data: {"d":"<html>..."}
+...
+event: done
+```
+
+### 2.2 vue_project（buildType=NPM → JsonMessageStreamHandler + ToolManager）
+
+浏览器收到的是 handler 重组后的展示文本，规则：
+- `ai_response.data` / `ai_thinking.text`：直接透传。
+- `tool_request`：按 `id` **首次去重**，首次出现时输出 `\n\n[选择工具] <显示名>\n\n`，重复 id 输出空。
+- `tool_executed`：按 `name` 查 `ToolManager`，输出 `\n\n<generateToolExecutedResult(arguments)>\n\n`。
+
+各工具显示名与执行结果模板（Java 现有 `BaseTool` 派生类）：
+
+| toolName | 显示名 | generateToolExecutedResult 模板 |
+|---|---|---|
+| `writeFile` | 写入文件 | `[工具调用] 写入文件 <relativeFilePath>` + ```` ```<suffix> `<content>` ``` ```` |
+| `readFile` | 读取文件 | `[工具调用] 读取文件 <relativeFilePath>` |
+| `modifyFile` | 修改文件 | `[工具调用] 修改文件 <relativeFilePath>` + 旧/新内容对比块 |
+| `deleteFile` | 删除文件 | `[工具调用] 删除文件 <relativeFilePath>` |
+| `readDir` | 读取目录 | `[工具调用] 读取目录 <relativeDirPath>`（空参数显示「根目录」） |
+| `exit` | 退出工具调用 | `\n\n[执行结束]\n\n` |
+
+示例序列（ai_thinking → tool_request(writeFile) → tool_executed → ai_response → done）：
+
+```
+data: {"d":"\n\n[选择工具] 写入文件\n\n"}
+data: {"d":"\n\n[工具调用] 写入文件 src/App.vue\n```vue\n<template>...</template>\n```\n\n"}
+data: {"d":"最终回复文本"}
+...
+event: done
+```
+
+## 3. 构建与历史（旧链路行为，Python 链路迁移到回调，§1.4）
+
+- 旧链路：`StreamHandlerExecutor.doHandle` 在流 `doOnComplete` 时执行 `BuilderExecutor.doBuild`；handler 在 `doOnComplete` 写 AI 历史。
+- Python 链路：主通道结束后进入「等待回调」；回调（success）→ 写历史 + `BuilderExecutor.doBuild` + 向 runId 关联的浏览器连接发 `done` 并关闭；回调超时（`callback-timeout-ms`）→ 浏览器 `business-error` + 幂等错误历史（§1.5）。
+
+## 4. 实机补录命令（待 MySQL/Redis 就绪后执行）
+
+```bash
+# 启动依赖：MySQL(3306) + Redis(6379)，执行 sql/create_table.sql，配置 application-local.yml
+# 登录取得 cookie 后，三类各录一次：
+curl -N -b <cookie> "http://localhost:8123/api/app/chat/gen/code?appId=1&message=<html消息>"  > snapshot_html.raw
+curl -N -b <cookie> "http://localhost:8123/api/app/chat/gen/code?appId=2&message=<multi_file消息>" > snapshot_multi_file.raw
+curl -N -b <cookie> "http://localhost:8123/api/app/chat/gen/code?appId=3&message=<vue_project消息>" > snapshot_vue_project.raw
+```
+
+T20 的 `sse_baseline.py` 按本文件的结构化字段（逐事件：`event` 名 + `data` JSON 字段集合）做逐事件比较。

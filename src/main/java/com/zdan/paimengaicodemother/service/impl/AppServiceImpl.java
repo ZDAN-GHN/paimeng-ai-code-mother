@@ -5,10 +5,17 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONUtil;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.zdan.paimengaicodemother.ai.codegen.route.AiCodeGenTypeRoutingService;
 import com.zdan.paimengaicodemother.ai.codegen.route.AiCodeGenTypeRoutingServiceFactory;
+import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.ai.python.PythonAgentClient;
+import com.zdan.paimengaicodemother.ai.python.PythonAgentRequest;
+import com.zdan.paimengaicodemother.ai.python.PythonAgentSseAdapter;
+import com.zdan.paimengaicodemother.ai.python.RunIdSinkRegistry;
+import com.zdan.paimengaicodemother.config.PythonAgentProperties;
 import com.zdan.paimengaicodemother.constant.AppConstant;
 import com.zdan.paimengaicodemother.core.AiCodeGeneratorFacade;
 import com.zdan.paimengaicodemother.core.builder.BuilderExecutor;
@@ -20,9 +27,9 @@ import com.zdan.paimengaicodemother.mapper.AppMapper;
 import com.zdan.paimengaicodemother.model.dto.app.AppAddRequest;
 import com.zdan.paimengaicodemother.model.dto.app.AppQueryRequest;
 import com.zdan.paimengaicodemother.model.entity.App;
+import com.zdan.paimengaicodemother.model.entity.ChatHistory;
 import com.zdan.paimengaicodemother.model.entity.User;
 import com.zdan.paimengaicodemother.model.enums.ChatHistoryMessageTypeEnum;
-import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 import com.zdan.paimengaicodemother.model.vo.AppVO;
 import com.zdan.paimengaicodemother.model.vo.UserVO;
 import com.zdan.paimengaicodemother.service.AppService;
@@ -30,8 +37,10 @@ import com.zdan.paimengaicodemother.service.ChatHistoryService;
 import com.zdan.paimengaicodemother.service.ScreenshotService;
 import com.zdan.paimengaicodemother.service.UserService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.io.File;
 import java.io.Serializable;
@@ -54,19 +63,31 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private final StreamHandlerExecutor streamHandlerExecutor;
     private final ScreenshotService screenshotService;
     private final AiCodeGenTypeRoutingServiceFactory aiCodeGenTypeRoutingServiceFactory;
+    private final PythonAgentClient pythonAgentClient;
+    private final PythonAgentSseAdapter pythonAgentSseAdapter;
+    private final RunIdSinkRegistry runIdSinkRegistry;
+    private final PythonAgentProperties pythonAgentProperties;
 
     public AppServiceImpl(UserService userService,
                           ChatHistoryService chatHistoryService,
                           AiCodeGeneratorFacade aiCodeGeneratorFacade,
                           StreamHandlerExecutor streamHandlerExecutor,
                           ScreenshotService screenshotService,
-                          AiCodeGenTypeRoutingServiceFactory aiCodeGenTypeRoutingServiceFactory) {
+                          AiCodeGenTypeRoutingServiceFactory aiCodeGenTypeRoutingServiceFactory,
+                          PythonAgentClient pythonAgentClient,
+                          PythonAgentSseAdapter pythonAgentSseAdapter,
+                          RunIdSinkRegistry runIdSinkRegistry,
+                          PythonAgentProperties pythonAgentProperties) {
         this.userService = userService;
         this.chatHistoryService = chatHistoryService;
         this.aiCodeGeneratorFacade = aiCodeGeneratorFacade;
         this.streamHandlerExecutor = streamHandlerExecutor;
         this.screenshotService = screenshotService;
         this.aiCodeGenTypeRoutingServiceFactory = aiCodeGenTypeRoutingServiceFactory;
+        this.pythonAgentClient = pythonAgentClient;
+        this.pythonAgentSseAdapter = pythonAgentSseAdapter;
+        this.runIdSinkRegistry = runIdSinkRegistry;
+        this.pythonAgentProperties = pythonAgentProperties;
     }
 
     @Override
@@ -192,7 +213,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     }
 
     @Override
-    public Flux<String> chatToGenCode(Long appId, String message, User loginUser) {
+    public Flux<ServerSentEvent<String>> chatToGenCode(Long appId, String message, User loginUser) {
         // 参数校验
         validateParam(appId, message, loginUser);
         // 用户只能给自己的应用生成代码
@@ -201,16 +222,167 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         if (!app.getUserId().equals(loginUser.getId())) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "无权限生成代码");
         }
-        // 调用代码生成门面类
+        // 调用 AI 前，先将用户消息添加到会话历史中
+        chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser);
         String codeGenType = app.getCodeGenType();
         CodeGenTypeEnum codeGenTypeEnum = Optional.ofNullable(CodeGenTypeEnum.getEnumByValue(codeGenType))
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAMS_ERROR, "代码生成类型不合法"));
-        // 调用 AI 前，先将用户消息添加到会话历史中
-        chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser);
-        // 调用 AI 生成代码
+        // 灰度开关：true 走 Python Agent 链路，false 走旧 Java AI 实现（行为不变）
+        if (pythonAgentProperties.isEnabled()) {
+            return pythonChatToGenCode(appId, message, loginUser, codeGenTypeEnum);
+        }
+        // 旧链路（行为与迁移前完全一致）
         Flux<String> contentFlux = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
-        // 保存会话消息后返回
-        return streamHandlerExecutor.doHandle(contentFlux, chatHistoryService, appId, loginUser, codeGenTypeEnum);
+        Flux<String> display = streamHandlerExecutor.doHandle(contentFlux, chatHistoryService, appId, loginUser, codeGenTypeEnum);
+        return display.map(this::dataSse).concatWith(Mono.just(doneSse()));
+    }
+
+    /**
+     * Python Agent 链路：主通道事件流 → 浏览器显示 + 回调终端信号（T15/T17/T18）
+     * 主通道结束后进入「等待回调」阶段（§1.5），done 由回调触发；超时兜底 business-error
+     *
+     * @param appId          应用 id
+     * @param message        用户提示词
+     * @param loginUser      当前登录用户
+     * @param codeGenTypeEnum 代码生成类型
+     * @return 浏览器 SSE 流（含终端事件）
+     */
+    private Flux<ServerSentEvent<String>> pythonChatToGenCode(Long appId, String message, User loginUser,
+                                                              CodeGenTypeEnum codeGenTypeEnum) {
+        // 1. 生成 runId 并注册浏览器连接终端（回调到达 / 超时通过该终端发 done / business-error）
+        String runId = UUID.randomUUID().toString();
+        String workspacePath = StrUtil.format("{}/{}_{}", AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenTypeEnum.getValue(), appId);
+        runIdSinkRegistry.register(runId, appId, codeGenTypeEnum, workspacePath, loginUser);
+        // 2. 构造主通道请求（§1.2：threadId 固定 app:{appId}，history 最近 20 条 bootstrap）
+        PythonAgentRequest request = new PythonAgentRequest();
+        request.setAppId(appId);
+        request.setUserId(loginUser.getId());
+        request.setMessage(message);
+        request.setCodeGenType(codeGenTypeEnum.getValue());
+        request.setRunId(runId);
+        request.setThreadId("app:" + appId);
+        request.setWorkspacePath(workspacePath);
+        request.setHistory(loadRecentHistory(appId));
+        // 3. 调用 Python 主通道；错误事件触发 failed 终端（幂等）
+        Flux<PythonAgentClient.SseEvent> pythonSse = pythonAgentClient.stream(request)
+                .doOnNext(event -> handlePythonErrorEvent(runId, appId, loginUser, event));
+        // 4. 事件分流 → 浏览器显示文本（复用现有 handler，§1.6）
+        Flux<String> display = pythonAgentSseAdapter.adapt(pythonSse, codeGenTypeEnum, chatHistoryService, appId, loginUser);
+        // 5. 显示文本包 {"d":...}；主通道结束后等待回调终端信号，超时用兜底 business-error
+        Mono<ServerSentEvent<String>> terminal = runIdSinkRegistry.awaitTerminal(
+                runId, pythonAgentProperties.getCallbackTimeoutMs(), () -> {
+                    // 幂等：超时仅处理一次
+                    if (runIdSinkRegistry.tryMarkProcessed(runId)) {
+                        chatHistoryService.addChatMessage(appId, "生成超时，请重试",
+                                ChatHistoryMessageTypeEnum.AI.getValue(), loginUser);
+                    }
+                    return businessErrorSse(ErrorCode.OPERATION_ERROR, "生成超时，请重试");
+                });
+        return display.map(this::dataSse).concatWith(terminal);
+    }
+
+    /**
+     * Python 主通道错误事件处理（§1.3 event:error → 浏览器 business-error + 幂等失败历史）
+     *
+     * @param runId     runId
+     * @param appId     应用 id
+     * @param loginUser 当前登录用户
+     * @param event     SSE 事件
+     */
+    private void handlePythonErrorEvent(String runId, Long appId, User loginUser, PythonAgentClient.SseEvent event) {
+        if (!"error".equals(event.event())) {
+            return;
+        }
+        if (!runIdSinkRegistry.tryMarkProcessed(runId)) {
+            return;
+        }
+        String message = extractErrorMessage(event.data());
+        log.error("Python Agent 返回错误事件，runId: {}, message: {}", runId, message);
+        chatHistoryService.addChatMessage(appId, "生成失败：" + message,
+                ChatHistoryMessageTypeEnum.AI.getValue(), loginUser);
+        runIdSinkRegistry.complete(runId, businessErrorSse(ErrorCode.OPERATION_ERROR, message));
+    }
+
+    /**
+     * 从错误事件 data（{"message":"..."}）中提取错误消息
+     *
+     * @param data 错误事件载荷
+     * @return 错误消息
+     */
+    private String extractErrorMessage(String data) {
+        if (StrUtil.isBlank(data)) {
+            return "未知错误";
+        }
+        try {
+            return JSONUtil.parseObj(data).getStr("message", "未知错误");
+        } catch (Exception e) {
+            return data;
+        }
+    }
+
+    /**
+     * 加载最近 20 条对话历史（§1.2 history，role user/assistant，时间正序）
+     *
+     * @param appId 应用 id
+     * @return 历史条目列表
+     */
+    private List<PythonAgentRequest.HistoryItem> loadRecentHistory(Long appId) {
+        QueryWrapper queryWrapper = QueryWrapper.create()
+                .eq(ChatHistory::getAppId, appId)
+                .in(ChatHistory::getMessageType,
+                        ChatHistoryMessageTypeEnum.USER.getValue(),
+                        ChatHistoryMessageTypeEnum.AI.getValue())
+                .orderBy(ChatHistory::getCreateTime, false)
+                .limit(0, 20);
+        List<ChatHistory> historyList = chatHistoryService.list(queryWrapper);
+        List<PythonAgentRequest.HistoryItem> items = new ArrayList<>();
+        // 倒序取回正序（老的在前，新的在后）
+        for (int i = historyList.size() - 1; i >= 0; i--) {
+            ChatHistory history = historyList.get(i);
+            if (StrUtil.isBlank(history.getMessage())) {
+                continue;
+            }
+            PythonAgentRequest.HistoryItem item = new PythonAgentRequest.HistoryItem();
+            item.setRole(ChatHistoryMessageTypeEnum.USER.getValue().equals(history.getMessageType()) ? "user" : "assistant");
+            item.setContent(history.getMessage());
+            items.add(item);
+        }
+        return items;
+    }
+
+    /**
+     * 浏览器文本事件：data: {"d":"<显示文本>"}（§1.6）
+     *
+     * @param chunk 显示文本
+     * @return SSE 事件
+     */
+    private ServerSentEvent<String> dataSse(String chunk) {
+        return ServerSentEvent.<String>builder()
+                .data(JSONUtil.toJsonStr(Map.of("d", chunk)))
+                .build();
+    }
+
+    /**
+     * 完成事件：event: done（构建完成后发出）
+     *
+     * @return SSE 事件
+     */
+    private ServerSentEvent<String> doneSse() {
+        return ServerSentEvent.<String>builder().event("done").build();
+    }
+
+    /**
+     * 业务错误事件：event: business-error + data: {"error":true,"code":...,"message":"..."}
+     *
+     * @param code    错误码
+     * @param message 错误消息
+     * @return SSE 事件
+     */
+    private ServerSentEvent<String> businessErrorSse(ErrorCode code, String message) {
+        return ServerSentEvent.<String>builder()
+                .event("business-error")
+                .data(JSONUtil.toJsonStr(Map.of("error", true, "code", code.getCode(), "message", message)))
+                .build();
     }
 
     /**

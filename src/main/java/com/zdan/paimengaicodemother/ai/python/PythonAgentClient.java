@@ -3,11 +3,18 @@ package com.zdan.paimengaicodemother.ai.python;
 import com.zdan.paimengaicodemother.config.PythonAgentProperties;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
+import io.netty.channel.ChannelOption;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
+import reactor.netty.http.client.HttpClient;
+
+import java.time.Duration;
 
 /**
  * Python Agent HTTP 客户端
@@ -33,13 +40,18 @@ public class PythonAgentClient {
     private final WebClient webClient;
 
     /**
-     * 构造 WebClient（base-url、Bearer 令牌、超时均取自配置）
+     * 构造 WebClient（base-url、Bearer 令牌、连接/读超时均取自配置）
      *
      * @param properties python-agent 配置
      */
     public PythonAgentClient(PythonAgentProperties properties) {
         this.properties = properties;
+        // 连接超时 + 读超时（read-timeout-ms 内既无事件也无回调则判定失败，§1.5）
+        HttpClient httpClient = HttpClient.create()
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, (int) properties.getConnectTimeoutMs())
+                .responseTimeout(Duration.ofMillis(properties.getReadTimeoutMs()));
         this.webClient = WebClient.builder()
+                .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .baseUrl(properties.getBaseUrl())
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + properties.getToken())
                 .defaultHeader(HttpHeaders.ACCEPT, MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -62,14 +74,35 @@ public class PythonAgentClient {
     }
 
     /**
-     * 调用主通道流式接口（阶段 3 完成接入，当前仅占位）
+     * 调用主通道流式接口（§1.1）
+     * POST /v1/agent/stream，解码 SSE 事件（event 名 + data 载荷）
      *
-     * @param request 主通道请求体
+     * @param request 主通道请求体（§1.2）
      * @return Python Agent SSE 事件流
      */
-    public Flux<String> stream(PythonAgentRequest request) {
-        // 阶段 3 前不可调用：给出明确错误而非 NotImplemented，便于尽早暴露误配置
-        throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Python Agent 链路尚未接入完成，请保持 python-agent.enabled=false");
+    public Flux<SseEvent> stream(PythonAgentRequest request) {
+        if (!properties.isEnabled()) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "python-agent 未启用，请设置 python-agent.enabled=true");
+        }
+        return webClient.post()
+                .uri(STREAM_PATH)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(request)
+                .retrieve()
+                .bodyToFlux(new ParameterizedTypeReference<ServerSentEvent<String>>() {
+                })
+                .map(sse -> new SseEvent(sse.event(), sse.data()));
+    }
+
+    /**
+     * SSE 事件（event 名 + data 载荷）
+     * 正常事件 event 为空、data 为语义载荷；错误事件 event=error、data 为 {"message":...}
+     *
+     * @param event 事件名（可空）
+     * @param data  事件载荷（可空）
+     * @author LXH
+     */
+    public record SseEvent(String event, String data) {
     }
 
     /**
