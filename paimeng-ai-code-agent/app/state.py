@@ -21,9 +21,13 @@ class AgentState(TypedDict, total=False):
 
 @lru_cache
 def _pool() -> ConnectionPool:
-    """PostgreSQL 连接池（懒创建，仅用于 LangGraph checkpoint）。"""
+    """PostgreSQL 连接池（懒创建，仅用于 LangGraph checkpoint）。
+
+    autocommit=True：PostgresSaver.setup() 含 CREATE INDEX CONCURRENTLY，
+    必须在无事务块下执行（langgraph-checkpoint-postgres 要求连接为自动提交模式）。
+    """
     settings = get_settings()
-    return ConnectionPool(conninfo=settings.database_url)
+    return ConnectionPool(conninfo=settings.database_url, kwargs={"autocommit": True}, open=True)
 
 
 def get_checkpointer() -> PostgresSaver:
