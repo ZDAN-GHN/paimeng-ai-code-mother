@@ -88,8 +88,13 @@
 - **历史写入选型澄清（记录）**：Python 链路成功时 AI 历史由 handler 在流结束写入（与旧链路一致），回调 success 不再重复写；失败/超时由回调/超时兜底幂等写错误历史。避免与「复用现有 handler」冲突导致重复写。此澄清待 T20 实机核对。
 - 编译：`JAVA_HOME=.../java/current ./mvnw compile` → **BUILD SUCCESS**；`./mvnw test -Dtest=PythonAgentClientTest,RunIdSinkRegistryTest` → **11 passed**（其余 `@SpringBootTest` 用例需 DB 环境，跳过）。
 
+## 2026-08-31 — 阶段 4（T19）完成 · PostgreSQL 环境解锁
+
+- **环境突破**：本机无 root、无 MySQL/Redis/PostgreSQL、Docker WSL 集成未激活；改用**用户态部署 PostgreSQL 16**（从清华 Ubuntu 镜像下载 `postgresql-16` + `libpq5` deb，`dpkg-deb -x` 解包，`LD_LIBRARY_PATH` 指到 libpq5，`initdb` + `pg_ctl` 以非 root 运行于 127.0.0.1:5432，trust 认证）。命令证据见下文。
+- **T19（checkpoint 恢复测试）✅**：`app/state.py` 的 `_pool()` 修正为 `ConnectionPool(conninfo, kwargs={"autocommit": True}, open=True)`——`PostgresSaver.setup()` 含 `CREATE INDEX CONCURRENTLY`，必须无事务块（锁定 langgraph-checkpoint-postgres 3.1.2 用法）。`tests/test_checkpoint.py`（checkpoint marker）：首次判定 `has_checkpoint=False` → 生成后 `True`（第二次请求不重复 bootstrap）；同 thread_id 从 checkpoint 恢复继续累加；不同 thread_id 隔离。命令证据：`DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/paimeng_test uv run pytest` → **87 passed**，两次运行幂等。
+- 提交：`T19 PostgreSQL checkpoint 恢复测试`（`DSH Web/ZDAN <zdan60661@gmail.com>`）。
+
 ## 下一步（环境就绪项）
 
-- **需 MySQL/Redis 实机**：T14a 实机补录基线（三类各录一次）→ T18 灰度开关 live 校验 → T20 逐事件比较（`sse_baseline.py`）。
-- **需 PostgreSQL**：T19 checkpoint 恢复测试（同一 thread_id 第二次请求不重复 bootstrap）。
-- T21（删除旧 AI 实现）：按「稳定」定义（开发环境灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1）后执行。
+- **需 MySQL/Redis 实机**：T14a 实机补录基线（三类各录一次）→ T18 灰度开关 live 校验 → T20 逐事件比较（`sse_baseline.py`）。若可按 PostgreSQL 同样方式用户态部署 MySQL/Redis + 运行 Java 后端（需 DeepSeek 在线），则可完成。
+- **T21（删除旧 AI 实现）**：按「稳定」定义（开发环境灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1）后执行，属部署期门禁，单会话无法完成。

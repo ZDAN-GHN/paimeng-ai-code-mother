@@ -49,8 +49,8 @@
 
 阶段 1-3（T0-T18）代码已全部落地（Python 84 passed；Java compile + 纯逻辑单测 11 passed）。剩余为**环境就绪项**：
 
-- **MySQL/Redis 实机**：T14a 补录浏览器事件基线（`sse_baseline.snapshot` 当前为代码推导的结构性基线）→ T18 灰度开关 live 校验 → T20 逐事件比较（`sse_baseline.py`）
-- **PostgreSQL**：T19 checkpoint 恢复测试（同一 `thread_id` 第二次请求不重复 bootstrap）
+- **PostgreSQL ✅（T19 已完成）**：用户态部署 PG16（清华镜像 deb 解包 + LD_LIBRARY_PATH + initdb/pg_ctl 非 root 于 5432，trust）；`_pool()` 需 `kwargs={"autocommit": True}, open=True`（`setup()` 的 `CREATE INDEX CONCURRENTLY` 要无事务块）；checkpoint 测试 87 passed
+- **MySQL/Redis 实机（待办）**：T14a 补录浏览器事件基线（`sse_baseline.snapshot` 当前为代码推导的结构性基线）→ T18 灰度开关 live 校验 → T20 逐事件比较（`sse_baseline.py`）
 - **T21**：按「稳定」定义（灰度 ≥7 天 + T19/T20 全绿 + 无 P0/P1）后删除旧 Java AI 实现
 
 历史写入选型澄清：Python 链路成功 AI 历史由 handler 在流结束写（与旧链路一致），回调 success 不重复写；失败/超时由回调/超时兜底幂等写错误历史。

@@ -5,7 +5,7 @@
 
 ## 一句话现状
 
-Java (Spring Boot) + Python (FastAPI) **双后端重构中**。阶段 1-3（T0-T18）实现已全部落地：Python 侧 `uv run pytest` 84 passed；Java 侧 `./mvnw compile` 通过 + 纯逻辑单测 11 passed（T14/T16）。剩余为环境就绪项（MySQL/Redis/PostgreSQL 实机校验 T14a/T18/T19/T20）与稳定后 T21。
+Java (Spring Boot) + Python (FastAPI) **双后端重构中**。阶段 1-3（T0-T18）实现已全部落地；T19（checkpoint）已实机验证（用户态 PostgreSQL 16）：Python `uv run pytest` 87 passed；Java `./mvnw compile` 通过 + 纯逻辑单测 11 passed。剩余为 MySQL/Redis 实机项（T14a 补录基线 / T18 灰度 live / T20 逐事件比较）与稳定后 T21。
 
 ## 领域记忆（`.agents/memories/`）
 
