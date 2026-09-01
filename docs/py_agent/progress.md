@@ -142,6 +142,16 @@
   - **1 failure 为环境依赖**：`WebScreenshotUtilsTest`（需真实 Chrome 截图 `baidu.com`；本机无 Chrome 二进制——本轮环境自适应改动只是把原类加载异常降级为 null 返回，非回归）。
 - **T21 删除方案定稿（`docs/py_agent/t21_delete_plan.md`）**：依赖分析结论——`langgraph4j/*` 零外部引用可直删；`ai/codegen/*` 引用方（`AiCodeGeneratorFacade`/`RouterNode`/`AppServiceImpl`/`ClazzScanner`）全在删除/改动清单内；`ai/guardrail`、`core/parser`/`core/saver`、`utils/ClazzScanner` 删除后变死代码一并删；保留 `ai/tools`（展示格式）、`core/handler/*`、`BuilderExecutor`、`ai/python/*`、`ai/enums/CodeGenTypeEnum`。`AppServiceImpl` 需移除 3 个构造参数 + 旧链路分支；`createApp` 的 codeGenType 来源（删掉 AI 路由后）为**未决决策**，候选：默认 html / `AppAddRequest` 增字段 / Python 侧路由，默认预判 1。T21 按 §5 门禁（灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1）执行，门禁放行后为机械性操作。
 
+## 2026-09-01 — 阶段 5 续：门禁前回归复验 + T21 删除范围决策
+
+- **门禁前回归复验（fresh）**：`uv run pytest`（`paimeng_test`）→ **87 passed**；`./mvnw test -Dtest=PythonAgentClientTest,RunIdSinkRegistryTest,PythonAgentSseAdapterTest` → **14 passed**。实时证据，非历史结论。
+- **灰度链路实机复验（html 经 Python 路径）**：`GET /api/app/chat/gen/code?appId=4&message=...`（baseline_user1 会话）→ 77KB SSE / 4181 data 行 / `event: done` / **0 business-error**；工作区 `tmp/code_output/html_4/index.html` 落盘（13KB）；`chat_history` 恰新增 **1 user + 1 ai**（无重复）。后端进程 env `PYTHON_AGENT_ENABLED` 已置位。
+- **T21 删除范围决策（用户确认）**：`createApp` **保留 Java 侧 AI 路由**（不改为默认 html/前端字段/Python 路由）。据此修订 `t21_delete_plan.md`：
+  - **保留**：`ai/codegen/route/*`、`config/RoutingAiModelConfig`、`utils/SpringContextUtil`、`prompt/codegen-routing-system-prompt.txt`、langchain4j 框架依赖（路由链自成闭环，与 langgraph4j 图框架无关）。
+  - **删除**：`ai/codegen` 执行类（7 个）、`langgraph4j/*`、`ai/guardrail/*`、`core/AiCodeGeneratorFacade` + `core/parser`/`core/saver`、`utils/ClazzScanner`、旧测试 `AiCodeGeneratorFacadeTest` + `langgraph4j/*`；**保留 `AiCodeGenTypeRoutingServiceTest`**。
+  - `AppServiceImpl`：保留路由字段/构造参数与 createApp 路由调用；仅移除 `aiCodeGeneratorFacade`/`streamHandlerExecutor` 与 `chatToGenCode` 旧链路分支（L235-236）。
+  - pom：`langgraph4j-*` 依赖可删，`langchain4j-*` 保留（路由需要）；保留 `langchain4j.open-ai.routing-chat-model` 配置段。
+
 ## 下一步
 
 - **T21（删除旧 AI 实现）**：按「稳定」定义（开发环境灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1）后执行，属部署期门禁，单会话无法完成。放行前需与产品/前端确认 `createApp` 的 codeGenType 来源（`t21_delete_plan.md` §6）。回归口径：Java 新链路 14 用例 + Python 87（含契约 11）+ `sse_baseline.py` 三类 DIFF 为空。

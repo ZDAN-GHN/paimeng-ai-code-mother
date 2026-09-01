@@ -28,4 +28,4 @@ Java (Spring Boot) + Python (FastAPI) **双后端重构中**。阶段 1-4 实现
 
 ## 下一步
 
-阶段 4：T19/T20 已实机验证完成；阶段 5（T21 就绪）已完成删除方案 `docs/py_agent/t21_delete_plan.md` 与新链路回归（Adapter 测试 3 passed）。剩余 **T21（部署期门禁）**：开发环境切 Python 灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1 后删除旧 Java AI 实现（`ai/codegen`、`langgraph4j` 等，保留 `ai/tools` 展示格式与 `core/handler`）；放行前确认 `createApp` codeGenType 来源。每完成一个任务：更新 `.agents/memories/` 对应文档 + 在 `docs/py_agent/progress.md` 追加一行（含日期与命令证据）。
+阶段 4：T19/T20 已实机验证完成；阶段 5（T21 就绪）已完成删除方案 `docs/py_agent/t21_delete_plan.md`（含门禁前回归复验与**用户决策：createApp 保留 Java 侧 AI 路由**）。剩余 **T21（部署期门禁）**：开发环境切 Python 灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1 后删除旧 Java AI 实现（`ai/codegen` 执行类、`langgraph4j`、`ai/guardrail`、`core/parser`/`core/saver`、`utils/ClazzScanner`；**保留** `ai/codegen/route/*` 路由链、`ai/tools` 展示格式、`core/handler`、`BuilderExecutor`、langchain4j 依赖）。每完成一个任务：更新 `.agents/memories/` 对应文档 + 在 `docs/py_agent/progress.md` 追加一行（含日期与命令证据）。
