@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from app.graph import CodeGenWorkflow
-from app.guardrails import GuardrailResult
+from app.core.graph import CodeGenWorkflow
+from app.core.guardrails import GuardrailResult
 
 WORKSPACE_ROOT = "/tmp/paimeng-test-workspace"
 FIXTURES = Path(__file__).parent / "fixtures"

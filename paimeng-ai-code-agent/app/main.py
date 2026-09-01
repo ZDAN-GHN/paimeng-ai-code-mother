@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 
-from app.api import router as agent_router
+from app.api.routes import router as agent_router
 
 app = FastAPI(title="paimeng-ai-code-agent", version="0.1.0")
 

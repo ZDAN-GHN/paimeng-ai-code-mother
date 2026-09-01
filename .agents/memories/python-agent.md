@@ -16,20 +16,22 @@
 
 ## 已落地模块
 
-- `app/config.py`：pydantic-settings，`.env` 键 `PYTHON_AGENT_TOKEN`/`WORKSPACE_ROOT`/`DATABASE_URL`/`JAVA_BASE_URL`/`MODEL_*`/`DASHSCOPE_*`（§9）
-- `app/main.py`：`/healthz`；`app/api.py`：`POST /v1/agent/stream`（SSE，占位流待 T11 替换）；`app/auth.py`：Bearer 校验（缺失/错误→401）
-- `app/models.py`：§1.2 请求、§1.3 四类事件、§1.4 回调（字段与 Java `StreamMessage` 逐字段对齐）
-- `app/sse.py`：SSE 序列化（§1.3 A5：空行分隔、data 逐行拆分）
-- `app/workspace.py`：`validate_workspace_path`（沙箱，防路径穿越→400）+ `atomic_write_files`（临时子目录→原子 move，失败回滚旧目录）
-- `app/state.py`：`PostgresSaver` 装配 + `thread_config`（`thread_id=app:{appId}`）+ `has_checkpoint`（首次判定，§1.5）
+> 2026-09-01 分包重构：`app/` 顶层仅保留 `main.py`（唯一入口），其余模块已按职责归入子包（见下方目录结构）。
+
+- `app/core/config.py`：pydantic-settings，`.env` 键 `PYTHON_AGENT_TOKEN`/`WORKSPACE_ROOT`/`DATABASE_URL`/`JAVA_BASE_URL`/`MODEL_*`/`DASHSCOPE_*`（§9）；`_REPO_ROOT` 用 `__file__` 上溯四级
+- `app/main.py`：`/healthz`；`app/api/routes.py`：`POST /v1/agent/stream`（SSE）；`app/api/auth.py`：Bearer 校验（缺失/错误→401）
+- `app/models/schemas.py`：§1.2 请求、§1.3 四类事件、§1.4 回调（字段与 Java `StreamMessage` 逐字段对齐）
+- `app/api/sse.py`：SSE 序列化（§1.3 A5：空行分隔、data 逐行拆分）
+- `app/workspace/manager.py`：`validate_workspace_path`（沙箱，防路径穿越→400）+ `atomic_write_files`（临时子目录→原子 move，失败回滚旧目录）
+- `app/core/state.py`：`PostgresSaver` 装配 + `thread_config`（`thread_id=app:{appId}`）+ `has_checkpoint`（首次判定，§1.5）
 - `app/tools/file_tools.py`（T6）：`FileTools` 绑定工作区 + 构造二次沙箱校验；`_resolve` 路径穿越守卫；`write/read/modify/delete_file/read_dir/exit_tool`；`IGNORED_NAMES/IGNORED_EXTENSIONS/IMPORTANT_FILES` 对齐 Java（`index.html/style.css/script.js/package.json` 等不可删）
 - `app/services/llm.py`（T7）：`create_chat_model(reasoning=False, temperature=0.7)` → ChatOpenAI（config `MODEL_*`）；`load_prompt(name)` 读 `app/prompts/`
 - `app/prompts/`（T7）：7 份提示词，源 `src/main/resources/prompt/*.txt`
-- `app/callback.py`（T13）：`send_callback`/`send_request_callback`（§1.4，POST `{JAVA_BASE_URL}/api/app/chat/gen/code/callback`，Bearer + runId 幂等由 Java 保证）；`stream_events` 成功发 success / 失败发 failed 回调
-- `app/streaming.py`（T12）：`stream_events` 主通道 SSE（vue→StreamMessage JSON / html/multi→文本块 / error 事件），html/multi 完成后原子落盘
-- `app/graph.py`（T11）：`CodeGenWorkflow`（guardrail→image_collector→prompt_enhancer→router→code_generator→code_quality_check，质检失败有界重试；无 project_builder——构建留 Java）
-- `app/workspace.py`（T10）：`write_generated_code` 集成入口（沙箱校验→html/multi_file 解析→原子落盘）
-- `app/guardrails.py`（T9）：`PromptSafetyInputGuardrail.validate` + `validate_prompt`（长度/空输入/敏感词/注入模式，对齐 Java `PromptSafetyInputGuardrail`）
+- `app/api/callback.py`（T13）：`send_callback`/`send_request_callback`（§1.4，POST `{JAVA_BASE_URL}/api/app/chat/gen/code/callback`，Bearer + runId 幂等由 Java 保证）；`stream_events` 成功发 success / 失败发 failed 回调
+- `app/api/streaming.py`（T12）：`stream_events` 主通道 SSE（vue→StreamMessage JSON / html/multi→文本块 / error 事件），html/multi 完成后原子落盘
+- `app/core/graph.py`（T11）：`CodeGenWorkflow`（guardrail→image_collector→prompt_enhancer→router→code_generator→code_quality_check，质检失败有界重试；无 project_builder——构建留 Java）
+- `app/workspace/manager.py`（T10）：`write_generated_code` 集成入口（沙箱校验→html/multi_file 解析→原子落盘）
+- `app/core/guardrails.py`（T9）：`PromptSafetyInputGuardrail.validate` + `validate_prompt`（长度/空输入/敏感词/注入模式，对齐 Java `PromptSafetyInputGuardrail`）
 - `app/services/images.py`（T8）：图片模型 + `plan_image_collection`（规划）+ `collect_images`（工具调用采集）+ `ImageTools` 四工具（Pexels/Undraw/DashScope/Mermaid，名称对齐 Java `@Tool`；COS 上传未迁移，file:// 回填）
 - `app/services/quality.py`（T8）：`check_code_quality`（异常按通过处理）+ `read_and_concatenate_code_files`（扩展名过滤 + 跳过 node_modules/dist/target/.git）
 - `app/services/codegen/`（T7）：`parsing.py`（HTML/MultiFile 解析正则对齐 Java `core/parser`）、`html.py`/`multi_file.py`（ChatOpenAI 文本流）、`vue.py`（reasoning 模型 + 6 工具 `bind_tools` 循环，`MAX_TOOL_CALLS=50`）、`routing.py`（关键词路由兜底 html）、`__init__.py`（`CodeGenServiceFactory` + `CodeGenServiceExecutor.stream`：vue→`run()`，其余→`stream()`）
@@ -44,7 +46,7 @@
 
 ## 目录结构（已落地 / 目标）
 
-`paimeng-ai-code-agent/`：`pyproject.toml`、`uv.lock`、`.python-version`、`.env.example`、`app/{main,api,auth,models,state,config,sse,workspace,graph,streaming,callback,guardrails}.py`、`app/tools/`、`app/services/`、`tests/`（含 `tests/fixtures/` 固定夹具快照）。
+`paimeng-ai-code-agent/`：`pyproject.toml`、`uv.lock`、`.python-version`、`.env.example`、`app/main.py`（**唯一顶层入口**）+ `app/{api,core,models,workspace,tools,services,prompts}/` 子包、`tests/`（含 `tests/fixtures/` 固定夹具快照）。子包分布：`api/`（routes·auth·sse·streaming·callback）、`core/`（config·state·graph·guardrails）、`models/schemas.py`、`workspace/manager.py`、`tools/`、`services/`（含 `services/codegen/`）、`prompts/`。
 
 ## 下一步任务
 

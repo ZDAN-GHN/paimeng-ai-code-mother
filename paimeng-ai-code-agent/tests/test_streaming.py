@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from app.guardrails import GuardrailResult
-from app.models import AgentRequest
-from app.streaming import stream_events
+from app.api.streaming import stream_events
+from app.core.guardrails import GuardrailResult
+from app.models.schemas import AgentRequest
 
 WORKSPACE_ROOT = "/tmp/paimeng-test-workspace"
 

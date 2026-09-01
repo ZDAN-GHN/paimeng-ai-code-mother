@@ -57,7 +57,7 @@
 - **微服务重构**：新架构代码位于 `paimeng-ai-code-mother-microservice/` 目录，包含 7 个微服务模块（未完成重构，不作为 Python Agent 迁移前提）
 - **MyBatis Flex 代码生成**：使用 `com.zdan.paimengaicodemother.generator` 包中的生成器，生成的 mapper 文件位于 `src/main/resources/mapper/`
 - **AI 框架（Java 旧实现）**：LangChain4j 和 LangGraph4j 构建 AI 工作流，主要逻辑在 `ai` 和 `langgraph4j` 包中；这些能力将迁移到 Python Agent，迁移完成后删除（保留 `ai/tools` 展示格式与 `core/handler`）
-- **Python Agent 技术栈**：Python 3.13 + FastAPI + LangGraph + LangChain + Pydantic 2；代码位于 `paimeng-ai-code-agent/app/`（`api.py`、`models.py`、`graph.py`、`streaming.py`、`tools/`、`services/` 等，结构见 `docs/py_agent/task_plan.md` §4）
+- **Python Agent 技术栈**：Python 3.13 + FastAPI + LangGraph + LangChain + Pydantic 2；代码位于 `paimeng-ai-code-agent/app/`（顶层仅 `main.py` 入口，其余按子包 `api/`·`core/`·`models/`·`workspace/`·`tools/`·`services/`·`prompts/` 组织，结构见 `docs/py_agent/task_plan.md` §4）
 - **Python 代码风格**：遵循 PEP 8，类型注解完整（Pydantic 2 模型），函数/类含 docstring；注释遵循项目注释风格
 - **数据分工**：PostgreSQL 仅保存 LangGraph checkpoint（`thread_id = app:{appId}`）；MySQL 继续保存业务数据和 `chat_history`
 - **Java↔Python 鉴权**：内部接口统一使用 `Authorization: Bearer {python-agent.token}`（Java 从 `python-agent.token` 配置读取，Python 从 `PYTHON_AGENT_TOKEN` 环境变量读取）

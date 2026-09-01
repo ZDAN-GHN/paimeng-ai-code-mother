@@ -13,13 +13,13 @@ from typing import Any, Callable, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from app.guardrails import PromptSafetyInputGuardrail
+from app.core.guardrails import PromptSafetyInputGuardrail
 from app.services.codegen import CodeGenServiceExecutor
 from app.services.codegen.routing import route_code_gen_type
 from app.services.images import ImageTools, plan_image_collection
 from app.services.quality import check_code_quality, read_and_concatenate_code_files
 from app.tools.file_tools import FileTools
-from app.workspace import validate_workspace_path, write_generated_code
+from app.workspace.manager import validate_workspace_path, write_generated_code
 
 # 质检失败后最大重生成次数
 MAX_QUALITY_RETRIES = 2

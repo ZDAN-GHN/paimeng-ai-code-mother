@@ -6,7 +6,7 @@
 
 from pathlib import Path
 
-from app.workspace import validate_workspace_path
+from app.workspace.manager import validate_workspace_path
 
 # 需要忽略的文件和目录（对齐 Java ProjectFileDirReadTool）
 IGNORED_NAMES = {

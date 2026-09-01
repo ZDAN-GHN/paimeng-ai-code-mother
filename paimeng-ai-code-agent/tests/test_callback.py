@@ -3,8 +3,8 @@
 import httpx
 import pytest
 
-from app.callback import build_callback_url, send_callback
-from app.config import get_settings
+from app.api.callback import build_callback_url, send_callback
+from app.core.config import get_settings
 
 
 class _FakeResponse:

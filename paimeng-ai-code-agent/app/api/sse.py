@@ -6,7 +6,7 @@
 
 from collections.abc import Iterator
 
-from app.models import StreamMessage
+from app.models.schemas import StreamMessage
 
 
 def format_data(data: str) -> str:

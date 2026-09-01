@@ -5,8 +5,8 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# 仓库根目录：paimeng-ai-code-agent/app/config.py 上溯两级
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+# 仓库根目录：app/core/config.py 上溯四级到 paimeng-ai-code-agent 的上一级
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
 class Settings(BaseSettings):

@@ -22,7 +22,7 @@ from langchain_core.tools import tool as langchain_tool
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from app.config import get_settings
+from app.core.config import get_settings
 from app.services.llm import create_chat_model, load_prompt
 
 logger = logging.getLogger(__name__)

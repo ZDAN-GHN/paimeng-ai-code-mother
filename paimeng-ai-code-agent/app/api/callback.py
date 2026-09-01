@@ -10,8 +10,8 @@ from typing import Any, Literal
 
 import httpx
 
-from app.config import get_settings
-from app.models import AgentRequest, CallbackRequest
+from app.core.config import get_settings
+from app.models.schemas import AgentRequest, CallbackRequest
 
 logger = logging.getLogger(__name__)
 

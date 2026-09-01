@@ -11,9 +11,10 @@ import json
 import logging
 from collections.abc import AsyncIterator, Callable
 
-from app.callback import CallbackStatus, send_request_callback
-from app.guardrails import PromptSafetyInputGuardrail
-from app.models import (
+from app.api.callback import CallbackStatus, send_request_callback
+from app.api.sse import encode_stream_message, format_data, format_event
+from app.core.guardrails import PromptSafetyInputGuardrail
+from app.models.schemas import (
     AgentRequest,
     AiResponseMessage,
     AiThinkingMessage,
@@ -22,9 +23,8 @@ from app.models import (
     ToolRequestMessage,
 )
 from app.services.codegen import CodeGenServiceExecutor
-from app.sse import encode_stream_message, format_data, format_event
 from app.tools.file_tools import FileTools
-from app.workspace import validate_workspace_path, write_generated_code
+from app.workspace.manager import validate_workspace_path, write_generated_code
 
 logger = logging.getLogger(__name__)
 

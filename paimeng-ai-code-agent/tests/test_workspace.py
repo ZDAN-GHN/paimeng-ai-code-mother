@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.workspace import atomic_write_files, validate_workspace_path, write_generated_code
+from app.workspace.manager import atomic_write_files, validate_workspace_path, write_generated_code
 
 WORKSPACE_ROOT = "/tmp/paimeng-test-workspace"
 

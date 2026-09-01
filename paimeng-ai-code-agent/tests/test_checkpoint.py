@@ -13,7 +13,7 @@ from uuid import uuid4
 import pytest
 from langgraph.graph import END, START, StateGraph
 
-from app.state import get_checkpointer, has_checkpoint, thread_config
+from app.core.state import get_checkpointer, has_checkpoint, thread_config
 
 
 class _CountState(TypedDict, total=False):

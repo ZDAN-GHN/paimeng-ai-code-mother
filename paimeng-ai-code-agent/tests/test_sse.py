@@ -2,8 +2,8 @@
 
 import pytest
 
-from app.models import AiResponseMessage
-from app.sse import encode_stream_message, format_data, format_event
+from app.api.sse import encode_stream_message, format_data, format_event
+from app.models.schemas import AiResponseMessage
 
 
 @pytest.mark.sse

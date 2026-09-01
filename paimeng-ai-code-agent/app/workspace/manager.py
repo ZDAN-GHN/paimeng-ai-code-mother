@@ -4,7 +4,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from app.config import get_settings
+from app.core.config import get_settings
 
 
 def validate_workspace_path(workspace_path: str) -> Path:

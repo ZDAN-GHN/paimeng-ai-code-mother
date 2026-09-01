@@ -6,7 +6,7 @@ from typing import Any, TypedDict
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg_pool import ConnectionPool
 
-from app.config import get_settings
+from app.core.config import get_settings
 
 
 class AgentState(TypedDict, total=False):

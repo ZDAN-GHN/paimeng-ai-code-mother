@@ -1,6 +1,6 @@
 """Guardrail 迁移测试（T9）：提示词安全输入护轨。"""
 
-from app.guardrails import PromptSafetyInputGuardrail, validate_prompt
+from app.core.guardrails import PromptSafetyInputGuardrail, validate_prompt
 
 
 def _reason(text: str) -> str:

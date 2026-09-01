@@ -164,6 +164,17 @@
   - `AppServiceImpl`：保留路由字段/构造参数与 createApp 路由调用；仅移除 `aiCodeGeneratorFacade`/`streamHandlerExecutor` 与 `chatToGenCode` 旧链路分支（L235-236）。
   - pom：`langgraph4j-*` 依赖可删，`langchain4j-*` 保留（路由需要）；保留 `langchain4j.open-ai.routing-chat-model` 配置段。
 
+## 2026-09-01 — Python Agent 分包重构（顶层仅保留 main.py 入口）
+
+- **重构动机**：`app/` 顶层平铺 12 个 `.py` 文件（api/auth/callback/config/graph/guardrails/models/sse/state/streaming/workspace 等），分包不清晰。用户要求最外层只保留 `main.py` 一个入口文件。
+- **目标结构（用户确认）**：`app/` 顶层仅 `main.py`（+ `__init__.py`）；其余按职责归入子包：
+  - `app/api/`：`routes.py`（原 `api.py`，`POST /v1/agent/stream`）、`auth.py`、`sse.py`、`streaming.py`、`callback.py`
+  - `app/core/`：`config.py`、`state.py`、`graph.py`、`guardrails.py`
+  - `app/models/schemas.py`（原 `models.py`）、`app/workspace/manager.py`（原 `workspace.py`）
+  - `app/tools/`、`app/services/`（含 `services/codegen/`）、`app/prompts/` 保持不变
+- **关键改动**：`app/core/config.py` 的 `_REPO_ROOT` 由 `__file__` 上溯 3 级改为 4 级（文件层级加深）；全部内部导入与 `tests/` 导入更新到新路径（含 `test_contract.py` 中 `monkeypatch` 目标 `app.streaming` → `app.api.streaming`）；`uvicorn app.main:app` 启动入口不变。
+- **命令证据**：`cd paimeng-ai-code-agent && uv run pytest` → **87 passed**（全量回归通过，含 contract 11）。
+
 ## 下一步
 
 - **T21（删除旧 AI 实现）**：按「稳定」定义（开发环境灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1）后执行，属部署期门禁，单会话无法完成。放行前需与产品/前端确认 `createApp` 的 codeGenType 来源（`t21_delete_plan.md` §6）。回归口径：Java 新链路 14 用例 + Python 87（含契约 11）+ `sse_baseline.py` 三类 DIFF 为空。

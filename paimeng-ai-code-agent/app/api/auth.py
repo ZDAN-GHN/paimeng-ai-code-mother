@@ -2,7 +2,7 @@
 
 from fastapi import Header, HTTPException
 
-from app.config import get_settings
+from app.core.config import get_settings
 
 
 async def require_bearer_token(authorization: str = Header(default="")) -> str:

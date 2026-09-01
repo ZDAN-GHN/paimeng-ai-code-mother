@@ -9,9 +9,9 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import get_settings
+from app.core.config import get_settings
 from app.main import app
-from app.models import AiResponseMessage, CallbackRequest, ToolRequestMessage
+from app.models.schemas import AiResponseMessage, CallbackRequest, ToolRequestMessage
 
 TOKEN = "test-token"
 
@@ -71,7 +71,7 @@ def test_stream_with_valid_token(client, monkeypatch):
         def stream(self, code_gen_type, user_message, file_tools=None):
             yield "```html\n<h1>hi</h1>\n```"
 
-    monkeypatch.setattr("app.streaming.CodeGenServiceExecutor", _FakeExec)
+    monkeypatch.setattr("app.api.streaming.CodeGenServiceExecutor", _FakeExec)
     resp = client.post(
         "/v1/agent/stream",
         json=_valid_payload(),

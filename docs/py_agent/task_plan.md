@@ -184,10 +184,10 @@ Python 侧需迁移并复刻以下根 `src` 组件（迁移后 Java 侧删除对
 |---|---|---|---|
 | T0 | **恢复编译基线**：按 §1.1-§1.5 补 `config/PythonAgentProperties.java`（绑定 `python-agent` 段，含新增键 `callback-timeout-ms`）、`ai/python/PythonAgentRequest.java`（§1.2 字段）、`ai/python/PythonAgentClient.java`（WebClient，阶段 3 前可最小实现：`enabled` 时抛 `NotImplemented` 之外的明确错误）；保证 `./mvnw compile` 通过 | `…/config/PythonAgentProperties.java`、`…/ai/python/PythonAgentRequest.java`、`…/ai/python/PythonAgentClient.java` | 无 |
 | T1 | `uv` 初始化子项目：`pyproject.toml`、`uv.lock`、目录骨架 `app/` | `paimeng-ai-code-agent/pyproject.toml`、`uv.lock` | 无 |
-| T2 | 配置层（pydantic-settings）：读 `PYTHON_AGENT_TOKEN`、`WORKSPACE_ROOT`、`DATABASE_URL`、`JAVA_BASE_URL` 等；附 `.env.example` | `paimeng-ai-code-agent/app/config.py`、`.env.example` | T1 |
-| T3 | FastAPI 应用：`/v1/agent/stream`（SSE）、`/healthz`、Bearer 令牌校验依赖 | `paimeng-ai-code-agent/app/main.py`、`app/api.py`、`app/auth.py` | T2 |
-| T4 | Pydantic 请求/事件模型：§1.2 请求、§1.3 四类事件、§1.4 回调 | `paimeng-ai-code-agent/app/models.py` | T3 |
-| T5 | PostgreSQL checkpointer：LangGraph `PostgresSaver` 装配 + `thread_id` 键约定（1.x 包路径 `langgraph.checkpoint.postgres`，具体 API 以官方文档为准，用 T19 的 checkpoint 恢复测试锁定用法，A8） | `paimeng-ai-code-agent/app/state.py` | T4 |
+| T2 | 配置层（pydantic-settings）：读 `PYTHON_AGENT_TOKEN`、`WORKSPACE_ROOT`、`DATABASE_URL`、`JAVA_BASE_URL` 等；附 `.env.example` | `paimeng-ai-code-agent/app/core/config.py`、`.env.example` | T1 |
+| T3 | FastAPI 应用：`/v1/agent/stream`（SSE）、`/healthz`、Bearer 令牌校验依赖 | `paimeng-ai-code-agent/app/main.py`、`app/api/routes.py`、`app/api/auth.py` | T2 |
+| T4 | Pydantic 请求/事件模型：§1.2 请求、§1.3 四类事件、§1.4 回调 | `paimeng-ai-code-agent/app/models/schemas.py` | T3 |
+| T5 | PostgreSQL checkpointer：LangGraph `PostgresSaver` 装配 + `thread_id` 键约定（1.x 包路径 `langgraph.checkpoint.postgres`，具体 API 以官方文档为准，用 T19 的 checkpoint 恢复测试锁定用法，A8） | `paimeng-ai-code-agent/app/core/state.py` | T4 |
 
 ### 阶段 2：Agent 迁移（状态：**待办**）
 
@@ -196,11 +196,11 @@ Python 侧需迁移并复刻以下根 `src` 组件（迁移后 Java 侧删除对
 | T6 | 文件类 Tools 迁移（读/写/改/删/列目录/退出），**含工作区沙箱校验** | `paimeng-ai-code-agent/app/tools/file_tools.py` + 单测 | T4 |
 | T7 | 代码生成服务迁移（html/multi_file/vue 三种 codeGenService + 路由） | `paimeng-ai-code-agent/app/services/codegen/…` + 单测 | T6 |
 | T8 | 图片采集与质量检查服务迁移（对照 §3 清单） | `paimeng-ai-code-agent/app/services/images.py`、`app/services/quality.py` + 单测 | T7 |
-| T9 | Guardrail 迁移 | `paimeng-ai-code-agent/app/guardrails.py` + 单测 | T7 |
-| T10 | 代码解析与工作区写入（临时目录→原子 move，见 §1.5） | `paimeng-ai-code-agent/app/workspace.py` + 单测 | T6 |
-| T11 | LangGraph 工作流编排（Router/PromptEnhancer/CodeGenerator/Quality/Image 节点接线） | `paimeng-ai-code-agent/app/graph.py` | T5、T7-T10 |
-| T12 | SSE 流式输出适配：把工作流输出映射为 §1.3 事件 JSON（逐字段对齐旧 `StreamMessage`） | `paimeng-ai-code-agent/app/streaming.py` | T4、T11 |
-| T13 | 完成回调客户端：工作流完成后按 §1.4 调用 Java 回调（`runId` 透传） | `paimeng-ai-code-agent/app/callback.py` | T4、T12 |
+| T9 | Guardrail 迁移 | `paimeng-ai-code-agent/app/core/guardrails.py` + 单测 | T7 |
+| T10 | 代码解析与工作区写入（临时目录→原子 move，见 §1.5） | `paimeng-ai-code-agent/app/workspace/manager.py` + 单测 | T6 |
+| T11 | LangGraph 工作流编排（Router/PromptEnhancer/CodeGenerator/Quality/Image 节点接线） | `paimeng-ai-code-agent/app/core/graph.py` | T5、T7-T10 |
+| T12 | SSE 流式输出适配：把工作流输出映射为 §1.3 事件 JSON（逐字段对齐旧 `StreamMessage`） | `paimeng-ai-code-agent/app/api/streaming.py` | T4、T11 |
+| T13 | 完成回调客户端：工作流完成后按 §1.4 调用 Java 回调（`runId` 透传） | `paimeng-ai-code-agent/app/api/callback.py` | T4、T12 |
 
 > 并行：T6-T7、T8、T9 相互独立（依赖 T4）；T10 依赖 T6；T11 等待 T5/T7-T10；T12/T13 串行在 T11 后。
 
@@ -299,7 +299,7 @@ Python 侧需迁移并复刻以下根 `src` 组件（迁移后 Java 侧删除对
 Python 端 streaming 适配（伪代码）：
 
 ```python
-# app/streaming.py —— 把工作流事件映射为 §1.3 事件 JSON
+# app/api/streaming.py —— 把工作流事件映射为 §1.3 事件 JSON
 async def stream_events(graph, config, code_gen_type, emit):
     if code_gen_type == "vue_project":        # 四类结构化事件
         for chunk in graph.astream_events(...):

@@ -3,10 +3,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.auth import require_bearer_token
-from app.models import AgentRequest
-from app.streaming import stream_events
-from app.workspace import validate_workspace_path
+from app.api.auth import require_bearer_token
+from app.api.streaming import stream_events
+from app.models.schemas import AgentRequest
+from app.workspace.manager import validate_workspace_path
 
 router = APIRouter(prefix="/v1/agent")
 

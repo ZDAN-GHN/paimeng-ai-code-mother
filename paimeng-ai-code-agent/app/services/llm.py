@@ -2,7 +2,7 @@
 
 from langchain_openai import ChatOpenAI
 
-from app.config import get_settings
+from app.core.config import get_settings
 
 
 def create_chat_model(*, reasoning: bool = False, temperature: float = 0.7) -> ChatOpenAI:
