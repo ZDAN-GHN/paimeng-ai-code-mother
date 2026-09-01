@@ -6,6 +6,8 @@
 
 - **代码风格**：Prettier 配置为无分号、单引号、100 字符宽度；Vue 3 Composition API；ESLint 检查。
 - **命令**（在 `paimeng-ai-code-mother-frontend/` 内）：`npm run dev` / `npm run build` / `npm run type-check` / `npm run lint` / `npm run openapi2ts`（需先启动后端）。
+- **WSL 运行前提**：node_modules 原为 Windows 侧安装（仅 win32 二进制），WSL 跑 dev/build 前需补装 Linux 原生包（rollup/esbuild），见 `deployment.md` 踩坑。
+- **运行时环境布局（新约定）**：node_modules 按约定位于 `wsl-rt-env/frontend/node_modules`（当前待迁移，仍在 `paimeng-ai-code-mother-frontend/node_modules`），见 `deployment.md`。
 - **环境配置**：已包含在 `.env.development`。
 
 ## SSE 消费基线

@@ -179,3 +179,9 @@
 
 - **T21（删除旧 AI 实现）**：按「稳定」定义（开发环境灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1）后执行，属部署期门禁，单会话无法完成。放行前需与产品/前端确认 `createApp` 的 codeGenType 来源（`t21_delete_plan.md` §6）。回归口径：Java 新链路 14 用例 + Python 87（含契约 11）+ `sse_baseline.py` 三类 DIFF 为空。
 
+
+## 2026-09-01 T21 灰度启动（用户决策）
+
+- **T21 门禁计时起点**：应用户要求将本地开发环境切换到 Python 链路（用户明确授权，符合 `project-startup-guardrail` 中「切换前用户确认」约定）。
+- **配置变更**：`src/main/resources/application-local.yml`（gitignore，不提交）追加 `python-agent.enabled: true` + `python-agent.token`（与 `paimeng-ai-code-agent/.env` 的 `PYTHON_AGENT_TOKEN` 同值）；仓库 `application.yml` 默认值保持 `${PYTHON_AGENT_ENABLED:false}` 不动。
+- **环境事实**：依赖服务全部落在 WSL（用户态 MySQL 8.0.46 @ `~/.local/opt/mysql8`，root/root，库已建表；Redis 6379 无密码；用户态 PG16 @ 5432）；全栈三服务（Java 8123 / Python 8090 / 前端 5173）健康检查实测通过。启动 SOP 与排障护栏沉淀于 `.agents/skills/project-startup-guardrail/SKILL.md`。

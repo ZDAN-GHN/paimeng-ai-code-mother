@@ -12,7 +12,7 @@
 | [java-backend.md](java-backend.md) | Java 侧状态、编译红线、迁移残留、包结构与代码风格约定 | 碰 Java 的 Agent |
 | [python-agent.md](python-agent.md) | Python Agent 子项目状态、FastAPI/LangGraph 依赖坑、下一步任务 | 碰 Python 的 Agent |
 | [vue-frontend.md](vue-frontend.md) | 前端路径、代码风格、SSE 消费基线 | 碰前端的 Agent |
-| [deployment.md](deployment.md) | 环境依赖、敏感文件、共享工作区、启动命令 | 跑环境/部署的 Agent |
+| [deployment.md](deployment.md) | 环境依赖、运行时环境布局（wsl-rt-env 新约定）、敏感文件、共享工作区、启动命令 | 跑环境/部署的 Agent |
 
 ## 更新约定
 

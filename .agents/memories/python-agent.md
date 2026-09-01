@@ -7,12 +7,12 @@
 | 项 | 状态 |
 |---|---|
 | `paimeng-ai-code-agent/` | **已创建**（`pyproject.toml`/`uv.lock`/`.python-version`/`app/`/`tests/`） |
-| 技术基线 | Python 3.13.15（`.python-version` 锁定）+ FastAPI 0.141.1 + LangGraph 1.2.11 + Pydantic 2.13.5，`uv` 管理 |
+| 技术基线 | Python 3.14.7（`.python-version` 锁定）+ FastAPI 0.141.1 + LangGraph 1.2.11 + Pydantic 2.13.5，`uv` 管理 |
 | 依赖坑 | 已规避：fastapi 0.141.1 与 starlette 1.6.0 `pip check` 全绿（不再存在 0.115/1.0 不兼容） |
 | T1-T20 | **全部完成**，`uv run pytest` **87 passed**（`-m contract` 11 passed）；T14a/T18/T20 **实机验证通过**（Python 链路三类型灰度实测 + `sse_baseline.py` `DIFF 为空`） |
 | langgraph-checkpoint-postgres | 3.1.2，`PostgresSaver(pool)` 接受 psycopg `ConnectionPool`；`setup()`/`get_tuple()` 已确认 |
-| PostgreSQL 实例 | 用户态 PG16 于 127.0.0.1:5432（清华镜像 deb 解包 + `LD_LIBRARY_PATH`）；`_pool()` 需 `kwargs={"autocommit": True}, open=True` |
-| MySQL/Redis 实例 | 用户态 MySQL 8.0.36（127.0.0.1:3306，root/root，DB `paimeng_ai_code_mother`）+ Redis 7.2.5（6379）就绪 |
+| PostgreSQL 实例 | **WSL**：用户态 PG16 @ 127.0.0.1:5432（清华镜像 deb 解包 + `LD_LIBRARY_PATH`）；`_pool()` 需 `kwargs={"autocommit": True}, open=True` |
+| MySQL/Redis 实例 | **WSL（2026-09-01 起，默认）**：用户态 MySQL 8.0.46（`~/.local/opt/mysql8`，root/root，DB `paimeng_ai_code_mother` 已建表）+ Redis（6379 无密码）；**Windows（此前实机验证用）**：服务 MySQL80 8.0.36 + Docker Redis 7.2.5。详见 `deployment.md` |
 
 ## 已落地模块
 
@@ -40,7 +40,7 @@
 ## 踩坑与规避
 
 - **FastAPI ↔ Starlette 版本**：fastapi 0.141.1 ↔ starlette 1.6.0 组合可复现（`uv.lock` 固定）。
-- **Python 版本**：`uv init` 默认解析到 3.14，必须写 `.python-version`=3.13 锁定 3.13.15。
+- **Python 版本**：`requires-python = ">=3.14,<3.15"`，`.python-version`=3.14.7 锁定 Python 3.14（依赖解析默认即 3.14，无需降级）。
 - `uv run pip check` 不可用（uv 虚拟环境无 pip），用 `uv pip check` 等价检查。
 - 工作区原子写入的临时目录必须建在目标**父目录**（sibling），不能建在目标目录内部（否则 rename 目标时 stage 随之移动导致路径失效）。
 

@@ -23,8 +23,6 @@ import com.zdan.paimengaicodemother.model.entity.App;
 import com.zdan.paimengaicodemother.model.entity.User;
 import com.zdan.paimengaicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.zdan.paimengaicodemother.model.vo.AppVO;
-import com.zdan.paimengaicodemother.ratelimiter.annotaion.RateLimit;
-import com.zdan.paimengaicodemother.ratelimiter.enums.RateLimitType;
 import com.zdan.paimengaicodemother.service.AppService;
 import com.zdan.paimengaicodemother.service.ChatHistoryService;
 import com.zdan.paimengaicodemother.service.ProjectDownloadService;
@@ -37,7 +35,6 @@ import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 
 import java.io.File;
 import java.time.LocalDateTime;
@@ -142,7 +139,7 @@ public class AppController {
      */
     @GetMapping(value = "/chat/gen/code", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     // 1 分钟内最多允许请求 5 次，采用根据用户类型进行限流
-    @RateLimit(limitType = RateLimitType.USER, rate = 1, rateInterval = 60, message = "AI 对话请求过于频繁，请稍后再试")
+    // @RateLimit(limitType = RateLimitType.USER, rate = 5, rateInterval = 60, message = "AI 对话请求过于频繁，请稍后再试")
     public Flux<ServerSentEvent<String>> chatToGenCode(@RequestParam Long appId,
                                                        @RequestParam String message,
                                                        HttpServletRequest request) {

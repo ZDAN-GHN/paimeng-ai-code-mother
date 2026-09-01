@@ -8,6 +8,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # 仓库根目录：app/core/config.py 上溯四级到 paimeng-ai-code-agent 的上一级
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
+# .env 绝对路径，避免依赖进程工作目录（PyCharm 等 IDE 启动时 cwd 不在 agent 目录会导致 .env 读不到）
+_ENV_FILE = _REPO_ROOT / "paimeng-ai-code-agent" / ".env"
+
 
 class Settings(BaseSettings):
     """Python Agent 全局配置。
@@ -16,7 +19,7 @@ class Settings(BaseSettings):
     Java↔Python 令牌两端共享（Java 侧 python-agent.token 同值）。
     """
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=_ENV_FILE, env_file_encoding="utf-8", extra="ignore")
 
     # 内部调用令牌（与 Java 侧 python-agent.token 一致），缺失时所有内部接口返回 401
     python_agent_token: str = ""
