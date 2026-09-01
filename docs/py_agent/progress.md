@@ -133,7 +133,16 @@
 - `JAVA_HOME=.../java/current ./mvnw compile` → BUILD SUCCESS；`./mvnw test -Dtest=PythonAgentClientTest,RunIdSinkRegistryTest` → **11 passed**。
 - `python3 docs/py_agent/sse_baseline.py --type {html,multi_file,vue_project} --baseline <T14a raw> --actual <Python raw>` → 三类 `DIFF 为空`。
 
+## 2026-09-01 — 阶段 5（T21 就绪准备）回归证据 + 删除方案
+
+- **新增 `PythonAgentSseAdapterTest`（T15 回归）✅**：3 用例覆盖本轮实机修复的两个契约点——`data=null` 空事件被过滤（不导致 mapper null / 流截断）、`error` 事件不进展示流、vue_project 路由到 `JsonMessageStreamHandler`。mock 两个 handler 透传数据流，`Flux.collectList().block()` 断言（环境无 `reactor-test`，避免新增依赖）。命令证据：`./mvnw test -Dtest=PythonAgentSseAdapterTest` → **3 passed**。
+- **全量 Java 测试套件（回归证据）**：`./mvnw test` → **Tests run: 30, Failures: 1, Errors: 9**。逐项归类：
+  - **Python 新链路全绿**：`PythonAgentClientTest` 5 + `RunIdSinkRegistryTest` 6 + `PythonAgentSseAdapterTest` 3 = **14 passed**；`AiCodeGenTypeRoutingServiceTest`、`AiConcurrentTest`、`ImageCollectionServiceTest`、`PaimengAiCodeMotherApplicationTests` 亦通过。
+  - **9 errors 均为旧链路/langgraph4j（T21 删除目标）或环境依赖**：`CodeGenWorkflowTest`×5 / `CodeGenConcurrentWorkflowTest`×2（`PromptSafetyInputGuardrail` 超长提示词 + 实机 DeepSeek 调用）、`AiCodeGeneratorFacadeTest`（旧路径 LLM 返回 MultiFile 被断言强转 Html）、`MermaidDiagramToolTest`（无 `mmdc` 二进制）、`UndrawIllustrationToolTest`（无搜索网络）。**均非本轮改动引入**，随 T21 删除。
+  - **1 failure 为环境依赖**：`WebScreenshotUtilsTest`（需真实 Chrome 截图 `baidu.com`；本机无 Chrome 二进制——本轮环境自适应改动只是把原类加载异常降级为 null 返回，非回归）。
+- **T21 删除方案定稿（`docs/py_agent/t21_delete_plan.md`）**：依赖分析结论——`langgraph4j/*` 零外部引用可直删；`ai/codegen/*` 引用方（`AiCodeGeneratorFacade`/`RouterNode`/`AppServiceImpl`/`ClazzScanner`）全在删除/改动清单内；`ai/guardrail`、`core/parser`/`core/saver`、`utils/ClazzScanner` 删除后变死代码一并删；保留 `ai/tools`（展示格式）、`core/handler/*`、`BuilderExecutor`、`ai/python/*`、`ai/enums/CodeGenTypeEnum`。`AppServiceImpl` 需移除 3 个构造参数 + 旧链路分支；`createApp` 的 codeGenType 来源（删掉 AI 路由后）为**未决决策**，候选：默认 html / `AppAddRequest` 增字段 / Python 侧路由，默认预判 1。T21 按 §5 门禁（灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1）执行，门禁放行后为机械性操作。
+
 ## 下一步
 
-- **T21（删除旧 AI 实现）**：按「稳定」定义（开发环境灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1）后执行，属部署期门禁，单会话无法完成。
+- **T21（删除旧 AI 实现）**：按「稳定」定义（开发环境灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1）后执行，属部署期门禁，单会话无法完成。放行前需与产品/前端确认 `createApp` 的 codeGenType 来源（`t21_delete_plan.md` §6）。回归口径：Java 新链路 14 用例 + Python 87（含契约 11）+ `sse_baseline.py` 三类 DIFF 为空。
 

@@ -48,9 +48,9 @@
 
 ## 下一步任务
 
-阶段 4 验证（T19/T20）已实机完成。剩余为**部署期门禁 T21**：
+阶段 4 验证（T19/T20）已实机完成；阶段 5（T21 就绪准备）已完成：删除方案 `docs/py_agent/t21_delete_plan.md` + 新链路回归 `PythonAgentSseAdapterTest`（3 passed，全量 Java 30 用例中 Python 新链路 14 全绿）。剩余为**部署期门禁 T21**：
 
-- **T21（待稳定期）**：按「稳定」定义（开发环境灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1）后删除旧 Java AI 实现（`ai/codegen`、`langgraph4j` 等，保留 `ai/tools` 展示格式与 `core/handler`），并全量回归。
+- **T21（待稳定期）**：按「稳定」定义（开发环境灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1）后删除旧 Java AI 实现（`ai/codegen`、`langgraph4j`、`ai/guardrail`、`core/parser`、`core/saver`、`utils/ClazzScanner`、`core/AiCodeGeneratorFacade`；保留 `ai/tools` 展示格式、`core/handler`、`BuilderExecutor`、`ai/python/*`、`ai/enums/CodeGenTypeEnum`），并全量回归。放行前未决：`createApp` 的 codeGenType 来源（删掉 `AiCodeGenTypeRoutingService` 后；候选：默认 html / `AppAddRequest` 增字段 / Python 侧路由）。回归口径：Java 新链路 14 用例（Client 5 + Registry 6 + Adapter 3）+ Python 87（含契约 11）+ `sse_baseline.py` 三类 DIFF 为空。
 
 历史写入选型澄清：Python 链路成功 AI 历史由 handler 在流结束写（与旧链路一致），回调 success 不重复写；失败/超时由回调/超时兜底幂等写错误历史。实测：Python 进程停掉 → 浏览器 ~1s 内 business-error + 恰好 1 条错误历史（Java 侧 `onErrorResume` 立即 `complete(runId, businessErrorSse)`，错误继续下传给 handler 写历史）。
 

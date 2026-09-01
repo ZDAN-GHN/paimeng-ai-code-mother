@@ -5,7 +5,7 @@
 
 ## 一句话现状
 
-Java (Spring Boot) + Python (FastAPI) **双后端重构中**。阶段 1-4 实现（T0-T20）已全部落地；T14a/T18/T20 已**实机验证**（用户态 PostgreSQL 16 + MySQL 8.0.36 + Redis 7.2.5 + 后端可启动 + DeepSeek 在线）：旧链路三类型基线已录、Python 链路三类型灰度实测通过、`sse_baseline.py` 逐事件比较 `DIFF 为空`。Python `uv run pytest` 87 passed（contract 11）；Java `./mvnw compile` + 纯逻辑单测 11 passed。剩余为稳定期门禁 T21（灰度 ≥7 天 + 全绿后删除旧 AI 实现）。
+Java (Spring Boot) + Python (FastAPI) **双后端重构中**。阶段 1-4 实现（T0-T20）已全部落地；T14a/T18/T20 已**实机验证**（用户态 PostgreSQL 16 + MySQL 8.0.36 + Redis 7.2.5 + 后端可启动 + DeepSeek 在线）：旧链路三类型基线已录、Python 链路三类型灰度实测通过、`sse_baseline.py` 逐事件比较 `DIFF 为空`。Python `uv run pytest` 87 passed（contract 11）；Java 新链路单测 14 passed（Client 5 + Registry 6 + Adapter 3，全量 30 用例中仅旧链路/langgraph4j/环境依赖用例失败，均为 T21 删除目标或需 Chrome/mmdc/网络）。阶段 5 T21 就绪方案已定稿（`docs/py_agent/t21_delete_plan.md`），剩余为稳定期门禁 T21（灰度 ≥7 天 + 全绿后删除旧 AI 实现）。
 
 ## 领域记忆（`.agents/memories/`）
 
@@ -28,4 +28,4 @@ Java (Spring Boot) + Python (FastAPI) **双后端重构中**。阶段 1-4 实现
 
 ## 下一步
 
-阶段 4：T19/T20 已实机验证完成；剩余 **T21（部署期门禁）**：开发环境切 Python 灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1 后删除旧 Java AI 实现（`ai/codegen`、`langgraph4j` 等，保留 `ai/tools` 展示格式与 `core/handler`）。每完成一个任务：更新 `.agents/memories/` 对应文档 + 在 `docs/py_agent/progress.md` 追加一行（含日期与命令证据）。
+阶段 4：T19/T20 已实机验证完成；阶段 5（T21 就绪）已完成删除方案 `docs/py_agent/t21_delete_plan.md` 与新链路回归（Adapter 测试 3 passed）。剩余 **T21（部署期门禁）**：开发环境切 Python 灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1 后删除旧 Java AI 实现（`ai/codegen`、`langgraph4j` 等，保留 `ai/tools` 展示格式与 `core/handler`）；放行前确认 `createApp` codeGenType 来源。每完成一个任务：更新 `.agents/memories/` 对应文档 + 在 `docs/py_agent/progress.md` 追加一行（含日期与命令证据）。
