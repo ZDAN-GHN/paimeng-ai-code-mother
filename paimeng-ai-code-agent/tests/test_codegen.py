@@ -154,7 +154,7 @@ def test_vue_tools_binding(tmp_path_factory):
     service = VueCodeGenService(FileTools(str(ws)))
     tools = service._tools()
     names = {getattr(t, "name", "") for t in tools}
-    assert names == {"write_file", "read_file", "modify_file", "delete_file", "read_dir", "exit_tool"}
+    assert names == {"writeFile", "readFile", "modifyFile", "deleteFile", "readDir", "exit"}
 
 
 def test_vue_execute_dispatches(tmp_path_factory):
@@ -164,7 +164,8 @@ def test_vue_execute_dispatches(tmp_path_factory):
     from app.tools.file_tools import FileTools
 
     service = VueCodeGenService(FileTools(str(ws)))
-    result = service._execute("write_file", {"relative_file_path": "a.txt", "content": "hello"})
+    result = service._execute("writeFile", {"relativeFilePath": "a.txt", "content": "hello"})
     assert result == "文件写入成功：a.txt"
-    assert service._execute("read_file", {"relative_file_path": "a.txt"}) == "hello"
+    assert service._execute("readFile", {"relativeFilePath": "a.txt"}) == "hello"
+    assert service._execute("exit", {}) == "不要继续调用工具，可以输出最终结果了"
     assert "不存在的工具" in service._execute("nope", {})

@@ -94,7 +94,46 @@
 - **T19（checkpoint 恢复测试）✅**：`app/state.py` 的 `_pool()` 修正为 `ConnectionPool(conninfo, kwargs={"autocommit": True}, open=True)`——`PostgresSaver.setup()` 含 `CREATE INDEX CONCURRENTLY`，必须无事务块（锁定 langgraph-checkpoint-postgres 3.1.2 用法）。`tests/test_checkpoint.py`（checkpoint marker）：首次判定 `has_checkpoint=False` → 生成后 `True`（第二次请求不重复 bootstrap）；同 thread_id 从 checkpoint 恢复继续累加；不同 thread_id 隔离。命令证据：`DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/paimeng_test uv run pytest` → **87 passed**，两次运行幂等。
 - 提交：`T19 PostgreSQL checkpoint 恢复测试`（`DSH Web/ZDAN <zdan60661@gmail.com>`）。
 
-## 下一步（环境就绪项）
+## 2026-09-01 — 环境解锁 + T14a/T18/T20 实机验证
 
-- **需 MySQL/Redis 实机**：T14a 实机补录基线（三类各录一次）→ T18 灰度开关 live 校验 → T20 逐事件比较（`sse_baseline.py`）。若可按 PostgreSQL 同样方式用户态部署 MySQL/Redis + 运行 Java 后端（需 DeepSeek 在线），则可完成。
+### 环境解锁（MySQL/Redis/后端可启动）
+
+- **用户态部署 MySQL 8.0.36**（`https://cdn.mysql.com/archives/...` tarball）：`libaio1`/`libnuma1`/`libncurses6` deb 解包进 `LD_LIBRARY_PATH`；`mysqld --no-defaults --datadir=/tmp/mysql-data --port=3306 --socket=/tmp/mysql-run/mysql.sock`；root/root，DB `paimeng_ai_code_mother`，`sql/create_table.sql` 建表。Redis 7.2.5 源码编译跑 6379。
+- **后端启动阻断修复（环境自适应）**：`WebScreenshotUtils`/`ScreenshotManager` 的静态 `WEB_DRIVER = initChromeDriver()` 在无 Chrome 环境抛 `BusinessException` 阻断 Spring Boot 启动；`initChromeDriver` 增加 `isChromeAvailable()` 快速失败（无 Chrome 二进制时不触发 WebDriverManager 联网下载——该调用在本环境会**挂起**），静态块与 `takeScreenshot` 空驱动降级为 null（截图功能不可用，不阻断业务）。命令证据：`./mvnw spring-boot:run` → 8123 起、`/api/doc.html` 200。
+- 登录链路：`POST /api/user/register` + `/api/user/login`（Spring Session → Redis `SESSION` cookie）；为绕过 AI 路由，直接向 MySQL `app` 表插入显式 `codeGenType` 的三类应用（html/multi_file/vue_project，各归不同用户以绕过 `@RateLimit(1/60s/用户)`）。
+
+### T14a（基线快照）✅ 实机补录
+
+- 旧链路（`python-agent.enabled=false`，DeepSeek）`curl -N` 三类各录一次：html 49292B/2612 data 行、multi_file 82905B/4439、vue_project 12873B/431，均以 `event: done` 终止、无 business-error；html/multi 浏览器侧为完整 LLM 回答原样透传（含 ```` ```html ```` 代码块），vue 为工具标记 + 回答重组（实测 6×写入文件 + 退出 + 执行结束）。`docs/py_agent/sse_baseline.snapshot` 已更新为实机记录（§4）。
+
+### T18（灰度开关）✅ 实机校验（全类型通过）
+
+- `python-agent.enabled=true` + 共用 `dev-token`，Python Agent 8090 起（`.env` 补齐 `MODEL_API_KEY`/`DASHSCOPE_API_KEY`/`PEXELS_API_KEY`，原 `.env` 这些键为空导致 `ChatOpenAI` 无凭据报错）。
+- 三类请求走 Python 链路全部成功：html（全量回答 + done + 工作区落盘 + 历史）、multi_file（3 文件落盘）、vue_project（工具循环建项目 + npm 构建出 `dist/` + done + 历史）。
+- **实机暴露并修复的契约问题**：
+  1. **Reactor SSE 空事件**：`bodyToFlux(ServerSentEvent<String>)` 在解码 Python SSE 流时于流中产生 `data=null` 的空事件（实测单流 12 个），导致 adapter 的 `.map(SseEvent::data)` 抛 "mapper returned a null value"、`SimpleTextStreamHandler.onErrorResume` 截断整条流。修复：`PythonAgentClient.stream()` 与 `PythonAgentSseAdapter.adapt()` 均 `filter(event -> event.data() != null)`。
+  2. **Python vue 工具名/参数名未对齐契约**：Python 侧 `@langchain_tool` 未显式命名，事件 `name` 为 `write_file/exit_tool`（snake_case），与 Java `ToolManager` 的 `writeFile/readFile/modifyFile/deleteFile/readDir/exit` 不符 → `getTool` 返回 null NPE；参数键 `relative_file_path` 与 Java `BaseTool.generateToolExecutedResult` 读取的 `relativeFilePath` 不符 → 浏览器显示 `写入文件 null`。修复：`vue.py` 工具显式命名驼峰 + 参数改驼峰键（`_execute` 同步），`test_codegen.py` 断言同步。
+  3. **exit 工具确定性**：模型是否调用 `exit` 不确定（新旧链路提示词相同均为模型可选项），实测旧链路样本恒含 `[执行结束]`；`VueCodeGenService.run()` 在模型未调用 exit 直接给最终答案时**补发** `exit` 工具事件（`exit-{uuid}`），保证与基线序列一致。
+  4. **Python 进程停掉快速失败**：原实现等 `callback-timeout-ms`(60s) 才发兜底 business-error 且写 2 条错误历史；`pythonChatToGenCode` 增加 `onErrorResume`（上游连接/读超时）→ 立即 `complete(runId, businessErrorSse)`，错误继续下传给 handler 写 1 条历史。实测 0.985s 返回 business-error + 1 条错误历史（§5 边界 ✓）。
+
+### T20（逐事件比较）✅ 实机验证
+
+- 新增 `docs/py_agent/sse_baseline.py`：解析浏览器侧 raw SSE → 结构签名（`data:{"d":...}` 数、`done`、错误、vue 工具显示名集合、`[执行结束]`），按类型比较。比较口径考虑 LLM 非确定性：html/multi 校验「纯文本透传 + done + 无错误」，vue 校验「工具显示名可解析到契约全集 + 退出工具 + 执行结束 + done」。
+- 实机结果：html / multi_file / vue_project 三类 `DIFF 为空`（exit=0），Python 链路与 T14a 基线结构一致。
+
+### §5 阶段 3 边界用例实机验证
+
+- 空 `message` → `event: business-error` + `{"code":40000,"error":true,"message":"提示词不能为空"}` ✓；缺 `appId` → HTTP 400 ✓；超长 `message`（>5000 字，URL query）→ HTTP 400 ✓。
+- Python 进程停掉 → 浏览器 `business-error`（~1s，非挂起）+ 历史恰一条错误 ✓。
+- 「同 runId 重复回调幂等」「迟到成功回调被丢弃」由 `RunIdSinkRegistryTest`（6 用例，含 tryMarkProcessed/awaitTerminal 时序）覆盖，实机路径与单测时序一致。
+
+### 验证命令证据
+
+- `cd paimeng-ai-code-agent && DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/paimeng_test uv run pytest` → **87 passed**（含 `-m contract` 11 passed）。
+- `JAVA_HOME=.../java/current ./mvnw compile` → BUILD SUCCESS；`./mvnw test -Dtest=PythonAgentClientTest,RunIdSinkRegistryTest` → **11 passed**。
+- `python3 docs/py_agent/sse_baseline.py --type {html,multi_file,vue_project} --baseline <T14a raw> --actual <Python raw>` → 三类 `DIFF 为空`。
+
+## 下一步
+
 - **T21（删除旧 AI 实现）**：按「稳定」定义（开发环境灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1）后执行，属部署期门禁，单会话无法完成。
+

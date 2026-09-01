@@ -204,7 +204,7 @@ Python 侧需迁移并复刻以下根 `src` 组件（迁移后 Java 侧删除对
 
 > 并行：T6-T7、T8、T9 相互独立（依赖 T4）；T10 依赖 T6；T11 等待 T5/T7-T10；T12/T13 串行在 T11 后。
 
-### 阶段 3：Java 接入（状态：**待办**）
+### 阶段 3：Java 接入（状态：**完成**）
 
 | # | 任务 | 产出物 | 依赖 |
 |---|---|---|---|
@@ -215,7 +215,7 @@ Python 侧需迁移并复刻以下根 `src` 组件（迁移后 Java 侧删除对
 | T17 | 错误/超时映射：`read-timeout-ms` 超时、`error` 事件、失败回调 → 浏览器 `business-error` + 幂等历史 | `…/service/impl/AppServiceImpl.java` | T15、T16 |
 | T18 | 灰度开关校验：`python-agent.enabled=false` 走旧链路（行为不变）；`true` 走 Python 链路 | `…/service/impl/AppServiceImpl.java` | T17 |
 
-### 阶段 4：验证切换（状态：**待办**）
+### 阶段 4：验证切换（状态：**进行中**）
 
 | # | 任务 | 产出物 | 依赖 |
 |---|---|---|---|

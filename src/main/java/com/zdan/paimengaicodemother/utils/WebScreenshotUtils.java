@@ -19,7 +19,10 @@ import org.openqa.selenium.support.ui.WebDriverWait;
 
 import java.io.File;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * 截图工具类
@@ -31,11 +34,18 @@ public class WebScreenshotUtils {
 
     private static final WebDriver WEB_DRIVER;
 
-    // 全局静态初始化，避免重复初始化驱动程序：
+    // 全局静态初始化，避免重复初始化驱动程序；
+    // 环境无 Chrome 时降级为 null（截图功能不可用），不阻断后端启动
     static {
         final int DEFAULT_WIDTH = 1600;
         final int DEFAULT_HEIGHT = 900;
-        WEB_DRIVER = initChromeDriver(DEFAULT_WIDTH, DEFAULT_HEIGHT);
+        WebDriver driver = null;
+        try {
+            driver = initChromeDriver(DEFAULT_WIDTH, DEFAULT_HEIGHT);
+        } catch (Exception e) {
+            log.warn("初始化 Chrome 浏览器失败，截图功能不可用: {}", e.getMessage());
+        }
+        WEB_DRIVER = driver;
     }
 
     /**
@@ -43,7 +53,9 @@ public class WebScreenshotUtils {
      */
     @PreDestroy
     public void destroy() {
-        WEB_DRIVER.quit();
+        if (WEB_DRIVER != null) {
+            WEB_DRIVER.quit();
+        }
     }
 
     /**
@@ -128,10 +140,51 @@ public class WebScreenshotUtils {
     }
 
     /**
+     * 检测当前环境是否存在 Chrome/Chromium 可执行文件
+     *
+     * @return true 表示存在
+     */
+    private static boolean isChromeAvailable() {
+        // 常见 Chrome/Chromium 可执行文件路径
+        List<String> candidates = new ArrayList<>(List.of(
+                "/usr/bin/google-chrome",
+                "/usr/bin/google-chrome-stable",
+                "/usr/bin/chromium",
+                "/usr/bin/chromium-browser",
+                "/opt/google/chrome/chrome",
+                "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+                "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
+        ));
+        // 遍历 PATH 目录下的常见可执行文件名
+        String pathEnv = System.getenv("PATH");
+        if (StrUtil.isNotBlank(pathEnv)) {
+            for (String dir : pathEnv.split(Pattern.quote(File.pathSeparator))) {
+                candidates.add(dir + File.separator + "google-chrome");
+                candidates.add(dir + File.separator + "chromium");
+                candidates.add(dir + File.separator + "chromium-browser");
+                if (FileUtil.isWindows()) {
+                    candidates.add(dir + File.separator + "chrome.exe");
+                }
+            }
+        }
+        for (String path : candidates) {
+            if (FileUtil.exist(path) && !FileUtil.isDirectory(path)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * 初始化 Chrome 浏览器驱动
      */
     public static WebDriver initChromeDriver(int width, int height) {
         try {
+            // 环境无 Chrome 可执行文件时快速失败，避免 WebDriverManager 联网下载驱动阻塞启动
+            if (!isChromeAvailable()) {
+                log.warn("未检测到 Chrome 浏览器，跳过驱动初始化");
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "初始化 Chrome 浏览器失败");
+            }
             // 自动管理 ChromeDriver
             WebDriverManager.chromedriver().setup();
             // 配置 Chrome 选项

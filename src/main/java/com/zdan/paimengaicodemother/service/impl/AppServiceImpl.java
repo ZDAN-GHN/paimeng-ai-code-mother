@@ -263,9 +263,16 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         request.setThreadId("app:" + appId);
         request.setWorkspacePath(workspacePath);
         request.setHistory(loadRecentHistory(appId));
-        // 3. 调用 Python 主通道；错误事件触发 failed 终端（幂等）
+        // 3. 调用 Python 主通道；错误事件触发 failed 终端（幂等）；
+        //    上游调用失败（连接/读超时）时立即触发 business-error 终端，不等回调超时（§1.5 兜底）
         Flux<PythonAgentClient.SseEvent> pythonSse = pythonAgentClient.stream(request)
-                .doOnNext(event -> handlePythonErrorEvent(runId, appId, loginUser, event));
+                .doOnNext(event -> handlePythonErrorEvent(runId, appId, loginUser, event))
+                .onErrorResume(error -> {
+                    log.error("调用 Python Agent 失败，runId: {}, message: {}", runId, error.getMessage());
+                    runIdSinkRegistry.complete(runId, businessErrorSse(ErrorCode.SYSTEM_ERROR, "AI 服务调用失败，请稍后重试"));
+                    // 错误继续向下传递，由 handler 记录一条错误历史（保持既有语义）
+                    return Flux.error(error);
+                });
         // 4. 事件分流 → 浏览器显示文本（复用现有 handler，§1.6）
         Flux<String> display = pythonAgentSseAdapter.adapt(pythonSse, codeGenTypeEnum, chatHistoryService, appId, loginUser);
         // 5. 显示文本包 {"d":...}；主通道结束后等待回调终端信号，超时用兜底 business-error

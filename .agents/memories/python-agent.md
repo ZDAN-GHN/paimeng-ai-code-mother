@@ -2,16 +2,17 @@
 
 > Python Agent（FastAPI + LangGraph + LangChain）侧的工作记忆。权威契约见 `docs/py_agent/task_plan.md` §1；任务分解见 §4。
 
-## 当前状态（2026-08-31 阶段 2 T6-T7 完成核对）
+## 当前状态（2026-09-01 T14a/T18/T20 实机验证完成）
 
 | 项 | 状态 |
 |---|---|
 | `paimeng-ai-code-agent/` | **已创建**（`pyproject.toml`/`uv.lock`/`.python-version`/`app/`/`tests/`） |
 | 技术基线 | Python 3.13.15（`.python-version` 锁定）+ FastAPI 0.141.1 + LangGraph 1.2.11 + Pydantic 2.13.5，`uv` 管理 |
 | 依赖坑 | 已规避：fastapi 0.141.1 与 starlette 1.6.0 `pip check` 全绿（不再存在 0.115/1.0 不兼容） |
-| T1-T13 | **全部完成**，`uv run pytest` **84 passed**（`-m contract` 11 passed）；阶段 2（T6-T13）全部落地，含离线 e2e（golden 夹具） |
+| T1-T20 | **全部完成**，`uv run pytest` **87 passed**（`-m contract` 11 passed）；T14a/T18/T20 **实机验证通过**（Python 链路三类型灰度实测 + `sse_baseline.py` `DIFF 为空`） |
 | langgraph-checkpoint-postgres | 3.1.2，`PostgresSaver(pool)` 接受 psycopg `ConnectionPool`；`setup()`/`get_tuple()` 已确认 |
-| PostgreSQL 实例 | 本机未安装/未启动（T19 checkpoint 恢复测试待环境就绪后跑） |
+| PostgreSQL 实例 | 用户态 PG16 于 127.0.0.1:5432（清华镜像 deb 解包 + `LD_LIBRARY_PATH`）；`_pool()` 需 `kwargs={"autocommit": True}, open=True` |
+| MySQL/Redis 实例 | 用户态 MySQL 8.0.36（127.0.0.1:3306，root/root，DB `paimeng_ai_code_mother`）+ Redis 7.2.5（6379）就绪 |
 
 ## 已落地模块
 
@@ -47,13 +48,18 @@
 
 ## 下一步任务
 
-阶段 1-3（T0-T18）代码已全部落地（Python 84 passed；Java compile + 纯逻辑单测 11 passed）。剩余为**环境就绪项**：
+阶段 4 验证（T19/T20）已实机完成。剩余为**部署期门禁 T21**：
 
-- **PostgreSQL ✅（T19 已完成）**：用户态部署 PG16（清华镜像 deb 解包 + LD_LIBRARY_PATH + initdb/pg_ctl 非 root 于 5432，trust）；`_pool()` 需 `kwargs={"autocommit": True}, open=True`（`setup()` 的 `CREATE INDEX CONCURRENTLY` 要无事务块）；checkpoint 测试 87 passed
-- **MySQL/Redis 实机（待办）**：T14a 补录浏览器事件基线（`sse_baseline.snapshot` 当前为代码推导的结构性基线）→ T18 灰度开关 live 校验 → T20 逐事件比较（`sse_baseline.py`）
-- **T21**：按「稳定」定义（灰度 ≥7 天 + T19/T20 全绿 + 无 P0/P1）后删除旧 Java AI 实现
+- **T21（待稳定期）**：按「稳定」定义（开发环境灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1）后删除旧 Java AI 实现（`ai/codegen`、`langgraph4j` 等，保留 `ai/tools` 展示格式与 `core/handler`），并全量回归。
 
-历史写入选型澄清：Python 链路成功 AI 历史由 handler 在流结束写（与旧链路一致），回调 success 不重复写；失败/超时由回调/超时兜底幂等写错误历史。
+历史写入选型澄清：Python 链路成功 AI 历史由 handler 在流结束写（与旧链路一致），回调 success 不重复写；失败/超时由回调/超时兜底幂等写错误历史。实测：Python 进程停掉 → 浏览器 ~1s 内 business-error + 恰好 1 条错误历史（Java 侧 `onErrorResume` 立即 `complete(runId, businessErrorSse)`，错误继续下传给 handler 写历史）。
+
+## 实机验证发现的契约要点（2026-09-01）
+
+- **vue 工具名/参数必须驼峰**：`@langchain_tool` 需显式命名 `writeFile/readFile/modifyFile/deleteFile/readDir/exit`（§1.3 与 Java `ToolManager` 一致），否则 Java `getTool` 返回 null NPE；参数键同样驼峰（`relativeFilePath`/`relativeDirPath`/`oldContent`/`newContent`），否则浏览器 `[工具调用] 写入文件 null`。
+- **exit 工具确定性**：模型是否调用 exit 不确定，`VueCodeGenService.run()` 在模型直接给最终答案时补发 exit 工具事件（`exit-{uuid}`），保证与基线 `[执行结束]` 序列一致。
+- **Reactor SSE 空事件**：Java `bodyToFlux(ServerSentEvent<String>)` 解码本流会产生 `data=null` 空事件（实测单流 12 个），Java 侧 `PythonAgentClient.stream()` 与 `PythonAgentSseAdapter.adapt()` 均需 `filter(event -> event.data() != null)`。
+- `.env` 的 `MODEL_API_KEY`/`DASHSCOPE_API_KEY`/`PEXELS_API_KEY` 原为空占位，实机联调时从 `application-local.yml` 补齐（同值）。
 
 ## 鉴权与工作区
 

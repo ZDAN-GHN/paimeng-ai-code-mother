@@ -91,6 +91,8 @@ public class PythonAgentClient {
                 .retrieve()
                 .bodyToFlux(new ParameterizedTypeReference<ServerSentEvent<String>>() {
                 })
+                // Reactor 解码 SSE 流时可能在流中产生空事件（event/data 均为 null），无语义载荷，过滤掉避免下游空指针
+                .filter(sse -> sse.data() != null)
                 .map(sse -> new SseEvent(sse.event(), sse.data()));
     }
 

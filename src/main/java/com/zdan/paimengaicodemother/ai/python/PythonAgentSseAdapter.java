@@ -56,8 +56,11 @@ public class PythonAgentSseAdapter {
                               CodeGenTypeEnum codeGenType,
                               ChatHistoryService chatHistoryService,
                               long appId, User loginUser) {
-        // error 事件不进入业务展示流（由调用方负责 failed 终端）
+        // error 事件不进入业务展示流（由调用方负责 failed 终端）；
+        // 过滤 data 为 null 的事件：Reactor 对 SSE 流解码时可能在流中产生空事件（data=null，无 event/id/comment），
+        // 该事件无语义载荷，直接跳过可避免下游 map 因 null 中断整条流
         Flux<String> dataFlux = pythonSse
+                .filter(event -> event.data() != null)
                 .filter(event -> !ERROR_EVENT.equals(event.event()))
                 .map(PythonAgentClient.SseEvent::data);
         return switch (codeGenType.getBuildType()) {

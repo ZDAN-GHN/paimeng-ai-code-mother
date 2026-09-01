@@ -5,7 +5,7 @@
 
 ## 一句话现状
 
-Java (Spring Boot) + Python (FastAPI) **双后端重构中**。阶段 1-3（T0-T18）实现已全部落地；T19（checkpoint）已实机验证（用户态 PostgreSQL 16）：Python `uv run pytest` 87 passed；Java `./mvnw compile` 通过 + 纯逻辑单测 11 passed。剩余为 MySQL/Redis 实机项（T14a 补录基线 / T18 灰度 live / T20 逐事件比较）与稳定后 T21。
+Java (Spring Boot) + Python (FastAPI) **双后端重构中**。阶段 1-4 实现（T0-T20）已全部落地；T14a/T18/T20 已**实机验证**（用户态 PostgreSQL 16 + MySQL 8.0.36 + Redis 7.2.5 + 后端可启动 + DeepSeek 在线）：旧链路三类型基线已录、Python 链路三类型灰度实测通过、`sse_baseline.py` 逐事件比较 `DIFF 为空`。Python `uv run pytest` 87 passed（contract 11）；Java `./mvnw compile` + 纯逻辑单测 11 passed。剩余为稳定期门禁 T21（灰度 ≥7 天 + 全绿后删除旧 AI 实现）。
 
 ## 领域记忆（`.agents/memories/`）
 
@@ -28,4 +28,4 @@ Java (Spring Boot) + Python (FastAPI) **双后端重构中**。阶段 1-3（T0-T
 
 ## 下一步
 
-阶段 3：T14a-T18 代码落地完成；待实机校验（T14a 补录基线 / T18 灰度 / T19 checkpoint / T20 逐事件比较）。每完成一个任务：更新 `.agents/memories/` 对应文档 + 在 `docs/py_agent/progress.md` 追加一行（含日期与命令证据）。
+阶段 4：T19/T20 已实机验证完成；剩余 **T21（部署期门禁）**：开发环境切 Python 灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1 后删除旧 Java AI 实现（`ai/codegen`、`langgraph4j` 等，保留 `ai/tools` 展示格式与 `core/handler`）。每完成一个任务：更新 `.agents/memories/` 对应文档 + 在 `docs/py_agent/progress.md` 追加一行（含日期与命令证据）。

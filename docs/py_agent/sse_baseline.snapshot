@@ -1,14 +1,15 @@
 # 浏览器 SSE 事件基线快照（T14a）
 
-> 来源：由现有 Java handler/controller 代码**推导的结构性基线**（`AppController.chatToGenCode`、`StreamHandlerExecutor`、`JsonMessageStreamHandler`、`SimpleTextStreamHandler`、`ToolManager`/`BaseTool`、`BuilderExecutor`）。
-> 状态：**env 阻断，暂以结构性基线冻结契约** —— 本机无 MySQL/Redis（且无 root 无法安装、Docker WSL 集成未激活），无法启动旧 Java AI 链路，故**未做 curl -N 实机录制**。本文件在 T15/T17 改动 `AppServiceImpl` 前落地，用于冻结浏览器侧事件契约；待环境就绪后按 §5 命令补录三类实机快照，T20 用 `sse_baseline.py` 做逐事件比较。
+> 来源：现有 Java handler/controller 代码**推导的结构性基线**（`AppController.chatToGenCode`、`StreamHandlerExecutor`、`JsonMessageStreamHandler`、`SimpleTextStreamHandler`、`ToolManager`/`BaseTool`、`BuilderExecutor`），并经 **2026-09-01 实机补录验证**（MySQL+Redis+DeepSeek 就绪后 curl -N 实测三类）。
+> 状态：**已实机补录（2026-09-01）**。本文件在 T15/T17 改动 `AppServiceImpl` 前落地，用于冻结浏览器侧事件契约；§4 记录实机结果，T20 用 `sse_baseline.py` 对 Python 链路的浏览器侧输出做逐事件比较。
 
 ## 1. 浏览器侧 wire 契约（Java 原样负责，Python 不直接接触，§1.6）
 
 - 主通道：`GET /api/app/chat/gen/code?appId={appId}&message={message}`，`Accept: text/event-stream`。
 - 每个事件：`data: {"d":"<显示文本>"}`（`ServerSentEvent.data` 为 `{"d": chunk}` 的 JSON；多行文本经 SSE 框架按 `data:` 行序列化）。
 - 终止事件：`event: done`（无 data）。
-- 错误事件：`event: business-error` + `data: {"error":true,"code":<code>,"message":"..."}`。
+- 错误事件：`event: business-error` + `data: {"error":true,"code":<code>,"message":"..."}`（前端 `AppChatPage.vue` 读 `.message`）。
+- 限流：`@RateLimit(USER, rate=1, rateInterval=60)` —— 每用户 60s 一次（Redisson），三类实测需 3 个用户各录一次。
 
 ## 2. 事件序列模板（按 codeGenType）
 
@@ -53,17 +54,47 @@ event: done
 
 ## 3. 构建与历史（旧链路行为，Python 链路迁移到回调，§1.4）
 
-- 旧链路：`StreamHandlerExecutor.doHandle` 在流 `doOnComplete` 时执行 `BuilderExecutor.doBuild`；handler 在 `doOnComplete` 写 AI 历史。
+- 旧链路：`StreamHandlerExecutor.doHandle` 在流 `doOnComplete` 时执行 `BuilderExecutor.doBuild`；handler 在 `doOnComplete` 写 AI 历史（含完整回答文本，含 ``` 代码块）。
 - Python 链路：主通道结束后进入「等待回调」；回调（success）→ 写历史 + `BuilderExecutor.doBuild` + 向 runId 关联的浏览器连接发 `done` 并关闭；回调超时（`callback-timeout-ms`）→ 浏览器 `business-error` + 幂等错误历史（§1.5）。
 
-## 4. 实机补录命令（待 MySQL/Redis 就绪后执行）
+## 4. 实机补录记录（2026-09-01，MySQL+Redis+DeepSeek 就绪）
+
+补录环境：本机 MySQL(3306)/Redis(6379)/PostgreSQL(5432) 已就绪；`python-agent.enabled=false`（旧 Java AI 链路，DeepSeek key 在 `application-local.yml`）。
 
 ```bash
-# 启动依赖：MySQL(3306) + Redis(6379)，执行 sql/create_table.sql，配置 application-local.yml
-# 登录取得 cookie 后，三类各录一次：
-curl -N -b <cookie> "http://localhost:8123/api/app/chat/gen/code?appId=1&message=<html消息>"  > snapshot_html.raw
-curl -N -b <cookie> "http://localhost:8123/api/app/chat/gen/code?appId=2&message=<multi_file消息>" > snapshot_multi_file.raw
-curl -N -b <cookie> "http://localhost:8123/api/app/chat/gen/code?appId=3&message=<vue_project消息>" > snapshot_vue_project.raw
+# 3 个用户（限流 1/60s/用户）：baseline_user / baseline_user2 / baseline_user3
+# 直接向 MySQL app 表插入三类应用（绕过 AI 路由，显式 codeGenType）：
+#   app 4 html / app 5 multi_file / app 6 vue_project（各归属不同用户）
+curl -N -b <cookie1> "http://localhost:8123/api/app/chat/gen/code?appId=4&message=<html消息>" > snapshot_html.raw
+curl -N -b <cookie2> "http://localhost:8123/api/app/chat/gen/code?appId=5&message=<multi_file消息>" > snapshot_multi_file.raw
+curl -N -b <cookie3> "http://localhost:8123/api/app/chat/gen/code?appId=6&message=<vue_project消息>" > snapshot_vue_project.raw
 ```
+
+实机结果（原始文件记录于 `/tmp/sse_{html,multi,vue}.raw`，含完整字节流；以下为结构化摘要）：
+
+| 类型 | 字节数 | data 行数 | 解码文本长度 | 终止事件 | 落盘产物 | 说明 |
+|---|---|---|---|---|---|---|
+| html | 49292 | 2612 | 7427 字符 | `event: done` | `tmp/code_output/html_4/index.html` | 文本 = 完整 LLM 回答（说明 + ```` ```html ```` + 代码 + 优化建议），原样透传 |
+| multi_file | 82905 | 4439 | 13580 字符 | `event: done` | `tmp/code_output/multi_file_5/{index.html,script.js,style.css}` | 同上，回答内嵌 ```html，落盘按文件拆分 |
+| vue_project | 12873 | 431 | 5478 字符 | `event: done` | `tmp/code_output/vue_project_6/`（含 npm 构建产物 dist/） | JsonMessageStreamHandler 路径：思维文本 + 工具标记 + 最终回复 |
+
+- 三类 SSE 原始字节均以 `data: {"d":"..."}` 分隔流 + 单个 `event: done` 结尾，无 `business-error`。
+- html 的 chat_history AI 消息 = 完整回答（含 ```` ```html ```` 代码块），handler 于流结束时写入（§3 行为实证）。
+- vue_project 的实测工具标记序列（与 §2.2 表格完全一致）：
+
+```
+[选择工具] 写入文件  ×6（6 个独立 tool_request id，每个输出一次，未触发同 id 去重）
+[工具调用] 写入文件 package.json
+[工具调用] 写入文件 vite.config.js
+[工具调用] 写入文件 index.html
+[工具调用] 写入文件 src/main.js
+[工具调用] 写入文件 src/App.vue
+[工具调用] 写入文件 src/styles/main.css
+[选择工具] 退出工具调用
+[执行结束]
+最终回复：项目已生成完毕，包含 6 个文件，运行后可实时展示当前的日期与时间（每秒自动更新），并支持移动端响应式布局。
+```
+
+> T20 比较要点：html/multi_file 浏览器侧为「回答原样透传」，无工具标记；vue_project 为「工具标记 + 回答」重组。Python 链路经 handler 转出浏览器侧时，须与上表字节级语义一致（尤其 vue 的 `[选择工具]`/`[工具调用]` 显示名与 `exit`→`[执行结束]`）。
 
 T20 的 `sse_baseline.py` 按本文件的结构化字段（逐事件：`event` 名 + `data` JSON 字段集合）做逐事件比较。
