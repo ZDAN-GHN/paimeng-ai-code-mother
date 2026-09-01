@@ -15,13 +15,13 @@
 1. 启动依赖服务：MySQL (localhost:3306) 和 Redis (localhost:6379)
 2. 创建数据库：运行 `sql/create_table.sql`
 3. 配置 `src/main/resources/application-local.yml`（参考 `application.yml`，需填入 API keys）
-4. Python Agent：`cd paimeng-ai-code-agent && uv sync && cp .env.example .env`（需 PostgreSQL 用于 LangGraph checkpoint，配置见 `docs/py_agent/task_plan.md` §9）
+4. Python Agent：`cd paimeng-ai-code-agent && UV_PROJECT_ENVIRONMENT=.venv-wsl uv sync && cp .env.example .env`（需 PostgreSQL 用于 LangGraph checkpoint，配置见 `docs/py_agent/task_plan.md` §9）
 5. 前端配置已包含在 `paimeng-ai-code-mother-frontend/.env.development`
 
 ## Package Manager
 - **Maven Wrapper**：`./mvnw clean install`（Windows 使用 `mvnw.cmd`）
 - **前端 (npm)**：在 `paimeng-ai-code-mother-frontend/` 目录使用 `npm install`
-- **Python (uv)**：在 `paimeng-ai-code-agent/` 目录使用 `uv sync`（Python 3.13；依赖以 `pyproject.toml` + `uv.lock` 锁定，不使用全局 pip 环境）
+- **Python (uv)**：在 `paimeng-ai-code-agent/` 目录使用 `UV_PROJECT_ENVIRONMENT=.venv-wsl uv sync`；WSL 虚拟环境固定为 `.venv-wsl/`，Python 3.14；依赖以 `pyproject.toml` + `uv.lock` 锁定，不使用全局 pip 环境
 
 ## Commands
 | Task | Command |
@@ -30,9 +30,9 @@
 | 运行全部 Java 测试 | `./mvnw test` |
 | 运行单个 Java 测试 | `./mvnw test -Dtest=类名` |
 | API 文档 | 启动后访问 `http://localhost:8123/api/doc.html` |
-| 运行 Python Agent | `cd paimeng-ai-code-agent && uv run uvicorn app.main:app --port 8090` |
-| 运行全部 Python 测试 | `cd paimeng-ai-code-agent && uv run pytest` |
-| 运行 Python 契约测试 | `cd paimeng-ai-code-agent && uv run pytest -m contract` |
+| 运行 Python Agent | `cd paimeng-ai-code-agent && UV_PROJECT_ENVIRONMENT=.venv-wsl uv run uvicorn app.main:app --port 8090` |
+| 运行全部 Python 测试 | `cd paimeng-ai-code-agent && UV_PROJECT_ENVIRONMENT=.venv-wsl uv run pytest` |
+| 运行 Python 契约测试 | `cd paimeng-ai-code-agent && UV_PROJECT_ENVIRONMENT=.venv-wsl uv run pytest -m contract` |
 | 前端开发服务器 | `cd paimeng-ai-code-mother-frontend && npm run dev` |
 | 前端构建 | `cd paimeng-ai-code-mother-frontend && npm run build` |
 | 前端类型检查 | `cd paimeng-ai-code-mother-frontend && npm run type-check` |
@@ -57,7 +57,7 @@
 - **微服务重构**：新架构代码位于 `paimeng-ai-code-mother-microservice/` 目录，包含 7 个微服务模块（未完成重构，不作为 Python Agent 迁移前提）
 - **MyBatis Flex 代码生成**：使用 `com.zdan.paimengaicodemother.generator` 包中的生成器，生成的 mapper 文件位于 `src/main/resources/mapper/`
 - **AI 框架（Java 旧实现）**：LangChain4j 和 LangGraph4j 构建 AI 工作流，主要逻辑在 `ai` 和 `langgraph4j` 包中；这些能力将迁移到 Python Agent，迁移完成后删除（保留 `ai/tools` 展示格式与 `core/handler`）
-- **Python Agent 技术栈**：Python 3.13 + FastAPI + LangGraph + LangChain + Pydantic 2；代码位于 `paimeng-ai-code-agent/app/`（顶层仅 `main.py` 入口，其余按子包 `api/`·`core/`·`models/`·`workspace/`·`tools/`·`services/`·`prompts/` 组织，结构见 `docs/py_agent/task_plan.md` §4）
+- **Python Agent 技术栈**：Python 3.14 + FastAPI + LangGraph + LangChain + Pydantic 2；代码位于 `paimeng-ai-code-agent/app/`（顶层仅 `main.py` 入口，其余按子包 `api/`·`core/`·`models/`·`workspace/`·`tools/`·`services/`·`prompts/` 组织，结构见 `docs/py_agent/task_plan.md` §4）
 - **Python 代码风格**：遵循 PEP 8，类型注解完整（Pydantic 2 模型），函数/类含 docstring；注释遵循项目注释风格
 - **数据分工**：PostgreSQL 仅保存 LangGraph checkpoint（`thread_id = app:{appId}`）；MySQL 继续保存业务数据和 `chat_history`
 - **Java↔Python 鉴权**：内部接口统一使用 `Authorization: Bearer {python-agent.token}`（Java 从 `python-agent.token` 配置读取，Python 从 `PYTHON_AGENT_TOKEN` 环境变量读取）

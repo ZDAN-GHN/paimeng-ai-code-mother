@@ -10,6 +10,7 @@
 ## 快速开始
 
 ```bash
+export UV_PROJECT_ENVIRONMENT=.venv-wsl
 uv sync
 cp .env.example .env   # 按需填写密钥
 uv run uvicorn app.main:app --port 8090
@@ -18,6 +19,7 @@ uv run uvicorn app.main:app --port 8090
 ## 测试
 
 ```bash
+export UV_PROJECT_ENVIRONMENT=.venv-wsl
 uv run pytest                 # 全部
 uv run pytest -m contract     # Java↔Python 契约
 ```

@@ -13,7 +13,7 @@
 在当前仓库新增独立的 Python Agent 子项目 `paimeng-ai-code-agent`，完整承载根目录 `src` 中可复用的 AI 能力（迁移组件清单见 §4）；Java Spring Boot 继续对外提供业务 REST/SSE 接口，只负责鉴权、业务状态、浏览器侧传输、构建与部署。
 
 **完成态（可判定）**：
-1. `./mvnw compile` 与 `cd paimeng-ai-code-agent && uv run pytest` 全绿；
+1. `./mvnw compile` 与 `cd paimeng-ai-code-agent && UV_PROJECT_ENVIRONMENT=.venv-wsl uv run pytest` 全绿；
 2. `python-agent.enabled=true` 时，浏览器端 `GET /api/app/chat/gen/code` 的事件序列与旧 Java 链路逐事件一致（对照 `docs/py_agent/sse_baseline.py` 基线，见 §5/§4-T20）；
 3. `python-agent.enabled=false` 时旧 Java 链路行为完全不变（灰度回滚路径）；
 4. 灰度稳定期满后删除旧 AI 实现，全量回归通过。
@@ -32,7 +32,7 @@
 
 ## 已确认架构
 
-- Python 3.13，`uv` 管理依赖；框架：FastAPI、LangGraph、LangChain、Pydantic 2。
+- Python 3.14，`uv` 管理依赖；框架：FastAPI、LangGraph、LangChain、Pydantic 2。
 - 依赖版本策略见 §8「依赖锁定」——不使用「最新稳定版」这种不可复现表述。
 - Java 使用 WebClient 直接 HTTP 调用 FastAPI（不引入 gRPC/Dubbo）。
 - Java 对外 SSE 连接负责浏览器侧传输封装；Python 负责全部 Agent 语义（模型、工作流、工具执行、Guardrail、代码解析、工作区落盘），并发出四类语义事件（见 §3）。
@@ -231,10 +231,10 @@ Python 侧需迁移并复刻以下根 `src` 组件（迁移后 Java 侧删除对
 
 - **阶段 1**
   - `./mvnw compile` 通过（T0）。
-  - `cd paimeng-ai-code-agent && uv sync && uv run pytest -m contract` 全绿（T3-T5）。
+  - `cd paimeng-ai-code-agent && UV_PROJECT_ENVIRONMENT=.venv-wsl uv sync && UV_PROJECT_ENVIRONMENT=.venv-wsl uv run pytest -m contract` 全绿（T3-T5）。
   - `curl -s http://localhost:8090/healthz` 返回 200 且含 `"status":"ok"`；不带 `Authorization` 调 `/v1/agent/stream` 返回 401。
 - **阶段 2**
-  - `cd paimeng-ai-code-agent && uv run pytest` 全绿（T6-T13 单测）。
+  - `cd paimeng-ai-code-agent && UV_PROJECT_ENVIRONMENT=.venv-wsl uv run pytest` 全绿（T6-T13 单测）。
   - 离线工作流端到端：给定 `message` + 空 `history`，用**固定夹具快照**（`paimeng-ai-code-agent/tests/fixtures/` 下的 golden 文件清单/关键内容片段）断言产出工作区文件，不依赖在线模型（LLM 非确定性导致「与旧实现 tree 一致」不可复现，M6）。
 - **阶段 3**
   - `./mvnw compile` 与 `./mvnw test -Dtest=AppServiceImplTest`（若存在）全绿。
@@ -283,14 +283,14 @@ Python 侧需迁移并复刻以下根 `src` 组件（迁移后 Java 侧删除对
 ## §8 依赖锁定（M2）
 
 - 统一用 `uv`（`pyproject.toml` + `uv.lock` 提交入库），不使用全局 pip 环境。
-- 禁止写「最新稳定版」；每个直接依赖给出下限/兼容约束，最终以 `uv.lock` 固定。
+- 直接依赖声明下限和兼容约束；每次升级以 `uv lock --upgrade` 解析当时最新稳定版本，完成兼容性与全量测试后提交 `uv.lock`。不使用不可复现的 `latest` 浮动标签。
 - 已知约束：FastAPI ↔ Starlette 必须 `pip check` 全绿（规避 FastAPI 0.115 / Starlette 1.0 不兼容）。
-- Python 3.13；LangGraph 使用带 PostgreSQL checkpoint 的 1.x 稳定线；Pydantic 2.x。
-- 本地被破坏的全局环境不影响子项目：`uv venv` 独立创建，`uv run` 进入。
+- Python 3.14；LangGraph 使用带 PostgreSQL checkpoint 的 1.x 稳定线；Pydantic 2.x。
+- 本地被破坏的全局环境不影响子项目：`UV_PROJECT_ENVIRONMENT=.venv-wsl uv venv .venv-wsl` 创建 WSL 虚拟环境，后续使用同一环境变量执行 `uv sync`/`uv run`。
 
 ## §9 运行与部署（M4）
 
-- **开发**：`cd paimeng-ai-code-agent && uv sync && cp .env.example .env`；`.env` 键：`PYTHON_AGENT_TOKEN`、`WORKSPACE_ROOT`（默认 `{repo}/tmp/code_output`）、`DATABASE_URL`（PostgreSQL DSN）、`JAVA_BASE_URL`、`MODEL_API_KEY` 等；启动 `uv run uvicorn app.main:app --port 8090`。
+- **开发**：`cd paimeng-ai-code-agent && UV_PROJECT_ENVIRONMENT=.venv-wsl uv sync && cp .env.example .env`；WSL 虚拟环境固定使用 `.venv-wsl/`；`.env` 键：`PYTHON_AGENT_TOKEN`、`WORKSPACE_ROOT`（默认 `{repo}/tmp/code_output`）、`DATABASE_URL`（PostgreSQL DSN）、`JAVA_BASE_URL`、`MODEL_API_KEY` 等；启动 `UV_PROJECT_ENVIRONMENT=.venv-wsl uv run uvicorn app.main:app --port 8090`。
 - **生产**：容器镜像 + 环境变量/Secret Manager 注入（键名同上）；健康检查挂探针（`/healthz`）。
 - **共享工作区**：Java 与 Python 同机或同容器卷，挂载点保证 Python 看到的 `WORKSPACE_ROOT` 与 Java `CODE_OUTPUT_ROOT_DIR`（`user.dir/tmp/code_output`）为同一绝对路径；异机部署必须将 `tmp/code_output` 挂到共享卷。
 

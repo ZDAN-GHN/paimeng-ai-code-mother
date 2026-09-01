@@ -1,5 +1,6 @@
-"""Python Agent 应用入口（FastAPI）。"""
+"""Python Agent 应用入口（FastAPI + Uvicorn）。"""
 
+import uvicorn
 from fastapi import FastAPI
 
 from app.api.routes import router as agent_router
@@ -14,3 +15,12 @@ async def healthz() -> dict[str, str]:
 
 
 app.include_router(agent_router)
+
+
+def run() -> None:
+    """启动 Uvicorn 服务（0.0.0.0:8090，不开启热重载）。"""
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8090, reload=False)
+
+
+if __name__ == "__main__":
+    run()

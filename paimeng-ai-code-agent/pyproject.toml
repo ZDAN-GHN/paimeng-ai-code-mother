@@ -3,7 +3,7 @@ name = "paimeng-ai-code-agent"
 version = "0.1.0"
 description = "派蒙 AI 应用工坊 Python Agent：承载 AI 能力（模型调用、LangGraph 工作流、工具执行、代码解析、工作区落盘）"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14,<3.15"
 dependencies = [
     # Web 框架：FastAPI ↔ Starlette 必须 pip check 全绿（规避 FastAPI 0.115 / Starlette 1.0 不兼容）
     "fastapi>=0.116.0",
@@ -15,11 +15,14 @@ dependencies = [
     "langgraph-checkpoint-postgres>=2.0.0",
     "psycopg[binary]>=3.2.0",
     # LangChain + DeepSeek（OpenAI 兼容规范）
-    "langchain>=0.3.0",
-    "langchain-openai>=0.3.0",
+    "langchain>=1.3.18",
+    "langchain-openai>=1.6.0",
     # 完成回调客户端
     "httpx>=0.28.0",
 ]
+
+[project.scripts]
+paimeng-agent = "app.main:run"
 
 [dependency-groups]
 dev = [
