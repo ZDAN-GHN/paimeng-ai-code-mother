@@ -17,11 +17,11 @@
 
 ## 依赖服务 — WSL 环境（当前默认）
 
-- **灰度状态（2026-09-01 起，2026-09-03 已决策回切）**：`application-local.yml` 现为 `python-agent.enabled: true`（token 与 Python `.env` 同值）；**2026-09-03 架构定稿后 P0 待执行回切 `false`**（Python Agent 全面退役，过渡期主链路 = 旧 Java AI）；`application.yml` 仓库默认仍为 `${PYTHON_AGENT_ENABLED:false}`。
+- **灰度状态（2026-09-03 P0 已执行，Issue #2）**：`application-local.yml` 已回切 `python-agent.enabled: false`（过渡期主链路 = 旧 Java AI，当日 WSL 全栈 e2e 全流程验证通过：建应用 → SSE 生成 → 构建 → 部署）；`application.yml` 仓库默认为 `${PYTHON_AGENT_ENABLED:false}`；TS Agent 接入后再新增 `ts-agent.enabled` 灰度。
 
 - **MySQL**：用户态安装 `~/.local/opt/mysql8`（8.0.46，tarball 解包，非系统服务）。启动 `bash ~/.local/opt/mysql8/start.sh`（监听 0.0.0.0:3306，socket `/tmp/mysql-zdan.sock`，日志 `~/.local/opt/mysql8/mysqld.log`，stop 用同目录 `mysqladmin -uroot -proot --socket=/tmp/mysql-zdan.sock shutdown`）。root 密码 2026-09-01 由空改为 `root`（与 `application.yml` 数据源一致，start.sh 已同步）。库 `paimeng_ai_code_mother` 已按 `sql/create_table.sql` 建表（user/app/chat_history）；另有课程模块的 `course_dev` 库。**Windows IDE 直连**（2026-09-01 实测）：Host = WSL IP（`hostname -I`，重启可能漂移）、Port 3306、账号 `root`（`root@'172.31.%'`）/root；bind 0.0.0.0 仅暴露给 WSL NAT 内网，局域网不可达。
 - **Redis**：WSL 内源码编译运行（`./src/redis-server *:6379`，无密码）。
-- **PostgreSQL**：用户态 PG16 @ 127.0.0.1:5432（清华镜像 deb 解包 + `LD_LIBRARY_PATH`），原仅存 LangGraph checkpoint。**2026-09-03 决策即刻停用**（P0 待执行）：checkpoint 职责随 Python Agent 退役消失，`generation_run` 落 MySQL；RAG v2（pgvector）时按本 runbook 重启。
+- **PostgreSQL**：用户态 PG16 @ 127.0.0.1:5432（清华镜像 deb 解包 + `LD_LIBRARY_PATH`），原仅存 LangGraph checkpoint。**已停用（2026-09-03 P0 执行确认）**：checkpoint 职责随 Python Agent 退役消失，`generation_run` 落 MySQL；现状为无服务、无容器自启机制、5432 无监听（用户态安装保留），RAG v2（pgvector）时按本 runbook 重启。
 
 ## 依赖服务 — Windows 环境（此前实机验证所用）
 
@@ -51,7 +51,7 @@
 
 ## 踩坑与规避（WSL + DSH 沙箱环境）
 
-- **DSH 沙箱 workspace-write 拦家目录写**：mysqld 需写 `~/.local/opt/mysql8`（data/log/pid），start.sh 须以完整权限运行；`uv run` 因 `~/.cache/uv` 被拒 → 直接调 `.venv/bin/uvicorn`（迁移后 `wsl-rt-env/python/.venv/bin/uvicorn`）；npm 缓存被拒 → 加 `--cache <repo>/tmp/npm-cache`。
+- **DSH 沙箱 workspace-write 拦家目录写**：mysqld 需写 `~/.local/opt/mysql8`（data/log/pid），start.sh 须以完整权限运行；`./mvnw spring-boot:run` 同理会写 `~/.m2/repository`（resolver-status.properties），亦须完整权限（2026-09-03 P0 e2e 实测）；`uv run` 因 `~/.cache/uv` 被拒 → 直接调 `.venv/bin/uvicorn`（迁移后 `wsl-rt-env/python/.venv/bin/uvicorn`）；npm 缓存被拒 → 加 `--cache <repo>/tmp/npm-cache`。
 - **前端 node_modules 为 Windows 侧安装**（仅 win32 二进制）：WSL 跑 `npm run dev` 前补装 `npm i --no-save --cache <repo>/tmp/npm-cache @rollup/rollup-linux-x64-gnu @esbuild/linux-x64`；重装 node_modules 后需重做。新约定 node_modules 位于 `wsl-rt-env/frontend/node_modules`（待迁移）。
 - **WSL2 NAT 无 localhost 转发**：Java 配置 `localhost:3306/6379` 只解析到 WSL 内实例；连 Windows 侧实例需网关 IP（`ip route show default`）。
 

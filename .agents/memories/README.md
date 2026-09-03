@@ -16,7 +16,7 @@
 
 ## 更新约定
 
-- **每次完成任务**：更新对应领域文档 + 根目录 `MEMORY.md` 的「一句话现状」，并在进度日志（当前为 `docs/py_agent/progress.md`，TS Agent 实施后迁至 `docs/ts_agent/progress.md`）追加一行（含日期与命令证据）。
+- **每次完成任务**：更新对应领域文档 + 根目录 `MEMORY.md` 的「一句话现状」，并在进度日志（TS Agent 实施期：`docs/ts_agent/progress.md`；Python Agent 历史：`docs/py_agent/progress.md`）追加一行（含日期与命令证据）。
 - **权威变更**：涉及目标架构、契约、验收的改动，必须先改 `docs/ts_agent/architecture.md`（或对应的 `docs/ts_agent/contract.md`）并走 `agent-design-review`；本目录只做同步摘要。
 - **文档尽量薄**：只写「当前状态 + 决策 + 坑 + 指针」，详细论证留在 `docs/`。
 

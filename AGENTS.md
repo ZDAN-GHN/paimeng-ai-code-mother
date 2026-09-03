@@ -3,12 +3,12 @@
 ## Project Overview
 派蒙 AI 应用工坊：基于 AI 的零代码应用生成平台。用户通过自然语言描述需求，AI 自动生成前端代码并可视化预览、部署。
 
-**三服务架构（2026-09-03 定稿，实施未启动）**，权威设计见 `docs/ts_agent/architecture.md`：
+**三服务架构（2026-09-03 定稿，实施已启动：P0 完成，P1 待启动）**，权威设计见 `docs/ts_agent/architecture.md`：
 - **Java Spring Boot**（`src/`，业务后端）：业务 REST、鉴权（签发短时 JWT）、充值/积分/会员、聊天历史、构建与部署（`BuilderExecutor`）。
 - **TS Agent**（新建，Node + Fastify + Vercel AI SDK + XState v5）：需求访谈、线框、planner→coder→reviewer 工作流、工具执行、Guardrail、SSE 直连浏览器（JWT 鉴权），通过内部回调让 Java 结算/写历史/触发构建。
 - **Python RAG**（新建 `paimeng-ai-code-rag/`，FastAPI）：检索服务，day-1 只读直查 MySQL 做 few-shot，v2 上 pgvector。
 
-**过渡态**：Python Agent（`paimeng-ai-code-agent/`）已定稿**全面退役**（用户决策 2026-09-03）：回切旧 Java AI 链路兜底（`python-agent.enabled=false`，P0 待执行，执行前本地配置仍为 true）、T21 门禁重定向为"TS Agent 契约对等 + 回归全绿"、PG 即刻停用、目录待 RAG 骨架复用后删除。`docs/py_agent/` 全目录转为历史参考（提示词/契约/验证记录是 TS 移植参考源）。
+**过渡态**：Python Agent（`paimeng-ai-code-agent/`）已定稿**全面退役**（用户决策 2026-09-03）：回切旧 Java AI 链路兜底（`python-agent.enabled=false`，**P0 已执行 2026-09-03**，本地配置已回切并 e2e 验证）、T21 门禁重定向为"TS Agent 契约对等 + 回归全绿"、PG 即刻停用、目录待 RAG 骨架复用后删除。`docs/py_agent/` 全目录转为历史参考（提示词/契约/验证记录是 TS 移植参考源）。
 
 项目详细上下文: [CONTEXT.md](CONTEXT.md)
 跨会话工作记忆: [MEMORY.md](MEMORY.md)

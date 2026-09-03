@@ -5,7 +5,7 @@
 
 ## 一句话现状
 
-**2026-09-03 架构定稿（经四轮设计审讯确认）：Java（业务/鉴权/积分/历史/构建）+ TS Agent（新建，Node/Fastify + Vercel AI SDK + XState v5，前端 fetch-SSE 直连 + JWT）+ Python RAG（新建 `paimeng-ai-code-rag/`，day-1 只读 few-shot 检索）三服务**；权威设计 `docs/ts_agent/architecture.md`。Python Agent（T0-T20 已实机验证但未上生产）**全面退役**：回切旧 Java AI 兜底、T21 门禁重定向为"TS Agent 契约对等 + 回归全绿"、PG 即刻停用、`paimeng-ai-code-agent/` 目录待 RAG 骨架复用后删除（git 历史即移植参考）；`docs/py_agent/` 转历史参考。**实施未启动**：P0（回切+停 PG，1 天）→ P1 骨架 → P2 核心能力 → P3 联调切换（含 T21 与前端改造）→ P4 RAG+盈利 MVP（手动充值；无执照，微信支付/公众号通知 v1.x）。本地环境：WSL 全栈（MySQL 8.0.46 + Redis + PG16 待停），运行时环境文件约定 `wsl-rt-env/`（待迁移）。
+**2026-09-03 架构定稿（经四轮设计审讯确认）：Java（业务/鉴权/积分/历史/构建）+ TS Agent（新建，Node/Fastify + Vercel AI SDK + XState v5，前端 fetch-SSE 直连 + JWT）+ Python RAG（新建 `paimeng-ai-code-rag/`，day-1 只读 few-shot 检索）三服务**；权威设计 `docs/ts_agent/architecture.md`。Python Agent（T0-T20 已实机验证但未上生产）**全面退役**：回切旧 Java AI 兜底、T21 门禁重定向为"TS Agent 契约对等 + 回归全绿"、PG 即刻停用、`paimeng-ai-code-agent/` 目录待 RAG 骨架复用后删除（git 历史即移植参考）；`docs/py_agent/` 转历史参考。**实施已启动（2026-09-03）**：**P0 已执行完毕并本地 e2e 验证**（Issue #2）→ P1 骨架（Issue #3）→ P2 核心能力 → P3 联调切换（含 T21 与前端改造）→ P4 RAG+盈利 MVP（手动充值；无执照，微信支付/公众号通知 v1.x）。本地环境：WSL 全栈（MySQL 8.0.46 + Redis 源码编译；PG16 已停用、5432 无监听），运行时环境文件约定 `wsl-rt-env/`（待迁移）。
 
 ## 领域记忆（`.agents/memories/`）
 
@@ -29,4 +29,4 @@
 
 ## 下一步
 
-按 `docs/ts_agent/architecture.md` §11 执行：**P0（止血回退）待执行**——① `application-local.yml` 置 `python-agent.enabled: false` 回切旧 Java AI；② 停用 PG16（runbook 留 `deployment.md`）；③ 记忆/文档更新（本文件与 `AGENTS.md`/`architecture.md` 已完成 2026-09-03）。随后 P1：TS Agent 骨架（Fastify + JWT 验签 + 工作区沙箱）+ `generation_run`/积分/反馈表 DDL + 新 SSE 协议契约。每完成一个任务：更新 `.agents/memories/` 对应文档 + 在 `docs/py_agent/progress.md`（或后续 `docs/ts_agent/progress.md`）追加一行（含日期与命令证据）。
+按 `docs/ts_agent/architecture.md` §11 执行：**P0（止血回退）已于 2026-09-03 执行完毕**（Issue #2，e2e 证据）——① `application-local.yml` 已回切 `python-agent.enabled: false`（旧 Java AI 链路全流程验证：注册/登录/建应用/SSE 生成/构建/部署/历史落库）；② PG 确认停用（无服务、无自启、5432 无监听）；③ 记忆/文档已同步。随后 P1：TS Agent 骨架（Issue #3：Fastify + JWT 验签 + 工作区沙箱）→ `generation_run`/积分/反馈表 DDL + 新 SSE 协议契约。实施进度日志：`docs/ts_agent/progress.md`。每完成一个任务：更新 `.agents/memories/` 对应文档 + 在 `docs/ts_agent/progress.md` 追加一行（含日期与命令证据）。
