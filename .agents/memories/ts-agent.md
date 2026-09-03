@@ -10,6 +10,7 @@
 - JWT 约定：HS256 共享密钥（`JWT_SECRET`），`algorithms` 白名单防混淆，`requiredClaims: ['exp','sub']`，离线验签不回查 Java；Java 侧签发在 #12。
 - `WORKSPACE_ROOT` 默认按服务目录解析 `../tmp/code_output`（对齐 Java `user.dir/tmp/code_output`），沙箱校验含 realpath 符号链接消解（移植 manager.py）。
 - 测试基建约定（后续票据沿用）：真实服务实例（`buildApp(overrides)`）+ `fastify.inject()` 注入式请求 + `jose SignJWT` 自签（`test/helpers.ts`）。
+- 运行时环境布局（2026-09-03 起）：node_modules 实际位于 `wsl-rt-env/ts-agent/node_modules`（服务目录内为符号链接），构建产物 `wsl-rt-env/ts-agent/dist`（`npm run build`）；命令不变，**勿用 `npm ci`**（会删符号链接，详见 `deployment.md` 踩坑）。
 - 实施票据链：~~#3 骨架~~ → **#4 run 生命周期** → #5 最小生成流 + 契约定稿 → #6 回调打通 → #7-#9 核心能力 → #10 积分 → #11 对账 → #12/#13 前端 → #14 灰度+T21。
 
 ## 移植参考（Python Agent 实测资产，代码现位于 `paimeng-ai-code-rag/`）

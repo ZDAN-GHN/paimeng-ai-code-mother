@@ -102,7 +102,7 @@ python3 -c "import socket;s=socket.create_connection(('127.0.0.1',6379),3);s.sen
 
 ```bash
 cd paimeng-ai-code-agent
-npm install   # TS Agent（Node，8092）
+npm install   # node_modules 实际位于 wsl-rt-env/ts-agent/node_modules（服务目录内为符号链接）；勿用 npm ci（会删符号链接）
 cd ../paimeng-ai-code-mother-frontend
 npm install   # 迁移后 node_modules 位于 wsl-rt-env/frontend/node_modules
 cd ..
@@ -140,7 +140,7 @@ npm run dev
 
 沙箱与环境护栏（实测踩坑）：
 
-- **TS Agent**：npm 缓存若被沙箱拒绝，加 `--cache ../tmp/npm-cache`；node_modules 需 Linux 二进制时按前端同样方式补装。
+- **TS Agent**：npm 缓存若被沙箱拒绝，加 `--cache ../tmp/npm-cache`；node_modules 需 Linux 二进制时按前端同样方式补装。`npm ci` 会删除 node_modules 符号链接、破坏 `wsl-rt-env/` 布局（重建法见 `deployment.md` 踩坑），一律用 `npm install`。
 - **前端**：node_modules 若原为 Windows 侧安装（仅 win32 二进制），WSL 启动 vite 报 `Cannot find module @rollup/rollup-linux-x64-gnu`。新约定 node_modules 位于 `wsl-rt-env/frontend/node_modules`（待迁移，当前仍在 `paimeng-ai-code-mother-frontend/node_modules`）。补装（`--no-save` 不动 package.json，`--cache` 绕开沙箱对 `~/.npm` 的限制）：
   `npm i --no-save --cache ../tmp/npm-cache @rollup/rollup-linux-x64-gnu @esbuild/linux-x64`
 - **Java**：启动约 18-20 秒，健康检查要轮询（如 sleep 25 后再查一次），一次连接失败不要直接判死；日志中 `初始化 Chrome 浏览器失败` 是已知无害告警（仅截图功能不可用），不算启动失败。

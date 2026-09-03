@@ -35,4 +35,5 @@
 ## 约定
 
 - 包结构 `com.zdan.paimengaicodemother.*`（`ai`/`controller`/`service`/`mapper`/`config`）；遵循阿里巴巴 Java 开发手册。
+- MyBatis Flex 代码生成：`com.zdan.paimengaicodemother.generator` 包生成器，产出 mapper XML 在 `src/main/resources/mapper/`。
 - 提交遵循 `AGENTS.md` 的「Git 提交」约定（Agent 代理提交时携带 `<Agent IDE>/<用户信息>`）；注释遵循 `project-comment-style` skill。

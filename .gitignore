@@ -1,6 +1,7 @@
 ### CUSTOM ###
 application-local.yml
 tmp
+wsl-rt-env
 
 HELP.md
 target/

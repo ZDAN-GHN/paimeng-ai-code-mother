@@ -2,7 +2,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": false,
-    "outDir": "dist",
+    "outDir": "../wsl-rt-env/ts-agent/dist",
     "rootDir": "src",
     "declaration": false,
     "sourceMap": true

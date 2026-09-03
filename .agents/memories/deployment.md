@@ -5,15 +5,16 @@
 
 ## 运行时环境文件布局（wsl-rt-env，2026-09-01 新约定）
 
-整个项目在 Linux/WSL 运行的运行时环境文件统一放仓库根目录 `wsl-rt-env/`（该目录需加入 gitignore，待办）：
+整个项目在 Linux/WSL 运行的运行时环境文件统一放仓库根目录 `wsl-rt-env/`（已加入根 .gitignore，2026-09-03）：
 
 | 技术栈 | 目标位置 | 说明 |
 |---|---|---|
 | Python | `wsl-rt-env/python/.venv` | uv 虚拟环境（替代旧 `.venv-wsl`） |
 | 前端 | `wsl-rt-env/frontend/node_modules` | npm 依赖 |
 | Java | `wsl-rt-env/java/target` | Maven 构建产物 |
+| TS Agent | `wsl-rt-env/ts-agent/node_modules` + `wsl-rt-env/ts-agent/dist` | **2026-09-03 起新服务直接按约定就位**：服务目录内 `paimeng-ai-code-agent/node_modules` 为指向它的符号链接，命令不变 |
 
-> **迁移待办**：`wsl-rt-env/` 当前已建但为空；现有 `.venv`（`paimeng-ai-code-rag/`，退役代码遗留）、`node_modules`（`paimeng-ai-code-mother-frontend/`）、`target`（仓库根目录）尚未迁入。迁移完成前，启动命令按实际路径执行；旧 `.venv-wsl` 已不再使用。
+> **迁移待办**：TS Agent 已合规（node_modules/dist 均在 `wsl-rt-env/ts-agent/`）；存量 `.venv`（`paimeng-ai-code-rag/`，退役代码遗留）、`node_modules`（`paimeng-ai-code-mother-frontend/`）、`target`（仓库根目录）尚未迁入。迁移完成前，存量启动命令按实际路径执行；旧 `.venv-wsl` 已不再使用。
 
 ## 依赖服务 — WSL 环境（当前默认）
 
@@ -47,13 +48,15 @@
 | MySQL（如未启动） | `bash ~/.local/opt/mysql8/start.sh`（需 DSH 提权，见踩坑） |
 | Java | `./mvnw spring-boot:run`（端口 8123，context-path `/api`；API 文档 `http://localhost:8123/api/doc.html`） |
 | Python RAG（P4 未实施） | `paimeng-ai-code-rag/` 为旧 Python Agent 重命名（骨架复用起点），退役代码不常态运行，不占用 8090 |
-| TS Agent | `cd paimeng-ai-code-agent && npm run dev`（端口 8092；#3 骨架起） |
+| TS Agent | `cd paimeng-ai-code-agent && npm run dev`（端口 8092；node_modules 实际位于 `wsl-rt-env/ts-agent/node_modules`，服务目录内为符号链接，命令不变） |
 | 前端 | `cd paimeng-ai-code-mother-frontend && npm run dev`（WSL 首次需补 Linux 二进制，见踩坑） |
 
 ## 踩坑与规避（WSL + DSH 沙箱环境）
 
 - **DSH 沙箱 workspace-write 拦家目录写**：mysqld 需写 `~/.local/opt/mysql8`（data/log/pid），start.sh 须以完整权限运行；`./mvnw spring-boot:run` 同理会写 `~/.m2/repository`（resolver-status.properties），亦须完整权限（2026-09-03 P0 e2e 实测）；`uv run` 因 `~/.cache/uv` 被拒 → 直接调 `.venv/bin/uvicorn`（迁移后 `wsl-rt-env/python/.venv/bin/uvicorn`）；npm 缓存被拒 → 加 `--cache <repo>/tmp/npm-cache`。
 - **前端 node_modules 为 Windows 侧安装**（仅 win32 二进制）：WSL 跑 `npm run dev` 前补装 `npm i --no-save --cache <repo>/tmp/npm-cache @rollup/rollup-linux-x64-gnu @esbuild/linux-x64`；重装 node_modules 后需重做。新约定 node_modules 位于 `wsl-rt-env/frontend/node_modules`（待迁移）。
+- **npm ci 与 node_modules 符号链接（TS Agent）**：`npm ci` 会先删除 node_modules（即删掉符号链接本身再建实体目录），破坏 wsl-rt-env 布局——一律用 `npm install`；误删后重建：`mv node_modules wsl-rt-env/ts-agent/ && cd .. && ln -s wsl-rt-env/ts-agent/node_modules paimeng-ai-code-agent/node_modules`（对齐 gitignore 后无痕）。
+- **DrvFs 目录重命名受限**：/mnt/c 上 mv 含打开句柄的目录（如运行中的 tsx watch 占用 node_modules）报 Permission denied——先停相关进程再迁移。
 - **WSL2 NAT 无 localhost 转发**：Java 配置 `localhost:3306/6379` 只解析到 WSL 内实例；连 Windows 侧实例需网关 IP（`ip route show default`）。
 
 ## 健康检查
