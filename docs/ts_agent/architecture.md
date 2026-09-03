@@ -1,6 +1,6 @@
 # TS Agent 目标架构定稿
 
-> **状态**：设计定稿，经用户四轮设计审讯逐项确认（2026-09-03），实施未启动（顺序见 §11）。
+> **状态**：设计定稿，经用户四轮设计审讯逐项确认（2026-09-03），实施已启动（P0 完成；P1 进行中，顺序见 §11）。
 > **权威地位**：本文取代 `docs/py_agent/task_plan.md` 的架构权威地位；`docs/py_agent/` 全目录转为历史参考（含提示词、契约、验证记录，是 TS 移植的参考源）。
 > 配套跨会话记忆见 `.agents/memories/`（总入口 `MEMORY.md`）。
 
@@ -19,8 +19,8 @@
 | 服务 | 技术栈 | 职责 |
 |---|---|---|
 | **Java**（`src/`） | Spring Boot | 业务 REST、鉴权（登录态 + **签发短时 JWT**）、充值/积分/会员、`chat_history` 落库、构建与部署（`BuilderExecutor`）、可视化编辑器数据 |
-| **TS Agent**（新建，Node） | Fastify + Vercel AI SDK + XState v5 | 需求访谈、线框生成、planner→coder→reviewer 工作流、工具执行、Guardrail、代码解析、工作区落盘、SSE 直连浏览器 |
-| **Python RAG**（新建 `paimeng-ai-code-rag/`） | FastAPI（复用旧 agent 骨架模式） | 检索服务：day-1 结构化 few-shot 检索；v2 语义检索（pgvector）+ ingest 管道 |
+| **TS Agent**（`paimeng-ai-code-agent/`，Node） | Fastify + Vercel AI SDK + XState v5 | 需求访谈、线框生成、planner→coder→reviewer 工作流、工具执行、Guardrail、代码解析、工作区落盘、SSE 直连浏览器 |
+| **Python RAG**（`paimeng-ai-code-rag/`，2026-09-03 由旧 Python Agent 目录重命名而来） | FastAPI（复用旧 agent 骨架模式） | 检索服务：day-1 结构化 few-shot 检索；v2 语义检索（pgvector）+ ingest 管道 |
 
 ### 1.1 服务间拓扑与鉴权
 
@@ -149,7 +149,7 @@ TS Agent ──(Bearer)──> Python RAG :8091              （POST /v1/retriev
 
 1. **回退主链路**：`python-agent.enabled=false` 回切旧 Java AI 兜底（验证过的回退路径，零成本），TS Agent 建成前保持开发环境可用。
 2. **T21 门禁重定向**：原"Python 灰度 ≥7 天"门禁作废，改为"**TS Agent 契约对等 + 回归全绿**"后删除旧 Java AI（删除范围仍按 `docs/py_agent/t21_delete_plan.md`，含用户已确认的 `createApp` 保留 Java 侧 AI 路由决策）。
-3. **Python Agent 目录处置**：新建 `paimeng-ai-code-rag/`（复用旧 FastAPI 骨架模式：auth/config/healthz/Bearer/uv 锁定）后**删除 `paimeng-ai-code-agent/` 整目录**；git 历史即移植参考库（提示词 7 份、解析正则、guardrail 规则从历史取）。
+3. **Python Agent 目录处置（2026-09-03 用户决策修订：重命名取代删除）**：`paimeng-ai-code-agent/` 整目录 `git mv` 为 `paimeng-ai-code-rag/`（旧 FastAPI 骨架 auth/config/healthz/Bearer/uv 锁定原位复用），退役代码在 P4 RAG 实施时精简；**TS Agent 落位 `paimeng-ai-code-agent/`（目录名复用）**；TS 移植参考 = `docs/py_agent/` 文档 + `paimeng-ai-code-rag/` 代码与 git 历史（提示词 7 份、解析正则、guardrail 规则）。
 4. **PG 即刻停用**：runbook 留档（`.agents/memories/deployment.md`），RAG v2 时重启。
 5. **Java 侧**：`ai/python/*` 三类泛化为通用 Agent 客户端（`python-agent.*` 配置段 → `agent.*`），callback endpoint 模式沿用改指向 TS Agent。
 
@@ -159,7 +159,7 @@ TS Agent ──(Bearer)──> Python RAG :8091              （POST /v1/retriev
 - **P1 骨架**（1-2 周）：TS Agent 服务骨架（Fastify + JWT 验签中间件 + 工作区沙箱移植）+ `generation_run`/积分/反馈表 DDL + `docs/ts_agent/contract.md` 新 SSE 协议 + Agent→Java 回调打通（泛化 `ai/python/*`）。
 - **P2 核心能力**（2-3 周）：guardrail/图片四工具/解析/质检 TS 移植（参照 git 历史 Python 实现，提示词直接复用）；访谈+线框（免费+限频）；XState 工作流 + 五层护栏 + 三档强度；中止 (a)。计费可后挂（run 表字段预留）。
 - **P3 联调切换**：契约测试移植（语义比对）→ `ts-agent.enabled` 灰度开关 → 执行 T21（删旧 Java AI + Python Agent 目录）→ 前端改造（fetch-SSE / JWT / 新事件 schema / 线框确认 UI / 档位选择器 / 中止按钮 / 积分显示）。
-- **P4 RAG + 盈利 MVP**：`paimeng-ai-code-rag/` day-1 上线（few-shot 直查）+ 反馈埋点 + 后台手动充值台账。
+- **P4 RAG + 盈利 MVP**：`paimeng-ai-code-rag/`（目录已由旧 Python Agent 重命名就位）精简退役代码后 day-1 上线（few-shot 直查）+ 反馈埋点 + 后台手动充值台账。
 
 ## 12. 明确推迟项（非遗忘，是有意识的排队）
 

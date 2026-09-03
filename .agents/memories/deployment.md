@@ -13,7 +13,7 @@
 | 前端 | `wsl-rt-env/frontend/node_modules` | npm 依赖 |
 | Java | `wsl-rt-env/java/target` | Maven 构建产物 |
 
-> **迁移待办**：`wsl-rt-env/` 当前已建但为空；现有 `.venv`（`paimeng-ai-code-agent/`）、`node_modules`（`paimeng-ai-code-mother-frontend/`）、`target`（仓库根目录）尚未迁入。迁移完成前，启动命令按实际路径执行；旧 `.venv-wsl` 已不再使用。
+> **迁移待办**：`wsl-rt-env/` 当前已建但为空；现有 `.venv`（`paimeng-ai-code-rag/`，退役代码遗留）、`node_modules`（`paimeng-ai-code-mother-frontend/`）、`target`（仓库根目录）尚未迁入。迁移完成前，启动命令按实际路径执行；旧 `.venv-wsl` 已不再使用。
 
 ## 依赖服务 — WSL 环境（当前默认）
 
@@ -31,11 +31,11 @@
 ## 敏感文件（不提交）
 
 - `src/main/resources/application-local.yml`（gitignore；参考 `application.yml`，填 API keys）。
-- Python 侧 `.env`（用 `cp .env.example .env`，gitignore）。
+- Python 侧 `.env`：现位于 `paimeng-ai-code-rag/.env`（退役 Agent 遗留，含联调密钥，gitignore 不提交；P4 RAG 实施时按新 `.env.example` 重建）；TS Agent 侧 `.env` 在 `paimeng-ai-code-agent/`（同规则）。
 
 ## 共享工作区
 
-- `tmp/code_output/{codeGenType}_{appId}`；Java `CODE_OUTPUT_ROOT_DIR = user.dir/tmp/code_output`，Python 侧 `WORKSPACE_ROOT` 须为同一绝对路径。
+- `tmp/code_output/{codeGenType}_{appId}`；Java `CODE_OUTPUT_ROOT_DIR = user.dir/tmp/code_output`，TS Agent 侧 `WORKSPACE_ROOT` 须为同一绝对路径（Java 计算绝对路径传入，Agent 侧沙箱校验）。
 - 本地同机；生产同容器卷或共享卷挂载。
 
 ## 启动命令（WSL 环境，2026-09-01 全链路验证）
@@ -46,7 +46,8 @@
 |---|---|
 | MySQL（如未启动） | `bash ~/.local/opt/mysql8/start.sh`（需 DSH 提权，见踩坑） |
 | Java | `./mvnw spring-boot:run`（端口 8123，context-path `/api`；API 文档 `http://localhost:8123/api/doc.html`） |
-| Python（退役参考） | `cd paimeng-ai-code-agent && .venv/bin/uvicorn app.main:app --port 8090`（**退役中**，仅目录删除前迁移参考；后续由 TS Agent / RAG 服务取代） |
+| Python RAG（P4 未实施） | `paimeng-ai-code-rag/` 为旧 Python Agent 重命名（骨架复用起点），退役代码不常态运行，不占用 8090 |
+| TS Agent | `cd paimeng-ai-code-agent && npm run dev`（端口 8092；#3 骨架起） |
 | 前端 | `cd paimeng-ai-code-mother-frontend && npm run dev`（WSL 首次需补 Linux 二进制，见踩坑） |
 
 ## 踩坑与规避（WSL + DSH 沙箱环境）
@@ -57,6 +58,7 @@
 
 ## 健康检查
 
-- `GET http://localhost:8090/healthz` → 200 `{"status":"ok"}`（退役服务，目录删除前可用）。
-- 全栈：`doc.html` 200 + `8090/healthz` ok + 前端 5173 200 + `ss -tlnp` 见 3306/6379 监听（**5432 停用后不应出现**）。
+- `GET http://localhost:8092/healthz` → 200 `{"status":"ok"}`（TS Agent，#3 骨架起）。
+- 旧 Python Agent 8090 不再运行（代码在 `paimeng-ai-code-rag/` 退役暂存）。
+- 全栈：`doc.html` 200 + `8092/healthz` ok + 前端 5173 200 + `ss -tlnp` 见 3306/6379 监听（**5432 停用后不应出现**）。
 - **生产目标拓扑**（见 `docs/ts_agent/architecture.md` §1.1）：nginx 单域名路由 `/api/*`→Java(8123)、`/agent/*`→TS Agent(Node)；RAG 仅内网。

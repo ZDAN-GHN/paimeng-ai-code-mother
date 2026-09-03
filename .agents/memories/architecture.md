@@ -6,8 +6,8 @@
 ## 目标架构（三服务）
 
 - **Java**（`src/`）：业务 REST、鉴权（签发短时 JWT）、充值/积分/会员、`chat_history` 落库、构建部署（`BuilderExecutor`）。
-- **TS Agent**（新建，Node + Fastify + Vercel AI SDK + XState v5）：访谈/线框/codegen 工作流、工具执行、Guardrail、工作区落盘；**SSE 直连浏览器**。
-- **Python RAG**（新建 `paimeng-ai-code-rag/`，FastAPI）：检索服务；day-1 只读直查 MySQL few-shot，v2 pgvector + ingest。
+- **TS Agent**（`paimeng-ai-code-agent/`，Node + Fastify + Vercel AI SDK + XState v5）：访谈/线框/codegen 工作流、工具执行、Guardrail、工作区落盘；**SSE 直连浏览器**。
+- **Python RAG**（`paimeng-ai-code-rag/`，FastAPI；2026-09-03 由旧 Python Agent 目录重命名而来）：检索服务；day-1 只读直查 MySQL few-shot，v2 pgvector + ingest。
 
 ## 拓扑与鉴权
 
@@ -36,9 +36,9 @@
 
 ## 过渡态（当前）
 
-- 旧 Java AI 链路为回退主链路（**P0 回切动作待执行**：`application-local.yml` 的 `python-agent.enabled` 当前仍为 true）。
+- 旧 Java AI 链路为回退主链路（**P0 已执行（2026-09-03）**：`application-local.yml` 已回切 `python-agent.enabled=false`，WSL 全栈 e2e 验证通过，Issue #2）。
 - T21 门禁重定向："TS Agent 契约对等 + 回归全绿"（删除范围仍按 `docs/py_agent/t21_delete_plan.md`，`createApp` 保留 Java 侧 AI 路由）。
-- `paimeng-ai-code-agent/` 待删（RAG 骨架复用其 FastAPI 模式后）；git 历史为 TS 移植参考库（提示词 7 份/解析正则/guardrail 规则）。
+- **目录方案（2026-09-03 用户决策：重命名取代删除）**：旧 Python Agent 目录整体 `git mv` 为 `paimeng-ai-code-rag/`（RAG 骨架复用起点，P4 精简退役代码）；**TS Agent 落位 `paimeng-ai-code-agent/`（目录名复用）**；TS 移植参考 = `docs/py_agent/` 文档 + `paimeng-ai-code-rag/` 代码与 git 历史。
 - Java 侧 `ai/python/*` 将泛化为通用 Agent 客户端（`agent.*` 配置段）。
 
 ## 踩坑与规避（架构级）

@@ -5,7 +5,7 @@
 
 ## 一句话现状
 
-**2026-09-03 架构定稿（经四轮设计审讯确认）：Java（业务/鉴权/积分/历史/构建）+ TS Agent（新建，Node/Fastify + Vercel AI SDK + XState v5，前端 fetch-SSE 直连 + JWT）+ Python RAG（新建 `paimeng-ai-code-rag/`，day-1 只读 few-shot 检索）三服务**；权威设计 `docs/ts_agent/architecture.md`。Python Agent（T0-T20 已实机验证但未上生产）**全面退役**：回切旧 Java AI 兜底、T21 门禁重定向为"TS Agent 契约对等 + 回归全绿"、PG 即刻停用、`paimeng-ai-code-agent/` 目录待 RAG 骨架复用后删除（git 历史即移植参考）；`docs/py_agent/` 转历史参考。**实施已启动（2026-09-03）**：**P0 已执行完毕并本地 e2e 验证**（Issue #2）→ P1 骨架（Issue #3）→ P2 核心能力 → P3 联调切换（含 T21 与前端改造）→ P4 RAG+盈利 MVP（手动充值；无执照，微信支付/公众号通知 v1.x）。本地环境：WSL 全栈（MySQL 8.0.46 + Redis 源码编译；PG16 已停用、5432 无监听），运行时环境文件约定 `wsl-rt-env/`（待迁移）。
+**2026-09-03 架构定稿（经四轮设计审讯确认）：Java（业务/鉴权/积分/历史/构建）+ TS Agent（`paimeng-ai-code-agent/`，Node/Fastify + Vercel AI SDK + XState v5，前端 fetch-SSE 直连 + JWT）+ Python RAG（`paimeng-ai-code-rag/`，day-1 只读 few-shot 检索）三服务**；权威设计 `docs/ts_agent/architecture.md`。Python Agent（T0-T20 曾实机验证但未上生产）**全面退役**：回切旧 Java AI 兜底、T21 门禁重定向为"TS Agent 契约对等 + 回归全绿"、PG 停用；**其目录已整体重命名为 `paimeng-ai-code-rag/`（2026-09-03 用户决策，取代"新建后删除"），TS Agent 落位 `paimeng-ai-code-agent/`（目录名复用）；python-agent 领域记忆已删除，重构为 ts-agent / python-rag 两域**。`docs/py_agent/` 转历史参考。**实施已启动（2026-09-03）**：**P0 已执行完毕并本地 e2e 验证**（Issue #2）→ P1 骨架（Issue #3，已认领实施中）→ P2 核心能力 → P3 联调切换（含 T21 与前端改造）→ P4 RAG+盈利 MVP（手动充值；无执照，微信支付/公众号通知 v1.x）。本地环境：WSL 全栈（MySQL 8.0.46 + Redis 源码编译；PG16 已停用、5432 无监听），运行时环境文件约定 `wsl-rt-env/`（待迁移）。
 
 ## 领域记忆（`.agents/memories/`）
 
@@ -14,7 +14,8 @@
 | `README.md` | 记忆目录索引与更新约定 |
 | `architecture.md` | 三服务目标架构决策（拓扑/鉴权/数据分工/护栏/闸门）、过渡态 |
 | `java-backend.md` | Java 侧状态、编译红线、迁移残留、关键事实 |
-| `python-agent.md` | Python Agent 退役状态与移植参考清单 |
+| `ts-agent.md` | TS Agent（`paimeng-ai-code-agent/`）实施状态、移植参考清单、契约教训 |
+| `python-rag.md` | Python RAG（`paimeng-ai-code-rag/`，P4）：目录来历、可复用骨架、day-1 结论 |
 | `vue-frontend.md` | 前端约定、SSE 消费基线、P3 计划改造 |
 | `deployment.md` | 环境依赖（WSL 默认 / Windows 两套）、运行时环境布局、敏感文件、共享工作区、启动命令 |
 
@@ -29,4 +30,4 @@
 
 ## 下一步
 
-按 `docs/ts_agent/architecture.md` §11 执行：**P0（止血回退）已于 2026-09-03 执行完毕**（Issue #2，e2e 证据）——① `application-local.yml` 已回切 `python-agent.enabled: false`（旧 Java AI 链路全流程验证：注册/登录/建应用/SSE 生成/构建/部署/历史落库）；② PG 确认停用（无服务、无自启、5432 无监听）；③ 记忆/文档已同步。随后 P1：TS Agent 骨架（Issue #3：Fastify + JWT 验签 + 工作区沙箱）→ `generation_run`/积分/反馈表 DDL + 新 SSE 协议契约。实施进度日志：`docs/ts_agent/progress.md`。每完成一个任务：更新 `.agents/memories/` 对应文档 + 在 `docs/ts_agent/progress.md` 追加一行（含日期与命令证据）。
+按 `docs/ts_agent/architecture.md` §11 执行：**P0（止血回退）已于 2026-09-03 执行完毕**（Issue #2，e2e 证据）——① `application-local.yml` 已回切 `python-agent.enabled: false`（旧 Java AI 链路全流程验证：注册/登录/建应用/SSE 生成/构建/部署/历史落库）；② PG 确认停用（无服务、无自启、5432 无监听）；③ 记忆/文档已同步。**P1 进行中（2026-09-03 认领）**：TS Agent 骨架（Issue #3：`paimeng-ai-code-agent/`，Fastify + JWT 验签 + 工作区沙箱 + 冒烟 SSE）→ `generation_run`/积分/反馈表 DDL + 新 SSE 协议契约（#4/#5）。实施进度日志：`docs/ts_agent/progress.md`。每完成一个任务：更新 `.agents/memories/` 对应文档 + 在 `docs/ts_agent/progress.md` 追加一行（含日期与命令证据）。

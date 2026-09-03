@@ -47,10 +47,10 @@
 
 **目标架构为三服务**（权威设计见 `docs/ts_agent/architecture.md`）：
 - **Java**（`src/`）：业务 REST、鉴权（签发 JWT）、充值/积分/会员、聊天历史、构建与部署
-- **TS Agent**（待新建）：需求访谈、线框、代码生成工作流（Vercel AI SDK + XState v5），fetch-SSE 直连浏览器
-- **Python RAG**（待新建 `paimeng-ai-code-rag/`）：检索服务（day-1 few-shot 直查，v2 pgvector）
+- **TS Agent**（`paimeng-ai-code-agent/`，Node + Fastify + Vercel AI SDK + XState v5）：需求访谈、线框、代码生成工作流，fetch-SSE 直连浏览器
+- **Python RAG**（`paimeng-ai-code-rag/`，P4 实施）：检索服务（day-1 few-shot 直查，v2 pgvector）
 
-过渡态：旧 Java AI 链路为回退主链路；Python Agent（`paimeng-ai-code-agent/`）已定稿退役，目录待 RAG 骨架复用后删除。
+过渡态：旧 Java AI 链路为回退主链路；Python Agent 已定稿退役，目录已整体重命名为 `paimeng-ai-code-rag/`（RAG 骨架复用起点，退役代码 P4 精简）；TS Agent 落位 `paimeng-ai-code-agent/`（目录名复用）。
 
 `paimeng-ai-code-mother-microservice/` 为**废弃的**微服务重构尝试（不作为任何迁移前提），包含 7 个模块：
 
