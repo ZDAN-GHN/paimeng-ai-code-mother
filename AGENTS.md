@@ -3,7 +3,7 @@
 ## Project Overview
 派蒙 AI 应用工坊：基于 AI 的零代码应用生成平台。用户通过自然语言描述需求，AI 自动生成前端代码并可视化预览、部署。
 
-**三服务架构（2026-09-03 定稿，实施已启动：P0 完成，P1 待启动）**，权威设计见 `docs/ts_agent/architecture.md`：
+**三服务架构（2026-09-03 定稿，实施已启动：P0 完成，P1 骨架完成（#3），下一票 #4）**，权威设计见 `docs/ts_agent/architecture.md`：
 - **Java Spring Boot**（`src/`，业务后端）：业务 REST、鉴权（签发短时 JWT）、充值/积分/会员、聊天历史、构建与部署（`BuilderExecutor`）。
 - **TS Agent**（`paimeng-ai-code-agent/`，Node + Fastify + Vercel AI SDK + XState v5）：需求访谈、线框、planner→coder→reviewer 工作流、工具执行、Guardrail、SSE 直连浏览器（JWT 鉴权），通过内部回调让 Java 结算/写历史/触发构建。
 - **Python RAG**（`paimeng-ai-code-rag/`，FastAPI）：检索服务，day-1 只读直查 MySQL 做 few-shot，v2 上 pgvector（2026-09-03 由旧 Python Agent 目录重命名而来，P4 实施）。
@@ -19,7 +19,7 @@
 3. 配置 `src/main/resources/application-local.yml`（参考 `application.yml`，需填入 API keys）
 4. Python RAG（`paimeng-ai-code-rag/`，**P4 实施**）：目录为旧 Python Agent 重命名（FastAPI 骨架复用起点），当前无需安装运行；PostgreSQL 不再需要（已决策停用，RAG v2 时重启）
 5. 前端配置已包含在 `paimeng-ai-code-mother-frontend/.env.development`
-6. TS Agent 骨架（`paimeng-ai-code-agent/`，Issue #3）与 Python RAG 服务（P4）：见 `docs/ts_agent/architecture.md` §11
+6. TS Agent 骨架已就位（`paimeng-ai-code-agent/`，Issue #3 完成：`npm install && cp .env.example .env && npm run dev`）；Python RAG P4 实施（见 `docs/ts_agent/architecture.md` §11）
 
 ## Package Manager
 - **Maven Wrapper**：`./mvnw clean install`（Windows 使用 `mvnw.cmd`）

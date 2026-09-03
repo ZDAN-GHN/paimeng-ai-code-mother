@@ -1,0 +1,27 @@
+{
+  "name": "paimeng-ai-code-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "派蒙 AI 应用工坊 TS Agent：需求访谈 / 线框 / codegen 工作流，SSE 直连浏览器",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "fastify": "^5.0.0",
+    "jose": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}
