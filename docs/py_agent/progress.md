@@ -185,3 +185,11 @@
 - **T21 门禁计时起点**：应用户要求将本地开发环境切换到 Python 链路（用户明确授权，符合 `project-startup-guardrail` 中「切换前用户确认」约定）。
 - **配置变更**：`src/main/resources/application-local.yml`（gitignore，不提交）追加 `python-agent.enabled: true` + `python-agent.token`（与 `paimeng-ai-code-agent/.env` 的 `PYTHON_AGENT_TOKEN` 同值）；仓库 `application.yml` 默认值保持 `${PYTHON_AGENT_ENABLED:false}` 不动。
 - **环境事实**：依赖服务全部落在 WSL（用户态 MySQL 8.0.46 @ `~/.local/opt/mysql8`，root/root，库已建表；Redis 6379 无密码；用户态 PG16 @ 5432）；全栈三服务（Java 8123 / Python 8090 / 前端 5173）健康检查实测通过。启动 SOP 与排障护栏沉淀于 `.agents/skills/project-startup-guardrail/SKILL.md`。
+
+## 2026-09-03 架构定稿：Agent 迁移 TypeScript，Python 转向 RAG（用户决策，本文档历史化）
+
+- **决策过程**：经四轮设计审讯（grilling，共 22+ 个决策点）逐项确认，用户最终拍板。权威设计落 `docs/ts_agent/architecture.md`（本文档及本目录自此转为历史参考）。
+- **目标架构**：Java（业务/鉴权/积分/历史/构建，签发 JWT）+ **TS Agent**（新建，Node + Fastify + Vercel AI SDK + XState v5，前端 fetch-SSE 直连 + JWT，Agent→Java 内部回调沿用 runId 幂等）+ **Python RAG**（新建 `paimeng-ai-code-rag/`，day-1 只读 few-shot 检索，v2 pgvector）三服务。关键机制：`generation_run` 表（MySQL）作 checkpoint、token 五层护栏、三档推理强度、线框闸门（未确认不 codegen，线框免费+限频）、按次+档位系数计费、PG 停用（"交易归 MySQL，记忆归 PG"）。
+- **Python Agent 处置**：全面退役。过渡期回切旧 Java AI 兜底（`python-agent.enabled=false`，**P0 待执行**，执行前本地仍为 true）；T21 门禁重定向为"TS Agent 契约对等 + 回归全绿"（删除范围仍按 `t21_delete_plan.md`）；PG 即刻停用；`paimeng-ai-code-agent/` 目录待 `paimeng-ai-code-rag/` 复用其 FastAPI 骨架后删除，git 历史即 TS 移植参考库（提示词 7 份/解析正则/guardrail 规则/沙箱实现）。
+- **本轮产物**：`docs/ts_agent/architecture.md`（权威设计）；`MEMORY.md`、`AGENTS.md`、`.agents/memories/{README,architecture,python-agent,java-backend,deployment,vue-frontend}.md`、`CONTEXT.md` 同步更新。
+- **实施顺序**：P0（回切+停 PG+文档，1 天）→ P1（TS Agent 骨架+run 表 DDL+新 SSE 契约）→ P2（核心能力移植+访谈线框+护栏）→ P3（契约测试+灰度+T21+前端改造）→ P4（RAG day-1+盈利 MVP）。

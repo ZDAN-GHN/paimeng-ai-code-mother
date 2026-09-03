@@ -43,9 +43,16 @@
 └─────────────────────────────────────────────────────┘
 ```
 
-## 微服务重构方向
+## 架构方向（2026-09-03 定稿）
 
-单体代码在 `src/` 下，微服务重构代码在 `paimeng-ai-code-mother-microservice/`，包含 7 个模块：
+**目标架构为三服务**（权威设计见 `docs/ts_agent/architecture.md`）：
+- **Java**（`src/`）：业务 REST、鉴权（签发 JWT）、充值/积分/会员、聊天历史、构建与部署
+- **TS Agent**（待新建）：需求访谈、线框、代码生成工作流（Vercel AI SDK + XState v5），fetch-SSE 直连浏览器
+- **Python RAG**（待新建 `paimeng-ai-code-rag/`）：检索服务（day-1 few-shot 直查，v2 pgvector）
+
+过渡态：旧 Java AI 链路为回退主链路；Python Agent（`paimeng-ai-code-agent/`）已定稿退役，目录待 RAG 骨架复用后删除。
+
+`paimeng-ai-code-mother-microservice/` 为**废弃的**微服务重构尝试（不作为任何迁移前提），包含 7 个模块：
 
 | 模块 | 职责 |
 |------|------|

@@ -1,16 +1,22 @@
 # 记忆：Java 后端
 
-> Java Spring Boot 侧的工作记忆。权威细节见 `docs/py_agent/task_plan.md` §1.6/§7 与 `AGENTS.md`。
+> Java Spring Boot 侧的工作记忆。目标架构中 Java 的职责与边界见 `docs/ts_agent/architecture.md`；历史契约细节见 `docs/py_agent/task_plan.md` §1.6/§7 与 `AGENTS.md`。
 
-## 当前状态（2026-08-31 T0 完成核对）
+## 当前状态（2026-09-03 退役决策后核对）
 
 | 项 | 状态 |
 |---|---|
 | `./mvnw compile` | **通过**（需 JDK 21；本机 sdkman 已装 `21.0.12+1.1-tem`，当前 JDK 17 会报 `release version 21 not supported`） |
-| `ai/python/` | `PythonAgentProperties`/`PythonAgentClient`/`PythonAgentRequest` 已创建（T0 完成） |
-| `AppServiceImpl` | **无** Python 分支引用（此前迁移残留已随提交清除，当前走旧 Java AI 链路） |
-| `application.yml` `python-agent` 段 | `enabled/base-url/token/connect-timeout-ms/read-timeout-ms` + **新增 `callback-timeout-ms`**（默认 60000） |
-| 旧 AI 链路 `ai/` + `langgraph4j/` | 完整存在（迁移对象，`task_plan.md` §3 清单） |
+| `ai/python/` | `PythonAgentProperties`/`PythonAgentClient`/`PythonAgentRequest` 存在；**将泛化为通用 Agent 客户端**（`python-agent.*` → `agent.*` 配置段，指向 TS Agent） |
+| `AppServiceImpl` | T18 已含 `python-agent.enabled` 分支；本地 `application-local.yml` 当前 `enabled: true`（**P0 回切 `false` 待执行**，回切后旧 Java AI 为过渡主链路） |
+| `application.yml` `python-agent` 段 | `enabled/base-url/token/connect-timeout-ms/read-timeout-ms` + `callback-timeout-ms`（默认 60000） |
+| 旧 AI 链路 `ai/` + `langgraph4j/` | 完整存在（**过渡期主链路**；TS Agent 契约对等后按 `docs/py_agent/t21_delete_plan.md` 删除，门禁已重定向） |
+
+## 2026-09-03 架构定稿中对 Java 的新增职责
+
+- **签发短时 JWT**（前端 fetch-SSE 直连 TS Agent 用，Agent 离线验签，不回查 Java）。
+- **积分体系**：预冻结 → 结算 → 退款，挂 runId 幂等（复用 `RunIdSinkRegistry` 机制）；按次 + 档位系数计费；MVP 后台手动充值。
+- **Agent→Java 内部回调**沿用 `/api/app/chat/gen/code/callback`（Bearer + runId 幂等）：结算积分 / 写历史 / 触发构建。
 
 ## 编译红线
 

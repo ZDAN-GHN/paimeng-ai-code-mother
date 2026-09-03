@@ -1,6 +1,6 @@
 # 记忆：运行与部署
 
-> 环境依赖、敏感文件、共享工作区、启动命令的工作记忆。权威细节见 `docs/py_agent/task_plan.md` §9。
+> 环境依赖、敏感文件、共享工作区、启动命令的工作记忆。目标部署拓扑见 `docs/ts_agent/architecture.md` §1.1/§11；Python Agent 运行细节（退役前）见 `docs/py_agent/task_plan.md` §9（历史参考）。
 > 存在两套本地环境：**WSL 环境**（2026-09-01 起，全栈实机验证通过，默认使用）与 **Windows 环境**（此前 T14a/T18/T20 实机验证所用，仍可用）。二者连接地址相同（127.0.0.1），不要混用同端口的两套实例。
 
 ## 运行时环境文件布局（wsl-rt-env，2026-09-01 新约定）
@@ -17,11 +17,11 @@
 
 ## 依赖服务 — WSL 环境（当前默认）
 
-- **灰度状态（2026-09-01）**：`application-local.yml` 已设 `python-agent.enabled: true`（token 与 Python `.env` 同值），本地启动即走 Python 链路；`application.yml` 仓库默认仍为 `${PYTHON_AGENT_ENABLED:false}`。T21 门禁计时自此起算。
+- **灰度状态（2026-09-01 起，2026-09-03 已决策回切）**：`application-local.yml` 现为 `python-agent.enabled: true`（token 与 Python `.env` 同值）；**2026-09-03 架构定稿后 P0 待执行回切 `false`**（Python Agent 全面退役，过渡期主链路 = 旧 Java AI）；`application.yml` 仓库默认仍为 `${PYTHON_AGENT_ENABLED:false}`。
 
 - **MySQL**：用户态安装 `~/.local/opt/mysql8`（8.0.46，tarball 解包，非系统服务）。启动 `bash ~/.local/opt/mysql8/start.sh`（监听 0.0.0.0:3306，socket `/tmp/mysql-zdan.sock`，日志 `~/.local/opt/mysql8/mysqld.log`，stop 用同目录 `mysqladmin -uroot -proot --socket=/tmp/mysql-zdan.sock shutdown`）。root 密码 2026-09-01 由空改为 `root`（与 `application.yml` 数据源一致，start.sh 已同步）。库 `paimeng_ai_code_mother` 已按 `sql/create_table.sql` 建表（user/app/chat_history）；另有课程模块的 `course_dev` 库。**Windows IDE 直连**（2026-09-01 实测）：Host = WSL IP（`hostname -I`，重启可能漂移）、Port 3306、账号 `root`（`root@'172.31.%'`）/root；bind 0.0.0.0 仅暴露给 WSL NAT 内网，局域网不可达。
 - **Redis**：WSL 内源码编译运行（`./src/redis-server *:6379`，无密码）。
-- **PostgreSQL**：用户态 PG16 @ 127.0.0.1:5432（清华镜像 deb 解包 + `LD_LIBRARY_PATH`），仅存 LangGraph checkpoint。
+- **PostgreSQL**：用户态 PG16 @ 127.0.0.1:5432（清华镜像 deb 解包 + `LD_LIBRARY_PATH`），原仅存 LangGraph checkpoint。**2026-09-03 决策即刻停用**（P0 待执行）：checkpoint 职责随 Python Agent 退役消失，`generation_run` 落 MySQL；RAG v2（pgvector）时按本 runbook 重启。
 
 ## 依赖服务 — Windows 环境（此前实机验证所用）
 
@@ -46,7 +46,7 @@
 |---|---|
 | MySQL（如未启动） | `bash ~/.local/opt/mysql8/start.sh`（需 DSH 提权，见踩坑） |
 | Java | `./mvnw spring-boot:run`（端口 8123，context-path `/api`；API 文档 `http://localhost:8123/api/doc.html`） |
-| Python | `cd paimeng-ai-code-agent && .venv/bin/uvicorn app.main:app --port 8090`（迁入 `wsl-rt-env/python/.venv` 后为 `wsl-rt-env/python/.venv/bin/uvicorn`） |
+| Python（退役参考） | `cd paimeng-ai-code-agent && .venv/bin/uvicorn app.main:app --port 8090`（**退役中**，仅目录删除前迁移参考；后续由 TS Agent / RAG 服务取代） |
 | 前端 | `cd paimeng-ai-code-mother-frontend && npm run dev`（WSL 首次需补 Linux 二进制，见踩坑） |
 
 ## 踩坑与规避（WSL + DSH 沙箱环境）
@@ -57,5 +57,6 @@
 
 ## 健康检查
 
-- `GET http://localhost:8090/healthz` → 200 `{"status":"ok"}`（Java 侧探活用）。
-- 全栈：`doc.html` 200 + `8090/healthz` ok + 前端 5173 200 + `ss -tlnp` 见 3306/6379/5432 监听。
+- `GET http://localhost:8090/healthz` → 200 `{"status":"ok"}`（退役服务，目录删除前可用）。
+- 全栈：`doc.html` 200 + `8090/healthz` ok + 前端 5173 200 + `ss -tlnp` 见 3306/6379 监听（**5432 停用后不应出现**）。
+- **生产目标拓扑**（见 `docs/ts_agent/architecture.md` §1.1）：nginx 单域名路由 `/api/*`→Java(8123)、`/agent/*`→TS Agent(Node)；RAG 仅内网。

@@ -1,33 +1,52 @@
-# 记忆：架构决策（双后端）
+# 记忆：架构决策（三服务目标架构）
 
-> 本文件记录双后端重构的**架构级决策**。权威论证见 `docs/py_agent/task_plan.md` §1 与「已确认架构」；此处为工作记忆摘要，不得与本目录其他文档冲突。
+> 2026-09-03 重构定稿（经四轮设计审讯、用户逐项确认）。权威设计见 `docs/ts_agent/architecture.md`；本文件为工作记忆摘要。
+> **取代旧「双后端架构决策（B2/H4）」**：`docs/py_agent/task_plan.md` §1 契约转历史参考；B2 的职责边界被三服务分工取代，H4 的"回调 + runId 幂等"机制**沿用**（改由 TS Agent 发起）。
 
-## 双后端职责边界（B2）
+## 目标架构（三服务）
 
-- **Java Spring Boot**（`src/`，主后端）：业务 REST/SSE 接口、鉴权、业务状态、浏览器侧传输封装、构建与部署。
-- **Python Agent**（`paimeng-ai-code-agent/`，FastAPI）：模型调用、LangGraph 工作流、工具**执行**、Guardrail、代码解析、工作区落盘，发出四类语义事件（`ai_response`/`ai_thinking`/`tool_request`/`tool_executed`）。
-- **Java 复用现有 `JsonMessageStreamHandler`/`SimpleTextStreamHandler`** 做工具去重、展示重组、聊天记录聚合；浏览器 wire（`data: {"d":…}`、`event: done`、`event: business-error`）由 Java 独占，Python 不直接接触。
-- **红线**：Python 事件 JSON 须与旧 `StreamMessage` schema 逐字段对齐，禁止自创事件格式（浏览器 SSE 兼容是最高风险）。
+- **Java**（`src/`）：业务 REST、鉴权（签发短时 JWT）、充值/积分/会员、`chat_history` 落库、构建部署（`BuilderExecutor`）。
+- **TS Agent**（新建，Node + Fastify + Vercel AI SDK + XState v5）：访谈/线框/codegen 工作流、工具执行、Guardrail、工作区落盘；**SSE 直连浏览器**。
+- **Python RAG**（新建 `paimeng-ai-code-rag/`，FastAPI）：检索服务；day-1 只读直查 MySQL few-shot，v2 pgvector + ingest。
 
-## 回调与完成信号（H4）
+## 拓扑与鉴权
 
-- **回调是唯一完成信号**：Python 工作流完成后 POST 回 Java；Java 按 `runId` 幂等（首次：写历史→构建→浏览器 `done`；重复直接丢弃）。
-- **独立等待超时** `callback-timeout-ms`（默认 60000），与 `read-timeout-ms`（300000）解耦；超时 → 浏览器 `business-error` + 幂等错误历史，不自动构建。
-- 回调仅接受 `status ∈ {success, failed}`；handler 只校验 Bearer token，不取 session。
+- 前端 → Java：cookie session（现状不变）。
+- 前端 → TS Agent：**fetch 流式 SSE + 短时 JWT**（EventSource 不支持自定义 header，故必须 fetch）；Agent 共享密钥**离线验签**，不回查 Java。
+- TS Agent → Java：内部回调（Bearer 服务令牌 + **runId 幂等**，沿用现有 callback 机制）：结算积分 / 写历史 / 触发构建。
+- TS Agent → RAG：`POST /v1/retrieval/context`（Bearer），返回 `{few_shots[], preferences}`。
+- 生产 nginx 单域名：`/api/*`→Java(8123)，`/agent/*`→Node；RAG 仅内网。
+- **"Java 不再对接 Agent"的准确语义**：不再**中转**生成流量；结算/历史/构建回调保留（四笔账有主：历史 Java 写、构建 Java 触发、费用 Java 结算、TS Agent 永不直连 MySQL）。
+- **不引入**：服务发现（2-3 服务静态配置 + healthz + 快速失败）、LLM 网关（MVP；**后续必做**，自托管 NewAPI/LiteLLM 类）、消息队列、微服务拆分（`paimeng-ai-code-mother-microservice/` 废弃）。
 
 ## 数据分工
 
-- **PostgreSQL**：仅保存 LangGraph checkpoint（`thread_id = app:{appId}`）。
-- **MySQL**：业务数据 + `chat_history`（产品事实来源）。
-- **首次判定（M3）**：Python 以「`thread_id` 在 PostgreSQL 是否有 checkpoint」判定是否用请求 `history` bootstrap；Java 每次都传 `history`，不做判断。
+- **交易归 MySQL**：业务 + `chat_history` + `generation_run` + 积分台账（退款/结算需同库同事务）。
+- **记忆归 PG**：PG **即刻停用**（原 LangGraph checkpoint 职责随 Python Agent 退役消失），RAG v2 pgvector 时重启。
 
-## 灰度与切换
+## 关键机制摘要（详见权威文档 §2-§4）
 
-- `python-agent.enabled` 切换两套链路；`false` 走旧 Java AI 实现（行为不变），`true` 走 Python Agent。
-- 任何阶段的第一个任务都必须保证 `./mvnw compile` 通过（编译红线，见 `java.md`）。
+- **浏览器 wire 重设**：四类事件（`ai_response`/`ai_thinking`/`tool_request`/`tool_executed`）语义与字段名保留；扔掉 `data:{"d":...}` 包装；`milestone` 升一等事件；契约落 `docs/ts_agent/contract.md`（P1 产出），契约测试语义比对不比对字节。
+- **checkpoint = `generation_run` 表**（MySQL）：run_id/phase/context JSON（含 XState 快照）/milestones JSON（退款粒度锚）/token_usage/积分台账引用。phase：`interview → wireframe_pending → wireframe_confirmed → coding → review → building → done/failed/aborted`；同 app 并发 run 拒绝。
+- **收敛三纪律**：phase 枚举进 DDL；跨请求等待仅显式状态；重试有界。
+- **token 五层护栏**：输出硬上限（max_turns/max_output_tokens/max_tool_calls=50/图片 4 张，档位差异化）+ 优雅收尾（不硬杀）+ 输入滑窗摘要 + runId 计量 + 日配额熔断。按次计费 ⇒ 单次成本有界。
+- **三档推理强度**：快速/标准（默认）/深度，每消息可选，深度 ×N 价格。
+- **线框闸门**：未确认线框不 codegen；线框**免费 + 独立限频**，积分冻结发生在确认进入 codegen 时刻。
+- **对话中断**：(a) 中止 day-1（保留半成品 + 里程碑退款，首文件前全额退）；(b) 续传挂 run 表稳定后。
 
-## 依赖与运行策略（M2/M4）
+## 过渡态（当前）
 
-- Python 用 `uv`（`pyproject.toml` + `uv.lock`）锁定依赖，禁止写「最新稳定版」。
-- 共享工作区：`tmp/code_output/{codeGenType}_{appId}`，Java 算绝对路径、Python 做沙箱校验。
-- 详细运行/部署见 `deployment.md` 与 `docs/py_agent/task_plan.md` §9。
+- 旧 Java AI 链路为回退主链路（**P0 回切动作待执行**：`application-local.yml` 的 `python-agent.enabled` 当前仍为 true）。
+- T21 门禁重定向："TS Agent 契约对等 + 回归全绿"（删除范围仍按 `docs/py_agent/t21_delete_plan.md`，`createApp` 保留 Java 侧 AI 路由）。
+- `paimeng-ai-code-agent/` 待删（RAG 骨架复用其 FastAPI 模式后）；git 历史为 TS 移植参考库（提示词 7 份/解析正则/guardrail 规则）。
+- Java 侧 `ai/python/*` 将泛化为通用 Agent 客户端（`agent.*` 配置段）。
+
+## 踩坑与规避（架构级）
+
+- 混合双 Agent 长期共存（Python 管旧 + TS 管新）是**最差解**，已明确排除。
+- Cordis（`@deepseek-ai/cordis`）是 DSH 插件组合元框架（DI/生命周期），**非 Agent 框架**，选型属类目错误已排除；仅当未来开放第三方工具生态时再评估。
+
+## 下一步 / 指针
+
+- 权威设计：`docs/ts_agent/architecture.md`（含实施顺序 P0-P4、明确推迟项清单）。
+- 历史参考：`docs/py_agent/task_plan.md`（契约细节）、`docs/py_agent/progress.md`（决策与验证记录）。

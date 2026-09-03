@@ -1,8 +1,9 @@
 # 记忆：Python Agent(Python 后端)
 
-> Python Agent（FastAPI + LangGraph + LangChain）侧的工作记忆。权威契约见 `docs/py_agent/task_plan.md` §1；任务分解见 §4。
+> **已定稿退役（2026-09-03 用户决策）**：Agent 能力迁移 TypeScript（见 `docs/ts_agent/architecture.md`），本子项目不再演进。目录 `paimeng-ai-code-agent/` 待新建 `paimeng-ai-code-rag/` 复用其 FastAPI 骨架模式后删除；**git 历史即移植参考库**——TS 移植时从历史取：7 份提示词（`app/prompts/`）、解析正则（`services/codegen/parsing.py`）、guardrail 规则（`core/guardrails.py`）、工具沙箱（`workspace/manager.py`）、契约测试模式（`tests/test_contract.py`）。
+> 旧契约见 `docs/py_agent/task_plan.md` §1（历史参考）；任务分解见 §4。
 
-## 当前状态（2026-09-01 T14a/T18/T20 实机验证完成）
+## 当前状态（2026-09-03 退役定稿；T0-T20 曾全部完成并实机验证）
 
 | 项 | 状态 |
 |---|---|
@@ -48,11 +49,11 @@
 
 `paimeng-ai-code-agent/`：`pyproject.toml`、`uv.lock`、`.python-version`、`.env.example`、`app/main.py`（**唯一顶层入口**）+ `app/{api,core,models,workspace,tools,services,prompts}/` 子包、`tests/`（含 `tests/fixtures/` 固定夹具快照）。子包分布：`api/`（routes·auth·sse·streaming·callback）、`core/`（config·state·graph·guardrails）、`models/schemas.py`、`workspace/manager.py`、`tools/`、`services/`（含 `services/codegen/`）、`prompts/`。
 
-## 下一步任务
+## 下一步任务（已全部被 2026-09-03 退役决策取代）
 
-阶段 4 验证（T19/T20）已实机完成；阶段 5（T21 就绪准备）已完成：删除方案 `docs/py_agent/t21_delete_plan.md`（含用户决策）+ 新链路回归 `PythonAgentSseAdapterTest`（3 passed，全量 Java 30 用例中 Python 新链路 14 全绿）。剩余为**部署期门禁 T21**：
+原阶段 5 T21（灰度 ≥7 天门禁删除旧 Java AI）**门禁重定向**为：TS Agent 契约对等 + 回归全绿后执行（删除范围不变，按 `docs/py_agent/t21_delete_plan.md`，含用户已确认的 `createApp` 保留 Java 侧 AI 路由）。Python Agent 本体随 T21 一并退役：`paimeng-ai-code-rag/` 骨架就绪后删除本目录。过渡期主链路 = 旧 Java AI（回切 `python-agent.enabled=false`，P0 待执行）。
 
-- **T21（待稳定期，范围已按用户决策收敛）**：按「稳定」定义（开发环境灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1）后删除旧 Java AI 实现。**`createApp` 保留 Java 侧 AI 路由**（用户已确认，不改为默认 html/前端字段/Python 路由）→ 保留 `ai/codegen/route/*` + `config/RoutingAiModelConfig` + `utils/SpringContextUtil` + `prompt/codegen-routing-system-prompt.txt` + langchain4j 依赖（路由链自成闭环）；删除 `ai/codegen` 执行类（7 个）、`langgraph4j/*`、`ai/guardrail/*`、`core/AiCodeGeneratorFacade`+`core/parser`+`core/saver`、`utils/ClazzScanner`；保留 `ai/tools` 展示格式、`core/handler`、`BuilderExecutor`、`ai/python/*`、`ai/enums/CodeGenTypeEnum`、`AiCodeGenTypeRoutingServiceTest`；`AppServiceImpl` 只移除 `aiCodeGeneratorFacade`/`streamHandlerExecutor` 与 `chatToGenCode` 旧分支，路由保留。pom：`langgraph4j-*` 可删，`langchain4j-*` 保留。回归口径：Java 新链路 14 + 路由 1 + Python 87（含契约 11）+ `sse_baseline.py` 三类 DIFF 为空。
+- **T21 删除范围（仍有效，门禁已重定向）**：**`createApp` 保留 Java 侧 AI 路由**（用户已确认）→ 保留 `ai/codegen/route/*` + `config/RoutingAiModelConfig` + `utils/SpringContextUtil` + `prompt/codegen-routing-system-prompt.txt` + langchain4j 依赖（路由链自成闭环）；删除 `ai/codegen` 执行类（7 个）、`langgraph4j/*`、`ai/guardrail/*`、`core/AiCodeGeneratorFacade`+`core/parser`+`core/saver`、`utils/ClazzScanner`；保留 `ai/tools` 展示格式、`core/handler`、`BuilderExecutor`、`ai/python/*`（将泛化为通用 Agent 客户端）、`ai/enums/CodeGenTypeEnum`、`AiCodeGenTypeRoutingServiceTest`；`AppServiceImpl` 只移除 `aiCodeGeneratorFacade`/`streamHandlerExecutor` 与 `chatToGenCode` 旧分支，路由保留。pom：`langgraph4j-*` 可删，`langchain4j-*` 保留。回归口径以 TS Agent 契约对等后的新契约为准（原"Python 87 + sse_baseline.py"口径随退役作废）。
 
 历史写入选型澄清：Python 链路成功 AI 历史由 handler 在流结束写（与旧链路一致），回调 success 不重复写；失败/超时由回调/超时兜底幂等写错误历史。实测：Python 进程停掉 → 浏览器 ~1s 内 business-error + 恰好 1 条错误历史（Java 侧 `onErrorResume` 立即 `complete(runId, businessErrorSse)`，错误继续下传给 handler 写历史）。
 
