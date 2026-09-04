@@ -13,6 +13,8 @@ import com.zdan.paimengaicodemother.model.vo.RunVO;
 import com.zdan.paimengaicodemother.service.impl.GenerationRunServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.redisson.api.RRateLimiter;
+import org.redisson.api.RedissonClient;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.ArrayList;
@@ -30,7 +32,7 @@ import static org.mockito.Mockito.*;
 
 /**
  * GenerationRunServiceImpl 单元测试（Mockito mock mapper，不依赖 Spring 上下文）
- * 覆盖：创建/幂等创建/并发拒绝/幂等更新/最新非终态查询/参数与 JSON 校验
+ * 覆盖：创建/幂等创建/并发拒绝/幂等更新/最新非终态查询/参数与 JSON 校验/线框每日配额
  *
  * @author LXH
  */
@@ -39,6 +41,8 @@ class GenerationRunServiceImplTest {
     private GenerationRunMapper mapper;
     private AppService appService;
     private ChatHistoryService chatHistoryService;
+    private RedissonClient redissonClient;
+    private RRateLimiter rateLimiter;
     private GenerationRunServiceImpl service;
 
     @BeforeEach
@@ -46,7 +50,10 @@ class GenerationRunServiceImplTest {
         mapper = mock(GenerationRunMapper.class);
         appService = mock(AppService.class);
         chatHistoryService = mock(ChatHistoryService.class);
-        service = new GenerationRunServiceImpl(appService, chatHistoryService);
+        redissonClient = mock(RedissonClient.class);
+        rateLimiter = mock(RRateLimiter.class);
+        when(redissonClient.getRateLimiter(anyString())).thenReturn(rateLimiter);
+        service = new GenerationRunServiceImpl(appService, chatHistoryService, redissonClient, 10);
         ReflectionTestUtils.setField(service, "mapper", mapper);
     }
 
@@ -368,5 +375,38 @@ class GenerationRunServiceImplTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.completeRun("run-1", completeRequest("run-1", "success", "/tmp/ws")));
         assertEquals("应用不存在", ex.getMessage());
+    }
+
+    /**
+     * 配额获取成功：acquire 返回 true
+     */
+    @Test
+    void acquireWireframeQuotaSucceeds() {
+        when(rateLimiter.tryAcquire(1)).thenReturn(true);
+        assertTrue(service.acquireWireframeDailyQuota(1L));
+        verify(redissonClient).getRateLimiter("rate_limit:user:1:wireframe_daily");
+        verify(rateLimiter).trySetRate(any(), eq(10L), any());
+    }
+
+    /**
+     * 配额耗尽 → TOO_MANY_REQUEST 明确文案
+     */
+    @Test
+    void acquireWireframeQuotaExceededThrows() {
+        when(rateLimiter.tryAcquire(1)).thenReturn(false);
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.acquireWireframeDailyQuota(1L));
+        assertEquals("今日线框生成次数已用完，请明天再试", ex.getMessage());
+    }
+
+    /**
+     * 非正 userId → PARAMS_ERROR
+     */
+    @Test
+    void acquireWireframeQuotaRejectsInvalidUserId() {
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.acquireWireframeDailyQuota(null));
+        assertEquals("userId 不能为空", ex.getMessage());
+        verify(redissonClient, never()).getRateLimiter(anyString());
     }
 }

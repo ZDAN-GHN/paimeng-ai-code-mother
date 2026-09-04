@@ -10,6 +10,7 @@ import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.model.dto.run.AgentCompleteRequest;
 import com.zdan.paimengaicodemother.model.dto.run.RunCreateRequest;
 import com.zdan.paimengaicodemother.model.dto.run.RunUpdateRequest;
+import com.zdan.paimengaicodemother.model.dto.run.WireframeQuotaRequest;
 import com.zdan.paimengaicodemother.model.vo.RunVO;
 import com.zdan.paimengaicodemother.service.GenerationRunService;
 import lombok.extern.slf4j.Slf4j;
@@ -128,6 +129,21 @@ public class GenerationRunController {
         checkInternalAuth(authorization);
         generationRunService.completeRun(runId, request);
         return ResponseEntity.ok(ResultUtils.success(true));
+    }
+
+    /**
+     * 线框生成每日配额（Issue #7）：线框免费 + 每用户每日独立限频（复用 Redisson 限流机制）
+     * 超出 → 429「今日线框生成次数已用完，请明天再试」；TS Agent 生成线框前调用
+     *
+     * @param request      配额请求（userId）
+     * @param authorization Authorization 头
+     * @return 配额获取结果
+     */
+    @PostMapping("/agent/wireframe/quota/acquire")
+    public ResponseEntity<BaseResponse<Boolean>> acquireWireframeQuota(@RequestBody WireframeQuotaRequest request,
+                                                                       @RequestHeader(value = "Authorization", required = false) String authorization) {
+        checkInternalAuth(authorization);
+        return ResponseEntity.ok(ResultUtils.success(generationRunService.acquireWireframeDailyQuota(request.getUserId())));
     }
 
     /**

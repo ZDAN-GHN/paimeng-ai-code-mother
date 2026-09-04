@@ -28,8 +28,13 @@ import com.zdan.paimengaicodemother.service.AppService;
 import com.zdan.paimengaicodemother.service.ChatHistoryService;
 import com.zdan.paimengaicodemother.service.GenerationRunService;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RRateLimiter;
+import org.redisson.api.RateType;
+import org.redisson.api.RedissonClient;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
@@ -73,10 +78,16 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
 
     private final AppService appService;
     private final ChatHistoryService chatHistoryService;
+    private final RedissonClient redissonClient;
+    private final int wireframeDailyLimit;
 
-    public GenerationRunServiceImpl(AppService appService, ChatHistoryService chatHistoryService) {
+    public GenerationRunServiceImpl(AppService appService, ChatHistoryService chatHistoryService,
+                                    RedissonClient redissonClient,
+                                    @Value("${agent.wireframe-daily-limit:10}") int wireframeDailyLimit) {
         this.appService = appService;
         this.chatHistoryService = chatHistoryService;
+        this.redissonClient = redissonClient;
+        this.wireframeDailyLimit = wireframeDailyLimit;
     }
 
     @Override
@@ -200,6 +211,29 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
         // 标记放到校验与副作用全部成功之后：任一步失败时 runId 不落标记，TS Agent 修正后重试可重新处理
         completedRunIds.add(runId);
         log.info("run 完成回调处理成功，runId: {}, status: {}", runId, request.getStatus());
+    }
+
+    /**
+     * 获取线框生成每日配额（Issue #7）：线框免费 + 每用户每日独立限频，与积分体系无关。
+     * 复用 RateLimitAspect 的 Redisson 令牌桶机制（rate_limit: 键前缀 + OVERALL + 滚动窗口）——
+     * 内部 Bearer 端点无 servlet session，以请求体 userId 键控（与注解的 session 取用户语义等价）。
+     * 键 TTL 设 25 小时：滚动 24h 窗口内不被清理，空闲后自动回收
+     *
+     * @param userId 用户 id
+     * @return 配额获取成功（true）
+     */
+    @Override
+    public boolean acquireWireframeDailyQuota(Long userId) {
+        ThrowUtils.throwIf(userId == null || userId <= 0, ErrorCode.PARAMS_ERROR, "userId 不能为空");
+        String key = "rate_limit:user:" + userId + ":wireframe_daily";
+        RRateLimiter rateLimiter = redissonClient.getRateLimiter(key);
+        rateLimiter.expire(Duration.ofHours(25));
+        // rate = 每 86400s 允许的令牌数（滚动 24h 窗口），等价「每用户每日 N 次」
+        rateLimiter.trySetRate(RateType.OVERALL, wireframeDailyLimit, Duration.ofSeconds(86400));
+        if (!rateLimiter.tryAcquire(1)) {
+            throw new BusinessException(ErrorCode.TOO_MANY_REQUEST, "今日线框生成次数已用完，请明天再试");
+        }
+        return true;
     }
 
     /**

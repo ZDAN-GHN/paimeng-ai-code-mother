@@ -27,7 +27,10 @@ bash scripts/run-wsl.sh type-check
 |---|---|---|
 | `GET /healthz` | 无 | 健康检查，`{"status":"ok"}` |
 | `POST /agent/workspace/validate` | JWT | body `{"workspacePath":"<绝对路径>"}`；不逃逸 `WORKSPACE_ROOT` → 200，否则 400 |
-| `POST /agent/stream` | JWT | 最小生成流：XState 线性工作流驱动 + Vercel AI SDK 假 LLM（provider + 工具循环）+ SSE |
+| `POST /agent/interview` | JWT | 五维访谈（受众/风格/页面清单/数据需求/交互，每维 2-4 选项选择题），最多 2 轮、信息足够跳过；状态持久化于 run context |
+| `POST /agent/wireframe` | JWT | 快速档线框：单文件 HTML（灰块/占位图/可点击跳转/站点地图，≤5 页），存 `{workspace}/wireframe/`，run → wireframe_pending；免费 + 每用户每日限频（超限 429） |
+| `POST /agent/wireframe/confirm` | JWT | 确认线框 → run → wireframe_confirmed（codegen 布局契约；幂等） |
+| `POST /agent/stream` | JWT | 最小生成流：XState 线性工作流驱动 + Vercel AI SDK 假 LLM（provider + 工具循环）+ SSE；**线框闸门**——非 wireframe_confirmed 的请求被拒（error 事件明确报错） |
 | `GET /agent/smoke/sse` | JWT | 兼容性冒烟端点：按新 SSE 格式输出脚本化事件 |
 
 ## 鉴权约定
@@ -45,17 +48,20 @@ bash scripts/run-wsl.sh type-check
 
 ```
 src/
-  config.ts            # 环境配置（PORT/JWT_SECRET/WORKSPACE_ROOT）
+  config.ts            # 环境配置（PORT/JWT_SECRET/WORKSPACE_ROOT/JAVA_INTERNAL_*）
   events.ts            # 七类 SSE 事件模型
   machine.ts           # XState v5 线性工作流状态机（interview→coding→review→done/failed，milestone 聚合）
   llm.ts               # 脚本化假 LLM：AI SDK LanguageModelV2 provider（customProvider 注册，零在线调用）
   workflow.ts          # 工作流驱动：XState actor 推进 + streamText 消费 + run phase 更新 + 工作区落盘
+  interview.ts         # 五维访谈：题目生成/收敛判断/结论（脚本化，真实模型替换点）
+  wireframe.ts         # 线框生成：单文件 HTML（站点地图 + 灰块 + 占位图，≤5 页）
+  context.ts           # run.context JSON 类型化解析（interview + wireframe 状态）
   sse/format.ts        # SSE 帧序列化
   auth/jwt.ts          # jose 离线验签
   auth/plugin.ts       # /agent/* 鉴权作用域（钩子不外溢）
   workspace/sandbox.ts # 工作区沙箱校验（移植自 Python Agent workspace/manager.py）
-  routes/              # healthz + agent 路由
+  routes/              # healthz + agent 路由（含需求工程与闸门）
   app.ts               # buildApp（生产与测试共用）
   index.ts             # 入口
-test/                  # vitest：healthz / 鉴权矩阵 / 沙箱逃逸 / SSE 顺序 / stream 契约
+test/                  # vitest：healthz / 鉴权矩阵 / 沙箱逃逸 / SSE 顺序 / stream 契约 / 需求工程
 ```

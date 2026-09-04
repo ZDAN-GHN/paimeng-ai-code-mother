@@ -58,3 +58,10 @@
 - 包结构 `com.zdan.paimengaicodemother.*`（`ai`/`controller`/`service`/`mapper`/`config`）；遵循阿里巴巴 Java 开发手册。
 - MyBatis Flex 代码生成：`com.zdan.paimengaicodemother.generator` 包生成器，产出 mapper XML 在 `src/main/resources/mapper/`。
 - 提交遵循 `AGENTS.md` 的「Git 提交」约定（Agent 代理提交时携带 `<Agent IDE>/<用户信息>`）；注释遵循 `project-comment-style` skill。
+
+## 2026-09-04 线框每日配额内部端点（Issue #7 已落地）
+
+- **`POST /internal/agent/wireframe/quota/acquire`**（`GenerationRunController`，Bearer 服务令牌）：`GenerationRunService.acquireWireframeDailyQuota(userId)`——线框免费 + 每用户每日独立限频（**复用 RateLimitAspect 的 Redisson 令牌桶机制**：`rate_limit:user:{userId}:wireframe_daily` 键 + `RateType.OVERALL` + 86400s 滚动窗口 + `tryAcquire(1)`）；超出 → `BusinessException(TOO_MANY_REQUEST)` → HTTP **429**「今日线框生成次数已用完，请明天再试」。键 TTL 25h（滚动 24h 窗口内不被清理，空闲回收）。
+- **配置**：`AgentProperties.wireframeDailyLimit`（默认 10），`application.yml` `agent.wireframe-daily-limit: ${AGENT_WIREFRAME_DAILY_LIMIT:10}`；`GenerationRunServiceImpl` 构造器注入 `RedissonClient` + `@Value` 限频数（**测试构造器同步改 4 参**）。
+- **不直接复用 `@RateLimit` 注解的原因**：注解 USER 类型靠 `userService.getLoginUser(request)`（servlet session）取用户，内部 Bearer 端点无 session；改为请求体 userId 键控（TS Agent JWT sub），机制（Redisson + `rate_limit:` 前缀）完全一致。
+- **测试**：`GenerationRunServiceImplTest` 21 例（+配额成功/耗尽 429/非法 userId 3 例，mock Redisson）、`GenerationRunControllerTest` 14 例（+401/200/429 3 例）。

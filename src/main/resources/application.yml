@@ -46,6 +46,11 @@ python-agent:
   # 主通道结束后等待完成回调的最长时间，超时未收到回调则判定失败
   callback-timeout-ms: ${PYTHON_AGENT_CALLBACK_TIMEOUT_MS:60000}
 
+# Agent 客户端补充配置（Issue #7）：线框免费阶段的每用户每日独立限频（与积分体系无关）
+agent:
+  # 线框生成每用户每日限频（滚动 24 小时窗口）
+  wireframe-daily-limit: ${AGENT_WIREFRAME_DAILY_LIMIT:10}
+
 # Java 内部 API（TS Agent 调用 generation_run 等内部端点时校验的 Bearer 服务令牌）
 internal-api:
   token: ${INTERNAL_API_TOKEN:}

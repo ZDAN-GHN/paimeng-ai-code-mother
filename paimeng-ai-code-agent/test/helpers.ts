@@ -24,7 +24,9 @@ export async function makeToken(overrides: { expiresIn?: string | number; sub?: 
 }
 
 export function buildTestApp(workspaceRoot: string = makeWorkspaceRoot(), overrides: Parameters<typeof buildApp>[0] = {}) {
-  return buildApp({ jwtSecret: TEST_SECRET, workspaceRoot, logLevel: 'silent', ...overrides })
+  // javaInternalToken 强制为空：测试默认离线（不读 .env 的 JAVA_INTERNAL_TOKEN，避免误连真实 Java），
+  // 需要内部 API 的用例显式注入 agentRoutes.runClient 假客户端
+  return buildApp({ jwtSecret: TEST_SECRET, workspaceRoot, logLevel: 'silent', javaInternalToken: '', ...overrides })
 }
 
 export type { FastifyInstance }

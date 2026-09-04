@@ -1,6 +1,21 @@
 # TS Agent 浏览器 SSE 契约
 
-状态：Issue #5 定稿。该协议由浏览器通过 `fetch` 直连 TS Agent，Java 不中转生成流。
+状态：Issue #5 定稿；Issue #7 增补需求工程（访谈/线框/确认）与 codegen 闸门。该协议由浏览器通过 `fetch` 直连 TS Agent，Java 不中转生成流。
+
+## 需求工程与 codegen 闸门（Issue #7）
+
+需求收敛前半程由三个 JSON 请求/响应端点完成（均 JWT 鉴权），run 状态经 Java 内部 API 持久化（`generation_run`，跨请求存活）；codegen（`/agent/stream`）受线框闸门约束。
+
+| 端点 | 请求 | 响应要点 | 阶段变更 |
+|---|---|---|---|
+| `POST /agent/interview` | `{ runId, appId, message?, answers? }` | `{ round, complete, questions? / summary }` | 建 run（interview）；访谈状态入 context |
+| `POST /agent/wireframe` | `{ runId, appId, workspacePath }` | `{ phase, wireframe: { relativeUrl, pageCount } }` | → `wireframe_pending`；免费 + 每日限频（超限 429） |
+| `POST /agent/wireframe/confirm` | `{ runId, appId }` | `{ phase, wireframe }` | → `wireframe_confirmed`（积分冻结时刻，见 #10） |
+| `POST /agent/stream` | 见下 | SSE | 闸门：仅 `wireframe_confirmed` 放行 |
+
+- **访谈**：固定 5 维（受众/风格/页面清单/数据需求/交互），每维 2-4 选项选择题，**最多 2 轮**；各维均已作答即收束（跳过剩余轮次），`complete: true` + `summary` 喂线框。答案经 `answers: [{ key, optionId, text? }]` 提交，跨请求续答。
+- **线框**：快速档模型产出单文件 HTML（灰块 + 占位图 + 页内锚点可点击跳转 + 站点地图），存 `{workspace}/wireframe/wireframe.html`，**页面数 ≤ 5**；免费但每用户每日独立限频（Java 内部配额端点，超出 → HTTP 429）。
+- **闸门（核心）**：未确认线框的 codegen 请求被拒——`/agent/stream` 先经 Java 内部 API 校验 run 阶段，非 `wireframe_confirmed` 时输出唯一 `error` 事件（明确报错），不发任何业务事件。已确认线框即 codegen 布局契约与视觉 diff 基准。
 
 ## 请求
 

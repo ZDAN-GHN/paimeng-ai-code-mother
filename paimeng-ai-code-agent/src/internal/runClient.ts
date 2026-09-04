@@ -140,6 +140,12 @@ export class RunClient {
     return this.request<Run | null>('POST', `/internal/agent/runs/${encodeURIComponent(runId)}/complete`, request)
   }
 
+  // 线框生成每日配额（Issue #7）：线框免费 + 每用户每日独立限频（复用 RateLimit 同机制，Java 侧
+  // Redisson 令牌桶键控 userId）；超出 → HTTP 429（RunApiError.status=429），由路由映射为明确报错
+  async acquireWireframeQuota(userId: number | string): Promise<boolean> {
+    return this.request<boolean>('POST', '/internal/agent/wireframe/quota/acquire', { userId })
+  }
+
   // 按 runId 查询 run（不存在返回 null）
   async getRun(runId: string): Promise<Run | null> {
     return this.request<Run | null>('GET', `/internal/runs/${encodeURIComponent(runId)}`)

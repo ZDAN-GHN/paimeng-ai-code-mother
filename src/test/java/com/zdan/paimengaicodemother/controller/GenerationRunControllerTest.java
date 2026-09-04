@@ -211,4 +211,47 @@ class GenerationRunControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("status 仅接受 success/failed"));
     }
+
+    /**
+     * 线框配额：无 Bearer → 401
+     */
+    @Test
+    void acquireWireframeQuotaWithoutBearerReturns401() throws Exception {
+        mockMvc.perform(post("/internal/agent/wireframe/quota/acquire")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":1}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    /**
+     * 线框配额：合法调用 → 200 true
+     */
+    @Test
+    void acquireWireframeQuotaWithValidBearerReturns200() throws Exception {
+        when(generationRunService.acquireWireframeDailyQuota(1L)).thenReturn(true);
+
+        mockMvc.perform(post("/internal/agent/wireframe/quota/acquire")
+                        .header("Authorization", AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":1}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data").value(true));
+    }
+
+    /**
+     * 线框配额：每日次数用完（service 抛 TOO_MANY_REQUEST）→ 429 明确文案
+     */
+    @Test
+    void acquireWireframeQuotaExceededReturns429() throws Exception {
+        doThrow(new BusinessException(ErrorCode.TOO_MANY_REQUEST, "今日线框生成次数已用完，请明天再试"))
+                .when(generationRunService).acquireWireframeDailyQuota(1L);
+
+        mockMvc.perform(post("/internal/agent/wireframe/quota/acquire")
+                        .header("Authorization", AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":1}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("今日线框生成次数已用完，请明天再试"));
+    }
 }

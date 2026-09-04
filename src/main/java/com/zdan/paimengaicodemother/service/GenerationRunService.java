@@ -57,4 +57,13 @@ public interface GenerationRunService extends IService<GenerationRun> {
      * @param request 完成回调请求
      */
     void completeRun(String runId, AgentCompleteRequest request);
+
+    /**
+     * 获取线框生成每日配额（Issue #7）：线框免费 + 每用户每日独立限频（复用 RateLimit 同机制，
+     * Redisson 令牌桶键控 userId；与积分体系无关）。超出 → BusinessException(TOO_MANY_REQUEST)
+     *
+     * @param userId 用户 id
+     * @return 配额获取成功
+     */
+    boolean acquireWireframeDailyQuota(Long userId);
 }

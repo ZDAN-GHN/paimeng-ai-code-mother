@@ -45,4 +45,9 @@ public class AgentProperties {
      * 回调等待超时，毫秒（主通道结束后等待完成回调的最长时间）
      */
     private long callbackTimeoutMs = 60000;
+
+    /**
+     * 线框生成每用户每日限频（Issue #7，免费 + 独立限频；滚动 24 小时窗口）
+     */
+    private int wireframeDailyLimit = 10;
 }
