@@ -21,6 +21,7 @@ import com.zdan.paimengaicodemother.exception.ThrowUtils;
 import com.zdan.paimengaicodemother.model.dto.app.*;
 import com.zdan.paimengaicodemother.model.entity.App;
 import com.zdan.paimengaicodemother.model.entity.User;
+import com.zdan.paimengaicodemother.model.enums.AgentCompleteStatusEnum;
 import com.zdan.paimengaicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.zdan.paimengaicodemother.model.vo.AppVO;
 import com.zdan.paimengaicodemother.service.AppService;
@@ -156,8 +157,8 @@ public class AppController {
     }
 
     /**
-     * Python Agent 完成回调（§1.4，内部接口）
-     * 不走用户鉴权（Python 无 session Cookie），仅校验 Bearer；runId 幂等；
+     * Agent 完成回调（§1.4，内部接口）
+     * 不走用户鉴权（Agent 无 session Cookie），仅校验 Bearer；runId 幂等；
      * 首次处理：success → 构建 + 向浏览器发 done；failed → 写错误历史 + business-error
      *
      * @param body          回调请求体
@@ -165,8 +166,8 @@ public class AppController {
      * @return 处理结果
      */
     @PostMapping("/chat/gen/code/callback")
-    public BaseResponse<Boolean> pythonAgentCallback(@RequestBody AgentCallbackRequest body,
-                                                     @RequestHeader(value = "Authorization", required = false) String authorization) {
+    public BaseResponse<Boolean> agentCallback(@RequestBody AgentCallbackRequest body,
+                                               @RequestHeader(value = "Authorization", required = false) String authorization) {
         // 仅校验内部 Bearer 令牌（A4：回调 handler 不取 session）
         String expected = "Bearer " + agentProperties.getToken();
         if (StrUtil.isBlank(agentProperties.getToken()) || !expected.equals(authorization)) {
@@ -175,7 +176,7 @@ public class AppController {
         ThrowUtils.throwIf(body == null || StrUtil.isBlank(body.getRunId()), ErrorCode.PARAMS_ERROR, "runId 不能为空");
         // status 仅接受 success/failed（A9），非法值返回 400
         String status = body.getStatus();
-        if (!"success".equals(status) && !"failed".equals(status)) {
+        if (AgentCompleteStatusEnum.getEnumByValue(status) == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "status 仅接受 success/failed");
         }
         String runId = body.getRunId();
@@ -189,7 +190,7 @@ public class AppController {
             return ResultUtils.success(true);
         }
         RunIdSinkRegistry.Entry entry = entryOpt.get();
-        if ("success".equals(status)) {
+        if (AgentCompleteStatusEnum.getEnumByValue(status) == AgentCompleteStatusEnum.SUCCESS) {
             // 成功历史已在主通道流结束时由 handler 写入（与旧链路一致，见 docs/py_agent/progress.md）
             // 此处执行构建并向浏览器发送 done
             try {

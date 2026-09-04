@@ -229,7 +229,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAMS_ERROR, "代码生成类型不合法"));
         // 灰度开关：true 走 Agent 链路，false 走旧 Java AI 实现（行为不变）
         if (agentProperties.isEnabled()) {
-            return pythonChatToGenCode(appId, message, loginUser, codeGenTypeEnum);
+            return agentChatToGenCode(appId, message, loginUser, codeGenTypeEnum);
         }
         // 旧链路（行为与迁移前完全一致）
         Flux<String> contentFlux = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
@@ -238,7 +238,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     }
 
     /**
-     * Python Agent 链路：主通道事件流 → 浏览器显示 + 回调终端信号（T15/T17/T18）
+     * Agent 链路：主通道事件流 → 浏览器显示 + 回调终端信号（T15/T17/T18）
      * 主通道结束后进入「等待回调」阶段（§1.5），done 由回调触发；超时兜底 business-error
      *
      * @param appId          应用 id
@@ -247,8 +247,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
      * @param codeGenTypeEnum 代码生成类型
      * @return 浏览器 SSE 流（含终端事件）
      */
-    private Flux<ServerSentEvent<String>> pythonChatToGenCode(Long appId, String message, User loginUser,
-                                                              CodeGenTypeEnum codeGenTypeEnum) {
+    private Flux<ServerSentEvent<String>> agentChatToGenCode(Long appId, String message, User loginUser,
+                                                             CodeGenTypeEnum codeGenTypeEnum) {
         // 1. 生成 runId 并注册浏览器连接终端（回调到达 / 超时通过该终端发 done / business-error）
         String runId = UUID.randomUUID().toString();
         String workspacePath = StrUtil.format("{}/{}_{}", AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenTypeEnum.getValue(), appId);
@@ -263,10 +263,10 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         request.setThreadId("app:" + appId);
         request.setWorkspacePath(workspacePath);
         request.setHistory(loadRecentHistory(appId));
-        // 3. 调用 Python 主通道；错误事件触发 failed 终端（幂等）；
+        // 3. 调用 Agent 主通道；错误事件触发 failed 终端（幂等）；
         //    上游调用失败（连接/读超时）时立即触发 business-error 终端，不等回调超时（§1.5 兜底）
         Flux<AgentClient.SseEvent> agentSse = agentClient.stream(request)
-                .doOnNext(event -> handlePythonErrorEvent(runId, appId, loginUser, event))
+                .doOnNext(event -> handleAgentErrorEvent(runId, appId, loginUser, event))
                 .onErrorResume(error -> {
                     log.error("调用 Agent 失败，runId: {}, message: {}", runId, error.getMessage());
                     runIdSinkRegistry.complete(runId, businessErrorSse(ErrorCode.SYSTEM_ERROR, "AI 服务调用失败，请稍后重试"));
@@ -289,14 +289,14 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     }
 
     /**
-     * Python 主通道错误事件处理（§1.3 event:error → 浏览器 business-error + 幂等失败历史）
+     * Agent 主通道错误事件处理（§1.3 event:error → 浏览器 business-error + 幂等失败历史）
      *
      * @param runId     runId
      * @param appId     应用 id
      * @param loginUser 当前登录用户
      * @param event     SSE 事件
      */
-    private void handlePythonErrorEvent(String runId, Long appId, User loginUser, AgentClient.SseEvent event) {
+    private void handleAgentErrorEvent(String runId, Long appId, User loginUser, AgentClient.SseEvent event) {
         if (!"error".equals(event.event())) {
             return;
         }
@@ -304,7 +304,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             return;
         }
         String message = extractErrorMessage(event.data());
-        log.error("Python Agent 返回错误事件，runId: {}, message: {}", runId, message);
+        log.error("Agent 返回错误事件，runId: {}, message: {}", runId, message);
         chatHistoryService.addChatMessage(appId, "生成失败：" + message,
                 ChatHistoryMessageTypeEnum.AI.getValue(), loginUser);
         runIdSinkRegistry.complete(runId, businessErrorSse(ErrorCode.OPERATION_ERROR, message));

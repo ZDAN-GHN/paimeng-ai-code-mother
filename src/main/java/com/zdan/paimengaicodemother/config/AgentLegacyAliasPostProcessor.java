@@ -21,28 +21,37 @@ import java.util.Map;
 public class AgentLegacyAliasPostProcessor implements EnvironmentPostProcessor, Ordered {
 
     /**
-     * 旧键 → 新键（spring 宽松绑定的下划线/短横线键名）
+     * 键名别名对：旧键 → 新键（spring 宽松绑定的下划线/短横线键名）
+     *
+     * @param legacy 旧键（python-agent.*）
+     * @param modern 新键（agent.*）
      */
-    private static final List<String[]> ALIASES = List.of(
-            new String[]{"python-agent.enabled", "agent.enabled"},
-            new String[]{"python-agent.base-url", "agent.base-url"},
-            new String[]{"python-agent.base_url", "agent.base-url"},
-            new String[]{"python-agent.token", "agent.token"},
-            new String[]{"python-agent.connect-timeout-ms", "agent.connect-timeout-ms"},
-            new String[]{"python-agent.connect_timeout_ms", "agent.connect-timeout-ms"},
-            new String[]{"python-agent.read-timeout-ms", "agent.read-timeout-ms"},
-            new String[]{"python-agent.read_timeout_ms", "agent.read-timeout-ms"},
-            new String[]{"python-agent.callback-timeout-ms", "agent.callback-timeout-ms"},
-            new String[]{"python-agent.callback_timeout_ms", "agent.callback-timeout-ms"}
+    private record Alias(String legacy, String modern) {
+    }
+
+    /**
+     * 旧键 → 新键 别名清单
+     */
+    private static final List<Alias> ALIASES = List.of(
+            new Alias("python-agent.enabled", "agent.enabled"),
+            new Alias("python-agent.base-url", "agent.base-url"),
+            new Alias("python-agent.base_url", "agent.base-url"),
+            new Alias("python-agent.token", "agent.token"),
+            new Alias("python-agent.connect-timeout-ms", "agent.connect-timeout-ms"),
+            new Alias("python-agent.connect_timeout_ms", "agent.connect-timeout-ms"),
+            new Alias("python-agent.read-timeout-ms", "agent.read-timeout-ms"),
+            new Alias("python-agent.read_timeout_ms", "agent.read-timeout-ms"),
+            new Alias("python-agent.callback-timeout-ms", "agent.callback-timeout-ms"),
+            new Alias("python-agent.callback_timeout_ms", "agent.callback-timeout-ms")
     );
 
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
         MutablePropertySources sources = environment.getPropertySources();
         Map<String, Object> aliasMap = new HashMap<>();
-        for (String[] pair : ALIASES) {
-            String legacy = pair[0];
-            String modern = pair[1];
+        for (Alias alias : ALIASES) {
+            String legacy = alias.legacy();
+            String modern = alias.modern();
             // 仅当旧键存在且新键缺失时复制（显式新键优先）
             if (environment.containsProperty(legacy) && !environment.containsProperty(modern)) {
                 aliasMap.put(modern, environment.getProperty(legacy));

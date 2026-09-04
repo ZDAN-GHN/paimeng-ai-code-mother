@@ -49,7 +49,6 @@ export interface RunUpdateRequest {
 
 // 完成回调消息条目（写 chat_history，Issue #6）
 export interface AgentCompleteMessage {
-  // user/ai
   messageType: 'user' | 'ai'
   content: string
 }
@@ -58,7 +57,6 @@ export interface AgentCompleteMessage {
 export interface AgentCompleteRequest {
   appId: number | string
   userId: number | string
-  // success/failed
   status: 'success' | 'failed'
   messages: AgentCompleteMessage[]
   workspacePath?: string

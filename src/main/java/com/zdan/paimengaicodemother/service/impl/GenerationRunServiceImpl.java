@@ -20,6 +20,7 @@ import com.zdan.paimengaicodemother.model.dto.run.RunUpdateRequest;
 import com.zdan.paimengaicodemother.model.entity.App;
 import com.zdan.paimengaicodemother.model.entity.GenerationRun;
 import com.zdan.paimengaicodemother.model.entity.User;
+import com.zdan.paimengaicodemother.model.enums.AgentCompleteStatusEnum;
 import com.zdan.paimengaicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.zdan.paimengaicodemother.model.enums.GenerationRunPhaseEnum;
 import com.zdan.paimengaicodemother.model.vo.RunVO;
@@ -164,19 +165,19 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
     @Override
     public void completeRun(String runId, AgentCompleteRequest request) {
         ThrowUtils.throwIf(StrUtil.isBlank(runId), ErrorCode.PARAMS_ERROR, "runId 不能为空");
-        validateComplete(request);
-        // 幂等：同 runId 只处理一次（重复回调直接忽略，不重复写历史/构建）
-        if (!completedRunIds.add(runId)) {
+        // 幂等检查（只读）：回调可能被网络层重试，已处理成功过则直接丢弃，避免重复写历史/构建
+        if (completedRunIds.contains(runId)) {
             log.info("run 完成回调已处理过，幂等跳过，runId: {}", runId);
             return;
         }
+        validateComplete(request);
         // 归属与构建类型以 Java 侧 app 为准（TS Agent 不传 codeGenType，避免契约冗余）
         App app = appService.getById(request.getAppId());
         ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
         User user = new User();
         user.setId(request.getUserId());
         if (CollUtil.isNotEmpty(request.getMessages())) {
-            // 本次对话历史按序落库（user + ai 全文）
+            // 保持发送顺序逐条落库，避免会话展示错位（user/ai 全文）
             for (AgentCompleteRequest.Message message : request.getMessages()) {
                 ThrowUtils.throwIf(ChatHistoryMessageTypeEnum.getEnumByValue(message.getMessageType()) == null,
                         ErrorCode.PARAMS_ERROR, "messageType 仅接受 user/ai");
@@ -184,17 +185,20 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
                         message.getMessageType(), user);
             }
         }
-        if ("success".equals(request.getStatus())) {
-            // 触发构建：产物落工作区（构建管线不变）
+        AgentCompleteStatusEnum status = AgentCompleteStatusEnum.getEnumByValue(request.getStatus());
+        if (status == AgentCompleteStatusEnum.SUCCESS) {
+            // 产物已就绪，构建产出可部署应用（构建管线复用旧链路，失败会抛出由上层映射 500）
             CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(app.getCodeGenType());
             ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "代码生成类型不合法");
             BuilderExecutor.doBuild(codeGenTypeEnum, request.getWorkspacePath());
         } else {
-            // 失败：写一条错误历史（AI 类型），不触发构建
+            // 失败无产物可构建，写错误历史让会话有可见反馈
             chatHistoryService.addChatMessage(request.getAppId(),
                     "生成失败：" + StrUtil.blankToDefault(request.getErrorMessage(), "生成失败"),
                     ChatHistoryMessageTypeEnum.AI.getValue(), user);
         }
+        // 标记放到校验与副作用全部成功之后：任一步失败时 runId 不落标记，TS Agent 修正后重试可重新处理
+        completedRunIds.add(runId);
         log.info("run 完成回调处理成功，runId: {}, status: {}", runId, request.getStatus());
     }
 
@@ -209,11 +213,10 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
                 ErrorCode.PARAMS_ERROR, "appId 不能为空");
         ThrowUtils.throwIf(request.getUserId() == null || request.getUserId() <= 0,
                 ErrorCode.PARAMS_ERROR, "userId 不能为空");
-        String status = request.getStatus();
-        ThrowUtils.throwIf(!"success".equals(status) && !"failed".equals(status),
-                ErrorCode.PARAMS_ERROR, "status 仅接受 success/failed");
-        // success 时需要工作区路径触发构建
-        ThrowUtils.throwIf("success".equals(status) && StrUtil.isBlank(request.getWorkspacePath()),
+        AgentCompleteStatusEnum status = AgentCompleteStatusEnum.getEnumByValue(request.getStatus());
+        ThrowUtils.throwIf(status == null, ErrorCode.PARAMS_ERROR, "status 仅接受 success/failed");
+        // success 时需要工作区路径触发构建（failed 无产物可构建，允许为空）
+        ThrowUtils.throwIf(status == AgentCompleteStatusEnum.SUCCESS && StrUtil.isBlank(request.getWorkspacePath()),
                 ErrorCode.PARAMS_ERROR, "workspacePath 不能为空");
     }
 
