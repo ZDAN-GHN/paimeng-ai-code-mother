@@ -213,20 +213,14 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
         log.info("run 完成回调处理成功，runId: {}, status: {}", runId, request.getStatus());
     }
 
-    /**
-     * 获取线框生成每日配额（Issue #7）：线框免费 + 每用户每日独立限频，与积分体系无关。
-     * 复用 RateLimitAspect 的 Redisson 令牌桶机制（rate_limit: 键前缀 + OVERALL + 滚动窗口）——
-     * 内部 Bearer 端点无 servlet session，以请求体 userId 键控（与注解的 session 取用户语义等价）。
-     * 键 TTL 设 25 小时：滚动 24h 窗口内不被清理，空闲后自动回收
-     *
-     * @param userId 用户 id
-     * @return 配额获取成功（true）
-     */
     @Override
     public boolean acquireWireframeDailyQuota(Long userId) {
         ThrowUtils.throwIf(userId == null || userId <= 0, ErrorCode.PARAMS_ERROR, "userId 不能为空");
+        // 复用 RateLimitAspect 的 Redisson 令牌桶机制：内部 Bearer 端点无 servlet session，无法走注解
+        // USER 型取登录用户，改以请求体 userId 键控（机制同源：rate_limit: 前缀 + OVERALL + tryAcquire）
         String key = "rate_limit:user:" + userId + ":wireframe_daily";
         RRateLimiter rateLimiter = redissonClient.getRateLimiter(key);
+        // 键 TTL 25 小时：滚动 24h 窗口内不被清理，空闲后自动回收
         rateLimiter.expire(Duration.ofHours(25));
         // rate = 每 86400s 允许的令牌数（滚动 24h 窗口），等价「每用户每日 N 次」
         rateLimiter.trySetRate(RateType.OVERALL, wireframeDailyLimit, Duration.ofSeconds(86400));

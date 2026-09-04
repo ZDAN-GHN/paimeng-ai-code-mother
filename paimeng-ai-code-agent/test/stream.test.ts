@@ -51,7 +51,8 @@ describe('POST /agent/stream（成功剧本）', () => {
   it('输出契约要求的完整事件序列，顺序约束满足', async () => {
     const root = makeWorkspaceRoot()
     const token = await makeToken()
-    const response = await buildTestApp(root).inject({
+    // 注入已确认线框的 runClient：闸门放行（无内部 API 的离线路径已按 #7 审查整改为拒绝）
+    const response = await buildTestApp(root, { agentRoutes: { runClient: fakeRunClient([], 'wireframe_confirmed') } }).inject({
       method: 'POST',
       url: '/agent/stream',
       headers: { authorization: `Bearer ${token}` },
@@ -125,7 +126,7 @@ describe('POST /agent/stream（成功剧本）', () => {
   it('工作区路径逃逸 WORKSPACE_ROOT → 错误终态且不写文件', async () => {
     const root = makeWorkspaceRoot()
     const token = await makeToken()
-    const response = await buildTestApp(root).inject({
+    const response = await buildTestApp(root, { agentRoutes: { runClient: fakeRunClient([], 'wireframe_confirmed') } }).inject({
       method: 'POST',
       url: '/agent/stream',
       headers: { authorization: `Bearer ${token}` },
@@ -208,5 +209,21 @@ describe('POST /agent/stream（#7 线框闸门）', () => {
     const result = frames(response.body)
     expect(types(result).at(-1)).toBe('done')
     expect(result.some((frame) => frame.event === 'error')).toBe(false)
+  })
+
+  it('未配置 Java 内部 API → 拒绝放行（无法校验闸门，不静默绕过）', async () => {
+    // 不注入 runClient（buildTestApp 默认 javaInternalToken 为空）→ 与需求工程端点 503 口径一致拒绝
+    const token = await makeToken()
+    const app = buildTestApp(makeWorkspaceRoot())
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/stream',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-gate-4', appId: 1, message: 'hello' },
+    })
+    expect(response.statusCode).toBe(200)
+    const result = frames(response.body)
+    expect(types(result)).toEqual(['error'])
+    expect(String(result[0]!.data.message)).toContain('未配置')
   })
 })

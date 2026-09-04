@@ -15,7 +15,8 @@
 
 - **访谈**：固定 5 维（受众/风格/页面清单/数据需求/交互），每维 2-4 选项选择题，**最多 2 轮**；各维均已作答即收束（跳过剩余轮次），`complete: true` + `summary` 喂线框。答案经 `answers: [{ key, optionId, text? }]` 提交，跨请求续答。
 - **线框**：快速档模型产出单文件 HTML（灰块 + 占位图 + 页内锚点可点击跳转 + 站点地图），存 `{workspace}/wireframe/wireframe.html`，**页面数 ≤ 5**；免费但每用户每日独立限频（Java 内部配额端点，超出 → HTTP 429）。
-- **闸门（核心）**：未确认线框的 codegen 请求被拒——`/agent/stream` 先经 Java 内部 API 校验 run 阶段，非 `wireframe_confirmed` 时输出唯一 `error` 事件（明确报错），不发任何业务事件。已确认线框即 codegen 布局契约与视觉 diff 基准。
+- **闸门（核心）**：未确认线框的 codegen 请求被拒——`/agent/stream` 先经 Java 内部 API 校验 run 阶段，非 `wireframe_confirmed` 时输出唯一 `error` 事件（明确报错），不发任何业务事件。已确认线框即 codegen 布局契约与视觉 diff 基准。**闸门状态存于 Java `generation_run`，未配置 Java 内部 API 时 codegen 拒绝放行**（`error` 事件「Java 内部 API 未配置，无法校验线框闸门」），与需求工程端点的 503 口径一致，避免绕过闸门。
+- **重新访谈 = 需求变更**：`wireframe_pending` 阶段重新访谈会使 run 回到 `interview` 并**失效既有未确认线框**（旧线框不能再被确认，须重新生成），防止锁定与新需求不一致的布局契约。
 
 ## 请求
 

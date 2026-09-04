@@ -129,6 +129,14 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     if (['coding', 'review', 'building', 'done', 'failed', 'aborted'].includes(run.phase)) {
       return reply.code(409).send({ statusCode: 409, error: 'Conflict', message: `当前阶段（${run.phase}）不能进行访谈` })
     }
+    // 重新访谈 = 需求变更（代码审查整改）：wireframe_pending 回到 interview 并失效既有未确认线框，
+    // 防止旧线框被确认成与新需求不一致的布局契约（架构 §4 闸门纪律）
+    if (run.phase === 'wireframe_pending') {
+      const invalidated = { ...context }
+      delete invalidated.wireframe
+      await runClient.updateRun(input.runId, { phase: 'interview', context: JSON.stringify(invalidated) })
+      delete context.wireframe
+    }
 
     // 载入既有访谈状态；首次进入定位到第 1 轮
     let state: InterviewState = context.interview ?? { round: 0, answers: {}, complete: false }
@@ -266,16 +274,22 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     const runClient = resolveRunClient()
     const events: AgentEvent[] = []
     try {
-      // 线框闸门（架构 §4 核心）：codegen 请求必须持有 wireframe_confirmed 阶段（已确认线框即布局契约）
-      if (runClient) {
-        const run = await runClient.getRun(input.runId)
-        if (!run || run.phase !== 'wireframe_confirmed') {
-          const reason = run ? `当前阶段为 ${run.phase}` : '尚未完成需求工程（访谈/线框/确认）'
-          events.push({ type: 'error', message: `未确认线框，无法进入代码生成（${reason}）：请先完成访谈并确认线框` })
-          reply.header('content-type', 'text/event-stream; charset=utf-8')
-          reply.header('cache-control', 'no-cache')
-          return encodeEventStream(events)
-        }
+      // 线框闸门（架构 §4 核心）：codegen 必须持有 wireframe_confirmed（已确认线框即布局契约）。
+      // 闸门状态存于 Java generation_run，未配置内部 API 时无法校验 → 拒绝放行
+      //（与 interview/wireframe/confirm 的 503 口径一致，避免 codegen 静默绕过闸门）
+      if (!runClient) {
+        events.push({ type: 'error', message: 'Java 内部 API 未配置，无法校验线框闸门，拒绝进入代码生成' })
+        reply.header('content-type', 'text/event-stream; charset=utf-8')
+        reply.header('cache-control', 'no-cache')
+        return encodeEventStream(events)
+      }
+      const run = await runClient.getRun(input.runId)
+      if (!run || run.phase !== 'wireframe_confirmed') {
+        const reason = run ? `当前阶段为 ${run.phase}` : '尚未完成需求工程（访谈/线框/确认）'
+        events.push({ type: 'error', message: `未确认线框，无法进入代码生成（${reason}）：请先完成访谈并确认线框` })
+        reply.header('content-type', 'text/event-stream; charset=utf-8')
+        reply.header('cache-control', 'no-cache')
+        return encodeEventStream(events)
       }
       for await (const event of runGenerationWorkflow(input, { workspaceRoot: config.workspaceRoot, provider: options.provider, runClient })) {
         // 终态守卫：done/error 都是流的最后一个事件，收到任一即停止消费（防实现缺陷把终态后的事件带进响应）

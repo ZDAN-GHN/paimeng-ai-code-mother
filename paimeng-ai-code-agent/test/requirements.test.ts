@@ -277,4 +277,33 @@ describe('POST /agent/wireframe/confirm（确认闸门 + 跨请求存活）', ()
     expect(response.statusCode).toBe(409)
     expect(String((response.json() as { message: string }).message)).toContain('没有待确认的线框')
   })
+
+  it('wireframe_pending 下重新访谈会失效旧线框并回到 interview（防旧线框确认脱钩，代码审查整改）', async () => {
+    const token = await makeToken()
+    const root = makeWorkspaceRoot()
+    const memo = memoryRunClient()
+    const app = buildTestApp(root, { agentRoutes: { runClient: memo.client } })
+
+    // 第 1 轮只答 2 维（访谈未收束），仍可先生成线框 → wireframe_pending
+    const r1 = await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c3', appId: 1, message: '咖啡店' } })
+    const all = (r1.json() as { questions: { key: string; options: { id: string }[] }[] }).questions
+    const partial = all.filter((q) => ['audience', 'style'].includes(q.key)).map((q) => ({ key: q.key, optionId: q.options[0]!.id }))
+    await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c3', appId: 1, answers: partial } })
+    await app.inject({ method: 'POST', url: '/agent/wireframe', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c3', appId: 1, workspacePath: root } })
+    expect(memo.store.get('run-c3')!.phase).toBe('wireframe_pending')
+    expect(JSON.parse(memo.store.get('run-c3')!.context as string).wireframe).toBeTruthy()
+
+    // 需求变更：续答缺失维度 → 失效旧线框、回到 interview
+    const missing = all.filter((q) => !['audience', 'style'].includes(q.key)).map((q) => ({ key: q.key, optionId: q.options[1]!.id }))
+    const resp = await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c3', appId: 1, answers: missing } })
+    expect((resp.json() as { complete: boolean }).complete).toBe(true)
+    const after = memo.store.get('run-c3')!
+    expect(after.phase).toBe('interview')
+    expect(JSON.parse(after.context as string).wireframe).toBeUndefined()
+
+    // 旧线框已失效，confirm 被拒（无法用与新需求不一致的布局当契约）
+    const confirm = await app.inject({ method: 'POST', url: '/agent/wireframe/confirm', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c3', appId: 1 } })
+    expect(confirm.statusCode).toBe(409)
+    expect(String((confirm.json() as { message: string }).message)).toContain('没有待确认的线框')
+  })
 })
