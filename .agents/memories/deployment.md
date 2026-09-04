@@ -3,18 +3,18 @@
 > 环境依赖、敏感文件、共享工作区、启动命令的工作记忆。目标部署拓扑见 `docs/ts_agent/architecture.md` §1.1/§11；Python Agent 运行细节（退役前）见 `docs/py_agent/task_plan.md` §9（历史参考）。
 > 存在两套本地环境：**WSL 环境**（2026-09-01 起，全栈实机验证通过，默认使用）与 **Windows 环境**（此前 T14a/T18/T20 实机验证所用，仍可用）。二者连接地址相同（127.0.0.1），不要混用同端口的两套实例。
 
-## 运行时环境文件布局（wsl-rt-env，2026-09-01 新约定）
+## 运行时环境文件布局（wsl-rt-env，2026-09-01 新约定；2026-09-04 强化：**通过命令指定、不建软链**）
 
-整个项目在 Linux/WSL 运行的运行时环境文件统一放仓库根目录 `wsl-rt-env/`（已加入根 .gitignore，2026-09-03）：
+整个项目在 Linux/WSL 运行的运行时环境文件统一放仓库根目录 `wsl-rt-env/`（已加入根 .gitignore，2026-09-03）。**指向运行时环境一律用命令参数（`-D` 属性 / 环境变量 / venv 直接调用）而非软链**：
 
 | 技术栈 | 目标位置 | 说明 |
 |---|---|---|
 | Python | `wsl-rt-env/python/.venv` | uv 虚拟环境（替代旧 `.venv-wsl`） |
 | 前端 | `wsl-rt-env/frontend/node_modules` | npm 依赖 |
-| Java | `wsl-rt-env/java/target` | Maven 构建产物 |
-| TS Agent | `wsl-rt-env/ts-agent/node_modules` + `wsl-rt-env/ts-agent/dist` | **2026-09-03 起新服务直接按约定就位**：服务目录内 `paimeng-ai-code-agent/node_modules` 为指向它的符号链接；`npm install` 会把符号链接替换回实体目录，**每次安装后必须执行 `bash scripts/sync-node-modules.sh` 归位** |
+| Java | `wsl-rt-env/java/target` | Maven 构建产物；**2026-09-04 起由命令指定**：pom 暴露 `maven.build.directory` 属性（默认 `${project.basedir}/target`），WSL 命令带 `-Dmaven.build.directory=$PWD/wsl-rt-env/java/target`，无软链 |
+| TS Agent | `wsl-rt-env/ts-agent/node_modules` + `wsl-rt-env/ts-agent/dist` | node_modules 物理在 wsl-rt-env；服务目录内 `paimeng-ai-code-agent/node_modules` 为指向它的符号链接；`npm install` 会把符号链接替换回实体目录，**每次安装后必须执行 `bash scripts/sync-node-modules.sh` 归位** |
 
-> **迁移待办**：TS Agent 已合规（node_modules/dist 均在 `wsl-rt-env/ts-agent/`）；存量 `.venv`（`paimeng-ai-code-rag/`，退役代码遗留）、`node_modules`（`paimeng-ai-code-mother-frontend/`）、`target`（仓库根目录）尚未迁入。迁移完成前，存量启动命令按实际路径执行；旧 `.venv-wsl` 已不再使用。
+> **迁移待办**：Java 已合规（2026-09-04：`target` 迁入 `wsl-rt-env/java/target`，命令 `-Dmaven.build.directory` 指定，无软链）；TS Agent 已合规（node_modules/dist 均在 `wsl-rt-env/ts-agent/`）；存量 `.venv`（`paimeng-ai-code-rag/`，退役代码遗留）、`node_modules`（`paimeng-ai-code-mother-frontend/`）尚未迁入。迁移完成前，存量启动命令按实际路径执行；旧 `.venv-wsl` 已不再使用。
 
 ## 依赖服务 — WSL 环境（当前默认）
 
@@ -47,7 +47,7 @@
 | 项 | 命令 |
 |---|---|
 | MySQL（如未启动） | `bash ~/.local/opt/mysql8/start.sh`（需 DSH 提权，见踩坑） |
-| Java | `./mvnw spring-boot:run`（端口 8123，context-path `/api`；API 文档 `http://localhost:8123/api/doc.html`） |
+| Java（WSL） | `./mvnw -Dmaven.build.directory=$PWD/wsl-rt-env/java/target spring-boot:run`（端口 8123，context-path `/api`；API 文档 `http://localhost:8123/api/doc.html`；构建产物在 `wsl-rt-env/java/target`，无软链） |
 | Python RAG（P4 未实施） | `paimeng-ai-code-rag/` 为旧 Python Agent 重命名（骨架复用起点），退役代码不常态运行，不占用 8090 |
 | TS Agent 安装依赖 | `cd paimeng-ai-code-agent && npm install && bash scripts/sync-node-modules.sh`（勿用 `npm ci`） |
 | TS Agent 运行 | `cd paimeng-ai-code-agent && npm run dev`（端口 8092；node_modules 符号链接指向 `wsl-rt-env/ts-agent/node_modules`，运行/测试无需归位） |

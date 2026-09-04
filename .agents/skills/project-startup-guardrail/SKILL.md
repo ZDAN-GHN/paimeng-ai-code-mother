@@ -24,7 +24,7 @@ disable-model-invocation: true
 - PostgreSQL：**已停用（2026-09-03 P0，Issue #2）**：无服务、5432 无监听（RAG v2 pgvector 时重启）；不做探活，出现 5432 监听反而是异常。
 - Windows 旧环境（MySQL80 服务 8.0.36 + Docker Redis 7.2.5）仅用于历史实机验证；WSL2 NAT 下 WSL→Windows 无 localhost 转发，Java 的 `localhost:3306/6379` 只会命中 WSL 内实例。
 - DSH 沙箱（workspace-write）会拦截家目录与 `~/.cache` 写入：mysqld 启动、`uv run`、npm 缓存都会失败，替代方案见启动节与排障表。
-- **运行时环境布局新约定（2026-09-01）**：整个项目在 Linux/WSL 的运行时环境文件统一放仓库根目录 `wsl-rt-env/`：`wsl-rt-env/python/.venv`（Python 虚拟环境，替代旧 `.venv-wsl`）、`wsl-rt-env/frontend/node_modules`（前端依赖）、`wsl-rt-env/java/target`（Java 构建产物）。当前 `wsl-rt-env/` 已建但为空，现有 `.venv`/`node_modules`/`target` 仍在各自旧位置，**迁入 `wsl-rt-env/` 为待办**；迁移完成前，本 SOP 的安装/启动命令按实际路径执行。
+- **运行时环境布局约定（2026-09-01 定，2026-09-04 强化「通过命令指定、不建软链」）**：整个项目在 Linux/WSL 的运行时环境文件统一放仓库根目录 `wsl-rt-env/`：`wsl-rt-env/python/.venv`（Python 虚拟环境，替代旧 `.venv-wsl`）、`wsl-rt-env/frontend/node_modules`（前端依赖）、`wsl-rt-env/java/target`（Java 构建产物，**2026-09-04 已迁入**，由 pom 的 `maven.build.directory` 属性 + 命令行 `-Dmaven.build.directory=$PWD/wsl-rt-env/java/target` 指定，无软链）。前端 node_modules、Python `.venv` 仍在旧位置，迁入为待办；迁移完成前，本 SOP 的安装/启动命令按实际路径执行。
 
 ## 启动模式
 
@@ -130,8 +130,8 @@ bash ~/.local/opt/mysql8/start.sh
 cd paimeng-ai-code-agent
 npm run dev   # 端口 8092，健康检查 /healthz
 
-# Java Spring Boot
-./mvnw spring-boot:run
+# Java Spring Boot（WSL 构建产物在 wsl-rt-env/java/target，由命令属性指定，无软链）
+./mvnw -Dmaven.build.directory=$PWD/wsl-rt-env/java/target spring-boot:run
 
 # Vue 前端
 cd paimeng-ai-code-mother-frontend

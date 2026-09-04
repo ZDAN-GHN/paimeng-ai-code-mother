@@ -32,6 +32,7 @@
 ## 编译红线
 
 - **JDK 21 是硬要求**（`<java.version>21</java.version>`）：用 `JAVA_HOME=/home/zdan/.sdkman/candidates/java/current`（sdkman 默认已切到 21）执行 `./mvnw compile`。
+- **构建产物目录（2026-09-04）**：`pom.xml` 暴露 `maven.build.directory` 属性（默认 `${project.basedir}/target`），`<build><directory>` 引用它。WSL 运行时环境统一放 `wsl-rt-env/`（不建软链），命令带 `-Dmaven.build.directory=$PWD/wsl-rt-env/java/target`；Windows/IDE 不传该属性则用默认 `target/`。⚠️ **不要用 `-Dproject.build.directory` 覆盖**——那是模型派生属性，部分插件（surefire 等）不认，会重建根 `target/`（实测 2026-09-04）。
 - T0 已落地：`config/PythonAgentProperties.java`（含 `callback-timeout-ms`）、`ai/python/PythonAgentRequest.java`（§1.2 字段 + `HistoryItem`）、`ai/python/PythonAgentClient.java`（WebClient，`health()` 可用；`stream()` 阶段 3 前抛明确 BusinessException）。
 - T18 起 `AppServiceImpl` 的 `pythonChatToGenCode` 分支已调用 `PythonAgentClient.stream()`；P0（2026-09-03）回切后该分支关闭（enabled=false），代码保留待 T21 泛化处置。
 
