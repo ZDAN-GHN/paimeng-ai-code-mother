@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "baseUrl": "../wsl-rt-env/frontend/node_modules",
+    "tsBuildInfoFile": "../wsl-rt-env/frontend/tsbuildinfo/tsconfig.app.tsbuildinfo",
+    "typeRoots": ["../wsl-rt-env/frontend/node_modules/@types"],
+    "paths": {
+      "@/*": ["../../../paimeng-ai-code-mother-frontend/src/*"],
+      "markdown-it": ["@types/markdown-it/index.d.ts"]
+    }
+  }
+}

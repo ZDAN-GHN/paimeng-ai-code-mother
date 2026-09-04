@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.node.json",
+  "include": [
+    "vite.config.*",
+    "vitest.config.*",
+    "cypress.config.*",
+    "nightwatch.conf.*",
+    "playwright.config.*"
+  ],
+  "compilerOptions": {
+    "baseUrl": "../wsl-rt-env/frontend/node_modules",
+    "tsBuildInfoFile": "../wsl-rt-env/frontend/tsbuildinfo/tsconfig.node.tsbuildinfo",
+    "typeRoots": ["../wsl-rt-env/frontend/node_modules/@types"]
+  }
+}

@@ -5,21 +5,20 @@
 ## 运行
 
 ```bash
-# WSL（依赖归位到 wsl-rt-env/ts-agent/，服务目录零 node_modules、零软链）
-npm install && bash scripts/sync-node-modules.sh
-# Windows/IDE：服务目录内直接 npm install 即可（本地 node_modules 优先于 wsl-rt-env）
-
+# WSL（依赖直接安装到 wsl-rt-env/ts-agent/，服务目录零 node_modules、零软链）
+bash scripts/install-wsl-node-modules.sh
 cp .env.example .env   # 按需修改 PORT / JWT_SECRET / WORKSPACE_ROOT
-npm run dev            # 端口 8092（esbuild 打包 + watch 自动重启；产物在 wsl-rt-env/ts-agent/dist/）
+bash scripts/run-wsl.sh  # 端口 8092（默认 dev；esbuild 打包 + watch 自动重启）
+# Windows/IDE：服务目录内直接 npm install，继续使用已有 npm 运行配置
 ```
 
-> 运行/测试/类型检查统一经 `scripts/run.mjs` 调度：依赖与构建产物指向 `wsl-rt-env/ts-agent/`（无软链），vitest/tsc 的解析配置分别在 `vitest.config.mjs` 与 `tsconfig.json`。新增依赖后需在 `tsconfig.json` 的 `paths` 里补该包的 d.ts 映射。
+> WSL 运行、测试与类型检查使用 `bash scripts/run-wsl.sh <dev|start|build|test|type-check>`；该入口会校验 Linux/WSL。内部仍经 `scripts/run.mjs` 调度依赖与构建产物。
 
 ## 测试
 
 ```bash
-npm test         # vitest 一键运行（真实服务实例 + fastify.inject + 自签 JWT）
-npm run type-check
+bash scripts/run-wsl.sh test
+bash scripts/run-wsl.sh type-check
 ```
 
 ## 路由

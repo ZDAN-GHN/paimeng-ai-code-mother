@@ -16,7 +16,7 @@
 
 ## 踩坑
 
-- `uv run` 因 DSH 沙箱拒 `~/.cache/uv` 写入 → 直接调 `.venv/bin/uvicorn`（迁移后 `wsl-rt-env/python/.venv/bin/uvicorn`）。
+- **WSL 环境（2026-09-04 已实施）**：`scripts/install-wsl-venv.sh` 通过 `UV_PROJECT_ENVIRONMENT`、`UV_CACHE_DIR`、`UV_PYTHON_INSTALL_DIR` 将虚拟环境、缓存与 uv 管理的 Python 置于 `wsl-rt-env/python/`；`scripts/run-wsl.sh` 从该 venv 启动测试或 P4 服务，并先校验 Linux/WSL。Windows/IDE 仍按 uv 默认规则使用目录内 `.venv`，无需改运行配置。
 - 目录内 `.env` 为退役 Agent 遗留（含联调密钥），已 gitignore 不提交；P4 实施时按新 `.env.example` 重建。
 
 ## 指针

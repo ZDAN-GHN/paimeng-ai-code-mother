@@ -2,9 +2,9 @@
 // 运行时环境调度器：统一解析 dev / build / start / test / type-check 的依赖与产物位置。
 //
 // 约定（与 AGENTS.md「运行时环境统一放 wsl-rt-env/，通过命令指定、不建软链」一致）：
-//   - 依赖物理位置：../wsl-rt-env/ts-agent/node_modules（WSL）
-//   - 构建产物位置：../wsl-rt-env/ts-agent/dist/app.bundle.mjs（esbuild 自包含打包，运行期不需要 node_modules）
-//   - 服务目录本地若存在 node_modules（Windows/IDE 常规 npm install），优先使用本地
+//   - 当前进程为 Linux/WSL 时，固定使用 ../wsl-rt-env/ts-agent/node_modules
+//   - Windows/IDE 时，固定使用服务目录 node_modules
+// 两个平台绝不互相回退，避免加载错误平台的原生二进制。
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -12,13 +12,14 @@ import { spawn } from 'node:child_process'
 
 const agentRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)))
 const rtAgentRoot = path.resolve(agentRoot, '..', 'wsl-rt-env', 'ts-agent')
+const isWsl = process.platform === 'linux'
+const runtimeNodeModules = path.join(rtAgentRoot, 'node_modules')
 const localNodeModules = path.join(agentRoot, 'node_modules')
-const nodeModules = existsSync(localNodeModules) ? localNodeModules : path.join(rtAgentRoot, 'node_modules')
+const nodeModules = isWsl ? runtimeNodeModules : localNodeModules
 
 if (!existsSync(nodeModules)) {
-  console.error(`[run] 找不到依赖：${localNodeModules} 与 ${path.join(rtAgentRoot, 'node_modules')} 均不存在`)
-  console.error('[run] WSL 先安装依赖：npm install && bash scripts/sync-node-modules.sh')
-  console.error('[run] Windows/IDE 在服务目录直接 npm install')
+  console.error(`[run] ${isWsl ? 'WSL' : 'Windows/IDE'} dependencies are missing: ${nodeModules}`)
+  console.error(isWsl ? '[run] WSL: bash scripts/install-wsl-node-modules.sh' : '[run] Windows/IDE: npm install')
   process.exit(1)
 }
 
