@@ -57,8 +57,10 @@ switch (command) {
   case 'dev':
   case 'preview':
   case 'build-only':
-    // runner 模式加载 vite.config.ts：bundle 模式要写 $HOME/node_modules/.vite-temp（Windows ACL/沙箱下 EROFS，与 vitest 同源踩坑）
-    run(vite, [command === 'build-only' ? 'build' : command, '--configLoader', 'runner', ...args])
+    // 禁用 --configLoader runner：config 在临时 runner 中加载完 runner 即关闭，
+    // vue/vue-devtools 插件运行期再经 runner 懒加载模块会崩（Vite module runner has been closed，
+    // Windows 与 WSL 均复现）；默认 bundle 模式无此问题，且项目内 node_modules 可写，无 EROFS 顾虑
+    run(vite, [command === 'build-only' ? 'build' : command, ...args])
     break
   case 'type-check':
     run(vueTsc, ['--build', typeCheckConfig, ...args])
