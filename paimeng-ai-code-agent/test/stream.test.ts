@@ -95,8 +95,8 @@ describe('POST /agent/stream（成功剧本）', () => {
       payload: { runId: 'run-3', appId: 1, message: 'hello' },
     })
     expect(response.statusCode).toBe(200)
-    // createRun(interview) + 每次节点跳变各一次 phase 更新
-    expect(calls.map((call) => call.phase).filter(Boolean)).toEqual(['interview', 'interview', 'coding', 'review', 'done'])
+    // createRun(interview) + 每次节点跳变各一次 phase 更新（首次 interview 不再重复更新）
+    expect(calls.map((call) => call.phase).filter(Boolean)).toEqual(['interview', 'coding', 'review', 'done'])
     // 里程碑随 run 更新累计
     expect(calls.at(-1)?.milestones).toBe(JSON.stringify(['开始生成', '规划页面结构', '检查生成结果', '生成完成']))
   })
@@ -134,6 +134,6 @@ describe('POST /agent/stream（error 剧本）', () => {
     expect(result.some((frame) => frame.event === 'done')).toBe(false)
     expect(eventTypes).toEqual(['milestone', 'ai_thinking', 'milestone', 'error'])
     // 阶段推进到 failed
-    expect(calls.map((call) => call.phase).filter(Boolean)).toEqual(['interview', 'interview', 'coding', 'failed'])
+    expect(calls.map((call) => call.phase).filter(Boolean)).toEqual(['interview', 'coding', 'failed'])
   })
 })

@@ -41,7 +41,8 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
 
   // 已发射的里程碑计数（对比 machine context 增量发射，保证不重不漏）
   let emitted = 0
-  let lastPhase: RunPhase | null = null
+  // 初始 phase 已由路由 createRun 写入（interview），同步起点对齐，避免首次重复更新
+  let lastPhase: RunPhase | null = PHASE_BY_STATE[String(actor.getSnapshot().value)] ?? 'failed'
 
   // 同步 machine 状态到外部：phase 变化 → run 更新；context.milestones 增量 → milestone 事件
   async function* sync(): AsyncGenerator<AgentEvent> {
@@ -76,7 +77,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     const result = streamText({
       model: provider.languageModel('scripted'),
       prompt: request.message,
-      // 脚本化假 LLM 确定性成功/失败，无需指数退避重试
+      // 脚本结果确定，失败无需退避重试
       maxRetries: 0,
       // 工具循环由 AI SDK 驱动：一轮文本+writeFile，二轮工具结果后收尾（v7 以 stopWhen 表达步数上限）
       stopWhen: isStepCount(2),

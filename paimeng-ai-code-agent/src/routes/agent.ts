@@ -1,4 +1,4 @@
-// /agent/* routes: workspace validation and the offline scripted generation flow
+// /agent/* 路由：工作区校验与离线脚本化生成流
 import type { FastifyInstance } from 'fastify'
 import type { AgentConfig } from '../config.js'
 import { RunClient } from '../internal/runClient.js'
@@ -53,8 +53,9 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
         await runClient.createRun({ runId: input.runId, appId: input.appId, userId, phase: 'interview' })
       }
       for await (const event of runGenerationWorkflow(input, { workspaceRoot: config.workspaceRoot, provider: options.provider, runClient })) {
+        // 终态守卫：done/error 都是流的最后一个事件，收到任一即停止消费（防实现缺陷把终态后的事件带进响应）
         events.push(event)
-        if (event.type === 'error') break
+        if (event.type === 'done' || event.type === 'error') break
       }
     } catch (error) {
       events.push({ type: 'error', message: error instanceof Error ? error.message : '生成失败' })
@@ -64,7 +65,7 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     return encodeEventStream(events)
   })
 
-  // Compatibility smoke endpoint retained for the P1 health checks.
+  // 冒烟兼容端点，P1 健康检查沿用
   fastify.get('/agent/smoke/sse', async (_request, reply) => {
     const events: AgentEvent[] = [
       { type: 'milestone', title: '开始生成', detail: '工作流启动' },

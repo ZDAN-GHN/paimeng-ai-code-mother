@@ -76,7 +76,7 @@ class ScriptedLanguageModel implements LanguageModelV2 {
       // 第一轮：流式页面内容（供 ai_response）+ writeFile 工具调用（供 tool_request/tool_executed）
       const parts: LanguageModelV2StreamPart[] = [
         { type: 'text-start', id: 'page' },
-        // 拆块模拟增量流式
+        // 拆两块模拟增量流式，契约定 ai_response 按增量块推送
         { type: 'text-delta', id: 'page', delta: content.slice(0, 32) },
         { type: 'text-delta', id: 'page', delta: content.slice(32) },
         { type: 'text-end', id: 'page' },
@@ -91,7 +91,7 @@ class ScriptedLanguageModel implements LanguageModelV2 {
       ]
       return { stream: streamFromParts(parts) }
     }
-    // 第二轮：工具已执行，收尾文本（仍可流式）
+    // 第二轮（工具结果已回喂）
     const parts: LanguageModelV2StreamPart[] = [
       { type: 'text-start', id: 'tail' },
       { type: 'text-delta', id: 'tail', delta: '\n页面已写入 index.html\n' },
