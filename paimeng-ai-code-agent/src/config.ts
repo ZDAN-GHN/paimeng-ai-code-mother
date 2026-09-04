@@ -13,6 +13,9 @@ export interface AgentConfig {
   jwtSecret: string
   workspaceRoot: string
   logLevel: string
+  // Java 内部 API（generation_run 读写，#4）：base-url 含 context-path（/api），token 与 Java 侧 internal-api.token 一致
+  javaInternalBaseUrl: string
+  javaInternalToken: string
 }
 
 // 允许调用方（测试、装配）覆盖任意配置项
@@ -56,5 +59,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Conf
   // 相对路径以服务目录为基准，默认对齐 Java 的 user.dir/tmp/code_output
   const workspaceRoot = path.isAbsolute(workspaceRootEnv) ? workspaceRootEnv : path.resolve(agentRoot, workspaceRootEnv)
   const logLevel = overrides.logLevel ?? env.LOG_LEVEL ?? 'info'
-  return { port, jwtSecret: jwtSecret || 'dev-insecure-secret', workspaceRoot, logLevel }
+  const javaInternalBaseUrl = overrides.javaInternalBaseUrl ?? env.JAVA_INTERNAL_BASE_URL ?? 'http://localhost:8123/api'
+  const javaInternalToken = overrides.javaInternalToken ?? env.JAVA_INTERNAL_TOKEN ?? ''
+  return { port, jwtSecret: jwtSecret || 'dev-insecure-secret', workspaceRoot, logLevel, javaInternalBaseUrl, javaInternalToken }
 }

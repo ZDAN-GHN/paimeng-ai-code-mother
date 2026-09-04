@@ -18,6 +18,17 @@
 - **积分体系**：预冻结 → 结算 → 退款，挂 runId 幂等（复用 `RunIdSinkRegistry` 机制）；按次 + 档位系数计费；MVP 后台手动充值。
 - **Agent→Java 内部回调**沿用 `/api/app/chat/gen/code/callback`（Bearer + runId 幂等）：结算积分 / 写历史 / 触发构建。
 
+## 2026-09-04 generation_run 内部 API（Issue #4 已落地）
+
+- **表**：`sql/create_table.sql` 新增 `generation_run`（run_id varchar PK 复用 runId 语义、appId/userId、phase 显式 MySQL ENUM 九值、context/milestones/tokenUsage JSON、creditLedgerRef 预留、startedTime/finishedTime）；索引 idx_appId_phase / idx_userId。**列名按项目既有约定用 camelCase**（user/app/chat_history 均为 camelCase；架构文档 §3.2 的 snake_case 为设计层命名，实现落 camelCase 并在此记录）。
+- **端点**（`GenerationRunController`，`/api/internal/*`，Bearer 服务令牌，配置 `internal-api.token`/`INTERNAL_API_TOKEN`）：
+  - `POST /internal/runs` 创建（同 runId 幂等返回既有；同 app 非终态并发 → **409**「当前有进行中的任务」）
+  - `PATCH /internal/runs/{runId}` 推进 phase/context/milestones/tokenUsage（无变化不落库；进终态自动补 finished_time）
+  - `GET /internal/runs/{runId}`、`GET /internal/apps/{appId}/runs/latest-nonterminal?userId=`（断点续传查询）
+- **错误码 → HTTP**：控制器内 `@ExceptionHandler` 覆盖全局 advice 的 200 返回：无/错 Bearer→401、并发→409、参数→400、不存在→404（TS 客户端依赖真实状态码）。
+- **服务**：`GenerationRunServiceImpl` 每 app 一把锁（`ConcurrentHashMap`）串行化幂等检查+并发检查+落库（单实例成立）；JSON 字段校验（hutool JSONUtil）。
+- **测试**：service 12 例（mock mapper，`ReflectionTestUtils.setField(mapper)`）+ controller 7 例（standalone MockMvc，**不用 @WebMvcTest**——其会扫描 mapper 需 sqlSessionFactory 导致上下文加载失败）。
+
 ## 编译红线
 
 - **JDK 21 是硬要求**（`<java.version>21</java.version>`）：用 `JAVA_HOME=/home/zdan/.sdkman/candidates/java/current`（sdkman 默认已切到 21）执行 `./mvnw compile`。
