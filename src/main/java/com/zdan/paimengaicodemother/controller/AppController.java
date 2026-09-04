@@ -6,7 +6,10 @@ import cn.hutool.json.JSONUtil;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.zdan.paimengaicodemother.ai.agent.AgentCallbackRequest;
+import com.zdan.paimengaicodemother.ai.agent.AgentJwtProperties;
+import com.zdan.paimengaicodemother.ai.agent.AgentJwtService;
 import com.zdan.paimengaicodemother.ai.agent.RunIdSinkRegistry;
+import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 import com.zdan.paimengaicodemother.annotation.AuthCheck;
 import com.zdan.paimengaicodemother.common.BaseResponse;
 import com.zdan.paimengaicodemother.common.DeleteRequest;
@@ -23,6 +26,7 @@ import com.zdan.paimengaicodemother.model.entity.App;
 import com.zdan.paimengaicodemother.model.entity.User;
 import com.zdan.paimengaicodemother.model.enums.AgentCompleteStatusEnum;
 import com.zdan.paimengaicodemother.model.enums.ChatHistoryMessageTypeEnum;
+import com.zdan.paimengaicodemother.model.vo.AgentTokenVO;
 import com.zdan.paimengaicodemother.model.vo.AppVO;
 import com.zdan.paimengaicodemother.service.AppService;
 import com.zdan.paimengaicodemother.service.ChatHistoryService;
@@ -57,6 +61,8 @@ public class AppController {
     private final UserService userService;
     private final ProjectDownloadService projectDownloadService;
     private final AgentProperties agentProperties;
+    private final AgentJwtProperties agentJwtProperties;
+    private final AgentJwtService agentJwtService;
     private final RunIdSinkRegistry runIdSinkRegistry;
     private final ChatHistoryService chatHistoryService;
 
@@ -64,12 +70,16 @@ public class AppController {
                          UserService userService,
                          ProjectDownloadService projectDownloadService,
                          AgentProperties agentProperties,
+                         AgentJwtProperties agentJwtProperties,
+                         AgentJwtService agentJwtService,
                          RunIdSinkRegistry runIdSinkRegistry,
                          ChatHistoryService chatHistoryService) {
         this.appService = appService;
         this.userService = userService;
         this.projectDownloadService = projectDownloadService;
         this.agentProperties = agentProperties;
+        this.agentJwtProperties = agentJwtProperties;
+        this.agentJwtService = agentJwtService;
         this.runIdSinkRegistry = runIdSinkRegistry;
         this.chatHistoryService = chatHistoryService;
     }
@@ -154,6 +164,40 @@ public class AppController {
         User loginUser = userService.getLoginUser(request);
         // 调用服务生成代码（SSE 流式返回，含文本事件与终端 done / business-error）
         return appService.chatToGenCode(appId, message, loginUser);
+    }
+
+    /**
+     * 获取 Agent 直连令牌
+     * 登录态换取短时 JWT + 工作区绝对路径，浏览器以 fetch-SSE 携带 Authorization 头直连 TS Agent（Issue #12）
+     *
+     * @param appId   应用 id
+     * @param request 请求
+     * @return 令牌与工作区路径
+     */
+    @GetMapping("/agent/token")
+    public BaseResponse<AgentTokenVO> getAgentToken(@RequestParam Long appId, HttpServletRequest request) {
+        // 1. 基础校验
+        ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 id 错误");
+
+        // 2. 登录校验 + 权限校验：用户只能给自己的应用生成代码
+        User loginUser = userService.getLoginUser(request);
+        App app = Optional.ofNullable(appService.getById(appId))
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_ERROR, "应用不存在"));
+        if (!app.getUserId().equals(loginUser.getId())) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "无权限生成代码");
+        }
+
+        // 3. 工作区路径由 Java 计算（浏览器不感知服务器目录布局），命名与旧链路一致：CODE_OUTPUT_ROOT/{codeGenType}_{appId}
+        String codeGenType = Optional.ofNullable(CodeGenTypeEnum.getEnumByValue(app.getCodeGenType()))
+                .orElseThrow(() -> new BusinessException(ErrorCode.PARAMS_ERROR, "代码生成类型不合法")).getValue();
+        String workspacePath = StrUtil.format("{}/{}_{}", AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenType, appId);
+
+        // 4. 签发短时 JWT
+        AgentTokenVO agentTokenVO = new AgentTokenVO();
+        agentTokenVO.setToken(agentJwtService.issueToken(loginUser.getId()));
+        agentTokenVO.setWorkspacePath(workspacePath);
+        agentTokenVO.setExpiresAt(System.currentTimeMillis() + agentJwtProperties.getTtlMinutes() * 60 * 1000);
+        return ResultUtils.success(agentTokenVO);
     }
 
     /**
