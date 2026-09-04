@@ -38,6 +38,12 @@
 - **配置别名**：`agent.*` 为新标准，`python-agent.*` 经 `AgentLegacyAliasPostProcessor`（EnvironmentPostProcessor，注册于 `META-INF/spring.factories`）复制为别名；`application.yml` 保留 `python-agent` 段作旧别名。
 - **测试**：`GenerationRunServiceImplTest` 18 例（+completeRun 幂等/成功/失败/校验 6 例）、`GenerationRunControllerTest` 11 例（+401/200/400 4 例）、`AgentLegacyAliasPostProcessorTest` 3 例、`AgentClientTest` 5、`AgentSseAdapterTest` 3、`RunIdSinkRegistryTest` 6。
 
+## 2026-09-04 Agent JWT 签发（Issue #12 已落地）
+
+- **端点**：`GET /app/agent/token?appId=`（`AppController`）：登录校验（session）→ 应用归属校验（非归属 `NO_AUTH_ERROR`「无权限生成代码」）→ codeGenType 校验 → **workspacePath 由 Java 计算**（`CODE_OUTPUT_ROOT_DIR/{codeGenType}_{appId}`，与旧链路命名一致，浏览器不感知服务器布局）→ 签发短时 JWT。响应 `AgentTokenVO{token, workspacePath, expiresAt}`（**expiresAt 是字符串**——JsonConfig Long 全字符串序列化防精度丢失，前端解析需按字符串）。
+- **服务**：`ai/agent/AgentJwtService`（hutool JWT HS256；`sub`=字符串 userId、`iat`/`exp` 整秒同一时基；空密钥拒签 `SYSTEM_ERROR`）；配置 `ai/agent/AgentJwtProperties`（prefix `agent.jwt`：`secret`/`ttl-minutes` 默认 10）。共享密钥与 TS Agent `JWT_SECRET` 同值（application-local.yml ↔ paimeng-ai-code-agent/.env，均不提交）。
+- **测试**：`AgentJwtServiceTest` 6 例 + `AppControllerAgentTokenTest` 4 例（standalone MockMvc + 全局异常处理器；未登录 40100/应用不存在 40400/非归属 40101/归属 200 且 token 可验签+sub 字符串+路径命名一致），10/10 全绿。⚠️ hutool `JWTValidator.validateDate` 过期抛的是 `cn.hutool.core.exceptions.ValidateException`（非 JWTException）。
+
 ## 编译红线
 
 - **JDK 21 是硬要求**（`<java.version>21</java.version>`）：用 `JAVA_HOME=/home/zdan/.sdkman/candidates/java/current`（sdkman 默认已切到 21）执行 `./mvnw compile`。

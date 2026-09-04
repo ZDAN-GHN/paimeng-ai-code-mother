@@ -70,4 +70,4 @@
 - `GET http://localhost:8092/healthz` → 200 `{"status":"ok"}`（TS Agent，#3 骨架起）。
 - 旧 Python Agent 8090 不再运行（代码在 `paimeng-ai-code-rag/` 退役暂存）。
 - 全栈：`doc.html` 200 + `8092/healthz` ok + 前端 5173 200 + `ss -tlnp` 见 3306/6379 监听（**5432 停用后不应出现**）。
-- **生产目标拓扑**（见 `docs/ts_agent/architecture.md` §1.1）：nginx 单域名路由 `/api/*`→Java(8123)、`/agent/*`→TS Agent(Node)；RAG 仅内网。
+- **生产目标拓扑**（见 `docs/ts_agent/architecture.md` §1.1）：nginx 单域名路由 `/api/*`→Java(8123)、`/agent/*`→TS Agent(Node)；RAG 仅内网。**配置模板已就位（#12）**：`deploy/nginx.conf.example`（/agent 段含 SSE 关键配置：`proxy_buffering off` + `proxy_read_timeout 600s` + HTTP/1.1 空 Connection）。
