@@ -31,4 +31,15 @@
 - WSL 运行时环境统一位于 `wsl-rt-env/`；通过服务脚本指定，不建软链。WSL/Linux 只读取此目录，Windows/IDE 只读取各服务本地环境，禁止跨平台回退。
 - 不擅自切换 `python-agent.enabled`，这会改变代码生成主链路。
 - Agent 代理提交的 commit message 必须携带 `<Agent IDE>/<用户信息>` 标注。
+- 每次改动完成后，必须创建对应的 Git commit，以便后续追踪和回滚；禁止留下未提交的改动。
 - 注释遵循 `project-comment-style`；Java 同时遵循阿里巴巴开发手册。
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in this repository's GitHub Issues via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+This repository uses a single-context domain-doc layout. See `docs/agents/domain.md`.

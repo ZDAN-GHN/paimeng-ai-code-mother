@@ -23,8 +23,8 @@ export async function makeToken(overrides: { expiresIn?: string | number; sub?: 
     .sign(new TextEncoder().encode(TEST_SECRET))
 }
 
-export function buildTestApp(workspaceRoot: string = makeWorkspaceRoot()) {
-  return buildApp({ jwtSecret: TEST_SECRET, workspaceRoot, logLevel: 'silent' })
+export function buildTestApp(workspaceRoot: string = makeWorkspaceRoot(), overrides: Parameters<typeof buildApp>[0] = {}) {
+  return buildApp({ jwtSecret: TEST_SECRET, workspaceRoot, logLevel: 'silent', ...overrides })
 }
 
 export type { FastifyInstance }

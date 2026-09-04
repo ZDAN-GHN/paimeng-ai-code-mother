@@ -16,7 +16,10 @@
     "paths": {
       "fastify": ["node_modules/fastify/fastify.d.ts", "../wsl-rt-env/ts-agent/node_modules/fastify/fastify.d.ts"],
       "jose": ["node_modules/jose/dist/types/index.d.ts", "../wsl-rt-env/ts-agent/node_modules/jose/dist/types/index.d.ts"],
-      "vitest": ["node_modules/vitest/dist/index.d.ts", "../wsl-rt-env/ts-agent/node_modules/vitest/dist/index.d.ts"]
+      "vitest": ["node_modules/vitest/dist/index.d.ts", "../wsl-rt-env/ts-agent/node_modules/vitest/dist/index.d.ts"],
+      "ai": ["node_modules/ai/dist/index.d.ts", "../wsl-rt-env/ts-agent/node_modules/ai/dist/index.d.ts"],
+      "xstate": ["node_modules/xstate/dist/xstate.cjs.d.ts", "../wsl-rt-env/ts-agent/node_modules/xstate/dist/xstate.cjs.d.ts"],
+      "@ai-sdk/provider": ["node_modules/@ai-sdk/provider/dist/index.d.ts", "../wsl-rt-env/ts-agent/node_modules/@ai-sdk/provider/dist/index.d.ts"]
     },
     "typeRoots": ["node_modules/@types", "../wsl-rt-env/ts-agent/node_modules/@types"]
   },

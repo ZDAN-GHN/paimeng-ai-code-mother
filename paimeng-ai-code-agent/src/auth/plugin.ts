@@ -1,7 +1,7 @@
 // /agent/* 鉴权作用域：JWT 验签钩子经插件封装只作用于本插件内注册的路由，不外溢到 /healthz
 import type { FastifyInstance } from 'fastify'
 import type { AgentConfig } from '../config.js'
-import { buildAgentRoutes } from '../routes/agent.js'
+import { buildAgentRoutes, type AgentRouteOptions } from '../routes/agent.js'
 import { verifyAgentJwt, type AgentJwtPayload } from './jwt.js'
 
 declare module 'fastify' {
@@ -11,7 +11,7 @@ declare module 'fastify' {
   }
 }
 
-export async function agentPlugin(fastify: FastifyInstance, opts: { config: AgentConfig }): Promise<void> {
+export async function agentPlugin(fastify: FastifyInstance, opts: { config: AgentConfig; routeOptions?: AgentRouteOptions }): Promise<void> {
   const { config } = opts
 
   // 无令牌 / 格式错误 / 验签失败 / 过期 → 统一 401，业务路由无需重复校验
@@ -27,5 +27,5 @@ export async function agentPlugin(fastify: FastifyInstance, opts: { config: Agen
     }
   })
 
-  buildAgentRoutes(fastify, config)
+  buildAgentRoutes(fastify, config, opts.routeOptions)
 }

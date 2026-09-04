@@ -14,12 +14,15 @@ export default {
   ...(useRuntimeEnv
     ? {
         resolve: {
-          // 只需覆盖业务代码的顶层裸导入（fastify / jose / vitest）；
+          // 只需覆盖业务代码的顶层裸导入（fastify / jose / vitest / ai / xstate / @ai-sdk/provider）；
           // 这些包自身的传递依赖按 Node 规则从其真实位置向上查找，天然落在同一 node_modules 树内
           alias: [
             { find: /^fastify$/, replacement: path.join(rtNodeModules, 'fastify') },
             { find: /^jose$/, replacement: path.join(rtNodeModules, 'jose') },
             { find: /^vitest$/, replacement: path.join(rtNodeModules, 'vitest') },
+            { find: /^ai$/, replacement: path.join(rtNodeModules, 'ai') },
+            { find: /^xstate$/, replacement: path.join(rtNodeModules, 'xstate') },
+            { find: /^@ai-sdk\/provider$/, replacement: path.join(rtNodeModules, '@ai-sdk', 'provider') },
           ],
         },
         // vite 默认把缓存写到 node_modules/.vite，会在服务目录催生 node_modules，改写入运行时环境

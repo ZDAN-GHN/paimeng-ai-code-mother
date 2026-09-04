@@ -126,8 +126,11 @@ switch (command) {
     break
   }
   case 'test': {
-    // vitest 依赖解析见 vitest.config.mjs（resolve.alias 指向运行时环境）
-    runChild(node, [path.join(nodeModules, 'vitest', 'vitest.mjs'), 'run', ...rest])
+    // vitest 依赖解析见 vitest.config.mjs（resolve.alias 指向运行时环境）。
+    // 默认走 --configLoader runner（不打配置包、不写 vite 临时文件）：
+    // 服务目录无 node_modules 时 vite 会上溯到 $HOME/node_modules/.vite-temp 写临时配置，
+    // 该路径受 Windows ACL 控制、可能不可写（实测 EACCES）。runner loader 可彻底绕开。
+    runChild(node, [path.join(nodeModules, 'vitest', 'vitest.mjs'), 'run', '--configLoader', 'runner', ...rest])
     break
   }
   case 'type-check': {
