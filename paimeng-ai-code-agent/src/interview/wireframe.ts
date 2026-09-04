@@ -2,7 +2,7 @@
 // 快速档模型输出（架构 §4）。脚本化实现确定性生成线框 HTML——「访谈结论 → 线框」即快速档模型的契约；
 // 接入真实快速档模型时替换 buildWireframeHtml 内部实现，输入输出与验收断言不变。
 // 线框文件存 {workspace}/wireframe/（跨请求存活，未确认前可重生成），确认后即 codegen 布局契约与视觉 diff 基准。
-import type { InterviewSummary } from './interview.js'
+import type { InterviewSummary } from './index.js'
 
 // 线框文件名（存 {workspace}/wireframe/ 子目录下）
 export const WIREFRAME_FILENAME = 'wireframe.html'

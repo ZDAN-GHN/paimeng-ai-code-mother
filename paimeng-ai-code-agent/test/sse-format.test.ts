@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { encodeEvent, encodeEventStream, formatEvent } from '../src/sse/format.js'
-import type { AgentEvent } from '../src/events.js'
+import type { AgentEvent } from '../src/workflow/events.js'
 
 describe('SSE 序列化约定', () => {
   it('多行 data 逐行拆分为独立 data: 行，帧以空行收尾', () => {

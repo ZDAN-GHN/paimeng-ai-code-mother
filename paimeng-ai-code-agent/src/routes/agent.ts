@@ -4,12 +4,12 @@
 import path from 'node:path'
 import { mkdir, writeFile } from 'node:fs/promises'
 import type { FastifyInstance } from 'fastify'
-import type { AgentConfig } from '../config.js'
+import type { AgentConfig } from '../app/config.js'
 import { RunClient, RunApiError } from '../internal/runClient.js'
 import { encodeEventStream } from '../sse/format.js'
-import type { AgentEvent } from '../events.js'
-import { runGenerationWorkflow, type StreamRequest } from '../workflow.js'
-import type { ScriptedLlmProvider } from '../llm.js'
+import type { AgentEvent } from '../workflow/events.js'
+import { runGenerationWorkflow, type StreamRequest } from '../workflow/index.js'
+import type { ScriptedLlmProvider } from '../llm/index.js'
 import { WorkspacePathError, validateWorkspacePath } from '../workspace/sandbox.js'
 import {
   buildRound1Questions,
@@ -19,9 +19,9 @@ import {
   mergeAnswers,
   type InterviewAnswer,
   type InterviewState,
-} from '../interview.js'
-import { WIREFRAME_FILENAME, buildWireframeHtml, countWireframePages } from '../wireframe.js'
-import { parseContext } from '../context.js'
+} from '../interview/index.js'
+import { WIREFRAME_FILENAME, buildWireframeHtml, countWireframePages } from '../interview/wireframe.js'
+import { parseContext } from '../interview/context.js'
 import type { ImageTools } from '../tools/imageTools.js'
 
 export interface AgentRouteOptions {

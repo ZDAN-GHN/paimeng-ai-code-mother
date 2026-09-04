@@ -1,20 +1,20 @@
 // 生成工作流驱动（Issue #5 + #8）：XState actor 驱动线性状态机，coding 节点经 Vercel AI SDK streamText
-// 消费脚本化假 LLM（src/llm.ts）。#8 扩展：Guardrail 输入校验（interview 阶段拦截 → failed 终态）、
+// 消费脚本化假 LLM（src/llm/index.ts）。#8 扩展：Guardrail 输入校验（interview 阶段拦截 → failed 终态）、
 // 全套工具注册（文件六工具 + 图片四工具 + 图片配额 4 张/run）、写盘前代码块解析、codegen 提示词注入 system。
-// 职责分工：状态机（src/machine.ts）定拓扑与 milestone；本文件做解释执行——推进状态、发射 SSE 事件、
+// 职责分工：状态机（src/workflow/machine.ts）定拓扑与 milestone；本文件做解释执行——推进状态、发射 SSE 事件、
 // 按 runId 推进 phase、工作区落盘。
 import { createActor } from 'xstate'
 import { isStepCount, streamText } from 'ai'
 import type { AgentEvent } from './events.js'
 import { MILESTONE_DETAILS, PHASE_BY_STATE, generationMachine } from './machine.js'
-import { createScriptedLlm, type LlmScript, type ScriptedLlmProvider } from './llm.js'
-import { RunClient, type RunPhase } from './internal/runClient.js'
-import { validateWorkspacePath } from './workspace/sandbox.js'
-import { validatePrompt } from './guardrails.js'
-import { loadPrompt, PROMPT_NAMES } from './prompts.js'
-import { FileTools } from './tools/fileTools.js'
-import { ImageTools, type ImageConfig } from './tools/imageTools.js'
-import { buildTools } from './tools/index.js'
+import { createScriptedLlm, type LlmScript, type ScriptedLlmProvider } from '../llm/index.js'
+import { RunClient, type RunPhase } from '../internal/runClient.js'
+import { validateWorkspacePath } from '../workspace/sandbox.js'
+import { validatePrompt } from '../interview/guardrails.js'
+import { loadPrompt, PROMPT_NAMES } from '../prompts/index.js'
+import { FileTools } from '../tools/fileTools.js'
+import { ImageTools, type ImageConfig } from '../tools/imageTools.js'
+import { buildTools } from '../tools/index.js'
 
 export interface StreamRequest {
   runId: string

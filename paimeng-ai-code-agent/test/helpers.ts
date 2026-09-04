@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { SignJWT } from 'jose'
 import type { FastifyInstance } from 'fastify'
-import { buildApp } from '../src/app.js'
+import { buildApp } from '../src/app/app.js'
 
 export const TEST_SECRET = 'test-secret'
 

@@ -1,5 +1,5 @@
 // SSE 序列化：事件以空行分隔；data 内容多行时逐行拆分为独立 data: 行（沿用旧契约 §1.3 A5 约定）
-import type { AgentEvent } from '../events.js'
+import type { AgentEvent } from '../workflow/events.js'
 
 // 把单条事件格式化为 SSE 帧（event 行 + data 行 + 结尾空行）
 export function formatEvent(event: string, data: string): string {

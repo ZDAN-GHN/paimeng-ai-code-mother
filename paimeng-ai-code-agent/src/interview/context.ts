@@ -1,7 +1,7 @@
 // run.context JSON 结构（Issue #7）：interview 访谈状态 + wireframe 线框状态。
 // context 为 Java generation_run 表的 JSON 字段（架构 §3.2：访谈结论/已确认线框路径/plan 序列化于此），
 // TS Agent 经 Java 内部 API 读写；本文件提供类型化解析与装配，保证各端点读写一致。
-import type { InterviewState } from './interview.js'
+import type { InterviewState } from './index.js'
 
 export interface WireframeState {
   // 线框相对工作区的 URL（如 wireframe/wireframe.html，codegen 布局契约与视觉 diff 基准的定位）

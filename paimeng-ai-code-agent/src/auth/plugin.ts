@@ -1,6 +1,6 @@
 // /agent/* 鉴权作用域：JWT 验签钩子经插件封装只作用于本插件内注册的路由，不外溢到 /healthz
 import type { FastifyInstance } from 'fastify'
-import type { AgentConfig } from '../config.js'
+import type { AgentConfig } from '../app/config.js'
 import { buildAgentRoutes, type AgentRouteOptions } from '../routes/agent.js'
 import { verifyAgentJwt, type AgentJwtPayload } from './jwt.js'
 

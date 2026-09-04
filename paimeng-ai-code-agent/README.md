@@ -48,20 +48,28 @@ bash scripts/run-wsl.sh type-check
 
 ```
 src/
-  config.ts            # 环境配置（PORT/JWT_SECRET/WORKSPACE_ROOT/JAVA_INTERNAL_*/PEXELS_*/DASHSCOPE_*）
-  events.ts            # 七类 SSE 事件模型
-  machine.ts           # XState v5 线性工作流状态机（interview→coding→review→done/failed，milestone 聚合）
-  llm.ts               # 脚本化假 LLM：AI SDK LanguageModelV2 provider（customProvider 注册，零在线调用）
-  workflow.ts          # 工作流驱动：XState actor 推进 + streamText 消费 + run phase 更新 + 工作区落盘
-  guardrails.ts        # 提示词安全输入护轨（#8：长度/空/敏感词/注入模式，interview 阶段拦截）
-  prompts.ts           # 提示词加载器（#8：7 份提示词复制自 Python Agent，经 AGENT_ROOT 定位）
+  index.ts             # 服务入口（默认端口 8092，esbuild 打包锚点）
+  app/
+    app.ts             # Fastify 应用装配（生产/测试共用构建入口）
+    config.ts          # 环境配置（PORT/JWT_SECRET/WORKSPACE_ROOT/JAVA_INTERNAL_*/PEXELS_*/DASHSCOPE_*）
+  interview/           # 需求理解域：访谈 → 线框 → 确认
+    index.ts           # 五维访谈：题目生成/收敛判断/结论（脚本化，真实模型替换点）
+    wireframe.ts       # 线框生成：单文件 HTML（站点地图 + 灰块 + 占位图，≤5 页）
+    guardrails.ts      # 提示词安全输入护轨（#8：长度/空/敏感词/注入模式，interview 阶段拦截）
+    context.ts         # run.context JSON 类型化解析（interview + wireframe 状态）
+  workflow/            # 生成工作流域
+    index.ts           # 工作流驱动：XState actor 推进 + streamText 消费 + run phase 更新 + 工作区落盘
+    machine.ts         # XState v5 线性工作流状态机（interview→coding→review→done/failed，milestone 聚合）
+    events.ts          # 七类 SSE 事件模型
+  llm/
+    index.ts           # 脚本化假 LLM：AI SDK LanguageModelV2 provider（customProvider 注册，零在线调用）
+  prompts/
+    index.ts           # 提示词加载器（#8：7 份提示词复制自 Python Agent，经 AGENT_ROOT 定位）
+    *.txt              # 7 份提示词资源
   codegen/parsing.ts   # 代码块解析（#8：HTML/CSS/JS 正则移植，writeFile 写盘前解析文件集）
   tools/fileTools.ts   # 文件六工具（#8：写/读/改/删/列目录/退出 + 重要文件保护 + 沙箱）
   tools/imageTools.ts  # 图片四工具（#8：Pexels/Undraw/DashScope/mmdc + 配额 4 张/run）
   tools/index.ts       # 工具注册表（#8：文件六 + 图片四 → AI SDK tool 定义）
-  interview.ts         # 五维访谈：题目生成/收敛判断/结论（脚本化，真实模型替换点）
-  wireframe.ts         # 线框生成：单文件 HTML（站点地图 + 灰块 + 占位图，≤5 页）
-  context.ts           # run.context JSON 类型化解析（interview + wireframe 状态）
   sse/format.ts        # SSE 帧序列化
   auth/jwt.ts          # jose 离线验签
   auth/plugin.ts       # /agent/* 鉴权作用域（钩子不外溢）

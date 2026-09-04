@@ -1,8 +1,8 @@
 // XState v5 最小线性工作流骨架（Issue #5）：interview → coding → review → done / failed。
 // 工作流拓扑钉死在状态图里——非法转移在类型层消灭；milestone 经 entry action 聚合进 context.milestones
-// （节点跳变 → 人话里程碑，退款粒度锚与 run 更新复用同一列表）。驱动解释器见 src/workflow.ts。
+// （节点跳变 → 人话里程碑，退款粒度锚与 run 更新复用同一列表）。驱动解释器见 src/workflow/index.ts。
 import { assign, createMachine } from 'xstate'
-import type { RunPhase } from './internal/runClient.js'
+import type { RunPhase } from '../internal/runClient.js'
 
 export interface GenerationContext {
   // 已过里程碑标题列表（按经过顺序累积）
