@@ -1,6 +1,7 @@
 package com.zdan.paimengaicodemother.service;
 
 import com.mybatisflex.core.service.IService;
+import com.zdan.paimengaicodemother.model.dto.run.AgentCompleteRequest;
 import com.zdan.paimengaicodemother.model.dto.run.RunCreateRequest;
 import com.zdan.paimengaicodemother.model.dto.run.RunUpdateRequest;
 import com.zdan.paimengaicodemother.model.entity.GenerationRun;
@@ -47,4 +48,13 @@ public interface GenerationRunService extends IService<GenerationRun> {
      * @return 最新非终态 run，无则返回 null
      */
     RunVO getLatestNonTerminalRun(Long appId, Long userId);
+
+    /**
+     * 处理 Agent 完成回调（Issue #6）：写本次对话历史 + success 触发构建
+     * 幂等：同 runId 只处理一次，重复回调直接忽略（不重复写历史/构建）
+     *
+     * @param runId   运行 id（幂等键）
+     * @param request 完成回调请求
+     */
+    void completeRun(String runId, AgentCompleteRequest request);
 }

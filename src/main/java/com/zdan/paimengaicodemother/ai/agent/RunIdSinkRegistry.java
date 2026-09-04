@@ -1,4 +1,4 @@
-package com.zdan.paimengaicodemother.ai.python;
+package com.zdan.paimengaicodemother.ai.agent;
 
 import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 import com.zdan.paimengaicodemother.model.entity.User;
@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 /**
- * runId ↔ 浏览器连接关联注册表（§1.4 A3）
+ * runId ↔ 浏览器连接关联注册表（§1.4 A3，泛化自 ai/python，Issue #6）
  * 以 runId 为 key 维护浏览器 SSE 终端信号（done / business-error）与请求元数据；
  * 回调到达 / 回调超时通过 terminal 信号通知主通道浏览器连接
  *

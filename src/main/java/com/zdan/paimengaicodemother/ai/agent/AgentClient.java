@@ -1,14 +1,13 @@
-package com.zdan.paimengaicodemother.ai.python;
+package com.zdan.paimengaicodemother.ai.agent;
 
-import com.zdan.paimengaicodemother.config.PythonAgentProperties;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
 import io.netty.channel.ChannelOption;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
-import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
@@ -17,13 +16,13 @@ import reactor.netty.http.client.HttpClient;
 import java.time.Duration;
 
 /**
- * Python Agent HTTP 客户端
- * 主通道、健康检查、鉴权按 docs/py_agent/task_plan.md §1.1 实现
+ * Agent HTTP 客户端（泛化自 PythonAgentClient，Issue #6）
+ * 主通道、健康检查、鉴权按 docs/py_agent/task_plan.md §1.1 的契约实现，Agent 身份由配置区分
  *
  * @author LXH
  */
 @Component
-public class PythonAgentClient {
+public class AgentClient {
 
     /**
      * 主通道路径
@@ -35,16 +34,16 @@ public class PythonAgentClient {
      */
     private static final String HEALTH_PATH = "/healthz";
 
-    private final PythonAgentProperties properties;
+    private final AgentProperties properties;
 
     private final WebClient webClient;
 
     /**
      * 构造 WebClient（base-url、Bearer 令牌、连接/读超时均取自配置）
      *
-     * @param properties python-agent 配置
+     * @param properties agent 配置
      */
-    public PythonAgentClient(PythonAgentProperties properties) {
+    public AgentClient(AgentProperties properties) {
         this.properties = properties;
         // 连接超时 + 读超时（read-timeout-ms 内既无事件也无回调则判定失败，§1.5）
         HttpClient httpClient = HttpClient.create()
@@ -78,11 +77,11 @@ public class PythonAgentClient {
      * POST /v1/agent/stream，解码 SSE 事件（event 名 + data 载荷）
      *
      * @param request 主通道请求体（§1.2）
-     * @return Python Agent SSE 事件流
+     * @return Agent SSE 事件流
      */
-    public Flux<SseEvent> stream(PythonAgentRequest request) {
+    public Flux<SseEvent> stream(AgentRequest request) {
         if (!properties.isEnabled()) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "python-agent 未启用，请设置 python-agent.enabled=true");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "agent 未启用，请设置 agent.enabled=true（或旧键 python-agent.enabled）");
         }
         return webClient.post()
                 .uri(STREAM_PATH)

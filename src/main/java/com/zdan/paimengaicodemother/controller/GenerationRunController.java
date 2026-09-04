@@ -7,6 +7,7 @@ import com.zdan.paimengaicodemother.config.InternalApiProperties;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ConcurrentRunException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
+import com.zdan.paimengaicodemother.model.dto.run.AgentCompleteRequest;
 import com.zdan.paimengaicodemother.model.dto.run.RunCreateRequest;
 import com.zdan.paimengaicodemother.model.dto.run.RunUpdateRequest;
 import com.zdan.paimengaicodemother.model.vo.RunVO;
@@ -109,6 +110,24 @@ public class GenerationRunController {
                                                                        @RequestHeader(value = "Authorization", required = false) String authorization) {
         checkInternalAuth(authorization);
         return ResponseEntity.ok(ResultUtils.success(generationRunService.getLatestNonTerminalRun(appId, userId)));
+    }
+
+    /**
+     * Agent 完成回调（Issue #6）：写对话历史 + success 触发构建
+     * Bearer + runId 幂等（同 runId 重复回调返回 200 丢弃，不重复写历史/构建）
+     *
+     * @param runId         运行 id（幂等键）
+     * @param request       完成回调请求
+     * @param authorization Authorization 头
+     * @return 处理结果
+     */
+    @PostMapping("/agent/runs/{runId}/complete")
+    public ResponseEntity<BaseResponse<Boolean>> completeRun(@PathVariable String runId,
+                                                             @RequestBody AgentCompleteRequest request,
+                                                             @RequestHeader(value = "Authorization", required = false) String authorization) {
+        checkInternalAuth(authorization);
+        generationRunService.completeRun(runId, request);
+        return ResponseEntity.ok(ResultUtils.success(true));
     }
 
     /**

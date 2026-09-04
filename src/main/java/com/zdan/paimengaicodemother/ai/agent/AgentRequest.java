@@ -1,17 +1,17 @@
-package com.zdan.paimengaicodemother.ai.python;
+package com.zdan.paimengaicodemother.ai.agent;
 
 import lombok.Data;
 
 import java.util.List;
 
 /**
- * Python Agent 主通道请求体
+ * Agent 主通道请求体（泛化自 PythonAgentRequest，Issue #6）
  * 字段与 docs/py_agent/task_plan.md §1.2 一一对应，不得自行改动
  *
  * @author LXH
  */
 @Data
-public class PythonAgentRequest {
+public class AgentRequest {
 
     /**
      * 应用 id
@@ -39,12 +39,12 @@ public class PythonAgentRequest {
     private String runId;
 
     /**
-     * LangGraph 会话标识，固定 app:{appId}
+     * 会话标识，固定 app:{appId}
      */
     private String threadId;
 
     /**
-     * 工作区绝对路径（Java 计算传入，Python 做沙箱校验）
+     * 工作区绝对路径（Java 计算传入，Agent 做沙箱校验）
      */
     private String workspacePath;
 

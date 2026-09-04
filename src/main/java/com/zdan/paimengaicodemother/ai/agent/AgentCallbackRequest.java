@@ -1,16 +1,16 @@
-package com.zdan.paimengaicodemother.ai.python;
+package com.zdan.paimengaicodemother.ai.agent;
 
 import lombok.Data;
 
 /**
- * Python Agent 完成回调请求体（§1.4）
+ * Agent 完成回调请求体（泛化自 PythonAgentCallbackRequest，Issue #6）
  * 字段与 docs/py_agent/task_plan.md §1.4 一一对应，不得自行改动；
  * status 仅接受 success/failed（非法值返回 400，A9）
  *
  * @author LXH
  */
 @Data
-public class PythonAgentCallbackRequest {
+public class AgentCallbackRequest {
 
     /**
      * 本次生成的 runId（幂等键）

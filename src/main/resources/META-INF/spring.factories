@@ -1,0 +1,3 @@
+# 注册 python-agent.* → agent.* 配置别名（AgentLegacyAliasPostProcessor，Issue #6）
+org.springframework.boot.env.EnvironmentPostProcessor=\
+com.zdan.paimengaicodemother.config.AgentLegacyAliasPostProcessor

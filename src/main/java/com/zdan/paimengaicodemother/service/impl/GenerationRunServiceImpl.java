@@ -2,20 +2,29 @@ package com.zdan.paimengaicodemother.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.bean.copier.CopyOptions;
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
+import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodemother.core.builder.BuilderExecutor;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ConcurrentRunException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.exception.ThrowUtils;
 import com.zdan.paimengaicodemother.mapper.GenerationRunMapper;
+import com.zdan.paimengaicodemother.model.dto.run.AgentCompleteRequest;
 import com.zdan.paimengaicodemother.model.dto.run.RunCreateRequest;
 import com.zdan.paimengaicodemother.model.dto.run.RunUpdateRequest;
+import com.zdan.paimengaicodemother.model.entity.App;
 import com.zdan.paimengaicodemother.model.entity.GenerationRun;
+import com.zdan.paimengaicodemother.model.entity.User;
+import com.zdan.paimengaicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.zdan.paimengaicodemother.model.enums.GenerationRunPhaseEnum;
 import com.zdan.paimengaicodemother.model.vo.RunVO;
+import com.zdan.paimengaicodemother.service.AppService;
+import com.zdan.paimengaicodemother.service.ChatHistoryService;
 import com.zdan.paimengaicodemother.service.GenerationRunService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -23,6 +32,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -53,6 +63,20 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
      * （单实例部署下成立；多实例时需依赖 DB 层约束，见 docs/ts_agent/architecture.md 单机部署前提）
      */
     private final ConcurrentHashMap<Long, Object> appLocks = new ConcurrentHashMap<>();
+
+    /**
+     * 已完成回调的 runId 集合（完成回调幂等，Issue #6）
+     * 单机部署（架构 §1.2）下内存即足够；重复回调直接忽略，不重复写历史/构建
+     */
+    private final Set<String> completedRunIds = ConcurrentHashMap.newKeySet();
+
+    private final AppService appService;
+    private final ChatHistoryService chatHistoryService;
+
+    public GenerationRunServiceImpl(AppService appService, ChatHistoryService chatHistoryService) {
+        this.appService = appService;
+        this.chatHistoryService = chatHistoryService;
+    }
 
     @Override
     public RunVO createRun(RunCreateRequest request) {
@@ -135,6 +159,62 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
     public RunVO getLatestNonTerminalRun(Long appId, Long userId) {
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "appId 不能为空");
         return toVO(getLatestNonTerminalRunEntity(appId, userId));
+    }
+
+    @Override
+    public void completeRun(String runId, AgentCompleteRequest request) {
+        ThrowUtils.throwIf(StrUtil.isBlank(runId), ErrorCode.PARAMS_ERROR, "runId 不能为空");
+        validateComplete(request);
+        // 幂等：同 runId 只处理一次（重复回调直接忽略，不重复写历史/构建）
+        if (!completedRunIds.add(runId)) {
+            log.info("run 完成回调已处理过，幂等跳过，runId: {}", runId);
+            return;
+        }
+        // 归属与构建类型以 Java 侧 app 为准（TS Agent 不传 codeGenType，避免契约冗余）
+        App app = appService.getById(request.getAppId());
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        User user = new User();
+        user.setId(request.getUserId());
+        if (CollUtil.isNotEmpty(request.getMessages())) {
+            // 本次对话历史按序落库（user + ai 全文）
+            for (AgentCompleteRequest.Message message : request.getMessages()) {
+                ThrowUtils.throwIf(ChatHistoryMessageTypeEnum.getEnumByValue(message.getMessageType()) == null,
+                        ErrorCode.PARAMS_ERROR, "messageType 仅接受 user/ai");
+                chatHistoryService.addChatMessage(request.getAppId(), message.getContent(),
+                        message.getMessageType(), user);
+            }
+        }
+        if ("success".equals(request.getStatus())) {
+            // 触发构建：产物落工作区（构建管线不变）
+            CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(app.getCodeGenType());
+            ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "代码生成类型不合法");
+            BuilderExecutor.doBuild(codeGenTypeEnum, request.getWorkspacePath());
+        } else {
+            // 失败：写一条错误历史（AI 类型），不触发构建
+            chatHistoryService.addChatMessage(request.getAppId(),
+                    "生成失败：" + StrUtil.blankToDefault(request.getErrorMessage(), "生成失败"),
+                    ChatHistoryMessageTypeEnum.AI.getValue(), user);
+        }
+        log.info("run 完成回调处理成功，runId: {}, status: {}", runId, request.getStatus());
+    }
+
+    /**
+     * 校验完成回调请求（appId/userId/status/workspacePath）
+     *
+     * @param request 完成回调请求
+     */
+    private void validateComplete(AgentCompleteRequest request) {
+        ThrowUtils.throwIf(request == null, ErrorCode.PARAMS_ERROR, "请求不能为空");
+        ThrowUtils.throwIf(request.getAppId() == null || request.getAppId() <= 0,
+                ErrorCode.PARAMS_ERROR, "appId 不能为空");
+        ThrowUtils.throwIf(request.getUserId() == null || request.getUserId() <= 0,
+                ErrorCode.PARAMS_ERROR, "userId 不能为空");
+        String status = request.getStatus();
+        ThrowUtils.throwIf(!"success".equals(status) && !"failed".equals(status),
+                ErrorCode.PARAMS_ERROR, "status 仅接受 success/failed");
+        // success 时需要工作区路径触发构建
+        ThrowUtils.throwIf("success".equals(status) && StrUtil.isBlank(request.getWorkspacePath()),
+                ErrorCode.PARAMS_ERROR, "workspacePath 不能为空");
     }
 
     /**

@@ -11,11 +11,11 @@ import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.zdan.paimengaicodemother.ai.codegen.route.AiCodeGenTypeRoutingService;
 import com.zdan.paimengaicodemother.ai.codegen.route.AiCodeGenTypeRoutingServiceFactory;
 import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
-import com.zdan.paimengaicodemother.ai.python.PythonAgentClient;
-import com.zdan.paimengaicodemother.ai.python.PythonAgentRequest;
-import com.zdan.paimengaicodemother.ai.python.PythonAgentSseAdapter;
-import com.zdan.paimengaicodemother.ai.python.RunIdSinkRegistry;
-import com.zdan.paimengaicodemother.config.PythonAgentProperties;
+import com.zdan.paimengaicodemother.ai.agent.AgentClient;
+import com.zdan.paimengaicodemother.ai.agent.AgentRequest;
+import com.zdan.paimengaicodemother.ai.agent.AgentSseAdapter;
+import com.zdan.paimengaicodemother.ai.agent.RunIdSinkRegistry;
+import com.zdan.paimengaicodemother.ai.agent.AgentProperties;
 import com.zdan.paimengaicodemother.constant.AppConstant;
 import com.zdan.paimengaicodemother.core.AiCodeGeneratorFacade;
 import com.zdan.paimengaicodemother.core.builder.BuilderExecutor;
@@ -63,10 +63,10 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private final StreamHandlerExecutor streamHandlerExecutor;
     private final ScreenshotService screenshotService;
     private final AiCodeGenTypeRoutingServiceFactory aiCodeGenTypeRoutingServiceFactory;
-    private final PythonAgentClient pythonAgentClient;
-    private final PythonAgentSseAdapter pythonAgentSseAdapter;
+    private final AgentClient agentClient;
+    private final AgentSseAdapter agentSseAdapter;
     private final RunIdSinkRegistry runIdSinkRegistry;
-    private final PythonAgentProperties pythonAgentProperties;
+    private final AgentProperties agentProperties;
 
     public AppServiceImpl(UserService userService,
                           ChatHistoryService chatHistoryService,
@@ -74,20 +74,20 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
                           StreamHandlerExecutor streamHandlerExecutor,
                           ScreenshotService screenshotService,
                           AiCodeGenTypeRoutingServiceFactory aiCodeGenTypeRoutingServiceFactory,
-                          PythonAgentClient pythonAgentClient,
-                          PythonAgentSseAdapter pythonAgentSseAdapter,
+                          AgentClient agentClient,
+                          AgentSseAdapter agentSseAdapter,
                           RunIdSinkRegistry runIdSinkRegistry,
-                          PythonAgentProperties pythonAgentProperties) {
+                          AgentProperties agentProperties) {
         this.userService = userService;
         this.chatHistoryService = chatHistoryService;
         this.aiCodeGeneratorFacade = aiCodeGeneratorFacade;
         this.streamHandlerExecutor = streamHandlerExecutor;
         this.screenshotService = screenshotService;
         this.aiCodeGenTypeRoutingServiceFactory = aiCodeGenTypeRoutingServiceFactory;
-        this.pythonAgentClient = pythonAgentClient;
-        this.pythonAgentSseAdapter = pythonAgentSseAdapter;
+        this.agentClient = agentClient;
+        this.agentSseAdapter = agentSseAdapter;
         this.runIdSinkRegistry = runIdSinkRegistry;
-        this.pythonAgentProperties = pythonAgentProperties;
+        this.agentProperties = agentProperties;
     }
 
     @Override
@@ -227,8 +227,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         String codeGenType = app.getCodeGenType();
         CodeGenTypeEnum codeGenTypeEnum = Optional.ofNullable(CodeGenTypeEnum.getEnumByValue(codeGenType))
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAMS_ERROR, "代码生成类型不合法"));
-        // 灰度开关：true 走 Python Agent 链路，false 走旧 Java AI 实现（行为不变）
-        if (pythonAgentProperties.isEnabled()) {
+        // 灰度开关：true 走 Agent 链路，false 走旧 Java AI 实现（行为不变）
+        if (agentProperties.isEnabled()) {
             return pythonChatToGenCode(appId, message, loginUser, codeGenTypeEnum);
         }
         // 旧链路（行为与迁移前完全一致）
@@ -254,7 +254,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         String workspacePath = StrUtil.format("{}/{}_{}", AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenTypeEnum.getValue(), appId);
         runIdSinkRegistry.register(runId, appId, codeGenTypeEnum, workspacePath, loginUser);
         // 2. 构造主通道请求（§1.2：threadId 固定 app:{appId}，history 最近 20 条 bootstrap）
-        PythonAgentRequest request = new PythonAgentRequest();
+        AgentRequest request = new AgentRequest();
         request.setAppId(appId);
         request.setUserId(loginUser.getId());
         request.setMessage(message);
@@ -265,19 +265,19 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         request.setHistory(loadRecentHistory(appId));
         // 3. 调用 Python 主通道；错误事件触发 failed 终端（幂等）；
         //    上游调用失败（连接/读超时）时立即触发 business-error 终端，不等回调超时（§1.5 兜底）
-        Flux<PythonAgentClient.SseEvent> pythonSse = pythonAgentClient.stream(request)
+        Flux<AgentClient.SseEvent> agentSse = agentClient.stream(request)
                 .doOnNext(event -> handlePythonErrorEvent(runId, appId, loginUser, event))
                 .onErrorResume(error -> {
-                    log.error("调用 Python Agent 失败，runId: {}, message: {}", runId, error.getMessage());
+                    log.error("调用 Agent 失败，runId: {}, message: {}", runId, error.getMessage());
                     runIdSinkRegistry.complete(runId, businessErrorSse(ErrorCode.SYSTEM_ERROR, "AI 服务调用失败，请稍后重试"));
                     // 错误继续向下传递，由 handler 记录一条错误历史（保持既有语义）
                     return Flux.error(error);
                 });
         // 4. 事件分流 → 浏览器显示文本（复用现有 handler，§1.6）
-        Flux<String> display = pythonAgentSseAdapter.adapt(pythonSse, codeGenTypeEnum, chatHistoryService, appId, loginUser);
+        Flux<String> display = agentSseAdapter.adapt(agentSse, codeGenTypeEnum, chatHistoryService, appId, loginUser);
         // 5. 显示文本包 {"d":...}；主通道结束后等待回调终端信号，超时用兜底 business-error
         Mono<ServerSentEvent<String>> terminal = runIdSinkRegistry.awaitTerminal(
-                runId, pythonAgentProperties.getCallbackTimeoutMs(), () -> {
+                runId, agentProperties.getCallbackTimeoutMs(), () -> {
                     // 幂等：超时仅处理一次
                     if (runIdSinkRegistry.tryMarkProcessed(runId)) {
                         chatHistoryService.addChatMessage(appId, "生成超时，请重试",
@@ -296,7 +296,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
      * @param loginUser 当前登录用户
      * @param event     SSE 事件
      */
-    private void handlePythonErrorEvent(String runId, Long appId, User loginUser, PythonAgentClient.SseEvent event) {
+    private void handlePythonErrorEvent(String runId, Long appId, User loginUser, AgentClient.SseEvent event) {
         if (!"error".equals(event.event())) {
             return;
         }
@@ -333,7 +333,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
      * @param appId 应用 id
      * @return 历史条目列表
      */
-    private List<PythonAgentRequest.HistoryItem> loadRecentHistory(Long appId) {
+    private List<AgentRequest.HistoryItem> loadRecentHistory(Long appId) {
         QueryWrapper queryWrapper = QueryWrapper.create()
                 .eq(ChatHistory::getAppId, appId)
                 .in(ChatHistory::getMessageType,
@@ -342,14 +342,14 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
                 .orderBy(ChatHistory::getCreateTime, false)
                 .limit(0, 20);
         List<ChatHistory> historyList = chatHistoryService.list(queryWrapper);
-        List<PythonAgentRequest.HistoryItem> items = new ArrayList<>();
+        List<AgentRequest.HistoryItem> items = new ArrayList<>();
         // 倒序取回正序（老的在前，新的在后）
         for (int i = historyList.size() - 1; i >= 0; i--) {
             ChatHistory history = historyList.get(i);
             if (StrUtil.isBlank(history.getMessage())) {
                 continue;
             }
-            PythonAgentRequest.HistoryItem item = new PythonAgentRequest.HistoryItem();
+            AgentRequest.HistoryItem item = new AgentRequest.HistoryItem();
             item.setRole(ChatHistoryMessageTypeEnum.USER.getValue().equals(history.getMessageType()) ? "user" : "assistant");
             item.setContent(history.getMessage());
             items.add(item);

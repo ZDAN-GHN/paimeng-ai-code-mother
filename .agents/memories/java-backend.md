@@ -7,9 +7,9 @@
 | 项 | 状态 |
 |---|---|
 | `./mvnw compile` | **通过**（需 JDK 21；本机 sdkman 已装 `21.0.12+1.1-tem`，当前 JDK 17 会报 `release version 21 not supported`） |
-| `ai/python/` | `PythonAgentProperties`/`PythonAgentClient`/`PythonAgentRequest` 存在；**将泛化为通用 Agent 客户端**（`python-agent.*` → `agent.*` 配置段，指向 TS Agent） |
-| `AppServiceImpl` | T18 已含 `python-agent.enabled` 分支；本地 `application-local.yml` 已回切 `enabled: false`（**P0 已执行 2026-09-03**，旧 Java AI 为过渡主链路） |
-| `application.yml` `python-agent` 段 | `enabled/base-url/token/connect-timeout-ms/read-timeout-ms` + `callback-timeout-ms`（默认 60000） |
+| `ai/agent/`（原 `ai/python/`，**#6 已泛化**） | `AgentProperties`/`AgentClient`/`AgentSseAdapter`/`AgentRequest`/`AgentCallbackRequest`/`RunIdSinkRegistry`（`agent.*` 配置段，`python-agent.*` 为别名） |
+| `AppServiceImpl` | T18 已含 `agent.enabled` 分支（开关变量由 `pythonAgentProperties` 改名 `agentProperties`，语义等价）；本地 `application-local.yml` 已回切 `enabled: false`（**P0 已执行 2026-09-03**，旧 Java AI 为过渡主链路） |
+| `application.yml` `python-agent` 段 | 保留作旧别名（expand-contract）：`enabled/base-url/token/connect-timeout-ms/read-timeout-ms/callback-timeout-ms`；`AgentLegacyAliasPostProcessor` 自动复制到 `agent.*`（新键显式设置时不覆盖） |
 | 旧 AI 链路 `ai/` + `langgraph4j/` | 完整存在（**过渡期主链路**；TS Agent 契约对等后按 `docs/py_agent/t21_delete_plan.md` 删除，门禁已重定向） |
 
 ## 2026-09-03 架构定稿中对 Java 的新增职责
@@ -28,6 +28,15 @@
 - **错误码 → HTTP**：控制器内 `@ExceptionHandler` 覆盖全局 advice 的 200 返回：无/错 Bearer→401、并发→409、参数→400、不存在→404（TS 客户端依赖真实状态码）。
 - **服务**：`GenerationRunServiceImpl` 每 app 一把锁（`ConcurrentHashMap`）串行化幂等检查+并发检查+落库（单实例成立）；JSON 字段校验（hutool JSONUtil）。
 - **测试**：service 12 例（mock mapper，`ReflectionTestUtils.setField(mapper)`）+ controller 7 例（standalone MockMvc，**不用 @WebMvcTest**——其会扫描 mapper 需 sqlSessionFactory 导致上下文加载失败）。
+
+## 2026-09-04 Agent 完成回调（Issue #6 已落地）
+
+- **`POST /internal/agent/runs/{runId}/complete`**（`GenerationRunController`，Bearer 服务令牌 `internal-api.token`，无/错→401）：`GenerationRunService.completeRun(runId, AgentCompleteRequest)`——写本次对话历史（messages user/ai 按序落 `chat_history`）+ success 触发构建。
+- **请求体** `AgentCompleteRequest`：`appId`/`userId`（**字符串传输，防 JS 精度丢失**）/`status`(success|failed)/`messages[{messageType,content}]`/`workspacePath`/`errorMessage`。`codeGenType` 由 Java 按 appId 查 app 表（TS Agent 不传，避免契约冗余）。
+- **幂等**：`GenerationRunServiceImpl` 内存 `completedRunIds`（ConcurrentHashMap.newKeySet），同 runId 只处理一次，重复回调返回 200 丢弃（单机部署成立；重启丢失由「先 createRun 后回调」时序兜底）。
+- **行为**：success → 写 messages + `BuilderExecutor.doBuild(codeGenType, workspacePath)`（构建管线不变，产物落工作区）；failed → 写一条错误历史「生成失败：{errorMessage}」，不构建。
+- **配置别名**：`agent.*` 为新标准，`python-agent.*` 经 `AgentLegacyAliasPostProcessor`（EnvironmentPostProcessor，注册于 `META-INF/spring.factories`）复制为别名；`application.yml` 保留 `python-agent` 段作旧别名。
+- **测试**：`GenerationRunServiceImplTest` 18 例（+completeRun 幂等/成功/失败/校验 6 例）、`GenerationRunControllerTest` 11 例（+401/200/400 4 例）、`AgentLegacyAliasPostProcessorTest` 3 例、`AgentClientTest` 5、`AgentSseAdapterTest` 3、`RunIdSinkRegistryTest` 6。
 
 ## 编译红线
 

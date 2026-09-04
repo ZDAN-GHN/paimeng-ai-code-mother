@@ -43,6 +43,8 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     if (!input.runId || input.appId === '' || !input.message || userId === '') {
       return reply.code(400).send({ statusCode: 400, error: 'Bad Request', message: 'runId、appId、message、userId 必填' })
     }
+    // JWT sub 兜底后的 userId 注入工作流请求（完成回调携带归属）
+    input.userId = userId
 
     const runClient = options.runClient ?? (config.javaInternalToken
       ? new RunClient({ baseUrl: config.javaInternalBaseUrl, token: config.javaInternalToken })

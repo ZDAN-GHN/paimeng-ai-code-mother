@@ -61,6 +61,27 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     }
   }
 
+  // 完成回调（Issue #6）：run 终态时通知 Java 写对话历史 + 触发构建；
+  // 回调失败不阻断生成主流程（Java 侧 runId 幂等，历史/构建可后续补偿）
+  async function notifyComplete(status: 'success' | 'failed', aiContent: string, errorMessage?: string): Promise<void> {
+    if (!runClient) return
+    try {
+      await runClient.completeRun(request.runId, {
+        appId: request.appId,
+        userId: request.userId ?? '',
+        status,
+        messages: [
+          { messageType: 'user', content: request.message },
+          { messageType: 'ai', content: aiContent },
+        ],
+        workspacePath: request.workspacePath ?? workspaceRoot,
+        ...(errorMessage ? { errorMessage } : {}),
+      })
+    } catch (error) {
+      console.error(`[workflow] 完成回调失败，runId: ${request.runId}: ${(error as Error).message}`)
+    }
+  }
+
   try {
     // ── interview：分析需求 ──
     yield* sync()
@@ -129,6 +150,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     if (!pageContent.includes('<html')) {
       actor.send({ type: 'FAIL', error: '生成结果缺少 html 根元素' })
       yield* sync()
+      await notifyComplete('failed', '', '生成结果缺少 html 根元素')
       yield { type: 'error', message: '生成结果缺少 html 根元素' }
       return
     }
@@ -136,6 +158,8 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     // ── done：终态 ──
     actor.send({ type: 'PROCEED' })
     yield* sync()
+    // 回调先于终态事件（路由收到 done/error 即 break，generator 不再 resume，yield 后的代码不会执行）
+    await notifyComplete('success', pageContent)
     yield { type: 'done' }
   } catch (error) {
     // 失败路径：状态机进入 failed（若仍在活跃态）→ phase=failed → error 终态，此后不再发业务事件
@@ -144,6 +168,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
       actor.send({ type: 'FAIL', error: message })
     }
     yield* sync()
+    await notifyComplete('failed', '', message)
     yield { type: 'error', message }
   }
 }

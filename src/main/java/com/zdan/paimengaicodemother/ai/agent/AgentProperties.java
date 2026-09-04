@@ -1,32 +1,33 @@
-package com.zdan.paimengaicodemother.config;
+package com.zdan.paimengaicodemother.ai.agent;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * Python Agent 配置
- * 与 paimeng-ai-code-agent 内部契约对齐（docs/py_agent/task_plan.md §1.1-§1.5）
+ * Agent 客户端配置（泛化自 python-agent.*，Issue #6）
+ * Java → Agent 主通道（Python Agent / TS Agent 通用）与回调终端信号共用的配置段；
+ * 旧键 python-agent.* 作为别名保留（expand-contract，见 AgentLegacyAliasPostProcessor）。
  *
  * @author LXH
  */
 @Data
 @Component
-@ConfigurationProperties(prefix = "python-agent")
-public class PythonAgentProperties {
+@ConfigurationProperties(prefix = "agent")
+public class AgentProperties {
 
     /**
-     * 是否启用 Python Agent 链路（false 走旧 Java AI 实现）
+     * 是否启用 Agent 链路（false 走旧 Java AI 实现，回退链路行为不变）
      */
     private boolean enabled = false;
 
     /**
-     * Python Agent 服务地址
+     * Agent 服务地址
      */
     private String baseUrl = "http://localhost:8090";
 
     /**
-     * 内部调用令牌（与 Python 侧 PYTHON_AGENT_TOKEN 一致）
+     * 内部调用令牌（与 Agent 侧配置一致）
      */
     private String token;
 

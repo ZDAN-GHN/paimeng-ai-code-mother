@@ -5,13 +5,13 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
-import com.zdan.paimengaicodemother.ai.python.PythonAgentCallbackRequest;
-import com.zdan.paimengaicodemother.ai.python.RunIdSinkRegistry;
+import com.zdan.paimengaicodemother.ai.agent.AgentCallbackRequest;
+import com.zdan.paimengaicodemother.ai.agent.RunIdSinkRegistry;
 import com.zdan.paimengaicodemother.annotation.AuthCheck;
 import com.zdan.paimengaicodemother.common.BaseResponse;
 import com.zdan.paimengaicodemother.common.DeleteRequest;
 import com.zdan.paimengaicodemother.common.ResultUtils;
-import com.zdan.paimengaicodemother.config.PythonAgentProperties;
+import com.zdan.paimengaicodemother.ai.agent.AgentProperties;
 import com.zdan.paimengaicodemother.constant.AppConstant;
 import com.zdan.paimengaicodemother.constant.UserConstant;
 import com.zdan.paimengaicodemother.core.builder.BuilderExecutor;
@@ -55,20 +55,20 @@ public class AppController {
     private final AppService appService;
     private final UserService userService;
     private final ProjectDownloadService projectDownloadService;
-    private final PythonAgentProperties pythonAgentProperties;
+    private final AgentProperties agentProperties;
     private final RunIdSinkRegistry runIdSinkRegistry;
     private final ChatHistoryService chatHistoryService;
 
     public AppController(AppService appService,
                          UserService userService,
                          ProjectDownloadService projectDownloadService,
-                         PythonAgentProperties pythonAgentProperties,
+                         AgentProperties agentProperties,
                          RunIdSinkRegistry runIdSinkRegistry,
                          ChatHistoryService chatHistoryService) {
         this.appService = appService;
         this.userService = userService;
         this.projectDownloadService = projectDownloadService;
-        this.pythonAgentProperties = pythonAgentProperties;
+        this.agentProperties = agentProperties;
         this.runIdSinkRegistry = runIdSinkRegistry;
         this.chatHistoryService = chatHistoryService;
     }
@@ -165,11 +165,11 @@ public class AppController {
      * @return 处理结果
      */
     @PostMapping("/chat/gen/code/callback")
-    public BaseResponse<Boolean> pythonAgentCallback(@RequestBody PythonAgentCallbackRequest body,
+    public BaseResponse<Boolean> pythonAgentCallback(@RequestBody AgentCallbackRequest body,
                                                      @RequestHeader(value = "Authorization", required = false) String authorization) {
         // 仅校验内部 Bearer 令牌（A4：回调 handler 不取 session）
-        String expected = "Bearer " + pythonAgentProperties.getToken();
-        if (StrUtil.isBlank(pythonAgentProperties.getToken()) || !expected.equals(authorization)) {
+        String expected = "Bearer " + agentProperties.getToken();
+        if (StrUtil.isBlank(agentProperties.getToken()) || !expected.equals(authorization)) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "非法调用");
         }
         ThrowUtils.throwIf(body == null || StrUtil.isBlank(body.getRunId()), ErrorCode.PARAMS_ERROR, "runId 不能为空");

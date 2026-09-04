@@ -3,9 +3,12 @@ package com.zdan.paimengaicodemother.service;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ConcurrentRunException;
 import com.zdan.paimengaicodemother.mapper.GenerationRunMapper;
+import com.zdan.paimengaicodemother.model.dto.run.AgentCompleteRequest;
 import com.zdan.paimengaicodemother.model.dto.run.RunCreateRequest;
 import com.zdan.paimengaicodemother.model.dto.run.RunUpdateRequest;
+import com.zdan.paimengaicodemother.model.entity.App;
 import com.zdan.paimengaicodemother.model.entity.GenerationRun;
+import com.zdan.paimengaicodemother.model.entity.User;
 import com.zdan.paimengaicodemother.model.vo.RunVO;
 import com.zdan.paimengaicodemother.service.impl.GenerationRunServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,8 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
@@ -35,12 +37,16 @@ import static org.mockito.Mockito.*;
 class GenerationRunServiceImplTest {
 
     private GenerationRunMapper mapper;
+    private AppService appService;
+    private ChatHistoryService chatHistoryService;
     private GenerationRunServiceImpl service;
 
     @BeforeEach
     void setUp() {
         mapper = mock(GenerationRunMapper.class);
-        service = new GenerationRunServiceImpl();
+        appService = mock(AppService.class);
+        chatHistoryService = mock(ChatHistoryService.class);
+        service = new GenerationRunServiceImpl(appService, chatHistoryService);
         ReflectionTestUtils.setField(service, "mapper", mapper);
     }
 
@@ -263,5 +269,104 @@ class GenerationRunServiceImplTest {
 
         assertEquals(1, success.get(), "恰有一个 run 创建成功");
         assertEquals(threads - 1, conflict.get(), "其余被并发拒绝");
+    }
+
+    private AgentCompleteRequest completeRequest(String runId, String status, String workspacePath) {
+        AgentCompleteRequest request = new AgentCompleteRequest();
+        request.setAppId(1L);
+        request.setUserId(1L);
+        request.setStatus(status);
+        request.setWorkspacePath(workspacePath);
+        return request;
+    }
+
+    private AgentCompleteRequest.Message message(String type, String content) {
+        AgentCompleteRequest.Message message = new AgentCompleteRequest.Message();
+        message.setMessageType(type);
+        message.setContent(content);
+        return message;
+    }
+
+    /**
+     * 成功回调：写 user/ai 历史并按 app 的 codeGenType 触发构建
+     */
+    @Test
+    void completeRunSuccessWritesHistoryAndBuilds() {
+        App app = new App();
+        app.setId(1L);
+        app.setCodeGenType("html");
+        when(appService.getById(1L)).thenReturn(app);
+
+        AgentCompleteRequest request = completeRequest("run-1", "success", "/tmp/ws/html_1");
+        request.setMessages(List.of(message("user", "hello"), message("ai", "<html>page</html>")));
+        service.completeRun("run-1", request);
+
+        verify(chatHistoryService, times(2)).addChatMessage(eq(1L), anyString(), anyString(), any(User.class));
+    }
+
+    /**
+     * 失败回调：写一条错误历史（AI 类型），不触发构建
+     */
+    @Test
+    void completeRunFailedWritesErrorHistory() {
+        App app = new App();
+        app.setId(1L);
+        when(appService.getById(1L)).thenReturn(app);
+
+        AgentCompleteRequest request = completeRequest("run-1", "failed", null);
+        request.setErrorMessage("boom");
+        service.completeRun("run-1", request);
+
+        verify(chatHistoryService, times(1))
+                .addChatMessage(eq(1L), eq("生成失败：boom"), eq("ai"), any(User.class));
+    }
+
+    /**
+     * 幂等：同 runId 重复回调只处理一次（不重复写历史/构建）
+     */
+    @Test
+    void completeRunIdempotentSkipsRepeat() {
+        App app = new App();
+        app.setId(1L);
+        app.setCodeGenType("html");
+        when(appService.getById(1L)).thenReturn(app);
+
+        AgentCompleteRequest request = completeRequest("run-1", "success", "/tmp/ws/html_1");
+        request.setMessages(List.of(message("ai", "<html>page</html>")));
+        service.completeRun("run-1", request);
+        service.completeRun("run-1", request);
+
+        verify(chatHistoryService, times(1)).addChatMessage(anyLong(), anyString(), anyString(), any(User.class));
+    }
+
+    /**
+     * 非法 status 拒绝
+     */
+    @Test
+    void completeRunRejectsInvalidStatus() {
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.completeRun("run-1", completeRequest("run-1", "unknown", "/tmp/ws")));
+        assertEquals("status 仅接受 success/failed", ex.getMessage());
+    }
+
+    /**
+     * success 缺少 workspacePath 拒绝
+     */
+    @Test
+    void completeRunRejectsMissingWorkspaceOnSuccess() {
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.completeRun("run-1", completeRequest("run-1", "success", null)));
+        assertEquals("workspacePath 不能为空", ex.getMessage());
+    }
+
+    /**
+     * 应用不存在 → NOT_FOUND
+     */
+    @Test
+    void completeRunRejectsMissingApp() {
+        when(appService.getById(1L)).thenReturn(null);
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.completeRun("run-1", completeRequest("run-1", "success", "/tmp/ws")));
+        assertEquals("应用不存在", ex.getMessage());
     }
 }

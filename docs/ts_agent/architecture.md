@@ -151,7 +151,7 @@ TS Agent ──(Bearer)──> Python RAG :8091              （POST /v1/retriev
 2. **T21 门禁重定向**：原"Python 灰度 ≥7 天"门禁作废，改为"**TS Agent 契约对等 + 回归全绿**"后删除旧 Java AI（删除范围仍按 `docs/py_agent/t21_delete_plan.md`，含用户已确认的 `createApp` 保留 Java 侧 AI 路由决策）。
 3. **Python Agent 目录处置（2026-09-03 用户决策修订：重命名取代删除）**：`paimeng-ai-code-agent/` 整目录 `git mv` 为 `paimeng-ai-code-rag/`（旧 FastAPI 骨架 auth/config/healthz/Bearer/uv 锁定原位复用），退役代码在 P4 RAG 实施时精简；**TS Agent 落位 `paimeng-ai-code-agent/`（目录名复用）**；TS 移植参考 = `docs/py_agent/` 文档 + `paimeng-ai-code-rag/` 代码与 git 历史（提示词 7 份、解析正则、guardrail 规则）。
 4. **PG 即刻停用**：runbook 留档（`.agents/memories/deployment.md`），RAG v2 时重启。
-5. **Java 侧**：`ai/python/*` 三类泛化为通用 Agent 客户端（`python-agent.*` 配置段 → `agent.*`），callback endpoint 模式沿用改指向 TS Agent。
+5. **Java 侧**：`ai/python/*` 三类泛化为通用 Agent 客户端（`python-agent.*` 配置段 → `agent.*`），callback endpoint 模式沿用改指向 TS Agent。（**#6 已落地 2026-09-04**：`ai/agent/*` 泛化完成、`agent.*` 配置 + `python-agent.*` 别名保留、新增完成回调 `POST /internal/agent/runs/{runId}/complete`。）
 
 ## 11. 实施顺序（依赖关系而非死顺序）
 

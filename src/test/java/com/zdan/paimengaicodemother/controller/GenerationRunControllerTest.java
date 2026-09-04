@@ -16,7 +16,10 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -153,5 +156,59 @@ class GenerationRunControllerTest {
                         .header("Authorization", AUTH))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.runId").value("run-1"));
+    }
+
+    /**
+     * 完成回调：无 Bearer → 401
+     */
+    @Test
+    void completeRunWithoutBearerReturns401() throws Exception {
+        mockMvc.perform(post("/internal/agent/runs/run-1/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    /**
+     * 完成回调：错 Bearer → 401
+     */
+    @Test
+    void completeRunWithWrongBearerReturns401() throws Exception {
+        mockMvc.perform(post("/internal/agent/runs/run-1/complete")
+                        .header("Authorization", "Bearer wrong-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    /**
+     * 完成回调：合法调用 → 200 true（写历史 + 构建由 service 完成）
+     */
+    @Test
+    void completeRunWithValidBearerReturns200() throws Exception {
+        mockMvc.perform(post("/internal/agent/runs/run-1/complete")
+                        .header("Authorization", AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"appId\":1,\"userId\":1,\"status\":\"success\",\"workspacePath\":\"/tmp/ws/html_1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data").value(true));
+        verify(generationRunService, times(1)).completeRun(eq("run-1"), any());
+    }
+
+    /**
+     * 完成回调：参数非法（service 抛 PARAMS_ERROR）→ 400
+     */
+    @Test
+    void completeRunInvalidParamReturns400() throws Exception {
+        doThrow(new BusinessException(ErrorCode.PARAMS_ERROR, "status 仅接受 success/failed"))
+                .when(generationRunService).completeRun(eq("run-1"), any());
+
+        mockMvc.perform(post("/internal/agent/runs/run-1/complete")
+                        .header("Authorization", AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"appId\":1,\"userId\":1,\"status\":\"unknown\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("status 仅接受 success/failed"));
     }
 }

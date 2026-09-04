@@ -1,8 +1,7 @@
-package com.zdan.paimengaicodemother.ai.python;
+package com.zdan.paimengaicodemother.ai.agent;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-import com.zdan.paimengaicodemother.config.PythonAgentProperties;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,19 +17,19 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * PythonAgentClient 单元测试（不依赖 Spring 上下文与数据库）
- * 用 JDK HttpServer 模拟 Python Agent 的 SSE 主通道与健康检查
+ * AgentClient 单元测试（不依赖 Spring 上下文与数据库）
+ * 用 JDK HttpServer 模拟 Agent 的 SSE 主通道与健康检查
  *
  * @author LXH
  */
-class PythonAgentClientTest {
+class AgentClientTest {
 
     private HttpServer server;
     private String baseUrl;
     private List<String> authorizationHeaders;
 
     /**
-     * 启动模拟 Python Agent 的 HTTP 服务（随机端口）
+     * 启动模拟 Agent 的 HTTP 服务（随机端口）
      */
     @BeforeEach
     void setUp() throws IOException {
@@ -73,18 +72,18 @@ class PythonAgentClientTest {
         }
     }
 
-    private PythonAgentClient newClient(boolean enabled) {
-        PythonAgentProperties properties = new PythonAgentProperties();
+    private AgentClient newClient(boolean enabled) {
+        AgentProperties properties = new AgentProperties();
         properties.setEnabled(enabled);
         properties.setBaseUrl(baseUrl);
         properties.setToken("test-token");
         properties.setConnectTimeoutMs(3000);
         properties.setReadTimeoutMs(5000);
-        return new PythonAgentClient(properties);
+        return new AgentClient(properties);
     }
 
-    private PythonAgentRequest newRequest() {
-        PythonAgentRequest request = new PythonAgentRequest();
+    private AgentRequest newRequest() {
+        AgentRequest request = new AgentRequest();
         request.setAppId(1L);
         request.setUserId(10001L);
         request.setMessage("做一个红包雨页面");
@@ -100,8 +99,8 @@ class PythonAgentClientTest {
      */
     @Test
     void streamDecodesSseEvents() {
-        PythonAgentClient client = newClient(true);
-        List<PythonAgentClient.SseEvent> events = new ArrayList<>();
+        AgentClient client = newClient(true);
+        List<AgentClient.SseEvent> events = new ArrayList<>();
         client.stream(newRequest()).doOnNext(events::add).blockLast();
         assertEquals(2, events.size());
         // 普通事件：event 为空，data 为语义载荷
@@ -117,7 +116,7 @@ class PythonAgentClientTest {
      */
     @Test
     void streamSendsBearerToken() {
-        PythonAgentClient client = newClient(true);
+        AgentClient client = newClient(true);
         client.stream(newRequest()).blockLast();
         assertEquals(List.of("Bearer test-token"), authorizationHeaders);
     }
@@ -127,7 +126,7 @@ class PythonAgentClientTest {
      */
     @Test
     void streamThrowsWhenDisabled() {
-        PythonAgentClient client = newClient(false);
+        AgentClient client = newClient(false);
         assertThrows(BusinessException.class, () -> client.stream(newRequest()).blockLast());
     }
 
@@ -136,7 +135,7 @@ class PythonAgentClientTest {
      */
     @Test
     void healthOk() {
-        PythonAgentClient client = newClient(true);
+        AgentClient client = newClient(true);
         assertTrue(client.health());
     }
 
@@ -145,13 +144,13 @@ class PythonAgentClientTest {
      */
     @Test
     void healthDownReturnsFalse() {
-        PythonAgentProperties properties = new PythonAgentProperties();
+        AgentProperties properties = new AgentProperties();
         properties.setEnabled(true);
         properties.setBaseUrl("http://127.0.0.1:1");
         properties.setToken("test-token");
         properties.setConnectTimeoutMs(500);
         properties.setReadTimeoutMs(500);
-        PythonAgentClient client = new PythonAgentClient(properties);
+        AgentClient client = new AgentClient(properties);
         assertFalse(client.health());
     }
 }

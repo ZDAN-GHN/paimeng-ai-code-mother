@@ -8,6 +8,9 @@ import { RunClient } from '../src/internal/runClient.js'
 
 type Frame = { event: string; data: Record<string, unknown> }
 
+// 内部 API 调用记录（url + 请求体，用于断言 createRun/updateRun/completeRun）
+type RunCall = { url: string; body: Record<string, unknown> }
+
 // 按 SSE 帧解析（空行分隔，event: + data: 单行 JSON）；每帧校验 data.type 与 event 名一致
 function frames(body: string): Frame[] {
   return body.split('\n\n').filter(Boolean).map((raw) => {
@@ -25,13 +28,13 @@ const types = (list: Frame[]) => list.map((frame) => frame.event)
 // 里程碑标题序列
 const milestones = (list: Frame[]) => list.filter((frame) => frame.event === 'milestone').map((frame) => String(frame.data.title))
 
-function fakeRunClient(calls: Array<{ phase?: string; milestones?: string }>): RunClient {
+function fakeRunClient(calls: RunCall[]): RunClient {
   return new RunClient({
     baseUrl: 'http://java.invalid',
     token: 'test',
-    fetchImpl: vi.fn(async (_url, init) => {
-      const body = init?.body ? JSON.parse(String(init.body)) as { phase?: string; milestones?: string } : {}
-      calls.push(body)
+    fetchImpl: vi.fn(async (url, init) => {
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {}
+      calls.push({ url: String(url), body })
       return new Response(JSON.stringify({ code: 0, data: { phase: body.phase ?? 'interview' }, message: 'ok' }), { status: 200 })
     }),
   })
@@ -84,8 +87,8 @@ describe('POST /agent/stream（成功剧本）', () => {
     expect(written).toContain('hello')
   })
 
-  it('run 行随工作流推进 phase：interview → coding → review → done', async () => {
-    const calls: Array<{ phase?: string; milestones?: string }> = []
+  it('run 行随工作流推进 phase：interview → coding → review → done，完成后回调 Java', async () => {
+    const calls: RunCall[] = []
     const token = await makeToken()
     const app = buildTestApp(makeWorkspaceRoot(), { agentRoutes: { runClient: fakeRunClient(calls) } })
     const response = await app.inject({
@@ -96,9 +99,19 @@ describe('POST /agent/stream（成功剧本）', () => {
     })
     expect(response.statusCode).toBe(200)
     // createRun(interview) + 每次节点跳变各一次 phase 更新（首次 interview 不再重复更新）
-    expect(calls.map((call) => call.phase).filter(Boolean)).toEqual(['interview', 'coding', 'review', 'done'])
-    // 里程碑随 run 更新累计
-    expect(calls.at(-1)?.milestones).toBe(JSON.stringify(['开始生成', '规划页面结构', '检查生成结果', '生成完成']))
+    const phases = calls.map((call) => call.body.phase).filter((phase): phase is string => Boolean(phase))
+    expect(phases).toEqual(['interview', 'coding', 'review', 'done'])
+    // 里程碑随 run 更新累计（取最后一次携带里程碑的更新）
+    const lastMilestones = [...calls].reverse().find((call) => call.body.milestones)?.body.milestones
+    expect(lastMilestones).toBe(JSON.stringify(['开始生成', '规划页面结构', '检查生成结果', '生成完成']))
+    // 完成回调：success，携带 user/ai 消息与工作区路径（Java 侧写历史 + 构建）
+    const complete = calls.find((call) => call.url.endsWith('/complete'))!
+    expect(complete.body.status).toBe('success')
+    expect(complete.body.messages).toEqual([
+      { messageType: 'user', content: 'hello' },
+      { messageType: 'ai', content: expect.stringContaining('<html') },
+    ])
+    expect(complete.body.workspacePath).toBeTruthy()
   })
 
   it('工作区路径逃逸 WORKSPACE_ROOT → 错误终态且不写文件', async () => {
@@ -117,8 +130,8 @@ describe('POST /agent/stream（成功剧本）', () => {
 })
 
 describe('POST /agent/stream（error 剧本）', () => {
-  it('error 后不再发任何业务事件，且 run → failed', async () => {
-    const calls: Array<{ phase?: string }> = []
+  it('error 后不再发任何业务事件，run → failed，且回调 Java 标记失败', async () => {
+    const calls: RunCall[] = []
     const token = await makeToken()
     const app = buildTestApp(makeWorkspaceRoot(), { agentRoutes: { runClient: fakeRunClient(calls) } })
     const response = await app.inject({
@@ -134,6 +147,11 @@ describe('POST /agent/stream（error 剧本）', () => {
     expect(result.some((frame) => frame.event === 'done')).toBe(false)
     expect(eventTypes).toEqual(['milestone', 'ai_thinking', 'milestone', 'error'])
     // 阶段推进到 failed
-    expect(calls.map((call) => call.phase).filter(Boolean)).toEqual(['interview', 'coding', 'failed'])
+    const phases = calls.map((call) => call.body.phase).filter((phase): phase is string => Boolean(phase))
+    expect(phases).toEqual(['interview', 'coding', 'failed'])
+    // 完成回调：failed，携带错误信息（Java 侧写错误历史）
+    const complete = calls.find((call) => call.url.endsWith('/complete'))!
+    expect(complete.body.status).toBe('failed')
+    expect(complete.body.errorMessage).toBe('假 LLM 剧本故意失败')
   })
 })

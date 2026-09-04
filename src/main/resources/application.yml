@@ -34,7 +34,9 @@ server:
       cookie:
         max-age: 2592000s
 
-# Python Agent 迁移开关。生产通过环境变量覆盖 token/base-url。
+# Agent 客户端迁移开关（泛化自 python-agent.*，Issue #6）：代码层已绑定 agent.* 前缀，
+# 此处保留 python-agent.* 段作为旧别名（AgentLegacyAliasPostProcessor 自动复制到 agent.*），
+# 向后兼容既有部署；新配置请直接使用 agent.*（环境变量 AGENT_ENABLED/AGENT_BASE_URL/AGENT_TOKEN 等）。
 python-agent:
   enabled: ${PYTHON_AGENT_ENABLED:false}
   base-url: ${PYTHON_AGENT_BASE_URL:http://localhost:8090}

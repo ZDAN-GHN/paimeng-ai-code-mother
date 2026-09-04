@@ -47,6 +47,24 @@ export interface RunUpdateRequest {
   finishedTime?: string
 }
 
+// 完成回调消息条目（写 chat_history，Issue #6）
+export interface AgentCompleteMessage {
+  // user/ai
+  messageType: 'user' | 'ai'
+  content: string
+}
+
+// Agent 完成回调请求（Issue #6）：run 终态时经 Java 内部 API 写历史 + 触发构建
+export interface AgentCompleteRequest {
+  appId: number | string
+  userId: number | string
+  // success/failed
+  status: 'success' | 'failed'
+  messages: AgentCompleteMessage[]
+  workspacePath?: string
+  errorMessage?: string
+}
+
 export interface Run {
   runId: string
   // Java 侧 Long（appId/userId）序列化为字符串，类型上兼容二者
@@ -117,6 +135,11 @@ export class RunClient {
   // 按 runId 推进 phase/上下文/里程碑/计量（幂等更新）
   async updateRun(runId: string, patch: RunUpdateRequest): Promise<Run> {
     return this.request<Run>('PATCH', `/internal/runs/${encodeURIComponent(runId)}`, patch)
+  }
+
+  // 完成回调：写本次对话历史 + success 触发构建（Java 侧按 runId 幂等，重复调用不重复处理）
+  async completeRun(runId: string, request: AgentCompleteRequest): Promise<Run | null> {
+    return this.request<Run | null>('POST', `/internal/agent/runs/${encodeURIComponent(runId)}/complete`, request)
   }
 
   // 按 runId 查询 run（不存在返回 null）
