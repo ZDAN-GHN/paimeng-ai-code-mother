@@ -9,6 +9,9 @@ export const DEPLOY_DOMAIN = import.meta.env.VITE_DEPLOY_DOMAIN || 'http://local
 // API 基础地址
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8123/api'
 
+// Agent 直连地址（开发经 Vite 代理 /agent → 8092，生产经 nginx 同路径路由，Issue #12）
+export const AGENT_BASE_URL = import.meta.env.VITE_AGENT_BASE_URL || '/agent'
+
 // 静态资源地址
 export const STATIC_BASE_URL = `${API_BASE_URL}/static`
 

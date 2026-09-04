@@ -60,6 +60,12 @@ export default defineConfig({
         target: 'http://localhost:8123',
         changeOrigin: true,
         secure: false
+      },
+      // Agent 生成流（SSE）：http-proxy 默认流式透传，不缓冲响应
+      '/agent': {
+        target: 'http://localhost:8092',
+        changeOrigin: true,
+        secure: false
       }
     }
   }

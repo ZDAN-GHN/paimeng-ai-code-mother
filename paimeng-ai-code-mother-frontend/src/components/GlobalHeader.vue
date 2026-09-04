@@ -48,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, ref, watch } from 'vue'
+import { computed, h, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { type MenuProps, message } from 'ant-design-vue'
 import { useLoginUserStore } from '@/stores/loginUser.ts'
@@ -60,7 +60,7 @@ const router = useRouter()
 // 当前选中菜单
 const selectedKeys = ref<string[]>(['/'])
 // 监听路由变化，更新当前选中菜单
-router.afterEach((to, from, next) => {
+router.afterEach((to) => {
   selectedKeys.value = [to.path]
 })
 

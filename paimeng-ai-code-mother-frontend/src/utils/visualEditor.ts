@@ -136,7 +136,7 @@ export class VisualEditor {
   /**
    * 向 iframe 发送消息
    */
-  private sendMessageToIframe(message: Record<string, any>) {
+  private sendMessageToIframe(message: Record<string, unknown>) {
     if (this.iframe?.contentWindow) {
       this.iframe.contentWindow.postMessage(message, '*')
     }

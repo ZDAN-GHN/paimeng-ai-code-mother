@@ -60,6 +60,31 @@
                 <a-avatar :src="aiAvatar" />
               </div>
               <div class="message-content">
+                <!-- 思考过程（ai_thinking 增量累积，可折叠） -->
+                <a-collapse v-if="message.thinking" ghost size="small" class="thinking-collapse">
+                  <a-collapse-panel key="thinking" header="🤔 思考过程">
+                    <div class="thinking-text">{{ message.thinking }}</div>
+                  </a-collapse-panel>
+                </a-collapse>
+                <!-- 里程碑（工作流节点跳变的人话进度） -->
+                <div v-if="message.milestones?.length" class="milestone-bar">
+                  <a-tag
+                    v-for="(milestone, mIdx) in message.milestones"
+                    :key="mIdx"
+                    :color="mIdx === (message.milestones?.length ?? 0) - 1 ? 'blue' : 'green'"
+                  >
+                    {{ milestone }}
+                  </a-tag>
+                </div>
+                <!-- 工具调用步骤 -->
+                <ul v-if="message.toolSteps?.length" class="tool-steps">
+                  <li v-for="step in message.toolSteps" :key="step.id" class="tool-step">
+                    <CheckCircleOutlined v-if="step.status === 'executed'" class="tool-step-icon executed" />
+                    <LoadingOutlined v-else class="tool-step-icon running" />
+                    <span class="tool-step-name">{{ formatToolName(step.name) }}</span>
+                    <span v-if="toolTarget(step)" class="tool-step-target">{{ toolTarget(step) }}</span>
+                  </li>
+                </ul>
                 <MarkdownRenderer v-if="message.content" :content="message.content" />
                 <div v-if="message.loading" class="loading-indicator">
                   <a-spin size="small" />
@@ -220,14 +245,21 @@ import {
   deleteApp as deleteAppApi,
 } from '@/api/appController'
 import { listAppChatHistory } from '@/api/chatHistoryController'
+import { getAgentToken } from '@/api/agentToken'
 import { CodeGenTypeEnum, formatCodeGenType } from '@/utils/codeGenTypes'
+import {
+  streamAgentEvents,
+  createRunId,
+  AgentStreamHttpError,
+  type AgentStreamEvent,
+} from '@/utils/agentSse'
 import request from '@/request'
 
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import AppDetailModal from '@/components/AppDetailModal.vue'
 import DeploySuccessModal from '@/components/DeploySuccessModal.vue'
 import aiAvatar from '@/assets/aiAvatar.png'
-import { API_BASE_URL, getStaticPreviewUrl } from '@/config/env'
+import { getStaticPreviewUrl } from '@/config/env'
 import { VisualEditor, type ElementInfo } from '@/utils/visualEditor'
 
 import {
@@ -237,6 +269,8 @@ import {
   InfoCircleOutlined,
   DownloadOutlined,
   EditOutlined,
+  CheckCircleOutlined,
+  LoadingOutlined,
 } from '@ant-design/icons-vue'
 
 const route = useRoute()
@@ -245,20 +279,37 @@ const loginUserStore = useLoginUserStore()
 
 // 应用信息
 const appInfo = ref<API.AppVO>()
-const appId = ref<any>()
+// 路由参数中的应用 id（字符串，调用后端时按需转换）
+const appId = ref<string>()
 
 // 对话相关
+// 工具调用步骤（tool_request 请求后待 tool_executed 补全）
+interface ToolStep {
+  id: string
+  name: string
+  arguments?: string
+  status: 'request' | 'executed'
+}
+
 interface Message {
   type: 'user' | 'ai'
   content: string
   loading?: boolean
   createTime?: string
+  // 思考过程（ai_thinking 增量累积）
+  thinking?: string
+  // 人话里程碑（milestone 事件按序累积）
+  milestones?: string[]
+  // 工具调用步骤（tool_request / tool_executed 按 id 配对）
+  toolSteps?: ToolStep[]
 }
 
 const messages = ref<Message[]>([])
 const userInput = ref('')
 const isGenerating = ref(false)
 const messagesContainer = ref<HTMLElement>()
+// 当前生成流的中止控制器（组件卸载时中止，也为后续中止按钮做准备）
+const streamAbortController = ref<AbortController | null>(null)
 
 // 对话历史相关
 const loadingHistory = ref(false)
@@ -310,7 +361,7 @@ const loadChatHistory = async (isLoadMore = false) => {
   loadingHistory.value = true
   try {
     const params: API.listAppChatHistoryParams = {
-      appId: appId.value,
+      appId: appId.value as unknown as number,
       pageSize: 10,
     }
     // 如果是加载更多，传递最后一条消息的创建时间作为游标
@@ -475,110 +526,143 @@ const sendMessage = async () => {
   await generateCode(message, aiMessageIndex)
 }
 
-// 生成代码 - 使用 EventSource 处理流式响应
+// 生成代码 - fetch 流式读取 Agent SSE（新通道：登录态换短时 JWT 直连，不再经 Java 中转）
 const generateCode = async (userMessage: string, aiMessageIndex: number) => {
-  let eventSource: EventSource | null = null
-  let streamCompleted = false
-
+  if (!appId.value) return
+  streamAbortController.value = new AbortController()
   try {
-    // 获取 axios 配置的 baseURL
-    const baseURL = request.defaults.baseURL || API_BASE_URL
-
-    // 构建URL参数
-    const params = new URLSearchParams({
-      appId: appId.value || '',
-      message: userMessage,
-    })
-
-    const url = `${baseURL}/app/chat/gen/code?${params}`
-
-    // 创建 EventSource 连接
-    eventSource = new EventSource(url, {
-      withCredentials: true,
-    })
-
-    let fullContent = ''
-
-    // 处理接收到的消息
-    eventSource.onmessage = function (event) {
-      if (streamCompleted) return
-
-      try {
-        // 解析JSON包装的数据
-        const parsed = JSON.parse(event.data)
-        const content = parsed.d
-
-        // 拼接内容
-        if (content !== undefined && content !== null) {
-          fullContent += content
-          messages.value[aiMessageIndex].content = fullContent
-          messages.value[aiMessageIndex].loading = false
-          scrollToBottom()
-        }
-      } catch (error) {
-        console.error('解析消息失败:', error)
-        handleError(error, aiMessageIndex)
-      }
+    // 1. 以登录态换取短时 JWT + 工作区路径（会话过期由 axios 拦截器统一跳转登录页）
+    const tokenRes = await getAgentToken(appId.value)
+    if (tokenRes.data.code !== 0 || !tokenRes.data.data) {
+      throw new Error(tokenRes.data.message || '获取生成凭据失败')
     }
+    const { token, workspacePath } = tokenRes.data.data
 
-    // 处理done事件
-    eventSource.addEventListener('done', function () {
-      if (streamCompleted) return
+    // 2. 携带 Authorization 直连 Agent 流式生成，返回值为终态事件
+    const terminal = await streamAgentEvents(
+      {
+        token,
+        runId: createRunId(),
+        appId: String(appId.value),
+        message: userMessage,
+        workspacePath,
+        signal: streamAbortController.value.signal,
+      },
+      (event) => handleAgentEvent(event, aiMessageIndex),
+    )
 
-      streamCompleted = true
-      isGenerating.value = false
-      eventSource?.close()
-
-      // 延迟更新预览，确保后端已完成处理
-      setTimeout(async () => {
-        await fetchAppInfo()
-        updatePreview()
-      }, 1000)
-    })
-
-    // 处理business-error事件（后端限流等错误）
-    eventSource.addEventListener('business-error', function (event: MessageEvent) {
-      if (streamCompleted) return
-
-      try {
-        const errorData = JSON.parse(event.data)
-        console.error('SSE业务错误事件:', errorData)
-
-        // 显示具体的错误信息
-        const errorMessage = errorData.message || '生成过程中出现错误'
-        messages.value[aiMessageIndex].content = `❌ ${errorMessage}`
-        messages.value[aiMessageIndex].loading = false
-        message.error(errorMessage)
-
-        streamCompleted = true
-        isGenerating.value = false
-        eventSource?.close()
-      } catch (parseError) {
-        console.error('解析错误事件失败:', parseError, '原始数据:', event.data)
-        handleError(new Error('服务器返回错误'), aiMessageIndex)
-      }
-    })
-
-    // 处理错误
-    eventSource.onerror = function () {
-      if (streamCompleted || !isGenerating.value) return
-      // 检查是否是正常的连接关闭
-      if (eventSource?.readyState === EventSource.CONNECTING) {
-        streamCompleted = true
-        isGenerating.value = false
-        eventSource?.close()
-
-        setTimeout(async () => {
-          await fetchAppInfo()
-          updatePreview()
-        }, 1000)
-      } else {
-        handleError(new Error('SSE连接错误'), aiMessageIndex)
-      }
+    // 3. 终态收尾（done 时 Java 已完成写历史与构建，直接刷新预览）
+    isGenerating.value = false
+    if (terminal?.type === 'done') {
+      await fetchAppInfo()
+      updatePreview()
+    } else if (!terminal) {
+      // 连接在终态前断开：按错误处理
+      handleError(new Error('连接中断'), aiMessageIndex)
     }
   } catch (error) {
-    console.error('创建 EventSource 失败：', error)
+    if (error instanceof AgentStreamHttpError && error.status === 401) {
+      // 令牌过期/无效：明确提示重新登录，而不是挂起
+      console.error('Agent 令牌无效或已过期：', error)
+      messages.value[aiMessageIndex].content = '登录已过期，请重新登录后继续生成。'
+      messages.value[aiMessageIndex].loading = false
+      message.error('登录已过期，请重新登录')
+      isGenerating.value = false
+      streamAbortController.value = null
+      // 与 axios 拦截器一致跳转登录页，携带回跳地址
+      setTimeout(() => {
+        window.location.href = `/user/login?redirect=${window.location.href}`
+      }, 1000)
+      return
+    }
     handleError(error, aiMessageIndex)
+    return
+  } finally {
+    streamAbortController.value = null
+  }
+}
+
+// 事件处理：按七类事件更新消息渲染
+const handleAgentEvent = (event: AgentStreamEvent, aiMessageIndex: number) => {
+  const msg = messages.value[aiMessageIndex]
+  if (!msg) return
+  switch (event.type) {
+    case 'ai_thinking':
+      // 思考过程增量累积，首个思考到达即结束 loading 占位
+      msg.thinking = (msg.thinking ?? '') + (event.text ?? '')
+      msg.loading = false
+      break
+    case 'ai_response':
+      msg.content += event.data ?? ''
+      msg.loading = false
+      break
+    case 'tool_request':
+      msg.toolSteps = msg.toolSteps ?? []
+      if (event.id && !msg.toolSteps.some((step) => step.id === event.id)) {
+        msg.toolSteps.push({
+          id: event.id,
+          name: event.name ?? '',
+          arguments: event.arguments,
+          status: 'request',
+        })
+      }
+      break
+    case 'tool_executed':
+      msg.toolSteps = msg.toolSteps ?? []
+      {
+        // 与请求帧按 id 配对；缺失时兜底补一条（防乱序丢帧）
+        const existing = event.id ? msg.toolSteps.find((step) => step.id === event.id) : undefined
+        if (existing) {
+          existing.status = 'executed'
+        } else {
+          msg.toolSteps.push({
+            id: event.id ?? `${event.name}-${msg.toolSteps.length}`,
+            name: event.name ?? '',
+            arguments: event.arguments,
+            status: 'executed',
+          })
+        }
+      }
+      break
+    case 'milestone':
+      msg.milestones = msg.milestones ?? []
+      if (event.title) {
+        msg.milestones.push(event.title)
+      }
+      break
+    case 'error':
+      msg.content = `❌ ${event.message || '生成过程中出现错误'}`
+      msg.loading = false
+      message.error(event.message || '生成过程中出现错误')
+      break
+    case 'done':
+      // 终态渲染无需处理，收尾统一在 generateCode 中进行
+      break
+  }
+  scrollToBottom()
+}
+
+// 工具名称展示映射
+const TOOL_NAME_LABELS: Record<string, string> = {
+  writeFile: '写入文件',
+  modifyFile: '修改文件',
+  readFile: '读取文件',
+  deleteFile: '删除文件',
+  readDir: '读取目录',
+}
+
+const formatToolName = (name: string) => {
+  return TOOL_NAME_LABELS[name] ?? name
+}
+
+// 从工具参数中提取目标文件路径用于展示
+const toolTarget = (step: ToolStep) => {
+  if (!step.arguments) return ''
+  try {
+    const parsed = JSON.parse(step.arguments)
+    return parsed.relativeFilePath ?? parsed.path ?? ''
+  } catch {
+    return step.arguments.length > 30 ? `${step.arguments.slice(0, 30)}…` : step.arguments
   }
 }
 
@@ -616,8 +700,9 @@ const downloadCode = async () => {
   }
   downloading.value = true
   try {
-    const API_BASE_URL = request.defaults.baseURL || ''
-    const url = `${API_BASE_URL}/app/download/${appId.value}`
+    // 下载走 axios 同源 baseURL（浏览器直接拉取文件流）
+    const baseURL = request.defaults.baseURL || ''
+    const url = `${baseURL}/app/download/${appId.value}`
     const response = await fetch(url, {
       method: 'GET',
       credentials: 'include',
@@ -765,7 +850,8 @@ onMounted(() => {
 
 // 清理资源
 onUnmounted(() => {
-  // EventSource 会在组件卸载时自动清理
+  // 中止进行中的生成流（fetch 不会像 EventSource 一样自动清理）
+  streamAbortController.value?.abort()
 })
 </script>
 
@@ -881,6 +967,64 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   color: #666;
+}
+
+/* 思考过程折叠面板 */
+.thinking-collapse {
+  margin-bottom: 8px;
+  background: #fafafa;
+  border-radius: 6px;
+}
+
+.thinking-collapse :deep(.ant-collapse-header) {
+  padding: 4px 8px !important;
+  font-size: 12px;
+  color: #888;
+}
+
+.thinking-text {
+  font-size: 12px;
+  color: #888;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 里程碑进度 */
+.milestone-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+/* 工具调用步骤 */
+.tool-steps {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.tool-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #666;
+  line-height: 1.8;
+}
+
+.tool-step-icon.executed {
+  color: #52c41a;
+}
+
+.tool-step-icon.running {
+  color: #1890ff;
+}
+
+.tool-step-target {
+  font-family: 'Monaco', 'Menlo', monospace;
+  color: #999;
 }
 
 /* 加载更多按钮 */

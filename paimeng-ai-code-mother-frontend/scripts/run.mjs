@@ -23,6 +23,8 @@ const runtimeEnv = isWsl
       FRONTEND_NODE_MODULES: nodeModules,
       VITE_CACHE_DIR: path.join(runtimeRoot, 'vite-cache'),
       VITE_OUT_DIR: path.join(runtimeRoot, 'dist'),
+      // eslint.config.ts 顶层裸导入（eslint/config 等）需经 NODE_PATH 命中实体依赖（服务目录无 node_modules）
+      NODE_PATH: nodeModules,
     }
   : process.env
 
@@ -55,7 +57,8 @@ switch (command) {
   case 'dev':
   case 'preview':
   case 'build-only':
-    run(vite, [command === 'build-only' ? 'build' : command, ...args])
+    // runner 模式加载 vite.config.ts：bundle 模式要写 $HOME/node_modules/.vite-temp（Windows ACL/沙箱下 EROFS，与 vitest 同源踩坑）
+    run(vite, [command === 'build-only' ? 'build' : command, '--configLoader', 'runner', ...args])
     break
   case 'type-check':
     run(vueTsc, ['--build', typeCheckConfig, ...args])

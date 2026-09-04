@@ -14,7 +14,15 @@ export default defineConfigWithVueTs(
     files: ['**/*.{ts,mts,tsx,vue}'],
   },
 
-  globalIgnores(['**/dist/**', '**/dist-ssr/**', '**/coverage/**']),
+  globalIgnores([
+    '**/dist/**',
+    '**/dist-ssr/**',
+    '**/coverage/**',
+    // openapi2ts 生成文件不参与 lint（生成器模板自带的 @ts-ignore 头部过不了 ban-ts-comment）
+    'src/api/**',
+    // 手写的接口封装不依赖生成模板，单独放行
+    '!src/api/agentToken.ts',
+  ]),
 
   pluginVue.configs['flat/essential'],
   vueTsConfigs.recommended,
