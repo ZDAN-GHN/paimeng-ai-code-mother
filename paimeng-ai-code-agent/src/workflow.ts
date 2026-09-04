@@ -1,15 +1,20 @@
-// 生成工作流驱动（Issue #5）：XState actor 驱动线性状态机，coding 节点经 Vercel AI SDK streamText
-// 消费脚本化假 LLM（src/llm.ts）。职责分工：状态机（src/machine.ts）定拓扑与 milestone；
-// 本文件做解释执行——推进状态、发射 SSE 事件、按 runId 推进 phase、工作区落盘。
-import path from 'node:path'
-import { mkdir, writeFile } from 'node:fs/promises'
+// 生成工作流驱动（Issue #5 + #8）：XState actor 驱动线性状态机，coding 节点经 Vercel AI SDK streamText
+// 消费脚本化假 LLM（src/llm.ts）。#8 扩展：Guardrail 输入校验（interview 阶段拦截 → failed 终态）、
+// 全套工具注册（文件六工具 + 图片四工具 + 图片配额 4 张/run）、写盘前代码块解析、codegen 提示词注入 system。
+// 职责分工：状态机（src/machine.ts）定拓扑与 milestone；本文件做解释执行——推进状态、发射 SSE 事件、
+// 按 runId 推进 phase、工作区落盘。
 import { createActor } from 'xstate'
-import { isStepCount, jsonSchema, streamText, tool } from 'ai'
+import { isStepCount, streamText } from 'ai'
 import type { AgentEvent } from './events.js'
 import { MILESTONE_DETAILS, PHASE_BY_STATE, generationMachine } from './machine.js'
-import { createScriptedLlm, type ScriptedLlmProvider } from './llm.js'
+import { createScriptedLlm, type LlmScript, type ScriptedLlmProvider } from './llm.js'
 import { RunClient, type RunPhase } from './internal/runClient.js'
 import { validateWorkspacePath } from './workspace/sandbox.js'
+import { validatePrompt } from './guardrails.js'
+import { loadPrompt, PROMPT_NAMES } from './prompts.js'
+import { FileTools } from './tools/fileTools.js'
+import { ImageTools, type ImageConfig } from './tools/imageTools.js'
+import { buildTools } from './tools/index.js'
 
 export interface StreamRequest {
   runId: string
@@ -17,7 +22,7 @@ export interface StreamRequest {
   userId?: number | string
   message: string
   workspacePath?: string
-  script?: 'success' | 'error'
+  script?: LlmScript
 }
 
 export interface WorkflowOptions {
@@ -25,6 +30,10 @@ export interface WorkflowOptions {
   provider?: ScriptedLlmProvider
   runClient?: RunClient
   workspaceRoot: string
+  // 图片四工具配置（#8）：默认取自环境（PEXELS_API_KEY / DASHSCOPE_API_KEY / IMAGE_MODEL），测试可注入
+  imageConfig?: ImageConfig
+  // 图片工具集（测试注入替身以断言配额/解析）
+  imageTools?: ImageTools
 }
 
 function json(value: unknown): string {
@@ -87,37 +96,42 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     yield* sync()
     yield { type: 'ai_thinking', text: '分析需求中' }
 
+    // Guardrail 校验用户输入（Issue #8）：拒绝 → failed 终态 + 明确报错，不进入 coding
+    const guardrail = validatePrompt(request.message)
+    if (!guardrail.isAllowed) {
+      actor.send({ type: 'FAIL', error: guardrail.reason })
+      yield* sync()
+      await notifyComplete('failed', '', guardrail.reason)
+      yield { type: 'error', message: guardrail.reason }
+      return
+    }
+
     // ── coding：AI SDK 工具循环生成页面 ──
     actor.send({ type: 'PROCEED' })
     yield* sync()
 
     // 工作区沙箱校验（逃逸 WORKSPACE_ROOT → 异常 → failed 终态）
     const workspace = validateWorkspacePath(request.workspacePath ?? workspaceRoot, workspaceRoot)
-    // ai_response 增量文本的拼接即页面内容；writeFile 工具执行时闭包读取（工具循环发生在文本流之后）
+    // 文件工具绑定工作区；图片工具绑定单 run 配额（4 张/run，架构 §3.3）
+    const files = new FileTools(workspace, workspaceRoot)
+    const images = options.imageTools ?? new ImageTools(options.imageConfig ?? { pexelsApiKey: '', dashscopeApiKey: '', imageModel: 'wan2.2-t2i-flash' })
+
+    // ai_response 增量文本的拼接即页面原始产出；writeFile 写盘前经代码块解析（src/tools/index.ts）
     let pageContent = ''
     const result = streamText({
       model: provider.languageModel('scripted'),
+      // codegen 提示词注入 system（7 份提示词随包维护，含「导览组件强制产出」要求；假 LLM 忽略，真实 provider 消费）
+      system: loadPrompt(PROMPT_NAMES.codegenHtml),
       prompt: request.message,
       // 脚本结果确定，失败无需退避重试
       maxRetries: 0,
-      // 工具循环由 AI SDK 驱动：一轮文本+writeFile，二轮工具结果后收尾（v7 以 stopWhen 表达步数上限）
+      // 工具循环由 AI SDK 驱动：一轮文本+工具调用，二轮工具结果后收尾（v7 以 stopWhen 表达步数上限）
       stopWhen: isStepCount(2),
-      tools: {
-        writeFile: tool({
-          description: '把生成的页面文件写入工作区',
-          inputSchema: jsonSchema({
-            type: 'object',
-            properties: { relativeFilePath: { type: 'string' } },
-            required: ['relativeFilePath'],
-          }),
-          execute: async (input) => {
-            const relativeFilePath = (input as { relativeFilePath: string }).relativeFilePath
-            await mkdir(workspace, { recursive: true })
-            await writeFile(path.join(workspace, relativeFilePath), pageContent, 'utf8')
-            return { ok: true, path: relativeFilePath }
-          },
-        }),
-      },
+      tools: buildTools({
+        files,
+        images,
+        getPageContent: () => pageContent,
+      }),
     })
     for await (const part of result.fullStream) {
       switch (part.type) {

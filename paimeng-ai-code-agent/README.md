@@ -30,7 +30,7 @@ bash scripts/run-wsl.sh type-check
 | `POST /agent/interview` | JWT | 五维访谈（受众/风格/页面清单/数据需求/交互，每维 2-4 选项选择题），最多 2 轮、信息足够跳过；状态持久化于 run context |
 | `POST /agent/wireframe` | JWT | 快速档线框：单文件 HTML（灰块/占位图/可点击跳转/站点地图，≤5 页），存 `{workspace}/wireframe/`，run → wireframe_pending；免费 + 每用户每日限频（超限 429） |
 | `POST /agent/wireframe/confirm` | JWT | 确认线框 → run → wireframe_confirmed（codegen 布局契约；幂等） |
-| `POST /agent/stream` | JWT | 最小生成流：XState 线性工作流驱动 + Vercel AI SDK 假 LLM（provider + 工具循环）+ SSE；**线框闸门**——非 wireframe_confirmed 的请求被拒（error 事件明确报错） |
+| `POST /agent/stream` | JWT | 生成流：XState 线性工作流 + Vercel AI SDK 假 LLM（provider + 工具循环）+ SSE；**线框闸门**——非 wireframe_confirmed 的请求被拒（error 事件明确报错）；#8 起含 Guardrail 输入校验（拒绝→failed）、文件六工具 + 图片四工具（**图片配额 4 张/run**）、写盘前代码块解析、产物含应用内导览组件 |
 | `GET /agent/smoke/sse` | JWT | 兼容性冒烟端点：按新 SSE 格式输出脚本化事件 |
 
 ## 鉴权约定
@@ -48,11 +48,17 @@ bash scripts/run-wsl.sh type-check
 
 ```
 src/
-  config.ts            # 环境配置（PORT/JWT_SECRET/WORKSPACE_ROOT/JAVA_INTERNAL_*）
+  config.ts            # 环境配置（PORT/JWT_SECRET/WORKSPACE_ROOT/JAVA_INTERNAL_*/PEXELS_*/DASHSCOPE_*）
   events.ts            # 七类 SSE 事件模型
   machine.ts           # XState v5 线性工作流状态机（interview→coding→review→done/failed，milestone 聚合）
   llm.ts               # 脚本化假 LLM：AI SDK LanguageModelV2 provider（customProvider 注册，零在线调用）
   workflow.ts          # 工作流驱动：XState actor 推进 + streamText 消费 + run phase 更新 + 工作区落盘
+  guardrails.ts        # 提示词安全输入护轨（#8：长度/空/敏感词/注入模式，interview 阶段拦截）
+  prompts.ts           # 提示词加载器（#8：7 份提示词复制自 Python Agent，经 AGENT_ROOT 定位）
+  codegen/parsing.ts   # 代码块解析（#8：HTML/CSS/JS 正则移植，writeFile 写盘前解析文件集）
+  tools/fileTools.ts   # 文件六工具（#8：写/读/改/删/列目录/退出 + 重要文件保护 + 沙箱）
+  tools/imageTools.ts  # 图片四工具（#8：Pexels/Undraw/DashScope/mmdc + 配额 4 张/run）
+  tools/index.ts       # 工具注册表（#8：文件六 + 图片四 → AI SDK tool 定义）
   interview.ts         # 五维访谈：题目生成/收敛判断/结论（脚本化，真实模型替换点）
   wireframe.ts         # 线框生成：单文件 HTML（站点地图 + 灰块 + 占位图，≤5 页）
   context.ts           # run.context JSON 类型化解析（interview + wireframe 状态）
@@ -63,5 +69,5 @@ src/
   routes/              # healthz + agent 路由（含需求工程与闸门）
   app.ts               # buildApp（生产与测试共用）
   index.ts             # 入口
-test/                  # vitest：healthz / 鉴权矩阵 / 沙箱逃逸 / SSE 顺序 / stream 契约 / 需求工程
+test/                  # vitest：healthz / 鉴权矩阵 / 沙箱逃逸 / SSE 顺序 / stream 契约 / 需求工程 / #8 核心
 ```

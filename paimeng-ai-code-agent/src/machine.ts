@@ -27,7 +27,11 @@ export const generationMachine = createMachine({
   states: {
     interview: {
       entry: assign({ milestones: ({ context }) => [...context.milestones, '开始生成'] }),
-      on: { PROCEED: { target: 'coding' } },
+      on: {
+        PROCEED: { target: 'coding' },
+        // Guardrail 拦截（Issue #8）：interview 阶段校验输入失败 → 直接 failed，不进入 coding
+        FAIL: { target: 'failed' },
+      },
     },
     coding: {
       entry: assign({ milestones: ({ context }) => [...context.milestones, '规划页面结构'] }),

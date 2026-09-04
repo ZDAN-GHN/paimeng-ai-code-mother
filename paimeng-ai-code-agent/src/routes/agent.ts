@@ -22,10 +22,13 @@ import {
 } from '../interview.js'
 import { WIREFRAME_FILENAME, buildWireframeHtml, countWireframePages } from '../wireframe.js'
 import { parseContext } from '../context.js'
+import type { ImageTools } from '../tools/imageTools.js'
 
 export interface AgentRouteOptions {
   runClient?: RunClient
   provider?: ScriptedLlmProvider
+  // 图片工具集（测试注入替身；缺省按 config 密钥新建）
+  imageTools?: ImageTools
 }
 
 // ── 请求体解析（宽容取类型，缺省回退）──
@@ -74,7 +77,7 @@ function asStreamBody(body: unknown): StreamRequest {
   const runId = typeof input.runId === 'string' ? input.runId : ''
   const appId = typeof input.appId === 'string' || typeof input.appId === 'number' ? input.appId : ''
   const message = typeof input.message === 'string' ? input.message : ''
-  const script = input.script === 'error' ? 'error' : 'success'
+  const script = input.script === 'error' ? 'error' : input.script === 'images' ? 'images' : 'success'
   return { runId, appId, userId: input.userId as number | string | undefined, message, workspacePath: input.workspacePath as string | undefined, script }
 }
 
@@ -291,7 +294,17 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
         reply.header('cache-control', 'no-cache')
         return encodeEventStream(events)
       }
-      for await (const event of runGenerationWorkflow(input, { workspaceRoot: config.workspaceRoot, provider: options.provider, runClient })) {
+      for await (const event of runGenerationWorkflow(input, {
+        workspaceRoot: config.workspaceRoot,
+        provider: options.provider,
+        runClient,
+        imageTools: options.imageTools,
+        imageConfig: {
+          pexelsApiKey: config.pexelsApiKey,
+          dashscopeApiKey: config.dashscopeApiKey,
+          imageModel: config.imageModel,
+        },
+      })) {
         // 终态守卫：done/error 都是流的最后一个事件，收到任一即停止消费（防实现缺陷把终态后的事件带进响应）
         events.push(event)
         if (event.type === 'done' || event.type === 'error') break

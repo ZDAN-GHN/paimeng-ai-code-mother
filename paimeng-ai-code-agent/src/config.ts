@@ -18,6 +18,11 @@ export interface AgentConfig {
   // Java 内部 API（generation_run 读写，#4）：base-url 含 context-path（/api），token 与 Java 侧 internal-api.token 一致
   javaInternalBaseUrl: string
   javaInternalToken: string
+  // 图片四工具密钥（Issue #8）：内容图 Pexels / Logo DashScope；未配置时对应工具返回空结果
+  pexelsApiKey: string
+  dashscopeApiKey: string
+  // Logo 生成模型（默认对齐 Java LogoGeneratorTool 的 wan2.2-t2i-flash）
+  imageModel: string
 }
 
 // 允许调用方（测试、装配）覆盖任意配置项
@@ -63,5 +68,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Conf
   const logLevel = overrides.logLevel ?? env.LOG_LEVEL ?? 'info'
   const javaInternalBaseUrl = overrides.javaInternalBaseUrl ?? env.JAVA_INTERNAL_BASE_URL ?? 'http://localhost:8123/api'
   const javaInternalToken = overrides.javaInternalToken ?? env.JAVA_INTERNAL_TOKEN ?? ''
-  return { port, jwtSecret: jwtSecret || 'dev-insecure-secret', workspaceRoot, logLevel, javaInternalBaseUrl, javaInternalToken }
+  const pexelsApiKey = overrides.pexelsApiKey ?? env.PEXELS_API_KEY ?? ''
+  const dashscopeApiKey = overrides.dashscopeApiKey ?? env.DASHSCOPE_API_KEY ?? ''
+  const imageModel = overrides.imageModel ?? env.IMAGE_MODEL ?? 'wan2.2-t2i-flash'
+  return { port, jwtSecret: jwtSecret || 'dev-insecure-secret', workspaceRoot, logLevel, javaInternalBaseUrl, javaInternalToken, pexelsApiKey, dashscopeApiKey, imageModel }
 }
