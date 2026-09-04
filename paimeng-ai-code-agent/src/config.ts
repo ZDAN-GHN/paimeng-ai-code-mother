@@ -5,8 +5,10 @@ import { fileURLToPath } from 'node:url'
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 
-// 服务根目录（src/ 或 dist/ 的上一级，两种运行方式解析结果一致）
-const agentRoot = path.resolve(moduleDir, '..')
+// 服务根目录：优先取 AGENT_ROOT 环境变量（esbuild 打包产物物理位于 wsl-rt-env/ts-agent/dist，
+// 无法从 import.meta.url 反推源码位置，由启动命令注入服务目录）；
+// 未注入时按源码位置推断（src/ 的上一级，测试直引源码时命中）
+const agentRoot = process.env.AGENT_ROOT ? path.resolve(process.env.AGENT_ROOT) : path.resolve(moduleDir, '..')
 
 export interface AgentConfig {
   port: number

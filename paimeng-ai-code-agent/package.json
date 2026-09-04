@@ -8,11 +8,11 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/index.js",
-    "type-check": "tsc --noEmit",
-    "test": "vitest run"
+    "dev": "node scripts/run.mjs dev",
+    "build": "node scripts/run.mjs build",
+    "start": "node scripts/run.mjs start",
+    "type-check": "node scripts/run.mjs type-check",
+    "test": "node scripts/run.mjs test"
   },
   "dependencies": {
     "fastify": "^5.0.0",
@@ -20,7 +20,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "tsx": "^4.0.0",
+    "esbuild": "^0.28.0",
     "typescript": "^5.6.0",
     "vitest": "^3.0.0"
   }

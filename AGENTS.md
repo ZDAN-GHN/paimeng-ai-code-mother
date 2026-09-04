@@ -22,15 +22,15 @@
 
 ## 常用命令
 
-> **运行时环境统一在 `wsl-rt-env/`**（不在各服务目录内），**通过命令指定、不建软链**：Java 构建产物在 `wsl-rt-env/java/target`（pom 暴露 `maven.build.directory` 属性，默认 `target/`；WSL 用 `-Dmaven.build.directory=$PWD/wsl-rt-env/java/target` 指定）；TS Agent 的 node_modules 物理位于 `wsl-rt-env/ts-agent/node_modules`（服务目录内为符号链接，运行/测试命令因此不变；**依赖安装必须以归位脚本收尾**）；前端 node_modules 为存量待迁移（见 `deployment.md`）。
+> **运行时环境统一在 `wsl-rt-env/`**（不在各服务目录内），**通过命令指定、不建软链**：Java 构建产物在 `wsl-rt-env/java/target`（pom 暴露 `maven.build.directory` 属性，默认 `target/`；WSL 用 `-Dmaven.build.directory=$PWD/wsl-rt-env/java/target` 指定）；TS Agent 的依赖与构建产物在 `wsl-rt-env/ts-agent/`（`node_modules` + esbuild 自包含产物 `dist/app.bundle.mjs`；npm scripts 经 `scripts/run.mjs` 调度器自动指向，服务目录内零 node_modules、零软链；**依赖安装必须以归位脚本收尾**）；前端 node_modules 为存量待迁移（见 `deployment.md`）。
 
 | Task | Command |
 |---|---|
 | 运行 Java 后端（WSL） | `./mvnw -Dmaven.build.directory=$PWD/wsl-rt-env/java/target spring-boot:run`（8123；API 文档 `http://localhost:8123/api/doc.html`；Windows/IDE 不传该属性用默认 `target/`） |
 | Java 测试（WSL） | `./mvnw -Dmaven.build.directory=$PWD/wsl-rt-env/java/target test`；单个：追加 `-Dtest=类名` |
 | **TS Agent 安装依赖** | `cd paimeng-ai-code-agent && npm install && bash scripts/sync-node-modules.sh`（勿用 `npm ci`） |
-| 运行 TS Agent | `cd paimeng-ai-code-agent && npm run dev`（8092） |
-| TS Agent 测试 | `cd paimeng-ai-code-agent && npm test` |
+| 运行 TS Agent | `cd paimeng-ai-code-agent && npm run dev`（8092；esbuild 打包 + watch 自动重启） |
+| TS Agent 测试 / 类型检查 | `cd paimeng-ai-code-agent && npm test` / `npm run type-check` |
 | 前端 dev / build / type-check / lint | `cd paimeng-ai-code-mother-frontend && npm run <script>` |
 | 生成 API 类型 | `cd paimeng-ai-code-mother-frontend && npm run openapi2ts`（需后端已启动） |
 

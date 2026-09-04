@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# 把 node_modules 归位到 wsl-rt-env 约定位置：
-# 物理目录永远在 wsl-rt-env/ts-agent/node_modules，服务目录内只放符号链接。
-# npm install / npm ci 会把符号链接替换回实体目录（arborist reify 行为），
-# 因此每次依赖安装后执行本脚本归位；npm run dev / npm test 不重排依赖树，无需执行。
+# 依赖归位脚本（WSL）：安装依赖并物理放到 wsl-rt-env 约定位置。
+# 流程：npm install 在服务目录正常安装（package-lock.json 同步更新、锁定版本事实），
+# 然后把实体目录移动到 ../wsl-rt-env/ts-agent/node_modules —— 服务目录内不放 node_modules、也不建符号链接。
+# 运行/测试/类型检查命令统一经 scripts/run.mjs / vitest.config.mjs / tsconfig.json 指向该位置。
+# 每次执行都会重新安装并归位（npm install 对已满足的依赖是增量操作，代价很小）。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 REAL="../wsl-rt-env/ts-agent/node_modules"
 
 if [ -L node_modules ]; then
-  echo "node_modules 已是符号链接 -> $(readlink node_modules)，无需归位"
-  exit 0
+  echo "检测到旧符号链接 node_modules，先移除（新约定不再使用软链）" >&2
+  rm node_modules
 fi
 
+npm install
+
+# npm 刚装的实体目录是最新事实，覆盖 wsl-rt-env 侧旧副本
+rm -rf "$REAL"
 mkdir -p "$(dirname "$REAL")"
-if [ -d node_modules ]; then
-  # npm 刚重装的实体目录是最新事实，覆盖 wsl-rt-env 侧旧副本
-  rm -rf "$REAL"
-  mv node_modules "$REAL"
-fi
+mv node_modules "$REAL"
 
-ln -s "$REAL" node_modules
-echo "node_modules 已归位 -> $(readlink node_modules)"
+echo "node_modules 已归位 -> $REAL（服务目录内不再保留任何 node_modules）"

@@ -11,7 +11,14 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "noEmit": true
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "fastify": ["node_modules/fastify/fastify.d.ts", "../wsl-rt-env/ts-agent/node_modules/fastify/fastify.d.ts"],
+      "jose": ["node_modules/jose/dist/types/index.d.ts", "../wsl-rt-env/ts-agent/node_modules/jose/dist/types/index.d.ts"],
+      "vitest": ["node_modules/vitest/dist/index.d.ts", "../wsl-rt-env/ts-agent/node_modules/vitest/dist/index.d.ts"]
+    },
+    "typeRoots": ["node_modules/@types", "../wsl-rt-env/ts-agent/node_modules/@types"]
   },
   "include": ["src", "test"]
 }

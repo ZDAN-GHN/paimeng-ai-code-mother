@@ -24,7 +24,7 @@ disable-model-invocation: true
 - PostgreSQL：**已停用（2026-09-03 P0，Issue #2）**：无服务、5432 无监听（RAG v2 pgvector 时重启）；不做探活，出现 5432 监听反而是异常。
 - Windows 旧环境（MySQL80 服务 8.0.36 + Docker Redis 7.2.5）仅用于历史实机验证；WSL2 NAT 下 WSL→Windows 无 localhost 转发，Java 的 `localhost:3306/6379` 只会命中 WSL 内实例。
 - DSH 沙箱（workspace-write）会拦截家目录与 `~/.cache` 写入：mysqld 启动、`uv run`、npm 缓存都会失败，替代方案见启动节与排障表。
-- **运行时环境布局约定（2026-09-01 定，2026-09-04 强化「通过命令指定、不建软链」）**：整个项目在 Linux/WSL 的运行时环境文件统一放仓库根目录 `wsl-rt-env/`：`wsl-rt-env/python/.venv`（Python 虚拟环境，替代旧 `.venv-wsl`）、`wsl-rt-env/frontend/node_modules`（前端依赖）、`wsl-rt-env/java/target`（Java 构建产物，**2026-09-04 已迁入**，由 pom 的 `maven.build.directory` 属性 + 命令行 `-Dmaven.build.directory=$PWD/wsl-rt-env/java/target` 指定，无软链）。前端 node_modules、Python `.venv` 仍在旧位置，迁入为待办；迁移完成前，本 SOP 的安装/启动命令按实际路径执行。
+- **运行时环境布局约定（2026-09-01 定，2026-09-04 强化「通过命令指定、不建软链」）**：整个项目在 Linux/WSL 的运行时环境文件统一放仓库根目录 `wsl-rt-env/`：`wsl-rt-env/python/.venv`（Python 虚拟环境，替代旧 `.venv-wsl`）、`wsl-rt-env/frontend/node_modules`（前端依赖）、`wsl-rt-env/java/target`（Java 构建产物，**2026-09-04 已迁入**，由 pom 的 `maven.build.directory` 属性 + 命令行 `-Dmaven.build.directory=$PWD/wsl-rt-env/java/target` 指定，无软链）、`wsl-rt-env/ts-agent/`（TS Agent 依赖 node_modules + esbuild 产物 `dist/app.bundle.mjs`，**2026-09-04 已完成去软链改造**：npm scripts 经 `scripts/run.mjs` 调度器指向，服务目录零 node_modules）。前端 node_modules、Python `.venv` 仍在旧位置，迁入为待办；迁移完成前，本 SOP 的安装/启动命令按实际路径执行。
 
 ## 启动模式
 
@@ -102,7 +102,7 @@ python3 -c "import socket;s=socket.create_connection(('127.0.0.1',6379),3);s.sen
 
 ```bash
 cd paimeng-ai-code-agent
-npm install && bash scripts/sync-node-modules.sh   # node_modules 物理位于 wsl-rt-env/ts-agent/node_modules（install 会替换符号链接，必须归位）
+npm install && bash scripts/sync-node-modules.sh   # 归位脚本把实体 node_modules 移入 wsl-rt-env/ts-agent/（服务目录零 node_modules、零软链；run.mjs/vitest/tsconfig 已指向该位置）
 cd ../paimeng-ai-code-mother-frontend
 npm install   # 迁移后 node_modules 位于 wsl-rt-env/frontend/node_modules
 cd ..
@@ -140,7 +140,7 @@ npm run dev
 
 沙箱与环境护栏（实测踩坑）：
 
-- **TS Agent**：npm 缓存若被沙箱拒绝，加 `--cache ../tmp/npm-cache`；node_modules 需 Linux 二进制时按前端同样方式补装。`npm install` 会把 node_modules 符号链接替换回实体目录（破坏 `wsl-rt-env/` 布局），安装后必须 `bash scripts/sync-node-modules.sh` 归位。
+- **TS Agent**：npm 缓存若被沙箱拒绝，加 `--cache ../tmp/npm-cache`；node_modules 需 Linux 二进制时按前端同样方式补装。`npm install` 在服务目录产生暂存 node_modules，安装后必须 `bash scripts/sync-node-modules.sh` 归位到 `wsl-rt-env/ts-agent/`（移入后服务目录不再保留）。运行/测试不需要 node_modules 在服务目录：`npm run dev/start` 跑 `wsl-rt-env/ts-agent/dist/app.bundle.mjs`（esbuild 自包含产物），`npm test`/`npm run type-check` 经 `scripts/run.mjs` + `vitest.config.mjs`/`tsconfig.json` 指向 wsl-rt-env。
 - **前端**：node_modules 若原为 Windows 侧安装（仅 win32 二进制），WSL 启动 vite 报 `Cannot find module @rollup/rollup-linux-x64-gnu`。新约定 node_modules 位于 `wsl-rt-env/frontend/node_modules`（待迁移，当前仍在 `paimeng-ai-code-mother-frontend/node_modules`）。补装（`--no-save` 不动 package.json，`--cache` 绕开沙箱对 `~/.npm` 的限制）：
   `npm i --no-save --cache ../tmp/npm-cache @rollup/rollup-linux-x64-gnu @esbuild/linux-x64`
 - **Java**：启动约 18-20 秒，健康检查要轮询（如 sleep 25 后再查一次），一次连接失败不要直接判死；日志中 `初始化 Chrome 浏览器失败` 是已知无害告警（仅截图功能不可用），不算启动失败。
@@ -172,7 +172,7 @@ npm run dev
 | --- | --- | --- |
 | 端口已占用 | `ss -ltnp`、进程命令、日志 | 先复用健康进程；停止进程需用户授权 |
 | Java 启动即失败 | `java -version`、`./mvnw compile`、首个异常 | JDK 21、配置文件、依赖下载；不改业务代码 |
-| TS Agent 启动失败 | node 版本、`paimeng-ai-code-agent/node_modules`、`.env` 键名 | 不使用全局安装，不打印 `.env` |
+| TS Agent 启动失败 | node 版本、`wsl-rt-env/ts-agent/node_modules` 与 `dist/app.bundle.mjs` 是否存在（缺则重跑安装/构建）、`.env` 键名 | 不使用全局安装，不打印 `.env` |
 | `/healthz` 失败 | TS Agent 日志、8092 监听状态、启动异常 | 修复环境/配置前不测 SSE |
 | JWT 401（`/agent/*`） | 令牌缺失/过期/签名、`JWT_SECRET` 是否一致 | 只核对存在性和脱敏摘要 |
 | 数据库连接失败 | 服务状态、地址/端口、数据库名、凭据来源 | 不重置密码、不删库、不自动导入 |

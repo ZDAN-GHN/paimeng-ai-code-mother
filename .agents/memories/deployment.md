@@ -12,9 +12,9 @@
 | Python | `wsl-rt-env/python/.venv` | uv 虚拟环境（替代旧 `.venv-wsl`） |
 | 前端 | `wsl-rt-env/frontend/node_modules` | npm 依赖 |
 | Java | `wsl-rt-env/java/target` | Maven 构建产物；**2026-09-04 起由命令指定**：pom 暴露 `maven.build.directory` 属性（默认 `${project.basedir}/target`），WSL 命令带 `-Dmaven.build.directory=$PWD/wsl-rt-env/java/target`，无软链 |
-| TS Agent | `wsl-rt-env/ts-agent/node_modules` + `wsl-rt-env/ts-agent/dist` | node_modules 物理在 wsl-rt-env；服务目录内 `paimeng-ai-code-agent/node_modules` 为指向它的符号链接；`npm install` 会把符号链接替换回实体目录，**每次安装后必须执行 `bash scripts/sync-node-modules.sh` 归位** |
+| TS Agent | `wsl-rt-env/ts-agent/node_modules` + `wsl-rt-env/ts-agent/dist` | **2026-09-04 起完全无软链**：依赖与 esbuild 产物（`dist/app.bundle.mjs` 自包含打包，运行期不需要 node_modules）都在 wsl-rt-env；服务目录内不放 node_modules。`npm run dev/build/start/test/type-check` 经 `scripts/run.mjs` 调度器自动指向该位置（依赖本地有 node_modules 时优先本地，兼容 Windows/IDE） |
 
-> **迁移待办**：Java 已合规（2026-09-04：`target` 迁入 `wsl-rt-env/java/target`，命令 `-Dmaven.build.directory` 指定，无软链）；TS Agent 已合规（node_modules/dist 均在 `wsl-rt-env/ts-agent/`）；存量 `.venv`（`paimeng-ai-code-rag/`，退役代码遗留）、`node_modules`（`paimeng-ai-code-mother-frontend/`）尚未迁入。迁移完成前，存量启动命令按实际路径执行；旧 `.venv-wsl` 已不再使用。
+> **迁移待办**：Java 已合规（2026-09-04：`target` 迁入 `wsl-rt-env/java/target`，命令 `-Dmaven.build.directory` 指定，无软链）；TS Agent 已合规（2026-09-04：esbuild 打包改造完成，node_modules/dist 均在 `wsl-rt-env/ts-agent/`，服务目录零 node_modules、零软链）；存量 `.venv`（`paimeng-ai-code-rag/`，退役代码遗留）、`node_modules`（`paimeng-ai-code-mother-frontend/`）尚未迁入。迁移完成前，存量启动命令按实际路径执行；旧 `.venv-wsl` 已不再使用。
 
 ## 依赖服务 — WSL 环境（当前默认）
 
@@ -49,15 +49,16 @@
 | MySQL（如未启动） | `bash ~/.local/opt/mysql8/start.sh`（需 DSH 提权，见踩坑） |
 | Java（WSL） | `./mvnw -Dmaven.build.directory=$PWD/wsl-rt-env/java/target spring-boot:run`（端口 8123，context-path `/api`；API 文档 `http://localhost:8123/api/doc.html`；构建产物在 `wsl-rt-env/java/target`，无软链） |
 | Python RAG（P4 未实施） | `paimeng-ai-code-rag/` 为旧 Python Agent 重命名（骨架复用起点），退役代码不常态运行，不占用 8090 |
-| TS Agent 安装依赖 | `cd paimeng-ai-code-agent && npm install && bash scripts/sync-node-modules.sh`（勿用 `npm ci`） |
-| TS Agent 运行 | `cd paimeng-ai-code-agent && npm run dev`（端口 8092；node_modules 符号链接指向 `wsl-rt-env/ts-agent/node_modules`，运行/测试无需归位） |
+| TS Agent 安装依赖 | `cd paimeng-ai-code-agent && npm install && bash scripts/sync-node-modules.sh`（归位脚本：本地暂存安装后把实体 node_modules 移入 `wsl-rt-env/ts-agent/`，服务目录不保留；勿用 `npm ci`） |
+| TS Agent 运行 | `cd paimeng-ai-code-agent && npm run dev`（端口 8092；esbuild 打包到 `wsl-rt-env/ts-agent/dist/app.bundle.mjs` 后运行，watch 重建 + 自动重启；产物自包含，运行期不依赖 node_modules 位置） |
 | 前端 | `cd paimeng-ai-code-mother-frontend && npm run dev`（WSL 首次需补 Linux 二进制，见踩坑） |
 
 ## 踩坑与规避（WSL + DSH 沙箱环境）
 
 - **DSH 沙箱 workspace-write 拦家目录写**：mysqld 需写 `~/.local/opt/mysql8`（data/log/pid），start.sh 须以完整权限运行；`./mvnw spring-boot:run` 同理会写 `~/.m2/repository`（resolver-status.properties），亦须完整权限（2026-09-03 P0 e2e 实测）；`uv run` 因 `~/.cache/uv` 被拒 → 直接调 `.venv/bin/uvicorn`（迁移后 `wsl-rt-env/python/.venv/bin/uvicorn`）；npm 缓存被拒 → 加 `--cache <repo>/tmp/npm-cache`。
 - **前端 node_modules 为 Windows 侧安装**（仅 win32 二进制）：WSL 跑 `npm run dev` 前补装 `npm i --no-save --cache <repo>/tmp/npm-cache @rollup/rollup-linux-x64-gnu @esbuild/linux-x64`；重装 node_modules 后需重做。新约定 node_modules 位于 `wsl-rt-env/frontend/node_modules`（待迁移）。
-- **npm 会替换 node_modules 符号链接（TS Agent）**：`npm install`/`npm ci` 的 reify 都会把符号链接换成实体目录、破坏 wsl-rt-env 布局——安装命令固定为 `npm install && bash scripts/sync-node-modules.sh`（归位脚本：实体目录 mv 回 `wsl-rt-env/ts-agent/` 并重建符号链接）；`npm run dev`/`npm test` 不重排依赖树，无需归位。
+- **npm 会替换 node_modules 符号链接（TS Agent，2026-09-04 已根治）**：旧方案服务目录放符号链接，`npm install`/`npm ci` 的 reify 都会把它换成实体目录。现方案 esbuild 打包改造后**服务目录零 node_modules、零软链**：安装命令固定为 `npm install && bash scripts/sync-node-modules.sh`（归位脚本把本地暂存目录移入 wsl-rt-env），运行/测试经 `scripts/run.mjs` 调度器指向 wsl-rt-env。
+- **TS Agent 无软链方案的工具适配（2026-09-04 实测踩坑）**：① Node ESM 不认 NODE_PATH，vitest 靠 `vitest.config.mjs` 的 `resolve.alias` 指向 `wsl-rt-env/ts-agent/node_modules`（alias 必须写在服务目录内的配置里，配置文件里 `new URL('../wsl-rt-env/...')` 的相对解析以配置文件自身位置为基准）；② tsc 不认 NODE_PATH，`tsconfig.json` 用 `paths` 显式映射到各包 d.ts **文件**（映射到目录无效，NodeNext 下不做 package.json 解析）+ `typeRoots` 双候选，候选列表本地优先、wsl-rt-env 兜底；③ esbuild JS API 不读 NODE_PATH（CLI 才读），等价物是 `nodePaths` 选项；`bin/esbuild` 可能被 postinstall 换成原生 ELF，勿用 `node bin/esbuild` 调用，走 `lib/main.js` 的 JS API；④ esbuild ESM bundle 需 banner 注入 `createRequire`（fastify 内部有 CJS require），CJS 格式则挂 `import.meta.url`；⑤ DrvFs 上 `node --watch` 收不到文件事件（esbuild 自带轮询兜底可收到），dev 的重启链路由 esbuild watch 的 `onEnd` 回调驱动，不用 node --watch。
 - **DrvFs 目录重命名受限**：/mnt/c 上 mv 含打开句柄的目录（如运行中的 tsx watch 占用 node_modules）报 Permission denied——先停相关进程再迁移。
 - **WSL2 NAT 无 localhost 转发**：Java 配置 `localhost:3306/6379` 只解析到 WSL 内实例；连 Windows 侧实例需网关 IP（`ip route show default`）。
 

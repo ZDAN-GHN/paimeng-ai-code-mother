@@ -5,10 +5,15 @@
 ## 运行
 
 ```bash
-npm install
+# WSL（依赖归位到 wsl-rt-env/ts-agent/，服务目录零 node_modules、零软链）
+npm install && bash scripts/sync-node-modules.sh
+# Windows/IDE：服务目录内直接 npm install 即可（本地 node_modules 优先于 wsl-rt-env）
+
 cp .env.example .env   # 按需修改 PORT / JWT_SECRET / WORKSPACE_ROOT
-npm run dev            # 端口 8092
+npm run dev            # 端口 8092（esbuild 打包 + watch 自动重启；产物在 wsl-rt-env/ts-agent/dist/）
 ```
+
+> 运行/测试/类型检查统一经 `scripts/run.mjs` 调度：依赖与构建产物指向 `wsl-rt-env/ts-agent/`（无软链），vitest/tsc 的解析配置分别在 `vitest.config.mjs` 与 `tsconfig.json`。新增依赖后需在 `tsconfig.json` 的 `paths` 里补该包的 d.ts 映射。
 
 ## 测试
 
