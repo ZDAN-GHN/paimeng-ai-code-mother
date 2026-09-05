@@ -17,10 +17,11 @@ const { default: vueDevTools } = await import(runtimeModule('vite-plugin-vue-dev
 
 const runtimeDependencyResolver = {
   name: 'runtime-dependency-resolver',
-  enforce: 'pre' as const,
+  // 保持普通顺序：Vite 内置解析（依赖预构建的 ESM 互操作）优先，本插件仅在原生解析失败时
+  // 兜底指向 wsl-rt-env 实体依赖。此前 enforce: 'pre' 直接返回文件路径会绕过预构建，
+  // 浏览器原生加载 CJS 产物报 "does not provide an export named 'xxx'" 导致整页白屏
   resolveId(source: string) {
     if (source.startsWith('.') || source.startsWith('/') || source.startsWith('@/')) return null
-    if (source === 'axios') return path.join(nodeModules, 'axios', 'index.js')
     try {
       return packageRequire.resolve(source)
     } catch {
