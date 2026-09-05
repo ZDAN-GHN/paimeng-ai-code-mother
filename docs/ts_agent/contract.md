@@ -87,6 +87,8 @@ Agent 创建 run 时使用 `interview`。工作流节点推进时更新同一 `r
 
 **Issue #9 token 计量**：run 进入终态（`done`/`failed`）前，Agent 经 `PATCH /internal/runs/{runId}` 携带 `tokenUsage` JSON 落库（`{ inputTokens, outputTokens, totalTokens }`），累计本次 run 全部模型调用（codegen 各轮 + 超限收尾调用）。
 
+**Issue #9 硬上限与超限收尾（设计取舍明示）**：每 run 差异化硬上限（max_turns / max_output_tokens / max_tool_calls=50 先例 / 图片 4 张，随三档强度放大）。超限（工具调用被 max_tool_calls/max_turns 截断，或输出达 max_output_tokens 截断）时**注入收尾指令**让模型基于已生成内容输出完整交代，**绝不硬杀**；状态机仍按拓扑推进（coding → review → done），但 review **不再跑三重门禁**——已达成本上界，重试必然再次触发同一上限（架构 §3.3「超限 = 优雅收尾，用户拿到完整交代」）。即：**超限路径的产物未经质检即 done**，这是有意取舍（MVP 成本上界优先），Playwright 渲染级视觉 diff 属远期验收管线（架构 §6）。
+
 ## 终态与错误
 
 成功响应不得在 `done` 后继续产生事件。失败响应不得发送 `done`，`error` 后不得产生业务事件。工作区路径必须位于配置的 `WORKSPACE_ROOT` 内，否则返回错误终态并且不得写文件。
