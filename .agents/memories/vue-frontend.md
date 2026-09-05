@@ -18,10 +18,11 @@
 - vite 代理：`/api→8123`、`/agent→8092`（vite.config.ts）；生产 nginx 同路径（`deploy/nginx.conf.example`）。
 - **注意**：codegen 受 #7 线框闸门约束——`/agent/stream` 仅在 run 处于 `wireframe_confirmed` 时放行，未确认时返回唯一 error 事件；访谈/线框/确认 UI 属 #13。
 
-## 前端 lint 环境与命令（2026-09-04 #12 修复）
+## 前端 lint 环境与命令（2026-09-04 #12 修复；2026-09-05 dev 环境修正）
 
 - WSL 下 `bash scripts/run-wsl.sh lint` 需要 `NODE_PATH` 指向 wsl-rt-env 实体依赖（eslint.config.ts 顶层裸导入 `eslint/config` 无法解析；已在 run.mjs 注入）。
-- dev/preview/build-only 用 `--configLoader runner` 加载 vite.config.ts（bundle 模式写 `$HOME/node_modules/.vite-temp` 被沙箱/Windows ACL 锁死 EROFS，与 vitest 同源踩坑）。
+- **dev/preview/build-only 禁用 `--configLoader runner`**（2026-09-05 修正，提交 318f099）：config 在临时 runner 中加载完 runner 即关闭，vue/vue-devtools 插件运行期再经 runner 懒加载模块报 `Vite module runner has been closed`，Windows 与 WSL 均复现；#12 时引入 runner 所规避的 EROFS 前提经实测不成立（bundle 模式启动零警告，项目内 node_modules 可写）。**边界**：ts-agent 侧 vitest 仍用 runner 且健康（85/85）——崩溃仅发生在 dev server 场景（插件运行期懒加载路径），勿顺手改动 vitest 的 runner。
+- **裸导入解析禁止 `enforce: 'pre'` 直返文件路径**（2026-09-05 修正，提交 9fd75f1/1672bf0）：绕过依赖预构建后浏览器原生加载 CJS 产物（vue/index.js、ant-design-vue/lib/index.js 等）报 `does not provide an export named 'xxx'`，整页白屏；`runtimeDependencyResolver` 已退居普通顺序兜底位，且仅对裸包名导入返回 ESM 入口（嵌套 import conditions 取 default），CJS-only 包与 deep import 返回 null 由 Vite 显式报错。
 - `src/api/**` 为 openapi2ts 生成文件，已在 eslint.config.ts globalIgnores 豁免（生成模板 `@ts-ignore` 头过不了 ban-ts-comment）；手写接口封装（如 `src/api/agentToken.ts`）单独放行。
 
 ## #13 待办（P3 前端功能补齐）
