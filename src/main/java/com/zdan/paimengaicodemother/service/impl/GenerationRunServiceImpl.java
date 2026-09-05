@@ -24,6 +24,7 @@ import com.zdan.paimengaicodemother.model.entity.GenerationRun;
 import com.zdan.paimengaicodemother.model.entity.User;
 import com.zdan.paimengaicodemother.model.enums.AgentCompleteStatusEnum;
 import com.zdan.paimengaicodemother.model.enums.ChatHistoryMessageTypeEnum;
+import com.zdan.paimengaicodemother.model.enums.CreditLedgerStatusEnum;
 import com.zdan.paimengaicodemother.model.enums.GenerationRunPhaseEnum;
 import com.zdan.paimengaicodemother.model.vo.CreditFreezeVO;
 import com.zdan.paimengaicodemother.model.vo.RunVO;
@@ -193,6 +194,13 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
             log.info("run 完成回调已处理过，幂等跳过，runId: {}", runId);
             return;
         }
+        // 记账幂等（AC4 并发 / AC5 迟到回调）：台账已非冻结态（已结算/退款）→ 本 run 已记账，直接丢弃，
+        // 不再执行任何分支副作用（不重复写历史/构建/记账）——不依赖内存集合，进程重启丢集也成立
+        CreditLedger ledger = creditService.getByRunId(runId);
+        if (ledger != null && !CreditLedgerStatusEnum.FROZEN.getValue().equals(ledger.getStatus())) {
+            log.info("台账已终态（{}），迟到/重复回调幂等跳过，runId: {}", ledger.getStatus(), runId);
+            return;
+        }
         validateComplete(request);
         // 归属与构建类型以 Java 侧 app 为准（TS Agent 不传 codeGenType，避免契约冗余）
         App app = appService.getById(request.getAppId());
@@ -200,6 +208,18 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
         User user = new User();
         user.setId(request.getUserId());
         AgentCompleteStatusEnum status = AgentCompleteStatusEnum.getEnumByValue(request.getStatus());
+        // AC5 run 终态与台账一致：run 已终态但本次回调终态与之不符 → 拒绝（迟到错序回调不得改写 run 状态）；
+        // 终态与 status 一致（TS 先置 run 终态再回调的 aborted/failed 正常路径）放行，由台账条件更新兜底幂等
+        GenerationRun run = this.getById(runId);
+        if (run != null) {
+            GenerationRunPhaseEnum currentPhase = GenerationRunPhaseEnum.getEnumByValue(run.getPhase());
+            if (GenerationRunPhaseEnum.isTerminal(currentPhase)
+                    && terminalPhaseOf(status) != currentPhase) {
+                log.warn("run 已终态（{}）与回调 status（{}）不一致，拒绝处理，runId: {}",
+                        currentPhase.getValue(), request.getStatus(), runId);
+                return;
+            }
+        }
         // 中断折算用的里程碑数（退款粒度的锚，架构 §3.2）：从 run.milestones JSON 解析
         Integer milestoneCount = resolveMilestoneCount(runId);
         if (CollUtil.isNotEmpty(request.getMessages())) {
@@ -238,10 +258,13 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
                     "生成失败：" + StrUtil.blankToDefault(request.getErrorMessage(), "生成失败"),
                     ChatHistoryMessageTypeEnum.AI.getValue(), user);
             markRunTerminal(runId, GenerationRunPhaseEnum.FAILED);
-        } else {
+        } else if (status == AgentCompleteStatusEnum.ABORTED) {
             // aborted：保留已写文件（Agent 侧不删），按里程碑折算退款（首文件落盘前全额退）
             creditService.refundRun(runId, status, request.getFilesWritten(), milestoneCount);
             markRunTerminal(runId, GenerationRunPhaseEnum.ABORTED);
+        } else {
+            // 理论不可达：validateComplete 已校验 status 仅 success/failed/aborted
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "status 非法");
         }
         // 标记放到校验与副作用全部成功之后：任一步失败时 runId 不落标记，TS Agent 修正后重试可重新处理
         completedRunIds.add(runId);
@@ -258,7 +281,7 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
             CreditLedger ledger = creditService.getByRunId(runId);
             if (ledger != null) {
                 log.info("run 已冻结，幂等返回既有台账，runId: {}, ledgerId: {}", runId, ledger.getId());
-                return toFreezeVO(ledger, creditService.getBalance(run.getUserId()));
+                return creditService.buildFreezeVO(ledger);
             }
         }
         // 冻结前置：只有已确认线框（进入 codegen）才冻结（架构 §4 闸门经济学，线框阶段免费）
@@ -351,18 +374,17 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
     }
 
     /**
-     * 台账转冻结视图（幂等重放返回既有台账时复用）
+     * 完成回调终态 → run 终态 phase 映射（AC5「run 终态与台账一致」的一致性判断锚）
      *
-     * @param ledger  台账
-     * @param balance 用户当前余额
-     * @return 视图
+     * @param status 完成回调终态
+     * @return 对应 run 终态 phase
      */
-    private CreditFreezeVO toFreezeVO(CreditLedger ledger, int balance) {
-        CreditFreezeVO vo = new CreditFreezeVO();
-        vo.setLedgerId(ledger.getId());
-        vo.setFrozenAmount(ledger.getFrozenAmount());
-        vo.setBalance(balance);
-        return vo;
+    private GenerationRunPhaseEnum terminalPhaseOf(AgentCompleteStatusEnum status) {
+        return switch (status) {
+            case SUCCESS -> GenerationRunPhaseEnum.DONE;
+            case FAILED -> GenerationRunPhaseEnum.FAILED;
+            case ABORTED -> GenerationRunPhaseEnum.ABORTED;
+        };
     }
 
     /**

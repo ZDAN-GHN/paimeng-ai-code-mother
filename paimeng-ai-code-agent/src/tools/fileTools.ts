@@ -29,8 +29,15 @@ export class FileTools {
   // 绑定工作区根（绝对路径，构造时经沙箱校验）
   private readonly root: string
 
-  // 本 run 成功写入的文件数（Issue #10 中断退款折算锚：首个文件落盘前中断 = 全额退款）
-  filesWritten = 0
+  // 本 run 已落盘的不同文件（相对路径）集合（Issue #10 中断退款折算锚）
+  // #10 审查整改：以「落盘文件数」为语义——同一文件重复写去重、modifyFile 落盘同样计数、
+  // 删除后移除；首个文件落盘前（=0）中断 → Java 全额退款
+  private readonly writtenFiles = new Set<string>()
+
+  // 已落盘的不同文件数（首文件落盘阈值：filesWritten=0 → 中断全额退款）
+  get filesWritten(): number {
+    return this.writtenFiles.size
+  }
 
   constructor(workspacePath: string, workspaceRoot: string) {
     this.root = validateWorkspacePath(workspacePath, workspaceRoot)
@@ -63,8 +70,8 @@ export class FileTools {
     const target = this.resolve(relativeFilePath)
     await mkdir(path.dirname(target), { recursive: true })
     await writeFile(target, content, 'utf8')
-    // 首文件落盘阈值（中断退款折算：filesWritten=0 → 全额退款）
-    this.filesWritten += 1
+    // 首文件落盘阈值（中断退款折算：filesWritten=0 → 全额退款；同文件重复写去重）
+    this.writtenFiles.add(relativeFilePath)
     return `文件写入成功：${relativeFilePath}`
   }
 
@@ -88,6 +95,8 @@ export class FileTools {
       return `信息：替换后文件内容未发生变化 - ${relativeFilePath}`
     }
     await writeFile(target, modifiedContent, 'utf8')
+    // 落盘计数：修改已存在文件也是磁盘写入（续跑场景首笔写可能经 modifyFile，需计入「已写文件」）
+    this.writtenFiles.add(relativeFilePath)
     return `文件修改成功: ${relativeFilePath}`
   }
 
@@ -106,6 +115,8 @@ export class FileTools {
       return `错误：不允许删除重要文件 - ${path.basename(target)}`
     }
     await rm(target, { force: true })
+    // 落盘文件数随删除移除（「已写文件」指当前盘上文件）
+    this.writtenFiles.delete(relativeFilePath)
     return `文件删除成功: ${relativeFilePath}`
   }
 

@@ -1,6 +1,6 @@
 // 文件类工具行为测试（Issue #8）：从 Python Agent tests/test_tools.py 逐条移植，
 // 断言写/读/改/删/列目录/退出语义与旧实现等价，且含工作区沙箱校验（防路径穿越）。
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -25,17 +25,36 @@ describe('FileTools 文件类工具（语义对齐旧实现）', () => {
     expect(await readFile(path.join(root, 'src/components/Button.vue'), 'utf8')).toBe('<template>hi</template>')
   })
 
-  it('已写文件计数：writeFile 成功后 filesWritten 递增（中断退款折算锚）', async () => {
+  it('已写文件计数：writeFile/modifyFile 落盘计数，同文件去重，删除减计数（#10 落盘文件数语义）', async () => {
     const { tools } = makeTools()
     expect(tools.filesWritten).toBe(0)
     await tools.writeFile('a.txt', 'one')
     await tools.writeFile('b.txt', 'two')
     expect(tools.filesWritten).toBe(2)
-    // 读/改/删不增加已写文件数（只有新建写入算落盘）
+    // 读不计数
     await tools.readFile('a.txt')
+    // modifyFile 落盘同样计数（续跑场景首笔写可能经 modifyFile，需计入「已写文件」）
     await tools.modifyFile('a.txt', 'one', 'one-1')
-    await tools.deleteFile('b.txt')
     expect(tools.filesWritten).toBe(2)
+    // 同一文件重复写去重（不按操作次数累加）
+    await tools.writeFile('a.txt', 'one-again')
+    expect(tools.filesWritten).toBe(2)
+    // 删除后从落盘文件数移除
+    await tools.deleteFile('b.txt')
+    expect(tools.filesWritten).toBe(1)
+  })
+
+  it('已写文件计数：续跑实例下 modifyFile 落盘即计入（首笔磁盘写经 modifyFile 不误判全额退款）', async () => {
+    const { tools, root } = makeTools()
+    // 上一轮留下的半成品已在盘上（模拟断点续跑的工作区）
+    await tools.writeFile('draft.txt', 'old')
+    const ws = path.join(root, `ws_resume_${Date.now()}`)
+    mkdirSync(ws, { recursive: true })
+    writeFileSync(path.join(ws, 'draft.txt'), 'old', 'utf8')
+    // 续跑：新实例绑该工作区，首笔磁盘写经 modifyFile（覆盖既有半成品）
+    const resumed = new FileTools(ws, root)
+    await resumed.modifyFile('draft.txt', 'old', 'new')
+    expect(resumed.filesWritten).toBe(1)
   })
 
   it('读文件往返一致', async () => {

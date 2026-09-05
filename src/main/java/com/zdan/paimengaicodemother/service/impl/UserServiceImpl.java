@@ -187,4 +187,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
         return user.getId();
     }
+
+    @Override
+    public int deductCredits(Long userId, int amount) {
+        return this.mapper.deductCredits(userId, amount);
+    }
+
+    @Override
+    public int addCredits(Long userId, int amount) {
+        return this.mapper.addCredits(userId, amount);
+    }
 }

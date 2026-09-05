@@ -544,12 +544,17 @@ class GenerationRunServiceImplTest {
         already.setCreditLedgerRef("9");
         when(mapper.selectOneById("run-1")).thenReturn(already);
         when(creditService.getByRunId("run-1")).thenReturn(frozenLedgerEntity());
-        when(creditService.getBalance(1L)).thenReturn(300);
+        CreditFreezeVO vo = new CreditFreezeVO();
+        vo.setLedgerId(9L);
+        vo.setFrozenAmount(100);
+        vo.setBalance(300);
+        when(creditService.buildFreezeVO(any())).thenReturn(vo);
 
         CreditFreezeVO result = service.freezeCredit("run-1", freezeRequest("standard"));
 
         assertEquals(9L, result.getLedgerId());
         assertEquals(300, result.getBalance());
+        verify(creditService).buildFreezeVO(frozenLedgerEntity());
         verify(creditService, never()).freeze(anyString(), any(), any(), any());
     }
 
@@ -616,6 +621,50 @@ class GenerationRunServiceImplTest {
         verify(chatHistoryService, times(2)).addChatMessage(anyLong(), anyString(), anyString(), any(User.class));
         // 退款不被空消息阻断
         verify(creditService).refundRun(eq("run-1"), eq(AgentCompleteStatusEnum.FAILED), isNull(), any());
+    }
+
+    /**
+     * 迟到错序回调（AC5）：run 已终态（aborted）却收到 success 回调 → 拒绝处理，
+     * 不写历史、不结算、不改变 run 状态（防 run 终态与台账状态错乱）
+     */
+    @Test
+    void completeRunLateSuccessAfterAborted_rejected() {
+        App app = new App();
+        app.setId(1L);
+        when(appService.getById(1L)).thenReturn(app);
+        when(mapper.selectOneById("run-1")).thenReturn(terminalRunEntity("run-1", "aborted"));
+
+        AgentCompleteRequest request = completeRequest("run-1", "success", "/tmp/ws/html_1");
+        request.setMessages(List.of(message("ai", "<html>page</html>")));
+        service.completeRun("run-1", request);
+
+        verify(chatHistoryService, never()).addChatMessage(anyLong(), anyString(), anyString(), any(User.class));
+        verify(creditService, never()).settleRun(anyString());
+        verify(creditService, never()).refundRun(anyString(), any(), any(), any());
+        // run 保持 aborted，不推进 done
+        verify(mapper, never()).update(any(GenerationRun.class), anyBoolean());
+    }
+
+    /**
+     * 迟到重复回调（AC5/AC4，进程重启丢内存集场景）：台账已终态（SETTLED）→ 幂等跳过，
+     * 不再写历史/结算（台账终态是比内存集合更可靠的记账完成标记）
+     */
+    @Test
+    void completeRunLedgerAlreadyTerminal_skipsLateCallback() {
+        CreditLedger settled = CreditLedger.builder()
+                .id(9L)
+                .runId("run-1")
+                .status(CreditLedgerStatusEnum.SETTLED.getValue())
+                .build();
+        when(creditService.getByRunId("run-1")).thenReturn(settled);
+
+        AgentCompleteRequest request = completeRequest("run-1", "success", "/tmp/ws/html_1");
+        request.setMessages(List.of(message("ai", "<html>page</html>")));
+        service.completeRun("run-1", request);
+
+        verify(chatHistoryService, never()).addChatMessage(anyLong(), anyString(), anyString(), any(User.class));
+        verify(creditService, never()).settleRun(anyString());
+        verify(creditService, never()).refundRun(anyString(), any(), any(), any());
     }
 
     private CreditLedger frozenLedgerEntity() {

@@ -2,7 +2,7 @@
 // 视觉 diff 门禁（以已确认线框为基准：基准缺失失败、覆盖线框页面区段通过、缺区段失败）、门禁汇总
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { makeWorkspaceRoot } from './helpers.js'
 import {
   DefaultBuildVerifier,
@@ -76,6 +76,15 @@ describe('结构化质检分（Issue #9）', () => {
     })
     const result = await gate.verify(makeContext())
     expect(result.passed).toBe(true)
+  })
+
+  it('QualityScoreGate：abort signal 透传到质检 scorer（#10 审查整改：review 工位 LLM 随中断取消）', async () => {
+    const signal = new AbortController().signal
+    const score = vi.fn().mockResolvedValue({ isValid: true, grade: 100, errors: [], suggestions: [] })
+    const gate = new QualityScoreGate({ score }, signal)
+    const context = makeContext({ codeContent: '<html>ok</html>' })
+    await gate.verify(context)
+    expect(score).toHaveBeenCalledWith('<html>ok</html>', signal)
   })
 })
 

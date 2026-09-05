@@ -35,7 +35,7 @@ export interface QualityScore {
 }
 
 export interface QualityScorer {
-  score(codeContent: string): Promise<QualityScore>
+  score(codeContent: string, signal?: AbortSignal): Promise<QualityScore>
 }
 
 // 从模型输出提取 JSON（去除 ```json 代码块围栏；对齐 Python _extract_json）
@@ -68,12 +68,15 @@ export function parseQualityScore(text: string): QualityScore {
 // 默认质检分执行器：generateText 调 reviewer 模型（scripted-quality），提示词复用 code-quality-check
 export class LlmQualityScorer implements QualityScorer {
   constructor(private readonly provider: ScriptedLlmProvider) {}
-  async score(codeContent: string): Promise<QualityScore> {
+  async score(codeContent: string, signal?: AbortSignal): Promise<QualityScore> {
     const result = await generateText({
       model: this.provider.languageModel('scripted-quality'),
       system: loadPrompt(PROMPT_NAMES.codeQualityCheck),
       prompt: codeContent,
       maxRetries: 0,
+      // 对话中断（#10 审查整改）：reviewer 工位的质检模型调用同样受 abort 信号约束
+      //（中断落在 review 时 LLM 即时取消，而非延迟到下一检查点）
+      ...(signal ? { abortSignal: signal } : {}),
     })
     const score = parseQualityScore(result.text)
     // 质检模型调用同样产生 token 消耗（#9 计量）：随评分回传，由 workflow 累计进 run.token_usage
@@ -90,9 +93,13 @@ export class LlmQualityScorer implements QualityScorer {
 
 export class QualityScoreGate implements ReviewGate {
   readonly name = GATE_NAMES.qualityScore
-  constructor(private readonly scorer: QualityScorer) {}
+  constructor(
+    private readonly scorer: QualityScorer,
+    // 对话中断（#10 审查整改）：随 run 的 abort 信号取消质检 LLM 调用
+    private readonly signal?: AbortSignal,
+  ) {}
   async verify(context: ReviewContext): Promise<GateResult> {
-    const result = await this.scorer.score(context.codeContent)
+    const result = await this.scorer.score(context.codeContent, this.signal)
     // #9 计量：质检模型调用 token 经门禁结果透传，由 workflow 累计进 run.token_usage
     if (result.isValid) {
       return { name: this.name, passed: true, detail: `质检通过（得分 ${result.grade}）`, usage: result.usage }
@@ -204,9 +211,9 @@ export function buildDefaultReviewGates(provider: ScriptedLlmProvider): ReviewGa
   }
 }
 
-export function gatesFromSet(set: ReviewGateSet): ReviewGate[] {
-  // build/visualDiff 已是门禁；quality 经 QualityScoreGate 适配 QualityScorer
-  return [new QualityScoreGate(set.quality), set.build, set.visualDiff]
+export function gatesFromSet(set: ReviewGateSet, signal?: AbortSignal): ReviewGate[] {
+  // build/visualDiff 已是门禁；quality 经 QualityScoreGate 适配 QualityScorer（携 run 中止信号）
+  return [new QualityScoreGate(set.quality, signal), set.build, set.visualDiff]
 }
 
 // 读取并拼接工作区代码文件（对齐 Python read_and_concatenate_code_files，供质检分门禁输入）
@@ -244,6 +251,8 @@ export interface RunReviewOptions {
   codeGenType: CodeGenType
   // 质检门禁模型调用的 token 用量回调（workflow 累计进 run.token_usage）
   onQualityUsage?: (usage: TokenUsage) => void
+  // 对话中断（#10 审查整改）：run 的中止信号，质检 LLM 调用随之取消
+  abortSignal?: AbortSignal
 }
 
 export async function runReviewCycle(options: RunReviewOptions): Promise<ReviewVerdict> {
@@ -253,7 +262,7 @@ export async function runReviewCycle(options: RunReviewOptions): Promise<ReviewV
     codeGenType: options.codeGenType,
     codeContent: readAndConcatenateCodeFiles(options.workspacePath),
   }
-  const verdict = await runReviewGates(gatesFromSet(options.gates), context)
+  const verdict = await runReviewGates(gatesFromSet(options.gates, options.abortSignal), context)
   // #9 计量：质检分门禁的模型调用 token 累计进 run 计量（reviewer 也是 run 的模型调用）
   const qualityGate = verdict.gates.find((g) => g.name === GATE_NAMES.qualityScore)
   if (qualityGate?.usage) options.onQualityUsage?.(qualityGate.usage)

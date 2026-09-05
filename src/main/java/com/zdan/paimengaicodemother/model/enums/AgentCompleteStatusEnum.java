@@ -16,25 +16,31 @@ public enum AgentCompleteStatusEnum {
     /**
      * 成功：写对话历史 + 触发构建 + 积分结算（台账 FROZEN → SETTLED）
      */
-    SUCCESS("成功", "success"),
+    SUCCESS("成功", "success", "complete"),
 
     /**
      * 失败：写错误历史 + 全额退款（台账 FROZEN → REFUNDED）
      */
-    FAILED("失败", "failed"),
+    FAILED("失败", "failed", "failed"),
 
     /**
      * 用户中断（Issue #10，架构 §3.5 中止 (a)）：保留已写文件 + 历史带 [用户中断] 标记
      * + 按已完成里程碑折算退款（首个文件落盘前全额退款，台账 → PARTIAL_REFUNDED / REFUNDED）
      */
-    ABORTED("用户中断", "aborted");
+    ABORTED("用户中断", "aborted", "interrupted");
 
     private final String text;
     private final String value;
 
-    AgentCompleteStatusEnum(String text, String value) {
+    /**
+     * 台账终态 reason（credit_ledger.reason，单一来源：与状态绑定，杜绝散落魔法字符串）
+     */
+    private final String reason;
+
+    AgentCompleteStatusEnum(String text, String value, String reason) {
         this.text = text;
         this.value = value;
+        this.reason = reason;
     }
 
     /**

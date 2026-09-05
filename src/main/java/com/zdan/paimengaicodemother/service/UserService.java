@@ -92,4 +92,22 @@ public interface UserService extends IService<User> {
      * @return 新用户 id
      */
     long userRegister(String userAccount, String userPassword, String checkPassword);
+
+    /**
+     * 原子扣减积分（Issue #10 积分协议；读改写并发安全由 DB 层 WHERE credits >= amount 保证）
+     *
+     * @param userId 用户 id
+     * @param amount 扣减积分数
+     * @return 受影响行数（0 = 余额不足或用户不存在）
+     */
+    int deductCredits(Long userId, int amount);
+
+    /**
+     * 原子增加积分（充值/退款加回）
+     *
+     * @param userId 用户 id
+     * @param amount 增加积分数
+     * @return 受影响行数（0 = 用户不存在）
+     */
+    int addCredits(Long userId, int amount);
 }

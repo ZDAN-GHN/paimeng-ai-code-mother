@@ -98,6 +98,12 @@ function json(value: unknown): string {
   return JSON.stringify(value)
 }
 
+// 模型调用统一携带中止信号（#10 审查整改：消除 streamText/generateText 重复条件展开；
+// AI SDK 不接受 undefined abortSignal，缺省时不传该键）
+function withAbort<T extends object>(opts: T, signal?: AbortSignal): T | (T & { abortSignal: AbortSignal }) {
+  return signal ? { ...opts, abortSignal: signal } : opts
+}
+
 // 把一次模型调用的 usage 累计进 run 计量（#9）：usage 字段可能为 undefined，按 0 计
 function accumulateUsage(target: TokenUsage, usage: Partial<TokenUsage>): void {
   target.inputTokens += usage.inputTokens ?? 0
@@ -235,6 +241,8 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
       codeGenType: request.codeGenType ?? 'html',
       // #9 计量：质检分门禁的模型调用 token 累计进 run 计量（reviewer 也是 run 的模型调用）
       onQualityUsage: (usage) => accumulateUsage(tokenUsage, usage),
+      // 对话中断（#10 审查整改）：reviewer 工位质检 LLM 调用同样受 abort 约束（取消 LLM 全覆盖）
+      abortSignal: options.abortSignal,
     })
   }
 
@@ -295,7 +303,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
       // 三档路由（#9）：intensity → 档位模型 id（配置覆盖优先；假 provider 据此断言路由）
       const modelId = resolveModelId(tier, options.modelOverrides)
 
-      const result = streamText({
+      const result = streamText(withAbort({
         model: provider.languageModel(modelId),
         system: codegenSystem,
         messages,
@@ -307,8 +315,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
         stopWhen: [isStepCount(tier.limits.maxTurns), stopWhenToolCalls(tier.limits.maxToolCalls)],
         tools: buildTools({ files: files!, images }),
         // 对话中断（#10）：abort 信号触发 → AI SDK 取消 LLM 调用（error part → GenerationAborted）
-        ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-      })
+      }, options.abortSignal))
 
       // 工具循环是否被硬上限截断（finishReason=tool-calls 即模型还想继续调工具但被 stopWhen 拦下）
       let truncatedByLimit = false
@@ -352,15 +359,14 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
       // 已生成内容拼入 system 供收尾模型基于产物交代（审查整改 c1：此前只传原始 messages，真实 provider 无法真正基于产物）
       if (truncatedByLimit) {
         yield { type: 'ai_thinking', text: '已达本次生成硬上限，正在收尾' }
-        const wrapUp = await generateText({
+        const wrapUp = await generateText(withAbort({
           model: provider.languageModel(modelId),
           system: `${codegenSystem}\n\n已达本次生成硬上限（工具调用/生成步数/输出长度上限）。请不要再调用工具，基于以下已生成内容立即输出最终完整交代：\n${pageContent}`,
           messages,
           maxRetries: 0,
           maxOutputTokens: tier.limits.maxOutputTokens,
           // 对话中断（#10）：收尾调用同样受 abort 信号约束
-          ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-        })
+        }, options.abortSignal))
         const wrapUpText = wrapUp.text
         pageContent += wrapUpText
         // 收尾文本同样按 ai_response 增量发射（用户收到完整交代）

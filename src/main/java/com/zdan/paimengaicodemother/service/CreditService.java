@@ -51,9 +51,8 @@ public interface CreditService extends IService<CreditLedger> {
      *
      * @param userId  目标用户 id
      * @param credits 充值积分数（正数）
-     * @return 充值成功
      */
-    boolean recharge(Long userId, int credits);
+    void recharge(Long userId, int credits);
 
     /**
      * 查询用户当前积分余额
@@ -70,4 +69,13 @@ public interface CreditService extends IService<CreditLedger> {
      * @return 台账，无则返回 null
      */
     CreditLedger getByRunId(String runId);
+
+    /**
+     * 台账转冻结视图（余额取自台账归属用户；供冻结幂等重放与 run.creditLedgerRef 回读复用，
+     * 单一构造点，避免调用方重复组装）
+     *
+     * @param ledger 台账
+     * @return 视图（ledgerId / frozenAmount / 冻结后余额）
+     */
+    CreditFreezeVO buildFreezeVO(CreditLedger ledger);
 }

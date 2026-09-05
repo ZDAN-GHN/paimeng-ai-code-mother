@@ -81,3 +81,13 @@
 - **e2e 实测坑**：failed 回调 messages 的 ai content 为空字符串 → Java 写历史 `addChatMessage` 抛「消息不能为空」→ 整个 completeRun 失败、退款不执行 → **completeRun 写历史时跳过空 content 消息**（failed 分支另写错误历史交代）；`CreditFreezeVO{ledgerId, frozenAmount, balance}`。
 - **测试**：`CreditServiceImplTest` 17 例（三剧本折算 + 幂等 + 余额不足 + 金额计算）、`GenerationRunServiceImplTest` 31 例（+三剧本记账/冻结幂等/闸门/里程碑透传/空消息跳过）、`GenerationRunControllerTest` 18 例（+freeze 401/200/402/403）、`CreditControllerTest` 4 例。
 
+## 2026-09-05 #10 code-review 整改（并发幂等 + 魔法值 + AC5 防护）
+
+- **余额变动改 DB 原子 SQL（并发丢更新修复）**：`UserMapper` 加 `@Update` 自定义方法——`deductCredits(userId, amount)`（`UPDATE user SET credits = credits - #{amount} WHERE id=#{userId} AND credits >= #{amount}`，affected=0 = 余额不足/用户不存在）、`addCredits(userId, amount)`（加钱）。`UserService`/`UserServiceImpl` 透传；`CreditServiceImpl.doFreeze`/`recharge`/`refundBalance` 弃 updateById 读改写（同用户并发冻结不再互相覆盖丢更新）。**注意**：`ServiceImpl` 的 `this.mapper` 可直接访问。
+- **台账 FROZEN→终态改条件更新**：`CreditLedgerMapper.transitionIfFrozen(CreditLedger)`（`UPDATE credit_ledger SET status=#{status}, settleAmount=#{settleAmount}, refundAmount=#{refundAmount}, reason=#{reason}, milestoneCount=#{milestoneCount}, updateTime=NOW() WHERE id=#{id} AND status='FROZEN'`）。settle/refund 先预读（`getFrozenOrNull`，原 `requireFrozen` 改名）算金额，再条件更新——**仅 affected=1 的线程执行加钱/结算**，并发重复回调（AC4）只一笔生效、**杜绝双重退款**；affected=0 幂等跳过。
+- **踩坑：`@Update` 列名必须用实体 `@Column` 名（驼峰）**——`credit_ledger` 表列是 `settleAmount/refundAmount/milestoneCount`（DDL 驼峰定义），用下划线 `settle_amount` 报 `Unknown column 'settle_amount'`（e2e 实库实测）；单元测试 mock mapper 不解析 SQL，**@Update 语法必须 WSL 实库验证**。
+- **AC5 迟到回调防护（completeRun 前置两道校验）**：① 台账已非 FROZEN（已结算/退款）→ 幂等丢弃（不依赖内存集合，进程重启丢 completedRunIds 也成立）；② run 已终态但 `terminalPhaseOf(status)`（SUCCESS/FAILED/ABORTED→done/failed/aborted）与之不符 → 拒绝（迟到错序不得改写 run 状态）。completeRun 三分支改显式 `else if ABORTED` + 兜底抛。
+- **魔法值收敛**：新建 `AgentIntensityEnum`（fast/standard/deep，空/非法兜底 standard）；台账 reason 魔法字符串（complete/failed/interrupted）收敛进 `AgentCompleteStatusEnum.reason` 字段（`status.getReason()` 单一来源）。
+- **其余**：`toFreezeVO` 移入 `CreditService.buildFreezeVO(ledger)`（GenerationRunServiceImpl 私有重复删除；balance 从 ledger.userId 查）；`recharge` 返回 `boolean`→`void`；`balanceOf(User)` 空值守卫提取；接口 `@param` 对齐。
+- **测试**：`CreditServiceImplTest` 22 例（+并发 transition 失败不加钱/非法强度兜底/充值用户缺失/退款用户缺失等 5 例）、`GenerationRunServiceImplTest` 33 例（+迟到错序拒绝/台账终态迟到跳过 2 例）；Java 相关 **77/77**。WSL 实库 e2e 全剧本（success/failed/aborted/幂等/迟到/并发双 failed 只退一次）验证通过。
+

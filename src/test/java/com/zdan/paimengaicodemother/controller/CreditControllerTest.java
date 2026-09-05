@@ -56,14 +56,13 @@ class CreditControllerTest {
      */
     @Test
     void rechargeReturns200() throws Exception {
-        when(creditService.recharge(1L, 200)).thenReturn(true);
-
         mockMvc.perform(post("/credit/recharge")
                         .contentType("application/json")
                         .content("{\"userId\":1,\"credits\":200}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data").value(true));
+        org.mockito.Mockito.verify(creditService).recharge(1L, 200);
     }
 
     /**
@@ -71,8 +70,8 @@ class CreditControllerTest {
      */
     @Test
     void rechargeInvalidCreditsReturnsError() throws Exception {
-        when(creditService.recharge(eq(1L), eq(-10)))
-                .thenThrow(new BusinessException(ErrorCode.PARAMS_ERROR, "充值积分数必须为正数"));
+        org.mockito.Mockito.doThrow(new BusinessException(ErrorCode.PARAMS_ERROR, "充值积分数必须为正数"))
+                .when(creditService).recharge(1L, -10);
 
         mockMvc.perform(post("/credit/recharge")
                         .contentType("application/json")

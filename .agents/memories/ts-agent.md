@@ -37,6 +37,12 @@
 - Java `bodyToFlux(ServerSentEvent)` 解码 SSE 会产生 `data=null` 空事件：Java 客户端侧需 `filter(event -> event.data() != null)`（#6 泛化回调客户端时注意）。
 - **Java 内部 API 的 Long 序列化为字符串**：`JsonConfig` 的 ToStringSerializer 会把 Long（appId/userId）序列化为字符串（防 JS 精度丢失，snowflake 18 位超安全整数）——TS run 客户端 `appId/userId` 类型必须兼容 `string | number`（#4 实测：响应 `"appId":"903"`）。
 
+## 2026-09-05 #10 code-review 整改（TS 侧）
+
+- **`FileTools.filesWritten` 语义修正（AC2「落盘文件数」）**：字段改 `private readonly writtenFiles = new Set<string>()` + `get filesWritten()` 返回 size——同文件重复写去重、**`modifyFile` 落盘同样计数**（续跑场景首笔磁盘写可能经 modifyFile，此前误判 filesWritten=0 → 全额退款）、`deleteFile` 成功后从 Set 移除。工作流 `catch` 里 `files?.filesWritten ?? 0` 语义随之变为「当前已落盘不同文件数」。
+- **reviewer 工位 LLM 取消全覆盖（Spec：review 的 generateText 不受 abort 约束）**：abortSignal 贯穿链——`RunReviewOptions.abortSignal` → `runReviewCycle` → `gatesFromSet(set, signal)` → `QualityScoreGate(scorer, signal)` → `QualityScorer.score(code, signal)`（接口第二参可选，测试替身 `{ score(code) }` 不受破坏）→ `LlmQualityScorer` 的 generateText `...(signal ? { abortSignal: signal } : {})`。
+- **abort 条件展开提取**：workflow 定义 `withAbort<T>(opts, signal)`（signal 存在才展开 `abortSignal`，AI SDK 不接受 undefined），streamText/generateText 两处重复消除。
+
 ## 下一步 / 指针
 
 - #9：已完成 质检门禁 + 输出护栏 + 三档强度 + token 计量（详见「当前状态」与 progress.md）。

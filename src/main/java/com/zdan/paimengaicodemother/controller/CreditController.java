@@ -38,12 +38,13 @@ public class CreditController {
      * 管理员手动充值（架构 §7 MVP 后台充值）：给指定用户增加积分余额
      *
      * @param request 充值请求（userId + credits）
-     * @return 充值成功
+     * @return 充值成功（操作型端点，固定成功）
      */
     @PostMapping("/recharge")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> recharge(@RequestBody CreditRechargeRequest request) {
-        return ResultUtils.success(creditService.recharge(request.getUserId(), request.getCredits()));
+        creditService.recharge(request.getUserId(), request.getCredits());
+        return ResultUtils.success(true);
     }
 
     /**
