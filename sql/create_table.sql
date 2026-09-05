@@ -12,6 +12,7 @@ create table if not exists user
     userAvatar   varchar(1024)                          null comment '用户头像',
     userProfile  varchar(512)                           null comment '用户简介',
     userRole     varchar(256) default 'user'            not null comment '用户角色：user/admin',
+    credits      int          default 0                 not null comment '积分余额（管理员手动充值，见 CreditController）',
     editTime     datetime     default CURRENT_TIMESTAMP not null comment '编辑时间',
     createTime   datetime     default CURRENT_TIMESTAMP not null comment '创建时间',
     updateTime   datetime     default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '更新时间',
@@ -78,3 +79,24 @@ create table if not exists generation_run
     INDEX idx_appId_phase (appId, phase), -- 同 app 并发校验 + 断点续传查询（最新非终态 run）核心索引
     INDEX idx_userId (userId)             -- 按用户维度查询
 ) comment '生成运行（generation_run）' collate = utf8mb4_unicode_ci;
+
+-- credit_ledger 表：积分台账（Issue #10，docs/ts_agent/architecture.md §7 扣费协议）
+-- 预冻结 → 完成结算 → 中断/失败退款；每 run 一条台账（uk_runId 幂等），与业务表同库同事务保证原子性
+create table if not exists credit_ledger
+(
+    id             bigint auto_increment comment 'id' primary key,
+    runId          varchar(64)                        not null comment '运行 id（幂等键，同 run 一条台账）',
+    userId         bigint                             not null comment '用户 id',
+    appId          bigint                             not null comment '应用 id',
+    status         enum ('FROZEN', 'SETTLED', 'PARTIAL_REFUNDED', 'REFUNDED') not null comment '台账状态：冻结→结算 / 冻结→部分退款 / 冻结→全额退款',
+    frozenAmount   int                                not null comment '冻结积分数（正数，进入 codegen 时预扣）',
+    settleAmount   int                                null comment '结算积分数（实际扣费，正数；结算时写入）',
+    refundAmount   int                                null comment '退款积分数（正数；退款时写入）',
+    reason         varchar(24)                        null comment '终态原因：complete/interrupted/failed',
+    milestoneCount int                                null comment '中断时已过里程碑数（退款折算锚）',
+    createTime     datetime default CURRENT_TIMESTAMP not null comment '创建时间',
+    updateTime     datetime default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '更新时间',
+    isDelete       tinyint  default 0                 not null comment '是否删除',
+    UNIQUE KEY uk_runId (runId),                     -- 同 run 只记一笔账（runId 幂等）
+    INDEX idx_userId (userId)                        -- 按用户维度查询
+) comment '积分台账（credit_ledger）' collate = utf8mb4_unicode_ci;

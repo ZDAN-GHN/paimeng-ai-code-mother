@@ -48,6 +48,11 @@ public class LoginUserVO implements Serializable {
     private String userRole;
 
     /**
+     * 积分余额（Issue #10：登录态展示；充值/冻结/退款经 CreditService 变动）
+     */
+    private Integer credits;
+
+    /**
      * 创建时间
      */
     private LocalDateTime createTime;

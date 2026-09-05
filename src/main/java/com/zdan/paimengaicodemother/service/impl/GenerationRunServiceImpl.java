@@ -15,17 +15,21 @@ import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.exception.ThrowUtils;
 import com.zdan.paimengaicodemother.mapper.GenerationRunMapper;
 import com.zdan.paimengaicodemother.model.dto.run.AgentCompleteRequest;
+import com.zdan.paimengaicodemother.model.dto.run.CreditFreezeRequest;
 import com.zdan.paimengaicodemother.model.dto.run.RunCreateRequest;
 import com.zdan.paimengaicodemother.model.dto.run.RunUpdateRequest;
 import com.zdan.paimengaicodemother.model.entity.App;
+import com.zdan.paimengaicodemother.model.entity.CreditLedger;
 import com.zdan.paimengaicodemother.model.entity.GenerationRun;
 import com.zdan.paimengaicodemother.model.entity.User;
 import com.zdan.paimengaicodemother.model.enums.AgentCompleteStatusEnum;
 import com.zdan.paimengaicodemother.model.enums.ChatHistoryMessageTypeEnum;
 import com.zdan.paimengaicodemother.model.enums.GenerationRunPhaseEnum;
+import com.zdan.paimengaicodemother.model.vo.CreditFreezeVO;
 import com.zdan.paimengaicodemother.model.vo.RunVO;
 import com.zdan.paimengaicodemother.service.AppService;
 import com.zdan.paimengaicodemother.service.ChatHistoryService;
+import com.zdan.paimengaicodemother.service.CreditService;
 import com.zdan.paimengaicodemother.service.GenerationRunService;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RRateLimiter;
@@ -57,6 +61,11 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
     public static final String CONCURRENT_MESSAGE = "当前有进行中的任务";
 
     /**
+     * 用户中断历史标记（Issue #10 验收：中断后历史带 [用户中断] 标记）
+     */
+    public static final String INTERRUPT_MARK = "[用户中断] ";
+
+    /**
      * 终态 phase 列表（非终态 run 用于断点续传与并发拒绝判定）
      */
     private static final List<String> TERMINAL_PHASES = List.of(
@@ -78,16 +87,19 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
 
     private final AppService appService;
     private final ChatHistoryService chatHistoryService;
+    private final CreditService creditService;
     private final RedissonClient redissonClient;
     private final int wireframeDailyLimit;
 
     public GenerationRunServiceImpl(AppService appService, ChatHistoryService chatHistoryService,
                                     RedissonClient redissonClient,
-                                    @Value("${agent.wireframe-daily-limit:10}") int wireframeDailyLimit) {
+                                    @Value("${agent.wireframe-daily-limit:10}") int wireframeDailyLimit,
+                                    CreditService creditService) {
         this.appService = appService;
         this.chatHistoryService = chatHistoryService;
         this.redissonClient = redissonClient;
         this.wireframeDailyLimit = wireframeDailyLimit;
+        this.creditService = creditService;
     }
 
     @Override
@@ -176,7 +188,7 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
     @Override
     public void completeRun(String runId, AgentCompleteRequest request) {
         ThrowUtils.throwIf(StrUtil.isBlank(runId), ErrorCode.PARAMS_ERROR, "runId 不能为空");
-        // 幂等检查（只读）：回调可能被网络层重试，已处理成功过则直接丢弃，避免重复写历史/构建
+        // 幂等检查（只读）：回调可能被网络层重试，已处理成功过则直接丢弃，避免重复写历史/构建/记账
         if (completedRunIds.contains(runId)) {
             log.info("run 完成回调已处理过，幂等跳过，runId: {}", runId);
             return;
@@ -187,30 +199,74 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
         ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
         User user = new User();
         user.setId(request.getUserId());
+        AgentCompleteStatusEnum status = AgentCompleteStatusEnum.getEnumByValue(request.getStatus());
+        // 中断折算用的里程碑数（退款粒度的锚，架构 §3.2）：从 run.milestones JSON 解析
+        Integer milestoneCount = resolveMilestoneCount(runId);
         if (CollUtil.isNotEmpty(request.getMessages())) {
             // 保持发送顺序逐条落库，避免会话展示错位（user/ai 全文）
             for (AgentCompleteRequest.Message message : request.getMessages()) {
                 ThrowUtils.throwIf(ChatHistoryMessageTypeEnum.getEnumByValue(message.getMessageType()) == null,
                         ErrorCode.PARAMS_ERROR, "messageType 仅接受 user/ai");
-                chatHistoryService.addChatMessage(request.getAppId(), message.getContent(),
-                        message.getMessageType(), user);
+                String content = message.getContent();
+                // 用户中断：历史带 [用户中断] 标记（Issue #10 验收）
+                if (status == AgentCompleteStatusEnum.ABORTED
+                        && ChatHistoryMessageTypeEnum.AI.getValue().equals(message.getMessageType())
+                        && StrUtil.isNotBlank(content) && !content.startsWith(INTERRUPT_MARK)) {
+                    content = INTERRUPT_MARK + content;
+                }
+                chatHistoryService.addChatMessage(request.getAppId(), content, message.getMessageType(), user);
             }
         }
-        AgentCompleteStatusEnum status = AgentCompleteStatusEnum.getEnumByValue(request.getStatus());
+        // 记账（台账与用户余额同库同事务，CreditService 内部 @Transactional；runId 幂等防重复记账）
         if (status == AgentCompleteStatusEnum.SUCCESS) {
+            creditService.settleRun(runId);
             // 产物已就绪，构建产出可部署应用（构建管线复用旧链路，失败会抛出由上层映射 500）
             CodeGenTypeEnum codeGenTypeEnum = CodeGenTypeEnum.getEnumByValue(app.getCodeGenType());
             ThrowUtils.throwIf(codeGenTypeEnum == null, ErrorCode.PARAMS_ERROR, "代码生成类型不合法");
             BuilderExecutor.doBuild(codeGenTypeEnum, request.getWorkspacePath());
-        } else {
+            markRunTerminal(runId, GenerationRunPhaseEnum.DONE);
+        } else if (status == AgentCompleteStatusEnum.FAILED) {
+            creditService.refundRun(runId, status, null, milestoneCount);
             // 失败无产物可构建，写错误历史让会话有可见反馈
             chatHistoryService.addChatMessage(request.getAppId(),
                     "生成失败：" + StrUtil.blankToDefault(request.getErrorMessage(), "生成失败"),
                     ChatHistoryMessageTypeEnum.AI.getValue(), user);
+            markRunTerminal(runId, GenerationRunPhaseEnum.FAILED);
+        } else {
+            // aborted：保留已写文件（Agent 侧不删），按里程碑折算退款（首文件落盘前全额退）
+            creditService.refundRun(runId, status, request.getFilesWritten(), milestoneCount);
+            markRunTerminal(runId, GenerationRunPhaseEnum.ABORTED);
         }
         // 标记放到校验与副作用全部成功之后：任一步失败时 runId 不落标记，TS Agent 修正后重试可重新处理
         completedRunIds.add(runId);
         log.info("run 完成回调处理成功，runId: {}, status: {}", runId, request.getStatus());
+    }
+
+    @Override
+    public CreditFreezeVO freezeCredit(String runId, CreditFreezeRequest request) {
+        ThrowUtils.throwIf(StrUtil.isBlank(runId), ErrorCode.PARAMS_ERROR, "runId 不能为空");
+        GenerationRun run = this.getById(runId);
+        ThrowUtils.throwIf(run == null, ErrorCode.NOT_FOUND_ERROR, "运行不存在");
+        // 幂等：creditLedgerRef 已关联（同 run 已冻结过）→ 直接返回既有台账，不重复扣款
+        if (StrUtil.isNotBlank(run.getCreditLedgerRef())) {
+            CreditLedger ledger = creditService.getByRunId(runId);
+            if (ledger != null) {
+                log.info("run 已冻结，幂等返回既有台账，runId: {}, ledgerId: {}", runId, ledger.getId());
+                return toFreezeVO(ledger, creditService.getBalance(run.getUserId()));
+            }
+        }
+        // 冻结前置：只有已确认线框（进入 codegen）才冻结（架构 §4 闸门经济学，线框阶段免费）
+        ThrowUtils.throwIf(!GenerationRunPhaseEnum.WIREFRAME_CONFIRMED.getValue().equals(run.getPhase()),
+                ErrorCode.FORBIDDEN_ERROR,
+                "当前阶段（" + run.getPhase() + "）不能冻结积分，请先确认线框");
+        CreditFreezeVO vo = creditService.freeze(runId, run.getAppId(), run.getUserId(),
+                request == null ? null : request.getIntensity());
+        // 台账关联写回 run（同库；供对账与幂等复用 creditLedgerRef 预留字段）
+        GenerationRun update = new GenerationRun();
+        update.setRunId(runId);
+        update.setCreditLedgerRef(String.valueOf(vo.getLedgerId()));
+        this.updateById(update);
+        return vo;
     }
 
     @Override
@@ -242,10 +298,65 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
         ThrowUtils.throwIf(request.getUserId() == null || request.getUserId() <= 0,
                 ErrorCode.PARAMS_ERROR, "userId 不能为空");
         AgentCompleteStatusEnum status = AgentCompleteStatusEnum.getEnumByValue(request.getStatus());
-        ThrowUtils.throwIf(status == null, ErrorCode.PARAMS_ERROR, "status 仅接受 success/failed");
-        // success 时需要工作区路径触发构建（failed 无产物可构建，允许为空）
+        ThrowUtils.throwIf(status == null, ErrorCode.PARAMS_ERROR, "status 仅接受 success/failed/aborted");
+        // success 时需要工作区路径触发构建（failed/aborted 无产物可构建，允许为空）
         ThrowUtils.throwIf(status == AgentCompleteStatusEnum.SUCCESS && StrUtil.isBlank(request.getWorkspacePath()),
                 ErrorCode.PARAMS_ERROR, "workspacePath 不能为空");
+    }
+
+    /**
+     * 把 run 推进到终态 phase（已终态幂等跳过；供「run 终态与台账状态一致」验收兜底）
+     *
+     * @param runId 运行 id
+     * @param phase 终态阶段（done/failed/aborted）
+     */
+    private void markRunTerminal(String runId, GenerationRunPhaseEnum phase) {
+        GenerationRun existing = this.getById(runId);
+        if (existing == null) {
+            return;
+        }
+        if (GenerationRunPhaseEnum.isTerminal(GenerationRunPhaseEnum.getEnumByValue(existing.getPhase()))) {
+            return;
+        }
+        GenerationRun update = new GenerationRun();
+        update.setRunId(runId);
+        update.setPhase(phase.getValue());
+        update.setFinishedTime(LocalDateTime.now());
+        this.updateById(update);
+    }
+
+    /**
+     * 从 run.milestones JSON 解析已过里程碑数（退款折算锚，架构 §3.2；解析失败返回 null）
+     *
+     * @param runId 运行 id
+     * @return 里程碑数，无/解析失败返回 null
+     */
+    private Integer resolveMilestoneCount(String runId) {
+        GenerationRun run = this.getById(runId);
+        if (run == null || StrUtil.isBlank(run.getMilestones())) {
+            return null;
+        }
+        try {
+            return JSONUtil.parseArray(run.getMilestones()).size();
+        } catch (Exception e) {
+            log.warn("run.milestones 解析失败，runId: {}", runId);
+            return null;
+        }
+    }
+
+    /**
+     * 台账转冻结视图（幂等重放返回既有台账时复用）
+     *
+     * @param ledger  台账
+     * @param balance 用户当前余额
+     * @return 视图
+     */
+    private CreditFreezeVO toFreezeVO(CreditLedger ledger, int balance) {
+        CreditFreezeVO vo = new CreditFreezeVO();
+        vo.setLedgerId(ledger.getId());
+        vo.setFrozenAmount(ledger.getFrozenAmount());
+        vo.setBalance(balance);
+        return vo;
     }
 
     /**

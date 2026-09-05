@@ -4,11 +4,16 @@ import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ConcurrentRunException;
 import com.zdan.paimengaicodemother.mapper.GenerationRunMapper;
 import com.zdan.paimengaicodemother.model.dto.run.AgentCompleteRequest;
+import com.zdan.paimengaicodemother.model.dto.run.CreditFreezeRequest;
 import com.zdan.paimengaicodemother.model.dto.run.RunCreateRequest;
 import com.zdan.paimengaicodemother.model.dto.run.RunUpdateRequest;
 import com.zdan.paimengaicodemother.model.entity.App;
+import com.zdan.paimengaicodemother.model.entity.CreditLedger;
 import com.zdan.paimengaicodemother.model.entity.GenerationRun;
 import com.zdan.paimengaicodemother.model.entity.User;
+import com.zdan.paimengaicodemother.model.enums.AgentCompleteStatusEnum;
+import com.zdan.paimengaicodemother.model.enums.CreditLedgerStatusEnum;
+import com.zdan.paimengaicodemother.model.vo.CreditFreezeVO;
 import com.zdan.paimengaicodemother.model.vo.RunVO;
 import com.zdan.paimengaicodemother.service.impl.GenerationRunServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,6 +46,7 @@ class GenerationRunServiceImplTest {
     private GenerationRunMapper mapper;
     private AppService appService;
     private ChatHistoryService chatHistoryService;
+    private CreditService creditService;
     private RedissonClient redissonClient;
     private RRateLimiter rateLimiter;
     private GenerationRunServiceImpl service;
@@ -50,10 +56,11 @@ class GenerationRunServiceImplTest {
         mapper = mock(GenerationRunMapper.class);
         appService = mock(AppService.class);
         chatHistoryService = mock(ChatHistoryService.class);
+        creditService = mock(CreditService.class);
         redissonClient = mock(RedissonClient.class);
         rateLimiter = mock(RRateLimiter.class);
         when(redissonClient.getRateLimiter(anyString())).thenReturn(rateLimiter);
-        service = new GenerationRunServiceImpl(appService, chatHistoryService, redissonClient, 10);
+        service = new GenerationRunServiceImpl(appService, chatHistoryService, redissonClient, 10, creditService);
         ReflectionTestUtils.setField(service, "mapper", mapper);
     }
 
@@ -353,7 +360,7 @@ class GenerationRunServiceImplTest {
     void completeRunRejectsInvalidStatus() {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.completeRun("run-1", completeRequest("run-1", "unknown", "/tmp/ws")));
-        assertEquals("status 仅接受 success/failed", ex.getMessage());
+        assertEquals("status 仅接受 success/failed/aborted", ex.getMessage());
     }
 
     /**
@@ -408,5 +415,194 @@ class GenerationRunServiceImplTest {
                 () -> service.acquireWireframeDailyQuota(null));
         assertEquals("userId 不能为空", ex.getMessage());
         verify(redissonClient, never()).getRateLimiter(anyString());
+    }
+
+    // ── #10 积分：completeRun 三剧本记账 + run 终态一致 ──
+
+    private GenerationRun terminalRunEntity(String runId, String phase) {
+        return run(runId, 1L, phase);
+    }
+
+    /**
+     * 成功回调：结算积分（FROZEN → SETTLED）+ run 推进 done 终态
+     */
+    @Test
+    void completeRunSuccessSettlesCreditAndMarksDone() {
+        App app = new App();
+        app.setId(1L);
+        app.setCodeGenType("html");
+        when(appService.getById(1L)).thenReturn(app);
+        when(mapper.selectOneById("run-1")).thenReturn(terminalRunEntity("run-1", "coding"));
+
+        AgentCompleteRequest request = completeRequest("run-1", "success", "/tmp/ws/html_1");
+        request.setMessages(List.of(message("user", "hello"), message("ai", "<html>page</html>")));
+        service.completeRun("run-1", request);
+
+        verify(creditService).settleRun("run-1");
+        verify(creditService, never()).refundRun(anyString(), any(), any(), any());
+        // run 终态与台账一致：success → done
+        verify(mapper).update(argThat(r -> "done".equals(r.getPhase())
+                && "run-1".equals(r.getRunId())), anyBoolean());
+    }
+
+    /**
+     * 失败回调：全额退款 + 写错误历史 + run 推进 failed 终态
+     */
+    @Test
+    void completeRunFailedRefundsAndMarksFailed() {
+        App app = new App();
+        app.setId(1L);
+        when(appService.getById(1L)).thenReturn(app);
+        when(mapper.selectOneById("run-1")).thenReturn(terminalRunEntity("run-1", "coding"));
+
+        AgentCompleteRequest request = completeRequest("run-1", "failed", null);
+        request.setErrorMessage("boom");
+        service.completeRun("run-1", request);
+
+        verify(creditService).refundRun(eq("run-1"), eq(AgentCompleteStatusEnum.FAILED), isNull(), any());
+        verify(chatHistoryService, times(1))
+                .addChatMessage(eq(1L), eq("生成失败：boom"), eq("ai"), any(User.class));
+        verify(mapper).update(argThat(r -> "failed".equals(r.getPhase())
+                && "run-1".equals(r.getRunId())), anyBoolean());
+    }
+
+    /**
+     * 中断回调：历史 ai 消息带 [用户中断] 标记 + 按已写文件数折算退款 + run 推进 aborted 终态
+     */
+    @Test
+    void completeRunAbortedMarksHistoryAndRefundsPartial() {
+        App app = new App();
+        app.setId(1L);
+        when(appService.getById(1L)).thenReturn(app);
+        when(mapper.selectOneById("run-1")).thenReturn(terminalRunEntity("run-1", "coding"));
+
+        AgentCompleteRequest request = completeRequest("run-1", "aborted", null);
+        request.setFilesWritten(2);
+        request.setMessages(List.of(message("user", "hello"), message("ai", "已保留 2 个文件")));
+        service.completeRun("run-1", request);
+
+        // 历史 ai 消息带 [用户中断] 标记（验收）
+        verify(chatHistoryService).addChatMessage(eq(1L), eq("[用户中断] 已保留 2 个文件"), eq("ai"), any(User.class));
+        // 中断折算退款（filesWritten=2，里程碑从 run.milestones 解析，未 stub → milestoneCount null → 基础比例）
+        verify(creditService).refundRun(eq("run-1"), eq(AgentCompleteStatusEnum.ABORTED), eq(2), isNull());
+        verify(creditService, never()).settleRun(anyString());
+        // run 终态与台账一致：aborted
+        verify(mapper).update(argThat(r -> "aborted".equals(r.getPhase())
+                && "run-1".equals(r.getRunId())), anyBoolean());
+    }
+
+    /**
+     * 中断回调首文件落盘前（filesWritten=0）：全额退款路径（台账 REFUNDED，Java 侧折算）
+     */
+    @Test
+    void completeRunAbortedNoFileRefundsFull() {
+        App app = new App();
+        app.setId(1L);
+        when(appService.getById(1L)).thenReturn(app);
+        when(mapper.selectOneById("run-1")).thenReturn(terminalRunEntity("run-1", "coding"));
+
+        AgentCompleteRequest request = completeRequest("run-1", "aborted", null);
+        request.setFilesWritten(0);
+        service.completeRun("run-1", request);
+
+        verify(creditService).refundRun(eq("run-1"), eq(AgentCompleteStatusEnum.ABORTED), eq(0), any());
+        verify(creditService, never()).settleRun(anyString());
+    }
+
+    // ── #10 积分：冻结 ──
+
+    private CreditFreezeRequest freezeRequest(String intensity) {
+        CreditFreezeRequest request = new CreditFreezeRequest();
+        request.setIntensity(intensity);
+        return request;
+    }
+
+    /**
+     * 冻结成功：wireframe_confirmed 阶段扣款 + 台账关联写回 run.creditLedgerRef
+     */
+    @Test
+    void freezeCreditSucceedsAndLinksLedgerRef() {
+        when(mapper.selectOneById("run-1")).thenReturn(run("run-1", 1L, "wireframe_confirmed"));
+        CreditFreezeVO vo = new CreditFreezeVO();
+        vo.setLedgerId(9L);
+        vo.setFrozenAmount(100);
+        vo.setBalance(400);
+        when(creditService.freeze(eq("run-1"), eq(1L), eq(1L), eq("standard"))).thenReturn(vo);
+
+        CreditFreezeVO result = service.freezeCredit("run-1", freezeRequest("standard"));
+
+        assertEquals(9L, result.getLedgerId());
+        verify(mapper).update(argThat(r -> "run-1".equals(r.getRunId()) && "9".equals(r.getCreditLedgerRef())), anyBoolean());
+    }
+
+    /**
+     * 冻结幂等：creditLedgerRef 已关联（同 run 已冻结过）→ 直接返回既有台账，不重复扣款
+     */
+    @Test
+    void freezeCreditIdempotentReturnsExisting() {
+        GenerationRun already = run("run-1", 1L, "coding");
+        already.setCreditLedgerRef("9");
+        when(mapper.selectOneById("run-1")).thenReturn(already);
+        when(creditService.getByRunId("run-1")).thenReturn(frozenLedgerEntity());
+        when(creditService.getBalance(1L)).thenReturn(300);
+
+        CreditFreezeVO result = service.freezeCredit("run-1", freezeRequest("standard"));
+
+        assertEquals(9L, result.getLedgerId());
+        assertEquals(300, result.getBalance());
+        verify(creditService, never()).freeze(anyString(), any(), any(), any());
+    }
+
+    /**
+     * 冻结前置：非 wireframe_confirmed 阶段拒绝（线框闸门经济学，冻结时点=进入 codegen）
+     */
+    @Test
+    void freezeCreditRejectsNonConfirmedPhase() {
+        when(mapper.selectOneById("run-1")).thenReturn(run("run-1", 1L, "wireframe_pending"));
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.freezeCredit("run-1", freezeRequest("standard")));
+        assertEquals("当前阶段（wireframe_pending）不能冻结积分，请先确认线框", ex.getMessage());
+        verify(creditService, never()).freeze(anyString(), any(), any(), any());
+    }
+
+    /**
+     * 冻结：run 不存在 → NOT_FOUND
+     */
+    @Test
+    void freezeCreditRejectsMissingRun() {
+        when(mapper.selectOneById("run-1")).thenReturn(null);
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.freezeCredit("run-1", freezeRequest("standard")));
+        assertEquals("运行不存在", ex.getMessage());
+    }
+
+    /**
+     * 中断回调的里程碑数：从 run.milestones JSON 解析后传给退款折算
+     */
+    @Test
+    void completeRunAbortedPassesMilestoneCount() {
+        App app = new App();
+        app.setId(1L);
+        when(appService.getById(1L)).thenReturn(app);
+        GenerationRun coding = run("run-1", 1L, "coding");
+        coding.setMilestones("[\"开始生成\",\"规划页面结构\"]");
+        when(mapper.selectOneById("run-1")).thenReturn(coding);
+
+        AgentCompleteRequest request = completeRequest("run-1", "aborted", null);
+        request.setFilesWritten(1);
+        service.completeRun("run-1", request);
+
+        verify(creditService).refundRun(eq("run-1"), eq(AgentCompleteStatusEnum.ABORTED), eq(1), eq(2));
+    }
+
+    private CreditLedger frozenLedgerEntity() {
+        return CreditLedger.builder()
+                .id(9L)
+                .runId("run-1")
+                .userId(1L)
+                .appId(1L)
+                .status(CreditLedgerStatusEnum.FROZEN.getValue())
+                .frozenAmount(100)
+                .build();
     }
 }

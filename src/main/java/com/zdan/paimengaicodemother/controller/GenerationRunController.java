@@ -8,9 +8,11 @@ import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ConcurrentRunException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.model.dto.run.AgentCompleteRequest;
+import com.zdan.paimengaicodemother.model.dto.run.CreditFreezeRequest;
 import com.zdan.paimengaicodemother.model.dto.run.RunCreateRequest;
 import com.zdan.paimengaicodemother.model.dto.run.RunUpdateRequest;
 import com.zdan.paimengaicodemother.model.dto.run.WireframeQuotaRequest;
+import com.zdan.paimengaicodemother.model.vo.CreditFreezeVO;
 import com.zdan.paimengaicodemother.model.vo.RunVO;
 import com.zdan.paimengaicodemother.service.GenerationRunService;
 import lombok.extern.slf4j.Slf4j;
@@ -147,6 +149,24 @@ public class GenerationRunController {
     }
 
     /**
+     * 冻结积分（Issue #10）：TS Agent 在「确认线框进入 codegen」时刻调用（架构 §7 扣费协议）
+     * 冻结额 = 基础价 × 生成类型系数 × 强度档位系数；余额不足 → 40201（TS Agent 映射为 error 事件拒绝 codegen）；
+     * 同 runId 幂等（重复冻结返回既有台账不重复扣款）
+     *
+     * @param runId         运行 id（幂等键）
+     * @param request       冻结请求（intensity）
+     * @param authorization Authorization 头
+     * @return 冻结结果（台账 id / 冻结额 / 余额）
+     */
+    @PostMapping("/agent/runs/{runId}/credit/freeze")
+    public ResponseEntity<BaseResponse<CreditFreezeVO>> freezeCredit(@PathVariable String runId,
+                                                                     @RequestBody(required = false) CreditFreezeRequest request,
+                                                                     @RequestHeader(value = "Authorization", required = false) String authorization) {
+        checkInternalAuth(authorization);
+        return ResponseEntity.ok(ResultUtils.success(generationRunService.freezeCredit(runId, request)));
+    }
+
+    /**
      * 校验内部 Bearer 服务令牌（无/错 → 401）
      *
      * @param authorization Authorization 头
@@ -204,6 +224,10 @@ public class GenerationRunController {
         }
         if (code == ErrorCode.TOO_MANY_REQUEST.getCode()) {
             return HttpStatus.TOO_MANY_REQUESTS.value();
+        }
+        if (code == ErrorCode.CREDIT_NOT_ENOUGH.getCode()) {
+            // 402 Payment Required：余额不足（TS Agent 据此映射「积分不足」error 事件拒绝 codegen）
+            return HttpStatus.PAYMENT_REQUIRED.value();
         }
         return HttpStatus.INTERNAL_SERVER_ERROR.value();
     }

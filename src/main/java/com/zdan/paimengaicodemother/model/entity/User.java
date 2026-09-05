@@ -73,6 +73,12 @@ public class User implements Serializable {
     private String userRole;
 
     /**
+     * 积分余额（管理员手动充值，架构 §7 MVP 后台充值；生成冻结/结算/退款经 CreditService 变动）
+     */
+    @Column("credits")
+    private Integer credits;
+
+    /**
      * 编辑时间
      */
     @Column("editTime")

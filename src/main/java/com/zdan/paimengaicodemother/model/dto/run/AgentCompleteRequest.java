@@ -29,7 +29,7 @@ public class AgentCompleteRequest implements Serializable {
     private Long userId;
 
     /**
-     * 完成状态，success/failed
+     * 完成状态，success/failed/aborted（#10 新增 aborted：用户中断）
      */
     private String status;
 
@@ -39,12 +39,17 @@ public class AgentCompleteRequest implements Serializable {
     private List<Message> messages;
 
     /**
+     * 中断时已落盘文件数（status=aborted 时用于「首个文件落盘前 = 全额退款」折算；成功/失败可空）
+     */
+    private Integer filesWritten;
+
+    /**
      * 工作区绝对路径（success 时构建产物落点）
      */
     private String workspacePath;
 
     /**
-     * 失败时的错误信息（status=failed 时写错误历史）
+     * 失败时的错误信息（status=failed 时写错误历史；aborted 时可附中断原因）
      */
     private String errorMessage;
 

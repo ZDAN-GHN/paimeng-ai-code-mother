@@ -50,6 +50,20 @@ python-agent:
 agent:
   # 线框生成每用户每日限频（滚动 24 小时窗口）
   wireframe-daily-limit: ${AGENT_WIREFRAME_DAILY_LIMIT:10}
+  # 积分计费（Issue #10，架构 §7 按次 + 档位系数；冻结额 = 基础价 × 生成类型系数 × 强度档系数）
+  credit:
+    base-price: ${AGENT_CREDIT_BASE_PRICE:100}
+    # 生成类型系数：html/multi_file/vue_project
+    html-multiplier: 1
+    multi-file-multiplier: 2
+    vue-project-multiplier: 3
+    # 强度档位系数：fast/standard/deep（与 TS Agent INTENSITY_TIERS.priceMultiplier 对齐）
+    fast-multiplier: 1
+    standard-multiplier: 1
+    deep-multiplier: 2
+    # 中断折算：已写文件且进入 review（里程碑≥3）按此比例结算，否则按基础比例（剩余部分退款）
+    interrupted-advanced-settle-ratio: 0.7
+    interrupted-basic-settle-ratio: 0.5
   # 短时 JWT（Issue #12）：登录态换取浏览器直连 TS Agent 的令牌；secret 与 TS Agent 侧 JWT_SECRET 取同一值
   jwt:
     secret: ${AGENT_JWT_SECRET:}

@@ -5,6 +5,7 @@ import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ConcurrentRunException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.model.dto.run.RunCreateRequest;
+import com.zdan.paimengaicodemother.model.vo.CreditFreezeVO;
 import com.zdan.paimengaicodemother.model.vo.RunVO;
 import com.zdan.paimengaicodemother.service.GenerationRunService;
 import org.junit.jupiter.api.BeforeEach;
@@ -253,5 +254,69 @@ class GenerationRunControllerTest {
                         .content("{\"userId\":1}"))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.message").value("今日线框生成次数已用完，请明天再试"));
+    }
+
+    /**
+     * 冻结积分：无 Bearer → 401
+     */
+    @Test
+    void freezeCreditWithoutBearerReturns401() throws Exception {
+        mockMvc.perform(post("/internal/agent/runs/run-1/credit/freeze")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"intensity\":\"standard\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    /**
+     * 冻结积分：合法调用 → 200 + 冻结结果
+     */
+    @Test
+    void freezeCreditWithValidBearerReturns200() throws Exception {
+        CreditFreezeVO vo = new CreditFreezeVO();
+        vo.setLedgerId(9L);
+        vo.setFrozenAmount(100);
+        vo.setBalance(400);
+        when(generationRunService.freezeCredit(eq("run-1"), any())).thenReturn(vo);
+
+        mockMvc.perform(post("/internal/agent/runs/run-1/credit/freeze")
+                        .header("Authorization", AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"intensity\":\"standard\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.ledgerId").value(9))
+                .andExpect(jsonPath("$.data.frozenAmount").value(100))
+                .andExpect(jsonPath("$.data.balance").value(400));
+    }
+
+    /**
+     * 冻结积分：余额不足（service 抛 CREDIT_NOT_ENOUGH）→ 402 + 明确文案（TS Agent 映射 error 事件）
+     */
+    @Test
+    void freezeCreditInsufficientBalanceReturns402() throws Exception {
+        doThrow(new BusinessException(ErrorCode.CREDIT_NOT_ENOUGH, "积分不足，当前余额 50，本次生成需 100 积分，请先充值"))
+                .when(generationRunService).freezeCredit(eq("run-1"), any());
+
+        mockMvc.perform(post("/internal/agent/runs/run-1/credit/freeze")
+                        .header("Authorization", AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"intensity\":\"standard\"}"))
+                .andExpect(status().isPaymentRequired())
+                .andExpect(jsonPath("$.message").value("积分不足，当前余额 50，本次生成需 100 积分，请先充值"));
+    }
+
+    /**
+     * 冻结积分：未确认线框（service 抛 FORBIDDEN）→ 403
+     */
+    @Test
+    void freezeCreditNonConfirmedPhaseReturns403() throws Exception {
+        doThrow(new BusinessException(ErrorCode.FORBIDDEN_ERROR, "当前阶段（wireframe_pending）不能冻结积分，请先确认线框"))
+                .when(generationRunService).freezeCredit(eq("run-1"), any());
+
+        mockMvc.perform(post("/internal/agent/runs/run-1/credit/freeze")
+                        .header("Authorization", AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"intensity\":\"standard\"}"))
+                .andExpect(status().isForbidden());
     }
 }
