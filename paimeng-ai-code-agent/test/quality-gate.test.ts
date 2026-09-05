@@ -160,9 +160,10 @@ describe('Issue #9：质检失败有界重试', () => {
 describe('Issue #9：硬上限优雅收尾（绝不硬杀）', () => {
   it('limit 剧本（工具调用无休止）→ max_tool_calls/max_turns 截断 → 注入收尾指令输出完整交代 → done', async () => {
     const root = makeWorkspaceRoot()
+    const calls: RunCall[] = []
     const token = await makeToken()
     const app = buildTestApp(root, {
-      agentRoutes: { runClient: fakeRunClient([], {}) },
+      agentRoutes: { runClient: fakeRunClient(calls, {}) },
     })
     const response = await app.inject({
       method: 'POST',
@@ -180,6 +181,13 @@ describe('Issue #9：硬上限优雅收尾（绝不硬杀）', () => {
     expect(eventTypes).toContain('tool_request')
     // 无 error 终态
     expect(result.some((f) => f.event === 'error')).toBe(false)
+    // 状态机仍按拓扑推进到 done（phase 序列 coding → review → done，不卡在 coding）
+    const phases = calls.map((call) => call.body.phase).filter((phase): phase is string => Boolean(phase))
+    expect(phases).toContain('coding')
+    expect(phases).toContain('review')
+    expect(phases).toContain('done')
+    const milestoneTitles = result.filter((f) => f.event === 'milestone').map((f) => String(f.data.title))
+    expect(milestoneTitles).toContain('生成完成')
   })
 })
 

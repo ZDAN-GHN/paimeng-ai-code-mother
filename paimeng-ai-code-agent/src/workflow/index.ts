@@ -314,8 +314,12 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
 
       // ── reviewer 工位：三重门禁（#9）──
       // 超限截断后不再走质检/重试：已达成本上界，重试必然再次触发同一上限；
-      // 以收尾交代直接进入成功终态（架构 §3.3「超限 = 优雅收尾，用户拿到完整交代，绝不硬杀」）
+      // 以收尾交代直接进入成功终态（架构 §3.3「超限 = 优雅收尾，用户拿到完整交代，绝不硬杀」）。
+      // 状态机仍按拓扑推进（coding → review → done），review 不跑门禁直接 PASS——
+      // 保证 phase 序列与里程碑完整（「检查生成结果」「生成完成」）
       if (truncatedByLimit) {
+        actor.send({ type: 'PROCEED' })
+        yield* sync()
         actor.send({ type: 'PASS' })
         yield* sync()
         break
