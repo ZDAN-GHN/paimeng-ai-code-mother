@@ -21,6 +21,8 @@ export interface QualityScore {
   score: number
   errors: string[]
   suggestions: string[]
+  // 本次质检模型调用的 token 用量（#9 计量：reviewer 也是 run 的模型调用，计入 run.token_usage）
+  usage?: { inputTokens: number; outputTokens: number; totalTokens: number }
 }
 
 export interface QualityScorer {
@@ -64,7 +66,16 @@ export class LlmQualityScorer implements QualityScorer {
       prompt: codeContent,
       maxRetries: 0,
     })
-    return parseQualityScore(result.text)
+    const score = parseQualityScore(result.text)
+    // 质检模型调用同样产生 token 消耗（#9 计量）：随评分回传，由 workflow 累计进 run.token_usage
+    return {
+      ...score,
+      usage: {
+        inputTokens: result.usage.inputTokens ?? 0,
+        outputTokens: result.usage.outputTokens ?? 0,
+        totalTokens: result.usage.totalTokens ?? 0,
+      },
+    }
   }
 }
 
@@ -73,11 +84,12 @@ export class QualityScoreGate implements ReviewGate {
   constructor(private readonly scorer: QualityScorer) {}
   async verify(context: ReviewContext): Promise<GateResult> {
     const score = await this.scorer.score(context.codeContent)
+    // #9 计量：质检模型调用 token 经门禁结果透传，由 workflow 累计进 run.token_usage
     if (score.isValid) {
-      return { name: this.name, passed: true, detail: `质检通过（得分 ${score.score}）` }
+      return { name: this.name, passed: true, detail: `质检通过（得分 ${score.score}）`, usage: score.usage }
     }
     const detail = score.errors.length > 0 ? score.errors.join('；') : '质检未通过'
-    return { name: this.name, passed: false, detail }
+    return { name: this.name, passed: false, detail, usage: score.usage }
   }
 }
 

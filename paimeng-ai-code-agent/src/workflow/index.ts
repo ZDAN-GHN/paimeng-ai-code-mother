@@ -196,7 +196,13 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
       codeGenType: request.codeGenType ?? 'html',
       codeContent: readAndConcatenateCodeFiles(request.workspacePath ?? workspaceRoot),
     }
-    return runReviewGates(gates, context)
+    const verdict = await runReviewGates(gates, context)
+    // #9 计量：质检分门禁的模型调用 token 累计进 run 计量（reviewer 也是 run 的模型调用）
+    const qualityGate = verdict.gates.find((g) => g.name === 'quality-score')
+    if (qualityGate?.usage) {
+      accumulateUsage(tokenUsage, qualityGate.usage)
+    }
+    return verdict
   }
 
   try {

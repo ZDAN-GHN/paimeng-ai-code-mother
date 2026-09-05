@@ -11,6 +11,8 @@ export interface GateResult {
   passed: boolean
   // 人话说明（失败时给用户看的交代 / 重试注入的修复意见）
   detail: string
+  // 本门禁模型调用的 token 用量（#9 计量：质检分门禁经 LLM 调用，计入 run.token_usage）
+  usage?: { inputTokens: number; outputTokens: number; totalTokens: number }
 }
 
 // 质检评审上下文（reviewer 工位运行时收集）

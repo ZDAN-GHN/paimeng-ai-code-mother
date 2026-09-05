@@ -82,7 +82,18 @@ function asStreamBody(body: unknown): StreamRequest {
   const runId = typeof input.runId === 'string' ? input.runId : ''
   const appId = typeof input.appId === 'string' || typeof input.appId === 'number' ? input.appId : ''
   const message = typeof input.message === 'string' ? input.message : ''
-  const script = input.script === 'error' ? 'error' : input.script === 'images' ? 'images' : input.script === 'limit' ? 'limit' : 'success'
+  const script: StreamRequest['script'] =
+    input.script === 'error'
+      ? 'error'
+      : input.script === 'images'
+        ? 'images'
+        : input.script === 'limit'
+          ? 'limit'
+          : input.script === 'quality-fail-then-pass'
+            ? 'quality-fail-then-pass'
+            : input.script === 'quality-fail-always'
+              ? 'quality-fail-always'
+              : 'success'
   const intensity = typeof input.intensity === 'string' ? (input.intensity as Intensity) : undefined
   const codeGenType = typeof input.codeGenType === 'string' ? input.codeGenType : undefined
   // 输入历史滑窗（#9）：宽容解析 history: [{ role, content }]，非法条目丢弃
