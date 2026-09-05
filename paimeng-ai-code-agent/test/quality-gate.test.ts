@@ -4,7 +4,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { makeToken, makeWorkspaceRoot, buildTestApp } from './helpers.js'
+import { makeToken, makeWorkspaceRoot, buildTestApp, makePassingReviewGates } from './helpers.js'
 import { createScriptedLlm } from '../src/llm/index.js'
 import { RunClient, type Run } from '../src/internal/runClient.js'
 import type { ReviewGateSet } from '../src/review/index.js'
@@ -76,6 +76,59 @@ function makeRetryOnceGates(): ReviewGateSet {
 }
 
 describe('Issue #9：质检失败有界重试', () => {
+  // 用真实 LlmQualityScorer + 质检剧本驱动 workflow（验收 1：质检失败剧本触发有界重试后通过）
+  it('quality-fail-then-pass 剧本：第 1 次质检失败触发重试，重试后通过 → done', async () => {
+    const { runGenerationWorkflow } = await import('../src/workflow/index.js')
+    const { LlmQualityScorer } = await import('../src/review/index.js')
+    const root = makeWorkspaceRoot()
+    const provider = createScriptedLlm('quality-fail-then-pass')
+    // 质检用真实 scorer（剧本控制 isValid），build/visual diff 用通过替身（聚焦质检重试行为）
+    const gates: ReviewGateSet = {
+      quality: new LlmQualityScorer(provider),
+      build: { verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
+      visualDiff: { verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
+    }
+    const events: Frame[] = []
+    for await (const ev of runGenerationWorkflow(
+      { runId: 'r', appId: 1, message: 'hello', workspacePath: root, script: 'quality-fail-then-pass' },
+      { provider, workspaceRoot: root, wireframePath: undefined, reviewGates: gates },
+    )) {
+      events.push({ event: ev.type, data: { ...(ev as object) } })
+    }
+    const eventTypes = events.map((e) => e.event)
+    expect(eventTypes.at(-1)).toBe('done')
+    const milestoneTitles = events.filter((e) => e.event === 'milestone').map((e) => String((e.data as { title: string }).title))
+    // 质检失败 → 重试：出现「根据质检意见重新生成」「复查生成结果」
+    expect(milestoneTitles).toContain('根据质检意见重新生成')
+    expect(milestoneTitles).toContain('复查生成结果')
+    expect(milestoneTitles).toContain('生成完成')
+  })
+
+  // 用真实 LlmQualityScorer + quality-fail-always 剧本（验收 1：耗尽后失败终态）
+  it('quality-fail-always 剧本：每次质检失败 → 有界重试耗尽 → failed 终态', async () => {
+    const { runGenerationWorkflow } = await import('../src/workflow/index.js')
+    const { LlmQualityScorer } = await import('../src/review/index.js')
+    const root = makeWorkspaceRoot()
+    const provider = createScriptedLlm('quality-fail-always')
+    const gates: ReviewGateSet = {
+      quality: new LlmQualityScorer(provider),
+      build: { verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
+      visualDiff: { verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
+    }
+    const events: Frame[] = []
+    for await (const ev of runGenerationWorkflow(
+      { runId: 'r', appId: 1, message: 'hello', workspacePath: root, script: 'quality-fail-always' },
+      { provider, workspaceRoot: root, wireframePath: undefined, reviewGates: gates },
+    )) {
+      events.push({ event: ev.type, data: { ...(ev as object) } })
+    }
+    const eventTypes = events.map((e) => e.event)
+    expect(eventTypes.at(-1)).toBe('error')
+    expect(events.some((e) => e.event === 'done')).toBe(false)
+    const errorMessage = String((events.at(-1)!.data as { message: string }).message)
+    expect(errorMessage).toContain('重试次数已用尽')
+  })
+
   it('质检第 1 次失败触发重试，重试后通过 → done；里程碑含「根据质检意见重新生成」', async () => {
     const root = makeWorkspaceRoot()
     const token = await makeToken()
@@ -209,32 +262,22 @@ describe('Issue #9：三档推理强度路由与上限', () => {
     expect(fast.limits.maxToolCalls).toBeLessThan(deep.limits.maxToolCalls)
   })
 
-  it('workflow 按档位路由到对应模型：provider.languageModel(tier.modelId) 被调用', async () => {
+  it('workflow 按档位路由到对应模型：provider.records 断言三档各自请求到对应模型配置', async () => {
     const { runGenerationWorkflow } = await import('../src/workflow/index.js')
-    const records: string[] = []
-    const provider = createScriptedLlm('success')
-    // 包装 languageModel 记录被请求的 modelId
-    const spyProvider = {
-      ...provider,
-      languageModel: (id: string) => {
-        records.push(id)
-        return provider.languageModel(id)
-      },
-    }
     const root = makeWorkspaceRoot()
-    const events: unknown[] = []
-    for await (const ev of runGenerationWorkflow(
-      { runId: 'r', appId: 1, message: 'hello', workspacePath: root, intensity: 'deep' },
-      {
-        provider: spyProvider as typeof provider,
-        workspaceRoot: root,
-        wireframePath: undefined,
-      },
-    )) {
-      events.push(ev)
+    // 三档各跑一次，从假 provider 的调用记录断言路由（验收 3：三档请求各自路由到对应模型配置）
+    for (const intensity of ['fast', 'standard', 'deep'] as const) {
+      const provider = createScriptedLlm('success')
+      for await (const _ev of runGenerationWorkflow(
+        { runId: 'r', appId: 1, message: 'hello', workspacePath: root, intensity },
+        { provider, workspaceRoot: root, wireframePath: undefined, reviewGates: makePassingReviewGates() },
+      )) {
+        // 消费完整流
+      }
+      // codegen 模型（scripted-{档位}）被调用；质检模型也被调用（默认门禁缺省时经 reviewGates 替身注入不触发，这里断言 codegen 路由）
+      const called = provider.records.map((r) => r.modelId)
+      expect(called).toContain(`scripted-${intensity}`)
     }
-    // deep 档：codegen 用 scripted-deep；质检模型调用（无 reviewGates 注入时走默认门禁 → 触发质检模型）
-    expect(records.some((id) => id === 'scripted-deep')).toBe(true)
   })
 
   it('workflow 按档位传 maxOutputTokens 给 provider（上限随档位变化）', async () => {
