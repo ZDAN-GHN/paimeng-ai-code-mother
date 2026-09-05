@@ -208,10 +208,16 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
                 ThrowUtils.throwIf(ChatHistoryMessageTypeEnum.getEnumByValue(message.getMessageType()) == null,
                         ErrorCode.PARAMS_ERROR, "messageType 仅接受 user/ai");
                 String content = message.getContent();
+                // 空内容跳过：failed 回调的 ai 可能为空（无产物内容，Java failed 分支另写错误历史），
+                // 空消息落库会抛「消息不能为空」，导致整个回调失败、记账/退款不执行（e2e 实测）
+                if (StrUtil.isBlank(content)) {
+                    log.info("跳过空消息（{}），runId: {}", message.getMessageType(), runId);
+                    continue;
+                }
                 // 用户中断：历史带 [用户中断] 标记（Issue #10 验收）
                 if (status == AgentCompleteStatusEnum.ABORTED
                         && ChatHistoryMessageTypeEnum.AI.getValue().equals(message.getMessageType())
-                        && StrUtil.isNotBlank(content) && !content.startsWith(INTERRUPT_MARK)) {
+                        && !content.startsWith(INTERRUPT_MARK)) {
                     content = INTERRUPT_MARK + content;
                 }
                 chatHistoryService.addChatMessage(request.getAppId(), content, message.getMessageType(), user);

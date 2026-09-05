@@ -595,6 +595,29 @@ class GenerationRunServiceImplTest {
         verify(creditService).refundRun(eq("run-1"), eq(AgentCompleteStatusEnum.ABORTED), eq(1), eq(2));
     }
 
+    /**
+     * failed 回调的 ai 消息为空：跳过空消息（不抛「消息不能为空」），退款仍执行（e2e 实测根因）
+     */
+    @Test
+    void completeRunFailedWithEmptyAiMessage_skipsEmptyAndStillRefunds() {
+        App app = new App();
+        app.setId(1L);
+        when(appService.getById(1L)).thenReturn(app);
+        when(mapper.selectOneById("run-1")).thenReturn(terminalRunEntity("run-1", "coding"));
+
+        AgentCompleteRequest request = completeRequest("run-1", "failed", null);
+        request.setErrorMessage("boom");
+        request.setMessages(List.of(message("user", "hello"), message("ai", "")));
+        service.completeRun("run-1", request);
+
+        // 空 ai 跳过，只写 user + Java 错误历史
+        verify(chatHistoryService, times(1)).addChatMessage(eq(1L), eq("hello"), eq("user"), any(User.class));
+        verify(chatHistoryService, times(1)).addChatMessage(eq(1L), eq("生成失败：boom"), eq("ai"), any(User.class));
+        verify(chatHistoryService, times(2)).addChatMessage(anyLong(), anyString(), anyString(), any(User.class));
+        // 退款不被空消息阻断
+        verify(creditService).refundRun(eq("run-1"), eq(AgentCompleteStatusEnum.FAILED), isNull(), any());
+    }
+
     private CreditLedger frozenLedgerEntity() {
         return CreditLedger.builder()
                 .id(9L)
