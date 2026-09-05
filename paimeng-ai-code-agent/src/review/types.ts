@@ -14,9 +14,16 @@ export interface TokenUsage {
   totalTokens: number
 }
 
+// 门禁名常量（#9 审查整改：消除跨文件魔数字面量重复；门禁名是汇总/重试定位的键）
+export const GATE_NAMES = {
+  qualityScore: 'quality-score',
+  build: 'build',
+  visualDiff: 'visual-diff',
+} as const
+
 // 单道门禁的结果
 export interface GateResult {
-  // 门禁名（'quality-score' / 'build' / 'visual-diff'）
+  // 门禁名（GATE_NAMES.qualityScore / GATE_NAMES.build / GATE_NAMES.visualDiff）
   name: string
   passed: boolean
   // 人话说明（失败时给用户看的交代 / 重试注入的修复意见）

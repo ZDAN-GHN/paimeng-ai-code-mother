@@ -19,12 +19,14 @@ export function makeWorkspaceRoot(): string {
 export function makePassingReviewGates(): ReviewGateSet {
   return {
     quality: {
-      score: async () => ({ isValid: true, score: 100, errors: [], suggestions: [] }),
+      score: async () => ({ isValid: true, grade: 100, errors: [], suggestions: [] }),
     },
     build: {
+      name: 'build',
       verify: async () => ({ name: 'build', passed: true, detail: '测试替身通过' }),
     },
     visualDiff: {
+      name: 'visual-diff',
       verify: async () => ({ name: 'visual-diff', passed: true, detail: '测试替身通过' }),
     },
   }

@@ -5,7 +5,6 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { makeWorkspaceRoot } from './helpers.js'
 import {
-  BuildGate,
   DefaultBuildVerifier,
   DefaultVisualDiffVerifier,
   LlmQualityScorer,
@@ -31,30 +30,30 @@ describe('结构化质检分（Issue #9）', () => {
     expect(extractJsonText('plain text')).toBe('plain text')
   })
 
-  it('parseQualityScore：合法 JSON → isValid/score/errors/suggestions', () => {
+  it('parseQualityScore：合法 JSON → isValid/grade/errors/suggestions', () => {
     const score = parseQualityScore('{"isValid": false, "errors": ["缺根元素"], "suggestions": ["补全 html 根"]}')
     expect(score.isValid).toBe(false)
-    expect(score.score).toBeLessThan(100)
+    expect(score.grade).toBeLessThan(100)
     expect(score.errors).toEqual(['缺根元素'])
     expect(score.suggestions).toEqual(['补全 html 根'])
   })
 
   it('parseQualityScore：isValid=true → 满分', () => {
     expect(parseQualityScore('{"isValid": true}').isValid).toBe(true)
-    expect(parseQualityScore('{"isValid": true}').score).toBe(100)
+    expect(parseQualityScore('{"isValid": true}').grade).toBe(100)
   })
 
   it('parseQualityScore：无法解析 → 视为未通过（宁可重试不放行劣质产物）', () => {
     const score = parseQualityScore('not json at all')
     expect(score.isValid).toBe(false)
-    expect(score.score).toBe(0)
+    expect(score.grade).toBe(0)
   })
 
   it('LlmQualityScorer：success 剧本 → 质检通过', async () => {
     const scorer = new LlmQualityScorer(createScriptedLlm('success'))
     const score = await scorer.score('<html><body>ok</body></html>')
     expect(score.isValid).toBe(true)
-    expect(score.score).toBe(100)
+    expect(score.grade).toBe(100)
   })
 
   it('LlmQualityScorer：quality-fail-always 剧本 → 质检失败', async () => {
@@ -73,7 +72,7 @@ describe('结构化质检分（Issue #9）', () => {
 
   it('QualityScoreGate 通过 → passed', async () => {
     const gate = new QualityScoreGate({
-      score: async () => ({ isValid: true, score: 100, errors: [], suggestions: [] }),
+      score: async () => ({ isValid: true, grade: 100, errors: [], suggestions: [] }),
     })
     const result = await gate.verify(makeContext())
     expect(result.passed).toBe(true)
@@ -188,16 +187,5 @@ describe('readAndConcatenateCodeFiles（Issue #9）', () => {
     expect(content).not.toContain('dep.js')
     expect(content).not.toContain('.hidden')
     expect(content).not.toContain('not code')
-  })
-})
-
-describe('BuildGate / QualityScoreGate 包装（Issue #9）', () => {
-  it('BuildGate 透传注入 verifier 的结果', async () => {
-    const gate = new BuildGate({
-      verify: async () => ({ name: 'build', passed: false, detail: '注入失败' }),
-    })
-    const result = await gate.verify(makeContext())
-    expect(result.passed).toBe(false)
-    expect(result.name).toBe('build')
   })
 })

@@ -83,8 +83,16 @@ const SCRIPT_WHITELIST: Record<string, NonNullable<StreamRequest['script']>> = {
   error: 'error',
   images: 'images',
   limit: 'limit',
+  'limit-length': 'limit-length',
   'quality-fail-then-pass': 'quality-fail-then-pass',
   'quality-fail-always': 'quality-fail-always',
+}
+
+// 生成类型白名单（#9 审查整改：codeGenType 三元链改查表，与 script 查表风格一致；其余回退 undefined → workflow 默认 html）
+const CODE_GEN_TYPE_WHITELIST: Record<string, NonNullable<StreamRequest['codeGenType']>> = {
+  html: 'html',
+  multi_file: 'multi_file',
+  vue_project: 'vue_project',
 }
 
 function asStreamBody(body: unknown): StreamRequest {
@@ -94,10 +102,7 @@ function asStreamBody(body: unknown): StreamRequest {
   const message = typeof input.message === 'string' ? input.message : ''
   const script = typeof input.script === 'string' ? SCRIPT_WHITELIST[input.script] ?? 'success' : 'success'
   const intensity = typeof input.intensity === 'string' ? (input.intensity as Intensity) : undefined
-  // 生成类型合法值校验（白名单；非法/缺省 → undefined → workflow 回退 html）
-  const codeGenType = input.codeGenType === 'html' || input.codeGenType === 'multi_file' || input.codeGenType === 'vue_project'
-    ? input.codeGenType
-    : undefined
+  const codeGenType = typeof input.codeGenType === 'string' ? CODE_GEN_TYPE_WHITELIST[input.codeGenType] : undefined
   // 输入历史滑窗（#9）：宽容解析 history: [{ role, content }]，非法条目丢弃
   const history = Array.isArray(input.history)
     ? (input.history as Array<Record<string, unknown>>)

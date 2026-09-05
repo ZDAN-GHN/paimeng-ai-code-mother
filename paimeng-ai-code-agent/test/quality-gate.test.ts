@@ -61,12 +61,12 @@ function makeRetryOnceGates(): ReviewGateSet {
       score: async () => {
         calls += 1
         return calls === 1
-          ? { isValid: false, score: 60, errors: ['模拟首次质检失败'], suggestions: ['调整布局'] }
-          : { isValid: true, score: 100, errors: [], suggestions: [] }
+          ? { isValid: false, grade: 60, errors: ['模拟首次质检失败'], suggestions: ['调整布局'] }
+          : { isValid: true, grade: 100, errors: [], suggestions: [] }
       },
     },
-    build: { verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
-    visualDiff: { verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
+    build: { name: 'build', verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
+    visualDiff: { name: 'visual-diff', verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
   }
 }
 
@@ -80,8 +80,8 @@ describe('Issue #9：质检失败有界重试', () => {
     // 质检用真实 scorer（剧本控制 isValid），build/visual diff 用通过替身（聚焦质检重试行为）
     const gates: ReviewGateSet = {
       quality: new LlmQualityScorer(provider),
-      build: { verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
-      visualDiff: { verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
+      build: { name: 'build', verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
+      visualDiff: { name: 'visual-diff', verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
     }
     const events: Frame[] = []
     for await (const ev of runGenerationWorkflow(
@@ -107,8 +107,8 @@ describe('Issue #9：质检失败有界重试', () => {
     const provider = createScriptedLlm('quality-fail-always')
     const gates: ReviewGateSet = {
       quality: new LlmQualityScorer(provider),
-      build: { verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
-      visualDiff: { verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
+      build: { name: 'build', verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
+      visualDiff: { name: 'visual-diff', verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
     }
     const events: Frame[] = []
     for await (const ev of runGenerationWorkflow(
@@ -156,10 +156,10 @@ describe('Issue #9：质检失败有界重试', () => {
     const token = await makeToken()
     const alwaysFail: ReviewGateSet = {
       quality: {
-        score: async () => ({ isValid: false, score: 40, errors: ['永远失败'], suggestions: ['x'] }),
+        score: async () => ({ isValid: false, grade: 40, errors: ['永远失败'], suggestions: ['x'] }),
       },
-      build: { verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
-      visualDiff: { verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
+      build: { name: 'build', verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
+      visualDiff: { name: 'visual-diff', verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
     }
     const app = buildTestApp(root, {
       agentRoutes: { runClient: fakeRunClient([], {}), reviewGates: alwaysFail },
@@ -185,11 +185,11 @@ describe('Issue #9：质检失败有界重试', () => {
       quality: {
         score: async () => {
           qualityCalls += 1
-          return { isValid: false, score: 0, errors: ['n'], suggestions: [] }
+          return { isValid: false, grade: 0, errors: ['n'], suggestions: [] }
         },
       },
-      build: { verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
-      visualDiff: { verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
+      build: { name: 'build', verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
+      visualDiff: { name: 'visual-diff', verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
     }
     const app = buildTestApp(root, {
       agentRoutes: { runClient: fakeRunClient([], {}), reviewGates: alwaysFail },
@@ -236,6 +236,32 @@ describe('Issue #9：硬上限优雅收尾（绝不硬杀）', () => {
     expect(phases).toContain('done')
     const milestoneTitles = result.filter((f) => f.event === 'milestone').map((f) => String(f.data.title))
     expect(milestoneTitles).toContain('生成完成')
+  })
+
+  it('limit-length 剧本（输出达 max_output_tokens 被截断，finishReason=length）→ 同样优雅收尾 → done（审查整改 c4）', async () => {
+    const root = makeWorkspaceRoot()
+    const calls: RunCall[] = []
+    const token = await makeToken()
+    const app = buildTestApp(root, {
+      agentRoutes: { runClient: fakeRunClient(calls, {}) },
+    })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/stream',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-limit-length', appId: 1, message: 'hello', workspacePath: root, script: 'limit-length', intensity: 'fast' },
+    })
+    const result = frames(response.body)
+    const eventTypes = types(result)
+    // 输出长度截断同样是优雅收尾（非硬杀）：done 终态 + 收尾交代文本
+    expect(eventTypes.at(-1)).toBe('done')
+    const responseText = result.filter((f) => f.event === 'ai_response').map((f) => String(f.data.data)).join('')
+    expect(responseText).toContain('已达本次生成硬上限')
+    expect(result.some((f) => f.event === 'error')).toBe(false)
+    const phases = calls.map((call) => call.body.phase).filter((phase): phase is string => Boolean(phase))
+    expect(phases).toContain('coding')
+    expect(phases).toContain('review')
+    expect(phases).toContain('done')
   })
 })
 
@@ -354,16 +380,18 @@ describe('Issue #9：视觉 diff 以已确认线框为基准', () => {
 
     let receivedWireframePath: string | undefined
     const recordingVisualDiff: VisualDiffVerifier = {
+      name: 'visual-diff',
       verify: async (ctx) => {
         receivedWireframePath = ctx.wireframePath
         return { name: 'visual-diff', passed: true, detail: 'ok' }
       },
     }
     const recordingBuild: BuildVerifier = {
+      name: 'build',
       verify: async (ctx) => ({ name: 'build', passed: true, detail: 'ok' }),
     }
     const gates: ReviewGateSet = {
-      quality: { score: async () => ({ isValid: true, score: 100, errors: [], suggestions: [] }) },
+      quality: { score: async () => ({ isValid: true, grade: 100, errors: [], suggestions: [] }) },
       build: recordingBuild,
       visualDiff: recordingVisualDiff,
     }
@@ -391,9 +419,9 @@ describe('Issue #9：视觉 diff 以已确认线框为基准', () => {
     // 生成页（success 剧本产物）不含 page-0 区段 → 视觉 diff 失败
     const context = { wireframe: { relativeUrl: 'wireframe/wireframe.html', pageCount: 1, confirmed: true } }
     const gates: ReviewGateSet = {
-      quality: { score: async () => ({ isValid: true, score: 100, errors: [], suggestions: [] }) },
-      build: { verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
-      visualDiff: { verify: async () => ({ name: 'visual-diff', passed: false, detail: '生成页缺少线框页面区段 page-0' }) },
+      quality: { score: async () => ({ isValid: true, grade: 100, errors: [], suggestions: [] }) },
+      build: { name: 'build', verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
+      visualDiff: { name: 'visual-diff', verify: async () => ({ name: 'visual-diff', passed: false, detail: '生成页缺少线框页面区段 page-0' }) },
     }
     const token = await makeToken()
     const app = buildTestApp(root, {

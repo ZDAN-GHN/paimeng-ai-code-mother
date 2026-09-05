@@ -22,6 +22,8 @@ export type LlmScript =
   | 'quality-fail-always'
   // 超限剧本：工具调用无休止（触发 max_tool_calls / max_turns 上限，验证优雅收尾）
   | 'limit'
+  // 输出长度截断剧本：finishReason='length'（模拟达 max_output_tokens 被 provider 截断，验证 length 路径优雅收尾）
+  | 'limit-length'
 
 // 单次模型调用记录（测试断言：路由到哪个模型 id、收到什么上限、prompt 是否含工具结果）
 export interface ScriptedCallRecord {
@@ -137,7 +139,9 @@ class ScriptedLanguageModel implements LanguageModelV2 {
   async doGenerate(options: LanguageModelV2CallOptions) {
     this.record(options)
     // 收尾调用（优雅收尾注入收尾指令后）：输出用户可见的完整交代
-    const wrapUp = this.script === 'limit' ? '\n已达本次生成硬上限，以上为已生成的页面内容。\n' : '\n页面已写入 index.html\n'
+    const wrapUp = this.script === 'limit' || this.script === 'limit-length'
+      ? '\n已达本次生成硬上限，以上为已生成的页面内容。\n'
+      : '\n页面已写入 index.html\n'
     return {
       content: [{ type: 'text' as const, text: buildPageContent(lastUserText(options)) + wrapUp }],
       finishReason: 'stop' as const,
@@ -160,22 +164,32 @@ class ScriptedLanguageModel implements LanguageModelV2 {
       // error 剧本：模型一进流式即失败（工作流 catch 后走 failed 终态，error 后不再发业务事件）
       throw new Error('假 LLM 剧本故意失败')
     }
-    if (this.script === 'limit') {
-      // 超限剧本：工具调用无休止（每次都不带工具结果则继续调用工具，永不自然收尾）——
-      // 直到工作流侧 max_tool_calls / max_turns 上限截断（stopWhen）后注入收尾指令走 doGenerate
-      if (!hasToolResult(options)) {
+    if (this.script === 'limit' || this.script === 'limit-length') {
+      // 超限剧本（limit）：工具调用无休止（每次都不带工具结果则继续调用工具，永不自然收尾）——
+      // 直到工作流侧 max_tool_calls / max_turns 上限截断（stopWhen）后注入收尾指令走 doGenerate。
+      // 带/不带工具结果两分支仅 delta 文本不同，合并构造（审查整改 Duplicated Code）。
+      // 输出长度截断剧本（limit-length）：单轮输出后直接 finishReason='length'（模拟达 max_output_tokens 被截断），
+      // 工作流对 'length' 与 'tool-calls' 一视同仁触发优雅收尾（审查整改 c4 覆盖该分支）。
+      if (!hasToolResult(options) || this.script === 'limit-length') {
         const parts: LanguageModelV2StreamPart[] = [
           { type: 'text-start', id: 'page' },
           { type: 'text-delta', id: 'page', delta: '正在生成页面' },
           { type: 'text-end', id: 'page' },
-          {
-            type: 'tool-call',
-            toolCallId: `limit-${this.records.length}`,
-            toolName: 'writeFile',
-            input: JSON.stringify({ relativeFilePath: 'index.html', content: buildPageContent(lastUserText(options)) }),
-          },
-          { type: 'finish', finishReason: 'tool-calls', usage: { inputTokens: 2, outputTokens: 2, totalTokens: 4 } },
         ]
+        if (this.script === 'limit-length') {
+          // 输出长度截断：不再发起工具调用，直接以 length 结束本轮（模拟输出上限截断）
+          parts.push({ type: 'finish', finishReason: 'length', usage: { inputTokens: 2, outputTokens: 2, totalTokens: 4 } })
+        } else {
+          parts.push(
+            {
+              type: 'tool-call',
+              toolCallId: `limit-${this.records.length}`,
+              toolName: 'writeFile',
+              input: JSON.stringify({ relativeFilePath: 'index.html', content: buildPageContent(lastUserText(options)) }),
+            },
+            { type: 'finish', finishReason: 'tool-calls', usage: { inputTokens: 2, outputTokens: 2, totalTokens: 4 } },
+          )
+        }
         return { stream: streamFromParts(parts) }
       }
       // 带工具结果仍继续调用（无休止循环，由 stopWhen 截断）

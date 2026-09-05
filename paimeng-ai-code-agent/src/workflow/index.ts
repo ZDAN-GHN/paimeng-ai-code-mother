@@ -26,13 +26,8 @@ import { loadPrompt, PROMPT_NAMES } from '../prompts/index.js'
 import { FileTools } from '../tools/fileTools.js'
 import { DEFAULT_IMAGE_MODEL, ImageTools, type ImageConfig } from '../tools/imageTools.js'
 import { buildTools } from '../tools/index.js'
-import {
-  buildDefaultReviewGates,
-  gatesFromSet,
-  readAndConcatenateCodeFiles,
-  type ReviewGateSet,
-} from '../review/index.js'
-import { runReviewGates, type CodeGenType, type ReviewContext, type ReviewVerdict, type TokenUsage } from '../review/types.js'
+import { buildDefaultReviewGates, runReviewCycle, type ReviewGateSet } from '../review/index.js'
+import { type CodeGenType, type ReviewVerdict, type TokenUsage } from '../review/types.js'
 
 // 输入历史滑窗：保留的最近全文轮数（更早折叠为摘要；架构 §3.3 输入侧有界）
 const HISTORY_WINDOW = 10
@@ -79,11 +74,7 @@ function json(value: unknown): string {
 }
 
 // 把一次模型调用的 usage 累计进 run 计量（#9）：usage 字段可能为 undefined，按 0 计
-function accumulateUsage(target: TokenUsage, usage: {
-  inputTokens: number | undefined
-  outputTokens: number | undefined
-  totalTokens: number | undefined
-}): void {
+function accumulateUsage(target: TokenUsage, usage: Partial<TokenUsage>): void {
   target.inputTokens += usage.inputTokens ?? 0
   target.outputTokens += usage.outputTokens ?? 0
   target.totalTokens += usage.totalTokens ?? 0
@@ -185,23 +176,18 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     yield { type: 'error', message }
   }
 
-  // reviewer 工位：三重门禁（质检分 + build + 视觉 diff），返回总判决（#9）
+  // reviewer 工位：三重门禁（质检分 + build + 视觉 diff），返回总判决（#9）。
+  // 编排收敛在 review 模块（runReviewCycle：上下文构建/门禁执行/质检 token 计量回调），本处只做参数组装
   async function runReview(): Promise<ReviewVerdict> {
-    const gates = options.reviewGates ? gatesFromSet(options.reviewGates) : gatesFromSet(buildDefaultReviewGates(provider))
-    const context: ReviewContext = {
+    return runReviewCycle({
+      gates: options.reviewGates ?? buildDefaultReviewGates(provider),
       workspacePath: request.workspacePath ?? workspaceRoot,
       // 视觉 diff 基准 = 已确认线框（路由解析 run.context.wireframe.relativeUrl 传入）
       wireframePath: options.wireframePath,
       codeGenType: request.codeGenType ?? 'html',
-      codeContent: readAndConcatenateCodeFiles(request.workspacePath ?? workspaceRoot),
-    }
-    const verdict = await runReviewGates(gates, context)
-    // #9 计量：质检分门禁的模型调用 token 累计进 run 计量（reviewer 也是 run 的模型调用）
-    const qualityGate = verdict.gates.find((g) => g.name === 'quality-score')
-    if (qualityGate?.usage) {
-      accumulateUsage(tokenUsage, qualityGate.usage)
-    }
-    return verdict
+      // #9 计量：质检分门禁的模型调用 token 累计进 run 计量（reviewer 也是 run 的模型调用）
+      onQualityUsage: (usage) => accumulateUsage(tokenUsage, usage),
+    })
   }
 
   try {
@@ -303,12 +289,13 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
       accumulateUsage(tokenUsage, await result.usage)
 
       // 超限优雅收尾（#9 护栏第 2 层）：注入收尾指令让模型基于已有产出输出完整交代，绝不硬杀——
-      // 收尾调用不带工具（避免继续触发上限），收尾文本并入 pageContent 与回调内容
+      // 收尾调用不带工具（避免继续触发上限），收尾文本并入 pageContent 与回调内容；
+      // 已生成内容拼入 system 供收尾模型基于产物交代（审查整改 c1：此前只传原始 messages，真实 provider 无法真正基于产物）
       if (truncatedByLimit) {
         yield { type: 'ai_thinking', text: '已达本次生成硬上限，正在收尾' }
         const wrapUp = await generateText({
           model: provider.languageModel(modelId),
-          system: `${codegenSystem}\n\n已达本次生成硬上限（工具调用/生成步数/输出长度上限）。请不要再调用工具，基于已生成内容立即输出最终完整交代。`,
+          system: `${codegenSystem}\n\n已达本次生成硬上限（工具调用/生成步数/输出长度上限）。请不要再调用工具，基于以下已生成内容立即输出最终完整交代：\n${pageContent}`,
           messages,
           maxRetries: 0,
           maxOutputTokens: tier.limits.maxOutputTokens,
@@ -324,11 +311,11 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
       // 超限截断后不再走质检/重试：已达成本上界，重试必然再次触发同一上限；
       // 以收尾交代直接进入成功终态（架构 §3.3「超限 = 优雅收尾，用户拿到完整交代，绝不硬杀」）。
       // 状态机仍按拓扑推进（coding → review → done），review 不跑门禁直接 PASS——
-      // 保证 phase 序列与里程碑完整（「检查生成结果」「生成完成」）
+      // 保证 phase 序列与里程碑完整（「检查生成结果」「生成完成」）。
+      // 只 PROCEED 进 review（里程碑「检查生成结果」），PASS 由 done 段统一发送
+      //（审查整改 c3：此前此处多发一次 PASS，actor 终态后再 send 触发 XState 告警）
       if (truncatedByLimit) {
         actor.send({ type: 'PROCEED' })
-        yield* sync()
-        actor.send({ type: 'PASS' })
         yield* sync()
         break
       }
