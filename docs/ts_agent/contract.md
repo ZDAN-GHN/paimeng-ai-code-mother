@@ -1,6 +1,6 @@
 # TS Agent 浏览器 SSE 契约
 
-状态：Issue #5 定稿；Issue #7 增补需求工程（访谈/线框/确认）与 codegen 闸门。该协议由浏览器通过 `fetch` 直连 TS Agent，Java 不中转生成流。
+状态：Issue #5 定稿；Issue #7 增补需求工程（访谈/线框/确认）与 codegen 闸门；Issue #9 增补三工位质检循环、护栏、三档强度与 token 计量。该协议由浏览器通过 `fetch` 直连 TS Agent，Java 不中转生成流。
 
 ## 需求工程与 codegen 闸门（Issue #7）
 
@@ -28,11 +28,23 @@
   "appId": "1001",
   "message": "生成一个个人主页",
   "workspacePath": "/repo/tmp/code_output/html_1001",
-  "script": "success"
+  "script": "success",
+  "intensity": "standard",
+  "history": [
+    { "role": "user", "content": "做一个宠物店网站" },
+    { "role": "assistant", "content": "好的，请补充想要的风格。" }
+  ],
+  "codeGenType": "html"
 }
 ```
 
-`runId`、`appId`、`message` 必填。`userId` 可由请求提供；生产请求通常从 JWT 的 `sub` 获取。`script` 仅用于离线验收，值为 `success`（默认）或 `error`。
+`runId`、`appId`、`message` 必填。`userId` 可由请求提供；生产请求通常从 JWT 的 `sub` 获取。`script` 仅用于离线验收，值为 `success`（默认）、`error`、`images`、`limit` 或质检剧本（`quality-fail-then-pass` / `quality-fail-always`）。
+
+**Issue #9 新增字段（均可选，缺省有默认）**：
+
+- `intensity`：三档推理强度，`fast` / `standard`（默认）/ `deep`。决定模型路由（对应模型 id）、护栏上限（`max_turns` / `max_output_tokens` / `max_tool_calls` / `max_images` 随档位放大）与价格系数（预留）。
+- `history`：输入历史滑窗输入，`[{ role: 'user'|'assistant', content }]`。Agent 侧保留**最近 10 轮全文**，更早轮次折叠为摘要并入 system（架构 §3.3 输入侧有界）。
+- `codeGenType`：生成类型（`html` 默认 / `multi_file` / `vue_project`），build 门禁按类型分派。
 
 响应 `Content-Type` 为 `text/event-stream; charset=utf-8`。每帧以空行分隔：
 
@@ -62,9 +74,18 @@ JSON 数据中的换行必须是转义字符；协议解析应按事件字段语
 
 Agent 创建 run 时使用 `interview`。工作流节点推进时更新同一 `runId`：
 
-`interview → coding → review → done`
+`interview → coding → review → done`（**Issue #9：review 质检失败且有界重试余量时回 coding 重试**，拓扑见图，最多 2 次重试 = 共 3 次尝试）
 
 失败时更新为 `failed`，然后发送 `error`。run 更新经 Java 内部 API 完成，使用 Bearer 服务令牌和 `runId` 幂等；TS Agent 不直连 MySQL。
+
+**Issue #9 里程碑增补**（重试路径，`milestone` 事件 title）：
+
+| title | 语义 |
+|---|---|
+| `根据质检意见重新生成` | review 失败回 coding 重试（进入 coding） |
+| `复查生成结果` | 重试后的 review 复查 |
+
+**Issue #9 token 计量**：run 进入终态（`done`/`failed`）前，Agent 经 `PATCH /internal/runs/{runId}` 携带 `tokenUsage` JSON 落库（`{ inputTokens, outputTokens, totalTokens }`），累计本次 run 全部模型调用（codegen 各轮 + 超限收尾调用）。
 
 ## 终态与错误
 

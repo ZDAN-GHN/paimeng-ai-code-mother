@@ -1,14 +1,37 @@
 // 脚本化假 LLM：以 Vercel AI SDK 的 LanguageModelV2 接口实现的离线 provider（零在线调用，Issue #5）。
-// 经 customProvider 注册为 `scripted` 模型，由 streamText 消费——模型交互（文本流 + 工具循环）整体走 AI SDK provider 抽象，
-// 后续替换真实 provider（OpenAI/DeepSeek 等）时只换 provider 工厂、不动工作流。
+// 经 customProvider 注册为 `scripted` 系列模型，由 streamText / generateText 消费——模型交互整体走 AI SDK
+// provider 抽象，后续替换真实 provider 时只换 provider 工厂、不动工作流。
+// #9 扩展：① 三档模型（scripted-fast/standard/deep，对应三档推理强度，供路由断言）；
+// ② 质检模型 scripted-quality（reviewer 工位结构化质检分，返回 code-quality-check JSON）；
+// ③ 超限剧本 limit（工具调用无休止，触发 max_tool_calls/max_turns 上限验证优雅收尾）；
+// ④ 调用记录 records（modelId + maxOutputTokens + prompt 角色，断言路由与档位上限随动）。
+
 import { customProvider } from 'ai'
 import type { LanguageModelV2, LanguageModelV2CallOptions, LanguageModelV2StreamPart } from '@ai-sdk/provider'
 
-export type LlmScript = 'success' | 'error' | 'images'
+export type LlmScript =
+  // 成功剧本：一轮文本 + writeFile 工具 + 收尾文本（契约成功路径）
+  | 'success'
+  // 模型层失败剧本：一进流式即抛错（工作流 catch → failed 终态）
+  | 'error'
+  // 图片配额剧本：一轮内并行多次图片搜索（第 2 次触发配额拒绝）
+  | 'images'
+  // 质检失败-重试后通过：第 1 次质检 isValid:false（触发 RETRY），第 2 次起 isValid:true（重试后通过）
+  | 'quality-fail-then-pass'
+  // 质检永远失败：每次质检 isValid:false（重试耗尽 → failed 终态）
+  | 'quality-fail-always'
+  // 超限剧本：工具调用无休止（触发 max_tool_calls / max_turns 上限，验证优雅收尾）
+  | 'limit'
 
-// 假模型从用户消息确定性合成页面内容（评审内容即 ai_response 增量文本的拼接）。
-// 产物含应用内导览组件（onboarding tour，Issue #8 验收「生成产物包含应用内导览组件」）：
-// 固定定位引导浮层 + 步骤切换 + 跳过，纯原生 JS 驱动，随应用打开、可被主动关闭。
+// 单次模型调用记录（测试断言：路由到哪个模型 id、收到什么上限、prompt 是否含工具结果）
+export interface ScriptedCallRecord {
+  modelId: string
+  maxOutputTokens: number | undefined
+  hasToolResult: boolean
+}
+
+// 用户消息 → 页面内容（评审内容即 ai_response 增量文本的拼接）
+// 产物含应用内导览组件（onboarding tour，Issue #8 验收「生成产物包含应用内导览组件」）。
 export function buildPageContent(message: string): string {
   const title = message.trim() || 'generated page'
   return `<!DOCTYPE html>
@@ -71,54 +94,102 @@ function streamFromParts(parts: LanguageModelV2StreamPart[]): ReadableStream<Lan
   })
 }
 
+// 假模型公共行为：prompt 工具结果判定与最近用户文本提取
+function hasToolResult(options: LanguageModelV2CallOptions): boolean {
+  return options.prompt.some((message) => message.role === 'tool')
+}
+
+function lastUserText(options: LanguageModelV2CallOptions): string {
+  for (let i = options.prompt.length - 1; i >= 0; i--) {
+    const message = options.prompt[i]
+    if (message?.role === 'user') {
+      const text = message.content
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('')
+      if (text) return text
+    }
+  }
+  return ''
+}
+
+// codegen 假模型（三档共用同一实现，modelId 区分路由）
 class ScriptedLanguageModel implements LanguageModelV2 {
   readonly specificationVersion = 'v2' as const
   readonly provider = 'scripted'
   readonly modelId: string
   readonly supportedUrls = {}
 
-  constructor(private readonly script: LlmScript) {
-    this.modelId = `scripted-${script}`
+  constructor(
+    private readonly script: LlmScript,
+    modelId: string,
+    private readonly records: ScriptedCallRecord[],
+  ) {
+    this.modelId = modelId
   }
 
-  // 当前 prompt 是否已带工具结果（工具循环的第二轮调用）
-  private hasToolResult(options: LanguageModelV2CallOptions): boolean {
-    return options.prompt.some((message) => message.role === 'tool')
-  }
-
-  // 取最近一条用户文本（页面内容合成的输入）
-  private lastUserText(options: LanguageModelV2CallOptions): string {
-    for (let i = options.prompt.length - 1; i >= 0; i--) {
-      const message = options.prompt[i]
-      if (message?.role === 'user') {
-        const text = message.content
-          .filter((part) => part.type === 'text')
-          .map((part) => part.text)
-          .join('')
-        if (text) return text
-      }
-    }
-    return ''
-  }
-
-  // 非流式路径（当前工作流只走 streamText；doGenerate 为接口完整性实现）
+  // 非流式路径（当前工作流 codegen 只走 streamText；doGenerate 供接口完整性与收尾调用）
   async doGenerate(options: LanguageModelV2CallOptions) {
-    const text = buildPageContent(this.lastUserText(options))
+    this.record(options)
+    // 收尾调用（优雅收尾注入收尾指令后）：输出用户可见的完整交代
+    const wrapUp = this.script === 'limit' ? '\n已达本次生成硬上限，以上为已生成的页面内容。\n' : '\n页面已写入 index.html\n'
     return {
-      content: [{ type: 'text' as const, text }],
+      content: [{ type: 'text' as const, text: buildPageContent(lastUserText(options)) + wrapUp }],
       finishReason: 'stop' as const,
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
       warnings: [],
     }
   }
 
+  private record(options: LanguageModelV2CallOptions): void {
+    this.records.push({
+      modelId: this.modelId,
+      maxOutputTokens: options.maxOutputTokens,
+      hasToolResult: hasToolResult(options),
+    })
+  }
+
   async doStream(options: LanguageModelV2CallOptions) {
+    this.record(options)
     if (this.script === 'error') {
       // error 剧本：模型一进流式即失败（工作流 catch 后走 failed 终态，error 后不再发业务事件）
       throw new Error('假 LLM 剧本故意失败')
     }
-    const content = buildPageContent(this.lastUserText(options))
-    if (!this.hasToolResult(options)) {
+    if (this.script === 'limit') {
+      // 超限剧本：工具调用无休止（每次都不带工具结果则继续调用工具，永不自然收尾）——
+      // 直到工作流侧 max_tool_calls / max_turns 上限截断（stopWhen）后注入收尾指令走 doGenerate
+      if (!hasToolResult(options)) {
+        const parts: LanguageModelV2StreamPart[] = [
+          { type: 'text-start', id: 'page' },
+          { type: 'text-delta', id: 'page', delta: '正在生成页面' },
+          { type: 'text-end', id: 'page' },
+          {
+            type: 'tool-call',
+            toolCallId: `limit-${this.records.length}`,
+            toolName: 'writeFile',
+            input: JSON.stringify({ relativeFilePath: 'index.html', content: buildPageContent(lastUserText(options)) }),
+          },
+          { type: 'finish', finishReason: 'tool-calls', usage: { inputTokens: 2, outputTokens: 2, totalTokens: 4 } },
+        ]
+        return { stream: streamFromParts(parts) }
+      }
+      // 带工具结果仍继续调用（无休止循环，由 stopWhen 截断）
+      const parts: LanguageModelV2StreamPart[] = [
+        { type: 'text-start', id: 'again' },
+        { type: 'text-delta', id: 'again', delta: '继续生成' },
+        { type: 'text-end', id: 'again' },
+        {
+          type: 'tool-call',
+          toolCallId: `limit-${this.records.length}`,
+          toolName: 'writeFile',
+          input: JSON.stringify({ relativeFilePath: 'index.html', content: buildPageContent(lastUserText(options)) }),
+        },
+        { type: 'finish', finishReason: 'tool-calls', usage: { inputTokens: 2, outputTokens: 2, totalTokens: 4 } },
+      ]
+      return { stream: streamFromParts(parts) }
+    }
+    const content = buildPageContent(lastUserText(options))
+    if (!hasToolResult(options)) {
       // 第一轮：流式页面内容（供 ai_response）+ 工具调用（供 tool_request/tool_executed）
       const parts: LanguageModelV2StreamPart[] = [
         { type: 'text-start', id: 'page' },
@@ -162,9 +233,80 @@ class ScriptedLanguageModel implements LanguageModelV2 {
   }
 }
 
-// 工厂：按剧本创建脚本化 provider；模型 id 固定 `scripted`
+// 质检假模型（reviewer 工位）：按剧本返回 code-quality-check JSON（isValid/errors/suggestions）。
+// quality-fail-then-pass：第 1 次质检失败、第 2 次起通过（有界重试后通过剧本）；
+// quality-fail-always：永远失败（重试耗尽 → failed）。
+class QualityLanguageModel implements LanguageModelV2 {
+  readonly specificationVersion = 'v2' as const
+  readonly provider = 'scripted'
+  readonly modelId = 'scripted-quality'
+  readonly supportedUrls = {}
+
+  // 质检调用次数（区分 then-pass 剧本的第 1 次与后续）
+  private calls = 0
+
+  constructor(
+    private readonly script: LlmScript,
+    private readonly records: ScriptedCallRecord[],
+  ) {}
+
+  private isValidNow(): boolean {
+    this.calls += 1
+    if (this.script === 'quality-fail-always') return false
+    if (this.script === 'quality-fail-then-pass') return this.calls >= 2
+    return true
+  }
+
+  private buildQualityJson(): string {
+    const isValid = this.isValidNow()
+    const result = isValid
+      ? { isValid: true, errors: [], suggestions: [] }
+      : {
+          isValid: false,
+          errors: ['生成页面缺少必要的视觉还原（模拟质检失败）'],
+          suggestions: ['按已确认线框调整页面布局与区块结构'],
+        }
+    return JSON.stringify(result)
+  }
+
+  async doGenerate(options: LanguageModelV2CallOptions) {
+    this.records.push({ modelId: this.modelId, maxOutputTokens: options.maxOutputTokens, hasToolResult: hasToolResult(options) })
+    const text = this.buildQualityJson()
+    return {
+      content: [{ type: 'text' as const, text }],
+      finishReason: 'stop' as const,
+      usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 },
+      warnings: [],
+    }
+  }
+
+  async doStream(options: LanguageModelV2CallOptions) {
+    // 质检走 generateText（doGenerate）；doStream 为接口完整性
+    this.records.push({ modelId: this.modelId, maxOutputTokens: options.maxOutputTokens, hasToolResult: hasToolResult(options) })
+    const text = this.buildQualityJson()
+    const parts: LanguageModelV2StreamPart[] = [
+      { type: 'text-start', id: 'quality' },
+      { type: 'text-delta', id: 'quality', delta: text },
+      { type: 'text-end', id: 'quality' },
+      { type: 'finish', finishReason: 'stop', usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 } },
+    ]
+    return { stream: streamFromParts(parts) }
+  }
+}
+
+// 工厂：按剧本创建脚本化 provider；注册三档 codegen 模型 + 质检模型。
+// records 由 provider 持有，测试经 provider.records 断言路由与档位上限。
 export function createScriptedLlm(script: LlmScript = 'success') {
-  return customProvider({ languageModels: { scripted: new ScriptedLanguageModel(script) } })
+  const records: ScriptedCallRecord[] = []
+  const provider = customProvider({
+    languageModels: {
+      'scripted-fast': new ScriptedLanguageModel(script, 'scripted-fast', records),
+      'scripted-standard': new ScriptedLanguageModel(script, 'scripted-standard', records),
+      'scripted-deep': new ScriptedLanguageModel(script, 'scripted-deep', records),
+      'scripted-quality': new QualityLanguageModel(script, records),
+    },
+  })
+  return Object.assign(provider, { records })
 }
 
 export type ScriptedLlmProvider = ReturnType<typeof createScriptedLlm>

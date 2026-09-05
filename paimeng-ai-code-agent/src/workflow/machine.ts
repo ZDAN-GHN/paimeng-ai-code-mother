@@ -1,18 +1,29 @@
-// XState v5 最小线性工作流骨架（Issue #5）：interview → coding → review → done / failed。
-// 工作流拓扑钉死在状态图里——非法转移在类型层消灭；milestone 经 entry action 聚合进 context.milestones
-// （节点跳变 → 人话里程碑，退款粒度锚与 run 更新复用同一列表）。驱动解释器见 src/workflow/index.ts。
+// XState 工作流状态机（Issue #5 骨架 → #9 质检循环演进）：interview → coding → review → done / failed。
+// #9 演进：review 质检失败时有界重试回 coding（先例 MAX_QUALITY_RETRIES=2，架构 §3.1 收敛纪律③），
+// 重试次数经 context.qualityAttempts 计数、guard 钉死在图里——非法转移与无界重试在类型/图层面消灭。
+// 里程碑经 entry action 聚合进 context.milestones（节点跳变 → 人话里程碑，退款粒度锚与 run 更新复用）。
+// 驱动解释器见 src/workflow/index.ts。
 import { assign, createMachine } from 'xstate'
 import type { RunPhase } from '../internal/runClient.js'
+
+// 质检失败后的有界重试次数（先例 2 次：首次 + 最多 2 次重试 = 共 3 次尝试）
+export const MAX_QUALITY_RETRIES = 2
 
 export interface GenerationContext {
   // 已过里程碑标题列表（按经过顺序累积）
   milestones: string[]
+  // 编码尝试次数（首次进入 coding = 1；每次重试 +1；review 失败且 < 上限时允许 RETRY）
+  qualityAttempts: number
 }
 
 export type GenerationEvent =
   // 单步工作完成，进入下一节点
   | { type: 'PROCEED' }
-  // 当前节点失败，进入 failed 终态
+  // 质检通过（review → done）
+  | { type: 'PASS' }
+  // 质检失败但有重试余量（review → coding，guard 有界）
+  | { type: 'RETRY' }
+  // 质检失败且重试耗尽（review → failed）
   | { type: 'FAIL'; error: string }
 
 export const generationMachine = createMachine({
@@ -22,7 +33,7 @@ export const generationMachine = createMachine({
     events: GenerationEvent
     input: { milestones?: string[] }
   },
-  context: ({ input }) => ({ milestones: input.milestones ?? [] }),
+  context: ({ input }) => ({ milestones: input.milestones ?? [], qualityAttempts: 0 }),
   initial: 'interview',
   states: {
     interview: {
@@ -34,16 +45,31 @@ export const generationMachine = createMachine({
       },
     },
     coding: {
-      entry: assign({ milestones: ({ context }) => [...context.milestones, '规划页面结构'] }),
+      // 首次进入 = 规划；重试进入 = 根据质检意见重新生成（里程碑区分人话进度）
+      entry: assign({
+        milestones: ({ context }) =>
+          [...context.milestones, context.qualityAttempts > 0 ? '根据质检意见重新生成' : '规划页面结构'],
+        qualityAttempts: ({ context }) => context.qualityAttempts + 1,
+      }),
       on: {
         PROCEED: { target: 'review' },
         FAIL: { target: 'failed' },
       },
     },
     review: {
-      entry: assign({ milestones: ({ context }) => [...context.milestones, '检查生成结果'] }),
+      // 首次质检 = 检查生成结果；重试后的复查 = 复查修复结果
+      entry: assign({
+        milestones: ({ context }) =>
+          [...context.milestones, context.qualityAttempts > 1 ? '复查生成结果' : '检查生成结果'],
+      }),
       on: {
-        PROCEED: { target: 'done' },
+        PASS: { target: 'done' },
+        // 有界重试：仅当编码尝试次数未超上限（1 首次 + MAX_QUALITY_RETRIES 重试）时允许回 coding；
+        // guard 不满足时该事件被图拒绝（解释器应发 FAIL，见 workflow）
+        RETRY: {
+          target: 'coding',
+          guard: ({ context }) => context.qualityAttempts < MAX_QUALITY_RETRIES + 1,
+        },
         FAIL: { target: 'failed' },
       },
     },
@@ -68,6 +94,8 @@ export const PHASE_BY_STATE: Record<string, RunPhase> = {
 export const MILESTONE_DETAILS: Record<string, string> = {
   开始生成: '正在分析需求',
   规划页面结构: '正在生成页面代码',
-  检查生成结果: '正在执行最小质量检查',
+  根据质检意见重新生成: '正在根据质检意见修复生成结果',
+  检查生成结果: '正在执行质量门禁检查',
+  复查生成结果: '正在复查修复后的结果',
   生成完成: '页面文件已写入工作区',
 }

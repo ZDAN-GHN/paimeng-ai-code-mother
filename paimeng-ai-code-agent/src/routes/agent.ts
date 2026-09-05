@@ -9,6 +9,8 @@ import { RunClient, RunApiError } from '../internal/runClient.js'
 import { encodeEventStream } from '../sse/format.js'
 import type { AgentEvent } from '../workflow/events.js'
 import { runGenerationWorkflow, type StreamRequest } from '../workflow/index.js'
+import type { HistoryTurn } from '../workflow/history.js'
+import type { Intensity } from '../intensity.js'
 import type { ScriptedLlmProvider } from '../llm/index.js'
 import { WorkspacePathError, validateWorkspacePath } from '../workspace/sandbox.js'
 import {
@@ -23,12 +25,15 @@ import {
 import { WIREFRAME_FILENAME, buildWireframeHtml, countWireframePages } from '../interview/wireframe.js'
 import { parseContext } from '../interview/context.js'
 import type { ImageTools } from '../tools/imageTools.js'
+import type { ReviewGateSet } from '../review/index.js'
 
 export interface AgentRouteOptions {
   runClient?: RunClient
   provider?: ScriptedLlmProvider
   // 图片工具集（测试注入替身；缺省按 config 密钥新建）
   imageTools?: ImageTools
+  // 三重门禁执行器（#9）：测试注入替身断言「以已确认线框为基准」与失败触发重试
+  reviewGates?: ReviewGateSet
 }
 
 // ── 请求体解析（宽容取类型，缺省回退）──
@@ -77,8 +82,16 @@ function asStreamBody(body: unknown): StreamRequest {
   const runId = typeof input.runId === 'string' ? input.runId : ''
   const appId = typeof input.appId === 'string' || typeof input.appId === 'number' ? input.appId : ''
   const message = typeof input.message === 'string' ? input.message : ''
-  const script = input.script === 'error' ? 'error' : input.script === 'images' ? 'images' : 'success'
-  return { runId, appId, userId: input.userId as number | string | undefined, message, workspacePath: input.workspacePath as string | undefined, script }
+  const script = input.script === 'error' ? 'error' : input.script === 'images' ? 'images' : input.script === 'limit' ? 'limit' : 'success'
+  const intensity = typeof input.intensity === 'string' ? (input.intensity as Intensity) : undefined
+  const codeGenType = typeof input.codeGenType === 'string' ? input.codeGenType : undefined
+  // 输入历史滑窗（#9）：宽容解析 history: [{ role, content }]，非法条目丢弃
+  const history = Array.isArray(input.history)
+    ? (input.history as Array<Record<string, unknown>>)
+        .filter((h) => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string')
+        .map((h) => ({ role: h.role as 'user' | 'assistant', content: h.content as string }))
+    : undefined
+  return { runId, appId, userId: input.userId as number | string | undefined, message, workspacePath: input.workspacePath as string | undefined, script, intensity, history, codeGenType }
 }
 
 export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, options: AgentRouteOptions = {}): void {
@@ -294,11 +307,34 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
         reply.header('cache-control', 'no-cache')
         return encodeEventStream(events)
       }
+      // #9 视觉 diff 基准 = 已确认线框：从 run.context.wireframe.relativeUrl 解析绝对路径传入 workflow
+      //（线框存 {workspace}/wireframe/wireframe.html，relativeUrl 相对工作区；解析后做沙箱校验防越界）
+      const context = parseContext(run.context)
+      let wireframePath: string | undefined
+      if (context.wireframe?.relativeUrl) {
+        try {
+          wireframePath = validateWorkspacePath(
+            path.join(input.workspacePath ?? config.workspaceRoot, context.wireframe.relativeUrl),
+            config.workspaceRoot,
+          )
+        } catch {
+          // 线框路径解析失败（越界等）→ 不设基准，review 视觉 diff 门禁将判定失败（宁可重试）
+          wireframePath = undefined
+        }
+      }
       for await (const event of runGenerationWorkflow(input, {
         workspaceRoot: config.workspaceRoot,
         provider: options.provider,
         runClient,
         imageTools: options.imageTools,
+        reviewGates: options.reviewGates,
+        wireframePath,
+        // 三档模型映射（#9，预留）：接入真实 provider 时按档位覆盖模型 id
+        modelOverrides: {
+          fast: config.modelFast,
+          standard: config.modelStandard,
+          deep: config.modelDeep,
+        },
         imageConfig: {
           pexelsApiKey: config.pexelsApiKey,
           dashscopeApiKey: config.dashscopeApiKey,

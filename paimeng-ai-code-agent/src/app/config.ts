@@ -17,6 +17,11 @@ export interface AgentConfig {
   dashscopeApiKey: string
   // Logo 生成模型（默认对齐 Java LogoGeneratorTool 的 wan2.2-t2i-flash）
   imageModel: string
+  // 三档推理强度模型映射（Issue #9，预留）：接入真实 provider 时按档位覆盖模型 id；
+  // 缺省用 INTENSITY_TIERS 内置默认（假 provider 的 scripted-*）
+  modelFast: string
+  modelStandard: string
+  modelDeep: string
 }
 
 // 允许调用方（测试、装配）覆盖任意配置项
@@ -65,5 +70,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Conf
   const pexelsApiKey = overrides.pexelsApiKey ?? env.PEXELS_API_KEY ?? ''
   const dashscopeApiKey = overrides.dashscopeApiKey ?? env.DASHSCOPE_API_KEY ?? ''
   const imageModel = overrides.imageModel ?? env.IMAGE_MODEL ?? DEFAULT_IMAGE_MODEL
-  return { port, jwtSecret: jwtSecret || 'dev-insecure-secret', workspaceRoot, logLevel, javaInternalBaseUrl, javaInternalToken, pexelsApiKey, dashscopeApiKey, imageModel }
+  const modelFast = overrides.modelFast ?? env.MODEL_FAST ?? ''
+  const modelStandard = overrides.modelStandard ?? env.MODEL_STANDARD ?? ''
+  const modelDeep = overrides.modelDeep ?? env.MODEL_DEEP ?? ''
+  return { port, jwtSecret: jwtSecret || 'dev-insecure-secret', workspaceRoot, logLevel, javaInternalBaseUrl, javaInternalToken, pexelsApiKey, dashscopeApiKey, imageModel, modelFast, modelStandard, modelDeep }
 }
