@@ -9,6 +9,9 @@ import type { RunPhase } from '../internal/runClient.js'
 // 质检失败后的有界重试次数（先例 2 次：首次 + 最多 2 次重试 = 共 3 次尝试）
 export const MAX_QUALITY_RETRIES = 2
 
+// 总尝试次数上限（首次 + 重试次数；图 guard 与 workflow 判断共用同一常量，避免双源漂移）
+export const MAX_QUALITY_ATTEMPTS = MAX_QUALITY_RETRIES + 1
+
 export interface GenerationContext {
   // 已过里程碑标题列表（按经过顺序累积）
   milestones: string[]
@@ -64,11 +67,11 @@ export const generationMachine = createMachine({
       }),
       on: {
         PASS: { target: 'done' },
-        // 有界重试：仅当编码尝试次数未超上限（1 首次 + MAX_QUALITY_RETRIES 重试）时允许回 coding；
+        // 有界重试：仅当编码尝试次数未超上限（MAX_QUALITY_ATTEMPTS）时允许回 coding；
         // guard 不满足时该事件被图拒绝（解释器应发 FAIL，见 workflow）
         RETRY: {
           target: 'coding',
-          guard: ({ context }) => context.qualityAttempts < MAX_QUALITY_RETRIES + 1,
+          guard: ({ context }) => context.qualityAttempts < MAX_QUALITY_ATTEMPTS,
         },
         FAIL: { target: 'failed' },
       },

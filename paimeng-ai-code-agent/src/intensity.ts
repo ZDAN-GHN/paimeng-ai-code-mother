@@ -75,7 +75,3 @@ export function resolveIntensity(value: unknown): IntensityConfig {
   const tier = typeof value === 'string' ? INTENSITY_TIERS[value as Intensity] : undefined
   return tier ?? INTENSITY_TIERS[DEFAULT_INTENSITY]
 }
-
-export function intensityConfig(key: Intensity): IntensityConfig {
-  return INTENSITY_TIERS[key]
-}

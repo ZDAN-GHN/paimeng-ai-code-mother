@@ -15,10 +15,10 @@ import { createActor } from 'xstate'
 import { generateText, isStepCount, streamText, type ToolSet } from 'ai'
 import type { StepResult } from 'ai'
 import type { AgentEvent } from './events.js'
-import { MAX_QUALITY_RETRIES, MILESTONE_DETAILS, PHASE_BY_STATE, generationMachine } from './machine.js'
+import { MAX_QUALITY_ATTEMPTS, MILESTONE_DETAILS, PHASE_BY_STATE, generationMachine } from './machine.js'
 import { createScriptedLlm, type LlmScript, type ScriptedLlmProvider } from '../llm/index.js'
 import { resolveIntensity, type Intensity, type IntensityConfig } from '../intensity.js'
-import { windowHistory, type HistoryTurn } from './history.js'
+import { windowHistory, type HistoryTurn, type WindowedHistory } from './history.js'
 import { RunClient, type RunPhase } from '../internal/runClient.js'
 import { validateWorkspacePath } from '../workspace/sandbox.js'
 import { validatePrompt } from '../interview/guardrails.js'
@@ -32,7 +32,7 @@ import {
   readAndConcatenateCodeFiles,
   type ReviewGateSet,
 } from '../review/index.js'
-import { runReviewGates, type ReviewContext, type ReviewVerdict } from '../review/types.js'
+import { runReviewGates, type CodeGenType, type ReviewContext, type ReviewVerdict, type TokenUsage } from '../review/types.js'
 
 // 输入历史滑窗：保留的最近全文轮数（更早折叠为摘要；架构 §3.3 输入侧有界）
 const HISTORY_WINDOW = 10
@@ -49,7 +49,7 @@ export interface StreamRequest {
   // 输入历史（#9 历史滑窗）：最近 N 轮全文 + 更早摘要，缺省单轮
   history?: HistoryTurn[]
   // 生成类型（build 门禁分派；缺省 html = MVP 静态部署主链路）
-  codeGenType?: string
+  codeGenType?: CodeGenType
 }
 
 export interface WorkflowOptions {
@@ -79,7 +79,7 @@ function json(value: unknown): string {
 }
 
 // 把一次模型调用的 usage 累计进 run 计量（#9）：usage 字段可能为 undefined，按 0 计
-function accumulateUsage(target: { inputTokens: number; outputTokens: number; totalTokens: number }, usage: {
+function accumulateUsage(target: TokenUsage, usage: {
   inputTokens: number | undefined
   outputTokens: number | undefined
   totalTokens: number | undefined
@@ -99,21 +99,20 @@ function stopWhenToolCalls<TOOLS extends ToolSet>(maxToolCalls: number) {
   }
 }
 
-// 组装模型消息（#9 输入历史滑窗）：最近 N 轮全文（user/assistant）+ 当前消息进对话；
-// 更早轮次摘要并入 system 提示词（由调用方在 system 参数注入，见 codegenSystem）
-function buildModelMessages(request: StreamRequest): Array<{ role: 'user' | 'assistant'; content: string }> {
-  const history = windowHistory(request.history ?? [], HISTORY_WINDOW)
+// 输入历史滑窗（#9）：最近 N 轮全文 + 更早摘要，一次计算供消息组装与 system 注入共用
+function windowedHistoryOf(request: StreamRequest): WindowedHistory {
+  return windowHistory(request.history ?? [], HISTORY_WINDOW)
+}
+
+// 组装模型消息（#9）：最近 N 轮全文（user/assistant）+ 当前消息进对话；
+// 更早轮次摘要由调用方注入 system（见 codegenSystem，避免重复滑窗计算）
+function buildModelMessages(request: StreamRequest, history: WindowedHistory): Array<{ role: 'user' | 'assistant'; content: string }> {
   const messages: Array<{ role: 'user' | 'assistant'; content: string }> = []
   for (const turn of history.recent) {
     messages.push({ role: turn.role, content: turn.content })
   }
   messages.push({ role: 'user', content: request.message })
   return messages
-}
-
-// 更早轮次摘要文本（注入 system；无更早轮次返回空）
-function earlierSummaryOf(request: StreamRequest): string {
-  return windowHistory(request.history ?? [], HISTORY_WINDOW).earlierSummary
 }
 
 export async function* runGenerationWorkflow(request: StreamRequest, options: WorkflowOptions): AsyncGenerator<AgentEvent> {
@@ -132,7 +131,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
   let lastPhase: RunPhase | null = PHASE_BY_STATE[String(actor.getSnapshot().value)] ?? 'failed'
 
   // token 计量累计（#9）：每轮模型调用的 usage 累加，终态前落 run.token_usage
-  const tokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+  const tokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
 
   // 同步 machine 状态到外部：phase 变化 → run 更新；context.milestones 增量 → milestone 事件
   async function* sync(): AsyncGenerator<AgentEvent> {
@@ -237,22 +236,23 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     let qualityOpinions: string[] = []
 
     // 有界重试循环：coding 生成 → review 三工位，质检失败且未耗尽 → 回 coding（#9）
-    // 循环次数由图钉死（MAX_QUALITY_RETRIES=2，machine review.RETRY guard 有界）
+    // 循环次数由图钉死（MAX_QUALITY_ATTEMPTS，machine review.RETRY guard 有界）
     for (;;) {
       // ── coder 工位：AI SDK 工具循环生成页面 ──
-      const earlierSummary = earlierSummaryOf(request)
+      // 输入历史滑窗一次计算（#9）：更早摘要进 system，最近 N 轮全文进对话
+      const windowed = windowedHistoryOf(request)
       const codegenSystem = [
         loadPrompt(PROMPT_NAMES.codegenHtml),
-        // 重试时把质检意见注入 system（修复意见是上一轮 reviewer 门禁的失败细节）
+        // 重试时把质检意见注入 system（修复意见是上一轮 reviewer 门禁的失败细节，去重注入避免重复）
         ...(qualityOpinions.length > 0
-          ? [`\n上一轮质检未通过，请根据以下意见修复生成结果：\n${qualityOpinions.join('\n')}`]
+          ? [`\n上一轮质检未通过，请根据以下意见修复生成结果：\n${[...new Set(qualityOpinions)].join('\n')}`]
           : []),
         // 档位说明（真实 provider 消费；假 LLM 忽略）
         `\n本次生成推理强度档位：${tier.label}（模型 ${tier.modelId}）。`,
         // 输入历史滑窗（#9）：更早轮次摘要并入 system，成本有界
-        ...(earlierSummary ? [`\n更早对话摘要：\n${earlierSummary}`] : []),
+        ...(windowed.earlierSummary ? [`\n更早对话摘要：\n${windowed.earlierSummary}`] : []),
       ].join('')
-      const messages = buildModelMessages(request)
+      const messages = buildModelMessages(request, windowed)
       // 三档路由（#9）：intensity → 档位模型 id（配置覆盖优先；假 provider 据此断言路由）
       const modelId = resolveModelId(tier, options.modelOverrides)
 
@@ -296,7 +296,9 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
         }
       }
       const finishReason = await result.finishReason
-      truncatedByLimit = finishReason === 'tool-calls'
+      // 硬上限截断判定（#9）：tool-calls = 模型还想继续调工具被 stopWhen 拦下；
+      // length = 输出达 max_output_tokens 上限被 provider 截断——两者都触发优雅收尾
+      truncatedByLimit = finishReason === 'tool-calls' || finishReason === 'length'
       // token 计量（#9）：累计本轮全部 step 的 usage（streamText usage 为各 step 总和）
       accumulateUsage(tokenUsage, await result.usage)
 
@@ -340,9 +342,10 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
 
       // 质检失败：有界重试（guard 已由图保证；这里读取 context 判断是否还有余量）
       const attempts = actor.getSnapshot().context.qualityAttempts
-      if (attempts < MAX_QUALITY_RETRIES + 1) {
-        // 回 coding 重试：质检意见注入下一轮 system
-        qualityOpinions = [...verdict.errors, ...verdict.suggestions]
+      if (attempts < MAX_QUALITY_ATTEMPTS) {
+        // 回 coding 重试：质检意见注入下一轮 system（suggestions = 失败门禁 detail 去重，
+        // errors 带门禁名用于最终交代，二者不重复注入）
+        qualityOpinions = verdict.suggestions
         actor.send({ type: 'RETRY' })
         yield* sync()
         continue

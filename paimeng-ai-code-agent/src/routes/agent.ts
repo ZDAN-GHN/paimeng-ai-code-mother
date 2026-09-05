@@ -77,25 +77,27 @@ function asWireframeBody(body: unknown): WireframeBody {
   }
 }
 
+// 离线剧本白名单（script 查表，替代嵌套三元；其余一律回退 success）
+const SCRIPT_WHITELIST: Record<string, NonNullable<StreamRequest['script']>> = {
+  success: 'success',
+  error: 'error',
+  images: 'images',
+  limit: 'limit',
+  'quality-fail-then-pass': 'quality-fail-then-pass',
+  'quality-fail-always': 'quality-fail-always',
+}
+
 function asStreamBody(body: unknown): StreamRequest {
   const input = (body ?? {}) as Record<string, unknown>
   const runId = typeof input.runId === 'string' ? input.runId : ''
   const appId = typeof input.appId === 'string' || typeof input.appId === 'number' ? input.appId : ''
   const message = typeof input.message === 'string' ? input.message : ''
-  const script: StreamRequest['script'] =
-    input.script === 'error'
-      ? 'error'
-      : input.script === 'images'
-        ? 'images'
-        : input.script === 'limit'
-          ? 'limit'
-          : input.script === 'quality-fail-then-pass'
-            ? 'quality-fail-then-pass'
-            : input.script === 'quality-fail-always'
-              ? 'quality-fail-always'
-              : 'success'
+  const script = typeof input.script === 'string' ? SCRIPT_WHITELIST[input.script] ?? 'success' : 'success'
   const intensity = typeof input.intensity === 'string' ? (input.intensity as Intensity) : undefined
-  const codeGenType = typeof input.codeGenType === 'string' ? input.codeGenType : undefined
+  // 生成类型合法值校验（白名单；非法/缺省 → undefined → workflow 回退 html）
+  const codeGenType = input.codeGenType === 'html' || input.codeGenType === 'multi_file' || input.codeGenType === 'vue_project'
+    ? input.codeGenType
+    : undefined
   // 输入历史滑窗（#9）：宽容解析 history: [{ role, content }]，非法条目丢弃
   const history = Array.isArray(input.history)
     ? (input.history as Array<Record<string, unknown>>)

@@ -88,8 +88,11 @@ export class QualityScoreGate implements ReviewGate {
     if (score.isValid) {
       return { name: this.name, passed: true, detail: `质检通过（得分 ${score.score}）`, usage: score.usage }
     }
-    const detail = score.errors.length > 0 ? score.errors.join('；') : '质检未通过'
-    return { name: this.name, passed: false, detail, usage: score.usage }
+    // 失败交代 = 质检 errors + suggestions（回喂 coder 的修复意见）
+    const parts: string[] = []
+    if (score.errors.length > 0) parts.push(score.errors.join('；'))
+    if (score.suggestions.length > 0) parts.push(`建议：${score.suggestions.join('；')}`)
+    return { name: this.name, passed: false, detail: parts.join('；') || '质检未通过', usage: score.usage }
   }
 }
 

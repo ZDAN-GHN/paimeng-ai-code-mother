@@ -53,11 +53,6 @@ function fakeRunClient(calls: RunCall[], gateContext: Record<string, unknown> = 
   })
 }
 
-// 注入自建 provider（带 records 断言路由与档位上限）
-function providerWithRecords(calls: unknown[] = []) {
-  return createScriptedLlm('success')
-}
-
 // 有界重试质检替身：第 1 次失败、第 2 次通过（模拟 quality-fail-then-pass 的机器门禁语义）
 function makeRetryOnceGates(): ReviewGateSet {
   let calls = 0
