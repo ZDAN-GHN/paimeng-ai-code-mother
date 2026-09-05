@@ -1,14 +1,8 @@
 // 服务配置：环境变量加载与默认值（键定义见 .env.example）
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const moduleDir = path.dirname(fileURLToPath(import.meta.url))
-
-// 服务根目录：优先取 AGENT_ROOT 环境变量（esbuild 打包产物物理位于 wsl-rt-env/ts-agent/dist，
-// 无法从 import.meta.url 反推源码位置，由启动命令注入服务目录）；
-// 未注入时按源码位置推断（本文件位于 src/app/，上两级即服务根，测试直引源码时命中）
-const agentRoot = process.env.AGENT_ROOT ? path.resolve(process.env.AGENT_ROOT) : path.resolve(moduleDir, '../..')
+import { agentRoot } from './agentRoot.js'
+import { DEFAULT_IMAGE_MODEL } from '../tools/imageTools.js'
 
 export interface AgentConfig {
   port: number
@@ -70,6 +64,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Conf
   const javaInternalToken = overrides.javaInternalToken ?? env.JAVA_INTERNAL_TOKEN ?? ''
   const pexelsApiKey = overrides.pexelsApiKey ?? env.PEXELS_API_KEY ?? ''
   const dashscopeApiKey = overrides.dashscopeApiKey ?? env.DASHSCOPE_API_KEY ?? ''
-  const imageModel = overrides.imageModel ?? env.IMAGE_MODEL ?? 'wan2.2-t2i-flash'
+  const imageModel = overrides.imageModel ?? env.IMAGE_MODEL ?? DEFAULT_IMAGE_MODEL
   return { port, jwtSecret: jwtSecret || 'dev-insecure-secret', workspaceRoot, logLevel, javaInternalBaseUrl, javaInternalToken, pexelsApiKey, dashscopeApiKey, imageModel }
 }

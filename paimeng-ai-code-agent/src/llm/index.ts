@@ -142,8 +142,9 @@ class ScriptedLanguageModel implements LanguageModelV2 {
           type: 'tool-call',
           toolCallId: WRITE_FILE_TOOL_CALL_ID,
           toolName: 'writeFile',
-          // arguments 为 JSON 字符串（契约 tool_request.arguments 语义）
-          input: JSON.stringify({ relativeFilePath: 'index.html' }),
+          // arguments 为 JSON 字符串（契约 tool_request.arguments 语义）；
+          // writeFile 参数与 Java ProjectFileWriteTool 对齐：relativeFilePath + content（#8 审查整改 A1）
+          input: JSON.stringify({ relativeFilePath: 'index.html', content }),
         })
       }
       parts.push({ type: 'finish', finishReason: 'tool-calls', usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 } })

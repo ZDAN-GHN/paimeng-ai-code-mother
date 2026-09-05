@@ -1,45 +1,39 @@
 // 工具注册表（Issue #8）：把工作区文件工具（读/写/改/删/列目录/退出）与图片四工具
 // （内容图/插画/Logo/架构图）包装为 Vercel AI SDK tool 定义，供 coding 阶段 streamText 注册。
-// 工具名对齐旧 Java 实现（camelCase）；执行函数闭包读取当前生成上下文（页面内容/工作区/图片工具实例）。
+// 工具名对齐旧 Java 实现（camelCase）；文件工具绑定工作区实例，图片工具绑定单 run 配额实例。
 import { jsonSchema, tool } from 'ai'
-import type { FileTools } from './fileTools.js'
-import type { ImageTools } from './imageTools.js'
-import { parseHtmlCode, toFiles } from '../codegen/parsing.js'
+import { FileTools } from './fileTools.js'
+import type { ImageTools, ImageToolResult } from './imageTools.js'
 
 export interface ToolContext {
   // 文件工具集（绑定当前工作区）
   files: FileTools
   // 图片工具集（绑定单 run 配额）
   images: ImageTools
-  // LLM 流式产出的原始文本（writeFile 写盘前经代码块解析出文件集）
-  getPageContent: () => string
 }
 
-// 从解析结果取指定文件内容：writeFile 写盘即「解析后文件集」落盘；解析为空时回退原文
-function fileContentByPath(context: ToolContext, relativeFilePath: string): string {
-  const files = toFiles(parseHtmlCode(context.getPageContent()))
-  return files[relativeFilePath] ?? context.getPageContent()
-}
-
-// 图片工具执行的统一包装：图片工具返回「资源数组或配额报错文本」，统一序列化为 JSON 字符串
-async function runImageTool(fn: () => Promise<string | unknown[]>): Promise<string> {
-  const result = await fn()
-  return JSON.stringify(result)
+// 图片工具执行的统一包装：透传判别联合对象，交由 workflow 的 json() 统一序列化一次
+// （避免此处先 JSON.stringify 造成双重编码；契约 tool_executed.result 为单层 JSON 文本）
+async function runImageTool(fn: () => Promise<ImageToolResult>): Promise<ImageToolResult> {
+  return fn()
 }
 
 export function buildTools(context: ToolContext) {
   return {
     // ── 工作区文件工具（对齐 Java ProjectFileWriteTool 等）──
     writeFile: tool({
-      description: '把生成的页面文件写入工作区（自动创建父目录；内容来自代码块解析后的文件集）',
+      description: '把文件内容写入工作区指定路径（自动创建父目录；内容由模型在参数中给出）',
       inputSchema: jsonSchema({
         type: 'object',
-        properties: { relativeFilePath: { type: 'string' } },
-        required: ['relativeFilePath'],
+        properties: {
+          relativeFilePath: { type: 'string' },
+          content: { type: 'string' },
+        },
+        required: ['relativeFilePath', 'content'],
       }),
       execute: async (input) => {
-        const relativeFilePath = (input as { relativeFilePath: string }).relativeFilePath
-        return context.files.writeFile(relativeFilePath, fileContentByPath(context, relativeFilePath))
+        const { relativeFilePath, content } = input as { relativeFilePath: string; content: string }
+        return context.files.writeFile(relativeFilePath, content)
       },
     }),
 
@@ -92,7 +86,7 @@ export function buildTools(context: ToolContext) {
     exit: tool({
       description: '结束工具调用，输出最终结果',
       inputSchema: jsonSchema({ type: 'object', properties: {} }),
-      execute: async () => '不要继续调用工具，可以输出最终结果了',
+      execute: async () => FileTools.exit(),
     }),
 
     // ── 图片四工具（对齐 Java langgraph4j/tools；配额 4 张/run）──

@@ -13,7 +13,7 @@ import { validateWorkspacePath } from '../workspace/sandbox.js'
 import { validatePrompt } from '../interview/guardrails.js'
 import { loadPrompt, PROMPT_NAMES } from '../prompts/index.js'
 import { FileTools } from '../tools/fileTools.js'
-import { ImageTools, type ImageConfig } from '../tools/imageTools.js'
+import { DEFAULT_IMAGE_MODEL, ImageTools, type ImageConfig } from '../tools/imageTools.js'
 import { buildTools } from '../tools/index.js'
 
 export interface StreamRequest {
@@ -91,6 +91,17 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     }
   }
 
+  // 统一失败收尾（消除 guardrail/review/catch 三处重复）：状态机进 failed（若仍活跃）→
+  // 同步 phase/milestone → 回调 Java 标记失败 → 发射唯一 error 终态；调用后不再发业务事件
+  async function* fail(message: string): AsyncGenerator<AgentEvent> {
+    if (actor.getSnapshot().status === 'active') {
+      actor.send({ type: 'FAIL', error: message })
+    }
+    yield* sync()
+    await notifyComplete('failed', '', message)
+    yield { type: 'error', message }
+  }
+
   try {
     // ── interview：分析需求 ──
     yield* sync()
@@ -99,10 +110,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     // Guardrail 校验用户输入（Issue #8）：拒绝 → failed 终态 + 明确报错，不进入 coding
     const guardrail = validatePrompt(request.message)
     if (!guardrail.isAllowed) {
-      actor.send({ type: 'FAIL', error: guardrail.reason })
-      yield* sync()
-      await notifyComplete('failed', '', guardrail.reason)
-      yield { type: 'error', message: guardrail.reason }
+      yield* fail(guardrail.reason)
       return
     }
 
@@ -114,9 +122,9 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     const workspace = validateWorkspacePath(request.workspacePath ?? workspaceRoot, workspaceRoot)
     // 文件工具绑定工作区；图片工具绑定单 run 配额（4 张/run，架构 §3.3）
     const files = new FileTools(workspace, workspaceRoot)
-    const images = options.imageTools ?? new ImageTools(options.imageConfig ?? { pexelsApiKey: '', dashscopeApiKey: '', imageModel: 'wan2.2-t2i-flash' })
+    const images = options.imageTools ?? new ImageTools(options.imageConfig ?? { pexelsApiKey: '', dashscopeApiKey: '', imageModel: DEFAULT_IMAGE_MODEL })
 
-    // ai_response 增量文本的拼接即页面原始产出；writeFile 写盘前经代码块解析（src/tools/index.ts）
+    // ai_response 增量文本的拼接即页面原始产出；writeFile 工具按模型参数 content 写盘
     let pageContent = ''
     const result = streamText({
       model: provider.languageModel('scripted'),
@@ -130,7 +138,6 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
       tools: buildTools({
         files,
         images,
-        getPageContent: () => pageContent,
       }),
     })
     for await (const part of result.fullStream) {
@@ -162,10 +169,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     actor.send({ type: 'PROCEED' })
     yield* sync()
     if (!pageContent.includes('<html')) {
-      actor.send({ type: 'FAIL', error: '生成结果缺少 html 根元素' })
-      yield* sync()
-      await notifyComplete('failed', '', '生成结果缺少 html 根元素')
-      yield { type: 'error', message: '生成结果缺少 html 根元素' }
+      yield* fail('生成结果缺少 html 根元素')
       return
     }
 
@@ -176,13 +180,8 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     await notifyComplete('success', pageContent)
     yield { type: 'done' }
   } catch (error) {
-    // 失败路径：状态机进入 failed（若仍在活跃态）→ phase=failed → error 终态，此后不再发业务事件
+    // 失败路径：统一收尾（catch 中 actor 可能已在终态，fail 内判断活跃态）
     const message = error instanceof Error ? error.message : '生成失败'
-    if (actor.getSnapshot().status === 'active') {
-      actor.send({ type: 'FAIL', error: message })
-    }
-    yield* sync()
-    await notifyComplete('failed', '', message)
-    yield { type: 'error', message }
+    yield* fail(message)
   }
 }

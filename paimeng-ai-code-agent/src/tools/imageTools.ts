@@ -1,6 +1,7 @@
 // 图片类工具集（Issue #8）：从 Python Agent 的 app/services/images.py 按语义移植，
 // 对齐 Java langgraph4j/tools 四个图片工具：Pexels 内容搜索 / Undraw 插画 / DashScope Logo / mmdc 架构图。
-// 引入「图片配额」（架构 §3.3 输出硬上限：每 run 4 张）——累计产出达到上限后，后续图片工具调用被拒并返回明确报错。
+// 引入「图片配额」（架构 §3.3 输出硬上限：每 run 4 张）——按「实际产出」扣减：
+// 配额用尽 → 明确报错（ok:false）；未配密钥/外部失败/渲染失败 → 返还配额 + 空结果（不阻断流程）。
 import { spawn } from 'node:child_process'
 import { writeFile as writeFsFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -16,14 +17,23 @@ export interface ImageResource {
   url: string
 }
 
+// 图片工具结果（判别联合，替代「资源数组或报错字符串」的原始通道）：
+// ok:false 仅表示配额拒绝（明确报错）；其余一律 ok（外部失败等降级为空资源列表）
+export type ImageToolResult =
+  | { ok: true; images: ImageResource[] }
+  | { ok: false; error: string }
+
 // ── 图片工具配置（对齐 Java @Value / Python settings）──
 
 export interface ImageConfig {
   pexelsApiKey: string
   dashscopeApiKey: string
-  // 模型默认值对齐 Java LogoGeneratorTool：wan2.2-t2i-flash
+  // Logo 生成模型（Java LogoGeneratorTool 默认值）
   imageModel: string
 }
+
+// Logo 模型默认值（对齐 Java LogoGeneratorTool 的 wan2.2-t2i-flash；config 与 workflow 共享）
+export const DEFAULT_IMAGE_MODEL = 'wan2.2-t2i-flash'
 
 // HTTP 客户端抽象（可注入测试替身；生产默认 fetch）
 export interface HttpClient {
@@ -79,7 +89,7 @@ export class ImageTools {
   private readonly config: ImageConfig
   private readonly http: HttpClient
   private readonly renderer: DiagramRenderer
-  // 剩余配额（每 run 图片产出硬上限；图片工具调用按实际返回资源数扣减）
+  // 剩余配额（每 run 图片产出硬上限；仅成功产出扣减）
   private remaining: number
 
   constructor(
@@ -100,58 +110,65 @@ export class ImageTools {
     return allowed
   }
 
+  // 本次调用未产出（未配密钥/外部失败/参数为空）：返还已扣配额，返回空结果——配额按「输出」计，
+  // 失败不占硬上限（对齐架构 §3.3 输出硬上限与 Python 空列表降级语义）
+  private noOutput(allowed: number): ImageToolResult {
+    this.remaining += allowed
+    return { ok: true, images: [] }
+  }
+
   // 搜索内容图片（Pexels，每页 12 张，截断到剩余配额）
-  async searchContentImages(query: string): Promise<ImageResource[] | string> {
+  async searchContentImages(query: string): Promise<ImageToolResult> {
     const allowed = this.acquire(12)
-    if (allowed === null) return IMAGE_QUOTA_EXCEEDED_MESSAGE
+    if (allowed === null) return { ok: false, error: IMAGE_QUOTA_EXCEEDED_MESSAGE }
     if (!this.config.pexelsApiKey) {
-      // 未配置密钥：不消耗配额（无产出），对齐 Python 日志跳过语义
-      this.remaining += allowed
-      return []
+      // 未配置密钥：无产出，不占配额
+      return this.noOutput(allowed)
     }
     try {
       const resp = await this.http.get(ImageTools.PEXELS_API_URL, {
         params: { query, per_page: '12', page: '1' },
         headers: { Authorization: this.config.pexelsApiKey },
       })
-      if (!resp.ok) return []
+      if (!resp.ok) return this.noOutput(allowed)
       const data = (await resp.json()) as { photos?: Array<{ alt?: string; src?: { medium?: string } }> }
-      return (data.photos ?? [])
+      const images = (data.photos ?? [])
         .filter((photo) => photo.src?.medium)
         .slice(0, allowed)
         .map((photo) => ({ category: 'CONTENT' as const, description: photo.alt || query, url: photo.src!.medium! }))
+      return { ok: true, images }
     } catch {
-      // 外部接口失败不阻断流程（对齐 Python 空列表语义）
-      return []
+      // 外部接口失败不阻断流程（对齐 Python 空列表语义）；未产出故返还配额
+      return this.noOutput(allowed)
     }
   }
 
   // 搜索插画图片（Undraw，initialResults 前 12 条，截断到剩余配额）
-  async searchIllustrations(query: string): Promise<ImageResource[] | string> {
+  async searchIllustrations(query: string): Promise<ImageToolResult> {
     const allowed = this.acquire(12)
-    if (allowed === null) return IMAGE_QUOTA_EXCEEDED_MESSAGE
+    if (allowed === null) return { ok: false, error: IMAGE_QUOTA_EXCEEDED_MESSAGE }
     try {
       const url = ImageTools.UNDRAW_API_URL.replaceAll('{query}', encodeURIComponent(query))
       const resp = await this.http.get(url, { timeout: 10_000 })
-      if (!resp.ok) return []
+      if (!resp.ok) return this.noOutput(allowed)
       const data = (await resp.json()) as { pageProps?: { initialResults?: Array<{ title?: string; media?: string }> } }
       const initialResults = data.pageProps?.initialResults ?? []
-      return initialResults
+      const images = initialResults
         .slice(0, allowed)
         .filter((item) => item.media)
         .map((item) => ({ category: 'ILLUSTRATION' as const, description: item.title || '插画', url: item.media! }))
+      return { ok: true, images }
     } catch {
-      return []
+      return this.noOutput(allowed)
     }
   }
 
   // 生成 Logo（DashScope 文生图，512*512 单张；配额按 1 张扣）
-  async generateLogos(description: string): Promise<ImageResource[] | string> {
+  async generateLogos(description: string): Promise<ImageToolResult> {
     const allowed = this.acquire(1)
-    if (allowed === null) return IMAGE_QUOTA_EXCEEDED_MESSAGE
+    if (allowed === null) return { ok: false, error: IMAGE_QUOTA_EXCEEDED_MESSAGE }
     if (!this.config.dashscopeApiKey) {
-      this.remaining += allowed
-      return []
+      return this.noOutput(allowed)
     }
     const prompt = `生成 Logo，Logo 中禁止包含任何文字！Logo 介绍：${description}`
     try {
@@ -163,31 +180,32 @@ export class ImageTools {
           parameters: { size: '512*512', n: 1 },
         },
       })
-      if (!resp.ok) return []
+      if (!resp.ok) return this.noOutput(allowed)
       const data = (await resp.json()) as { output?: { results?: Array<{ url?: string }> } }
-      const results = (data.output?.results ?? []).filter((item) => item.url)
-      // 单张生成：扣 1 张配额；生成失败不返还（调用已发生）
-      return results.slice(0, allowed).map((item) => ({ category: 'LOGO' as const, description, url: item.url! }))
+      const images = (data.output?.results ?? [])
+        .filter((item) => item.url)
+        .slice(0, allowed)
+        .map((item) => ({ category: 'LOGO' as const, description, url: item.url! }))
+      return { ok: true, images }
     } catch {
-      return []
+      return this.noOutput(allowed)
     }
   }
 
   // 生成架构图（mmdc 渲染 Mermaid → SVG 本地路径；配额按 1 张扣）
-  async generateArchitectureDiagram(mermaidCode: string, description: string): Promise<ImageResource[] | string> {
+  async generateArchitectureDiagram(mermaidCode: string, description: string): Promise<ImageToolResult> {
     const allowed = this.acquire(1)
-    if (allowed === null) return IMAGE_QUOTA_EXCEEDED_MESSAGE
+    if (allowed === null) return { ok: false, error: IMAGE_QUOTA_EXCEEDED_MESSAGE }
     if (!mermaidCode) {
-      this.remaining += allowed
-      return []
+      return this.noOutput(allowed)
     }
     try {
       const outputFile = path.join(tmpdir(), `paimeng-mermaid-${Date.now()}.svg`)
       await this.renderer(mermaidCode, outputFile)
-      return [{ category: 'ARCHITECTURE' as const, description, url: `file://${outputFile}` }]
+      return { ok: true, images: [{ category: 'ARCHITECTURE' as const, description, url: `file://${outputFile}` }] }
     } catch {
-      // 转换失败不阻断流程（对齐 Python 空列表语义）
-      return []
+      // 转换失败不阻断流程（对齐 Python 空列表语义）；未产出故返还配额
+      return this.noOutput(allowed)
     }
   }
 

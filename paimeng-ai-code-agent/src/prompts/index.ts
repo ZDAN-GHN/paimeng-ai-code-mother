@@ -3,11 +3,7 @@
 // 运行时经 AGENT_ROOT 定位提示词目录（esbuild 打包产物不内联 .txt，须运行时读取）。
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-// 服务根目录：优先 AGENT_ROOT 环境变量（打包产物物理位于 wsl-rt-env/ts-agent/dist，由启动命令注入）；
-// 未注入时按源码位置推断（本文件位于 src/prompts/，上两级即服务根，测试直引源码时命中）
-const agentRoot = process.env.AGENT_ROOT ? path.resolve(process.env.AGENT_ROOT) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+import { agentRoot } from '../app/agentRoot.js'
 
 const PROMPTS_DIR = path.join(agentRoot, 'src', 'prompts')
 

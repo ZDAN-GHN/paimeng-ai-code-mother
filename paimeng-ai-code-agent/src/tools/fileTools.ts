@@ -45,6 +45,17 @@ export class FileTools {
     return candidate
   }
 
+  // 读取已存在文件的内容；不存在或非文件 → null（调用方据此给统一错误文本，消除四处重复的 stat 检查）
+  private async readExistingFile(target: string): Promise<string | null> {
+    try {
+      const info = await stat(target)
+      if (!info.isFile()) return null
+      return await readFile(target, 'utf8')
+    } catch {
+      return null
+    }
+  }
+
   async writeFile(relativeFilePath: string, content: string): Promise<string> {
     const target = this.resolve(relativeFilePath)
     await mkdir(path.dirname(target), { recursive: true })
@@ -54,27 +65,14 @@ export class FileTools {
 
   async readFile(relativeFilePath: string): Promise<string> {
     const target = this.resolve(relativeFilePath)
-    try {
-      const info = await stat(target)
-      if (!info.isFile()) {
-        return `错误：文件不存在或不是文件 - ${relativeFilePath}`
-      }
-      return await readFile(target, 'utf8')
-    } catch {
-      return `错误：文件不存在或不是文件 - ${relativeFilePath}`
-    }
+    const content = await this.readExistingFile(target)
+    return content ?? `错误：文件不存在或不是文件 - ${relativeFilePath}`
   }
 
   async modifyFile(relativeFilePath: string, oldContent: string, newContent: string): Promise<string> {
     const target = this.resolve(relativeFilePath)
-    let originalContent: string
-    try {
-      const info = await stat(target)
-      if (!info.isFile()) {
-        return `错误：文件不存在或不是文件 - ${relativeFilePath}`
-      }
-      originalContent = await readFile(target, 'utf8')
-    } catch {
+    const originalContent = await this.readExistingFile(target)
+    if (originalContent === null) {
       return `错误：文件不存在或不是文件 - ${relativeFilePath}`
     }
     if (!originalContent.includes(oldContent)) {

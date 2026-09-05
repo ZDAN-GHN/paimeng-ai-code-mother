@@ -83,7 +83,10 @@ describe('POST /agent/stream（成功剧本）', () => {
     expect(types(result).indexOf('tool_request')).toBeLessThan(types(result).indexOf('tool_executed'))
     expect(request.data.id).toBe(executed.data.id)
     expect(request.data.name).toBe('writeFile')
-    expect(request.data.arguments).toBe(JSON.stringify({ relativeFilePath: 'index.html' }))
+    // writeFile 参数对齐 Java ProjectFileWriteTool：relativeFilePath + content（#8 审查整改 A1）
+    const args = JSON.parse(String(request.data.arguments)) as { relativeFilePath: string; content: string }
+    expect(args.relativeFilePath).toBe('index.html')
+    expect(args.content).toContain('<html')
     expect(executed.data.arguments).toBe(request.data.arguments)
 
     // done 为唯一终态，仅在最后出现
@@ -320,13 +323,14 @@ describe('POST /agent/stream（Issue #8 Guardrail + 图片配额 + 导览组件�
       expect(req.data.name).toBe('searchContentImages')
       expect(result.indexOf(req)).toBeLessThan(result.indexOf(exe))
     }
-    // 配额 4 张：两次搜索恰好一次取满（资源数组）、一次被拒（报错文本）——并行执行结果顺序不定，按内容断言
-    const executedResults = executed.map((f) => String(f.data.result))
-    const rejected = executedResults.filter((r) => r.includes('图片配额已用完'))
-    const fulfilled = executedResults.filter((r) => !r.includes('图片配额已用完'))
+    // 配额 4 张：两次搜索恰好一次取满（ok:true + images）、一次被拒（ok:false + error）——
+    // 并行执行结果顺序不定，按判别联合内容断言（#8 审查整改 B6）
+    const executedResults = executed.map((f) => JSON.parse(String(f.data.result)) as { ok: boolean; images?: unknown[]; error?: string })
+    const rejected = executedResults.filter((r) => r.ok === false && r.error?.includes('图片配额已用完'))
+    const fulfilled = executedResults.filter((r) => r.ok === true && Array.isArray(r.images))
     expect(rejected).toHaveLength(1)
     expect(fulfilled).toHaveLength(1)
-    expect(fulfilled[0]).toContain('CONTENT')
+    expect(JSON.stringify(fulfilled[0]!.images)).toContain('CONTENT')
     // 配额拒绝不影响生成流终态
     expect(types(result).at(-1)).toBe('done')
   })
