@@ -71,3 +71,13 @@
 - **配置**：`AgentProperties.wireframeDailyLimit`（默认 10），`application.yml` `agent.wireframe-daily-limit: ${AGENT_WIREFRAME_DAILY_LIMIT:10}`；`GenerationRunServiceImpl` 构造器注入 `RedissonClient` + `@Value` 限频数（**测试构造器同步改 4 参**）。
 - **不直接复用 `@RateLimit` 注解的原因**：注解 USER 类型靠 `userService.getLoginUser(request)`（servlet session）取用户，内部 Bearer 端点无 session；改为请求体 userId 键控（TS Agent JWT sub），机制（Redisson + `rate_limit:` 前缀）完全一致。
 - **测试**：`GenerationRunServiceImplTest` 21 例（+配额成功/耗尽 429/非法 userId 3 例，mock Redisson）、`GenerationRunControllerTest` 14 例（+401/200/429 3 例）。
+
+## 2026-09-05 积分台账 + 三剧本记账（Issue #10 已落地）
+
+- **表**：`credit_ledger`（uk_runId 唯一幂等，`FROZEN/SETTLED/PARTIAL_REFUNDED/REFUNDED` enum，frozen/settle/refundAmount + reason + milestoneCount）；`user.credits` 余额（int 默认 0）。`generation_run.creditLedgerRef` 存台账 id（冻结时 Java 写回）。
+- **CreditService**（`service/CreditServiceImpl`，@Transactional 台账+余额同库同事务）：`freeze(runId, appId, userId, intensity)`（幂等先查后插，uk_runId 兜底；冻结额 = `agent.credit.base-price` × 生成类型系数 html1/multi_file2/vue_project3 × 强度档 fast1/standard1/deep2；余额不足 → **40201**「积分不足…请先充值」→ HTTP 402）、`settleRun`（FROZEN→SETTLED 全额结算，reason=complete）、`refundRun(runId, status, filesWritten, milestoneCount)`（failed→REFUNDED 全额；aborted 且 filesWritten≤0→REFUNDED 全额（**首文件落盘前全额退**）；aborted 已写文件→PARTIAL_REFUNDED 折算——里程碑≥3 结算 70%（`interrupted-advanced-settle-ratio`）、否则 50%（basic），milestoneCount 由 completeRun 从 run.milestones JSON 解析传入）、`recharge`（管理员）、`getBalance`。
+- **内部端点**：`POST /internal/agent/runs/{runId}/credit/freeze`（`GenerationRunController` + `GenerationRunService.freezeCredit`：run 存在 + creditLedgerRef 已设则幂等返回既有台账 + wireframe_confirmed 前置（否则 403「请先确认线框」）+ creditService.freeze + creditLedgerRef 写回 run）。**completeRun 扩展三态**：success→settleRun+构建+markRunTerminal(done)；failed→refundRun(FAILED)+错误历史+markRunTerminal(failed)；aborted→refundRun(ABORTED, filesWritten)+历史 ai 加 `[用户中断] ` 前缀+markRunTerminal(aborted)。**幂等**：completedRunIds 内存集 + 台账 uk_runId 双保险。
+- **用户端点**：`POST /credit/recharge`（@AuthCheck admin）+ `GET /credit/balance`（session 用户）；`LoginUserVO.credits`（BeanUtil 自动复制，无需手动）。
+- **e2e 实测坑**：failed 回调 messages 的 ai content 为空字符串 → Java 写历史 `addChatMessage` 抛「消息不能为空」→ 整个 completeRun 失败、退款不执行 → **completeRun 写历史时跳过空 content 消息**（failed 分支另写错误历史交代）；`CreditFreezeVO{ledgerId, frozenAmount, balance}`。
+- **测试**：`CreditServiceImplTest` 17 例（三剧本折算 + 幂等 + 余额不足 + 金额计算）、`GenerationRunServiceImplTest` 31 例（+三剧本记账/冻结幂等/闸门/里程碑透传/空消息跳过）、`GenerationRunControllerTest` 18 例（+freeze 401/200/402/403）、`CreditControllerTest` 4 例。
+
