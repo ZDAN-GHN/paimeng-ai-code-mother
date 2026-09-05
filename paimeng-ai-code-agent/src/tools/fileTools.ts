@@ -29,6 +29,9 @@ export class FileTools {
   // 绑定工作区根（绝对路径，构造时经沙箱校验）
   private readonly root: string
 
+  // 本 run 成功写入的文件数（Issue #10 中断退款折算锚：首个文件落盘前中断 = 全额退款）
+  filesWritten = 0
+
   constructor(workspacePath: string, workspaceRoot: string) {
     this.root = validateWorkspacePath(workspacePath, workspaceRoot)
   }
@@ -60,6 +63,8 @@ export class FileTools {
     const target = this.resolve(relativeFilePath)
     await mkdir(path.dirname(target), { recursive: true })
     await writeFile(target, content, 'utf8')
+    // 首文件落盘阈值（中断退款折算：filesWritten=0 → 全额退款）
+    this.filesWritten += 1
     return `文件写入成功：${relativeFilePath}`
   }
 

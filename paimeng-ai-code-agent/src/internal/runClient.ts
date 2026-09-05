@@ -53,14 +53,24 @@ export interface AgentCompleteMessage {
   content: string
 }
 
-// Agent 完成回调请求（Issue #6）：run 终态时经 Java 内部 API 写历史 + 触发构建
+// Agent 完成回调请求（Issue #6 + #10）：run 终态时经 Java 内部 API 写历史 + 记账（结算/退款）+ 触发构建
 export interface AgentCompleteRequest {
   appId: number | string
   userId: number | string
-  status: 'success' | 'failed'
+  // 终态：success（结算+构建）/ failed（全额退款）/ aborted（用户中断，折算退款）
+  status: 'success' | 'failed' | 'aborted'
   messages: AgentCompleteMessage[]
   workspacePath?: string
+  // 中断时已落盘文件数（aborted 时供「首个文件落盘前 = 全额退款」折算；success/failed 忽略）
+  filesWritten?: number
   errorMessage?: string
+}
+
+// 冻结积分响应（Issue #10）：Java 返回台账关联与冻结结果
+export interface CreditFreezeVO {
+  ledgerId: number | string
+  frozenAmount: number
+  balance: number
 }
 
 export interface Run {
@@ -144,6 +154,12 @@ export class RunClient {
   // Redisson 令牌桶键控 userId）；超出 → HTTP 429（RunApiError.status=429），由路由映射为明确报错
   async acquireWireframeQuota(userId: number | string): Promise<boolean> {
     return this.request<boolean>('POST', '/internal/agent/wireframe/quota/acquire', { userId })
+  }
+
+  // 冻结积分（Issue #10）：TS Agent 在「确认线框进入 codegen」时刻调用（Java 按 run 查 appId/userId）；
+  // 余额不足 → HTTP 402（RunApiError.status=402）；同 runId 幂等（重复冻结返回既有台账不重复扣款）
+  async freezeCredit(runId: string, body: { intensity?: string }): Promise<CreditFreezeVO> {
+    return this.request<CreditFreezeVO>('POST', `/internal/agent/runs/${encodeURIComponent(runId)}/credit/freeze`, body)
   }
 
   // 按 runId 查询 run（不存在返回 null）

@@ -147,4 +147,45 @@ describe('RunClient（generation_run 生命周期）', () => {
     expect(err).toBeInstanceOf(RunApiError)
     expect((err as RunApiError).status).toBe(502)
   })
+
+  it('freezeCredit：POST /internal/agent/runs/{runId}/credit/freeze，携带 intensity，解析冻结结果', async () => {
+    const { fetchImpl, calls } = makeMockFetch(() =>
+      jsonResponse({ code: 0, data: { ledgerId: 9, frozenAmount: 100, balance: 400 }, message: 'ok' }))
+    const client = makeClient(fetchImpl)
+
+    const vo = await client.freezeCredit('run-1', { intensity: 'standard' })
+
+    expect(calls[0]!.url).toBe('http://java:8123/api/internal/agent/runs/run-1/credit/freeze')
+    expect(calls[0]!.method).toBe('POST')
+    expect(calls[0]!.headers?.['authorization'] ?? calls[0]!.headers?.['Authorization']).toBe('Bearer svc-token')
+    expect(calls[0]!.body).toEqual({ intensity: 'standard' })
+    expect(vo).toEqual({ ledgerId: 9, frozenAmount: 100, balance: 400 })
+  })
+
+  it('freezeCredit：余额不足（402）→ RunApiError，透传明确文案', async () => {
+    const { fetchImpl } = makeMockFetch(() =>
+      jsonResponse({ code: 40201, data: null, message: '积分不足，当前余额 50，本次生成需 100 积分，请先充值' }, 402))
+    const client = makeClient(fetchImpl)
+
+    const err = await client.freezeCredit('run-1', { intensity: 'standard' }).catch((e) => e)
+    expect(err).toBeInstanceOf(RunApiError)
+    expect((err as RunApiError).status).toBe(402)
+    expect((err as RunApiError).message).toContain('积分不足')
+  })
+
+  it('completeRun：aborted 状态透传 filesWritten（中断折算退款依据）', async () => {
+    const { fetchImpl, calls } = makeMockFetch(() => jsonResponse({ code: 0, data: null, message: 'ok' }))
+    const client = makeClient(fetchImpl)
+
+    await client.completeRun('run-1', {
+      appId: 1,
+      userId: 1,
+      status: 'aborted',
+      messages: [{ messageType: 'user', content: 'hello' }, { messageType: 'ai', content: '生成已中断，已保留 1 个已生成文件' }],
+      filesWritten: 1,
+    })
+
+    expect(calls[0]!.url).toBe('http://java:8123/api/internal/agent/runs/run-1/complete')
+    expect(calls[0]!.body).toMatchObject({ status: 'aborted', filesWritten: 1 })
+  })
 })

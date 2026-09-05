@@ -25,6 +25,19 @@ describe('FileTools 文件类工具（语义对齐旧实现）', () => {
     expect(await readFile(path.join(root, 'src/components/Button.vue'), 'utf8')).toBe('<template>hi</template>')
   })
 
+  it('已写文件计数：writeFile 成功后 filesWritten 递增（中断退款折算锚）', async () => {
+    const { tools } = makeTools()
+    expect(tools.filesWritten).toBe(0)
+    await tools.writeFile('a.txt', 'one')
+    await tools.writeFile('b.txt', 'two')
+    expect(tools.filesWritten).toBe(2)
+    // 读/改/删不增加已写文件数（只有新建写入算落盘）
+    await tools.readFile('a.txt')
+    await tools.modifyFile('a.txt', 'one', 'one-1')
+    await tools.deleteFile('b.txt')
+    expect(tools.filesWritten).toBe(2)
+  })
+
   it('读文件往返一致', async () => {
     const { tools } = makeTools()
     await tools.writeFile('a.txt', 'hello')

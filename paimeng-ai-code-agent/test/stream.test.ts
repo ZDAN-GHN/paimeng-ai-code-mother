@@ -335,3 +335,58 @@ describe('POST /agent/stream（Issue #8 Guardrail + 图片配额 + 导览组件�
     expect(types(result).at(-1)).toBe('done')
   })
 })
+
+describe('POST /agent/stream（#10 冻结积分）', () => {
+  // 冻结被拒的 runClient：闸门放行（wireframe_confirmed），但 freeze 端点返回 402（余额不足）
+  function freezeRejectingRunClient(): RunClient {
+    return new RunClient({
+      baseUrl: 'http://java.invalid',
+      token: 'test',
+      fetchImpl: vi.fn(async (url, init) => {
+        const method = init?.method ?? 'GET'
+        const isFreeze = method === 'POST' && String(url).endsWith('/credit/freeze')
+        if (isFreeze) {
+          return new Response(JSON.stringify({ code: 40201, data: null, message: '积分不足，当前余额 50，本次生成需 100 积分，请先充值' }), { status: 402 })
+        }
+        const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {}
+        const data = method === 'GET'
+          ? { runId: String(url).split('/').at(-1), appId: 1, userId: 1, phase: 'wireframe_confirmed', context: null, milestones: null }
+          : { runId: String(url).split('/').at(-2), appId: 1, userId: 1, phase: body.phase ?? 'interview', context: null, milestones: null }
+        return new Response(JSON.stringify({ code: 0, data, message: 'ok' }), { status: 200 })
+      }),
+    })
+  }
+
+  it('余额不足（402）→ error 事件明确拒绝，不进入 codegen（无业务事件）', async () => {
+    const token = await makeToken()
+    const app = buildTestApp(makeWorkspaceRoot(), { agentRoutes: { runClient: freezeRejectingRunClient() } })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/stream',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-credit-1', appId: 1, message: 'hello', workspacePath: makeWorkspaceRoot() },
+    })
+    expect(response.statusCode).toBe(200)
+    const result = frames(response.body)
+    // 冻结失败：唯一事件是 error，无任何生成业务事件（不产生 token 消耗）
+    expect(types(result)).toEqual(['error'])
+    expect(String(result[0]!.data.message)).toContain('积分不足')
+    expect(result.some((frame) => frame.event === 'done')).toBe(false)
+    expect(result.some((frame) => frame.event === 'milestone')).toBe(false)
+  })
+
+  it('冻结成功（默认 200 的 fakeRunClient）→ 正常进入 codegen 产出 done', async () => {
+    const root = makeWorkspaceRoot()
+    const token = await makeToken()
+    const app = buildTestApp(root, { agentRoutes: { runClient: fakeRunClient([], 'wireframe_confirmed') } })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/stream',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-credit-2', appId: 1, message: 'hello', workspacePath: root },
+    })
+    const result = frames(response.body)
+    expect(types(result).at(-1)).toBe('done')
+    expect(result.some((frame) => frame.event === 'error')).toBe(false)
+  })
+})

@@ -340,6 +340,29 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
           wireframePath = undefined
         }
       }
+      // 冻结积分（Issue #10，架构 §7 扣费协议）：确认线框进入 codegen 时刻预扣（闸门通过后、生成前）。
+      // 余额不足 → 402 → error 事件明确拒绝（不进入 codegen）；其他失败同样拒绝放行
+      //（幂等：同 runId 重复冻结 Java 返回既有台账，不重复扣款）
+      try {
+        await runClient.freezeCredit(input.runId, { intensity: input.intensity })
+      } catch (err) {
+        const reason = err instanceof RunApiError && err.status === 402
+          ? err.message
+          : `冻结积分失败，无法进入代码生成：${err instanceof Error ? err.message : '未知错误'}`
+        events.push({ type: 'error', message: reason })
+        reply.header('content-type', 'text/event-stream; charset=utf-8')
+        reply.header('cache-control', 'no-cache')
+        return encodeEventStream(events)
+      }
+      // 对话中断（Issue #10，架构 §3.5 中止 (a)）：感知客户端断开（关页面/中止按钮 abort）→
+      // 取消 LLM 调用 → workflow 走 aborted 终态（保留已写文件 + 历史 [用户中断] + 折算退款）。
+      // reply.raw 'close' 在连接正常结束（writableEnded）与异常断开都会触发，仅后者视为中断
+      const abortController = new AbortController()
+      reply.raw.on('close', () => {
+        if (!reply.raw.writableEnded) {
+          abortController.abort()
+        }
+      })
       for await (const event of runGenerationWorkflow(input, {
         workspaceRoot: config.workspaceRoot,
         provider: options.provider,
@@ -358,6 +381,8 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
           dashscopeApiKey: config.dashscopeApiKey,
           imageModel: config.imageModel,
         },
+        // 对话中断（#10）：连接断开 → abort 信号 → 工作流取消 LLM 并走 aborted 终态
+        abortSignal: abortController.signal,
       })) {
         // 终态守卫：done/error 都是流的最后一个事件，收到任一即停止消费（防实现缺陷把终态后的事件带进响应）
         events.push(event)

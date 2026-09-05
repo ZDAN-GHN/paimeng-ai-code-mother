@@ -62,6 +62,31 @@ export interface WorkflowOptions {
   wireframePath?: string
   // 三档模型映射覆盖（#9，预留）：接入真实 provider 时按档位覆盖 modelId；缺省用 INTENSITY_TIERS 默认
   modelOverrides?: Partial<Record<Intensity, string>>
+  // 中止信号（Issue #10 对话中断，架构 §3.5 中止 (a)）：连接断开/用户中止时由路由 abort，
+  // 工作流取消 LLM 调用、保留已写文件并走 aborted 终态（历史 [用户中断] + 折算退款）
+  abortSignal?: AbortSignal
+}
+
+// 用户中断哨兵错误：abort 信号触发后由 error part 分支抛出，顶层 catch 据此走 aborted 终态
+//（区别于普通模型失败 → failed 终态）
+export class GenerationAborted extends Error {
+  constructor() {
+    super('生成已中断')
+    this.name = 'GenerationAborted'
+  }
+}
+
+// 判断模型层错误是否为中止（AI SDK abort 抛 AbortError / DOMException name='AbortError'）
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
+// 每次模型调用/关键决策点前检查中止信号（#10）：abort 可能落在模型调用间隙（工具执行后、下一轮调用前），
+// 显式检查保证中断立即生效，不被正常路径拖到 done 后才处理（对话中断的产品语义：中断即停）
+function throwIfAborted(abortSignal?: AbortSignal): void {
+  if (abortSignal?.aborted) {
+    throw new GenerationAborted()
+  }
 }
 
 // 按档位解析实际使用的模型 id（配置覆盖优先，缺省档位默认）
@@ -141,9 +166,13 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     }
   }
 
-  // 完成回调（Issue #6）：run 终态时通知 Java 写对话历史 + 触发构建；
-  // 回调失败不阻断生成主流程（Java 侧 runId 幂等，历史/构建可后续补偿）
-  async function notifyComplete(status: 'success' | 'failed', aiContent: string, errorMessage?: string): Promise<void> {
+  // 完成回调（Issue #6 + #10）：run 终态时通知 Java 写对话历史 + 记账（结算/退款）+ 触发构建；
+  // aborted 附带已写文件数（Java 折算退款）；回调失败不阻断生成主流程（Java 侧 runId 幂等，可后续补偿）
+  async function notifyComplete(
+    status: 'success' | 'failed' | 'aborted',
+    aiContent: string,
+    options_: { errorMessage?: string; filesWritten?: number } = {},
+  ): Promise<void> {
     if (!runClient) return
     try {
       await runClient.completeRun(request.runId, {
@@ -155,7 +184,8 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
           { messageType: 'ai', content: aiContent },
         ],
         workspacePath: request.workspacePath ?? workspaceRoot,
-        ...(errorMessage ? { errorMessage } : {}),
+        ...(options_.errorMessage ? { errorMessage: options_.errorMessage } : {}),
+        ...(options_.filesWritten !== undefined ? { filesWritten: options_.filesWritten } : {}),
       })
     } catch (error) {
       console.error(`[workflow] 完成回调失败，runId: ${request.runId}: ${(error as Error).message}`)
@@ -172,8 +202,26 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     if (runClient) {
       await runClient.updateRun(request.runId, { tokenUsage: json(tokenUsage) })
     }
-    await notifyComplete('failed', '', message)
+    await notifyComplete('failed', '', { errorMessage: message })
     yield { type: 'error', message }
+  }
+
+  // 用户中断收尾（Issue #10 对话中断，架构 §3.5 中止 (a)）：
+  // 取消 LLM 调用后由 abortSignal 触发——保留已写文件（不删）→ run 推进 aborted（含里程碑与 token 计量）
+  // → 回调 Java（aborted + filesWritten，Java 折算退款 + 历史 [用户中断]）→ 发射 error 终态提示中断；
+  // 中断不走状态机正常拓扑（XState 无 aborted 节点），run phase 直接置 aborted
+  async function* abortRun(filesWritten: number): AsyncGenerator<AgentEvent> {
+    if (runClient) {
+      await runClient.updateRun(request.runId, {
+        phase: 'aborted',
+        milestones: json(actor.getSnapshot().context.milestones),
+        tokenUsage: json(tokenUsage),
+      })
+    }
+    await notifyComplete('aborted', `生成已中断，已保留 ${filesWritten} 个已生成文件，可在对话中继续补完`, {
+      filesWritten,
+    })
+    yield { type: 'error', message: '生成已中断' }
   }
 
   // reviewer 工位：三重门禁（质检分 + build + 视觉 diff），返回总判决（#9）。
@@ -189,6 +237,9 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
       onQualityUsage: (usage) => accumulateUsage(tokenUsage, usage),
     })
   }
+
+  // 文件工具实例（try 内赋值；中断 catch 需读已写文件数做退款折算，故提升到 try 外作用域）
+  let files: FileTools | undefined
 
   try {
     // ── interview（planner 工位）：分析需求 ──
@@ -209,7 +260,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     // 工作区沙箱校验（逃逸 WORKSPACE_ROOT → 异常 → failed 终态）
     const workspace = validateWorkspacePath(request.workspacePath ?? workspaceRoot, workspaceRoot)
     // 文件工具绑定工作区；图片工具绑定单 run 配额（#9：配额随档位放大，标准档 4 张/run）
-    const files = new FileTools(workspace, workspaceRoot)
+    files = new FileTools(workspace, workspaceRoot)
     const images =
       options.imageTools ??
       new ImageTools(options.imageConfig ?? { pexelsApiKey: '', dashscopeApiKey: '', imageModel: DEFAULT_IMAGE_MODEL }, {
@@ -224,6 +275,8 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     // 有界重试循环：coding 生成 → review 三工位，质检失败且未耗尽 → 回 coding（#9）
     // 循环次数由图钉死（MAX_QUALITY_ATTEMPTS，machine review.RETRY guard 有界）
     for (;;) {
+      // 对话中断（#10）：每轮开始前检查中止信号（覆盖工具执行后的调用间隙）
+      throwIfAborted(options.abortSignal)
       // ── coder 工位：AI SDK 工具循环生成页面 ──
       // 输入历史滑窗一次计算（#9）：更早摘要进 system，最近 N 轮全文进对话
       const windowed = windowedHistoryOf(request)
@@ -252,7 +305,9 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
         // max_tool_calls 累计工具调用数截断（历史先例 50，标准档）
         maxOutputTokens: tier.limits.maxOutputTokens,
         stopWhen: [isStepCount(tier.limits.maxTurns), stopWhenToolCalls(tier.limits.maxToolCalls)],
-        tools: buildTools({ files, images }),
+        tools: buildTools({ files: files!, images }),
+        // 对话中断（#10）：abort 信号触发 → AI SDK 取消 LLM 调用（error part → GenerationAborted）
+        ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
       })
 
       // 工具循环是否被硬上限截断（finishReason=tool-calls 即模型还想继续调工具但被 stopWhen 拦下）
@@ -277,6 +332,10 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
             }
             break
           case 'error':
+            // 中止（#10）：abort 信号触发的 AbortError → 中断终态（区别于普通失败）
+            if (isAbortError(part.error)) {
+              throw new GenerationAborted()
+            }
             // 模型层失败被 AI SDK 吸收为流内 error part（循环正常结束）；显式抛出以走 failed 终态
             throw part.error instanceof Error ? part.error : new Error(String(part.error))
         }
@@ -299,6 +358,8 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
           messages,
           maxRetries: 0,
           maxOutputTokens: tier.limits.maxOutputTokens,
+          // 对话中断（#10）：收尾调用同样受 abort 信号约束
+          ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
         })
         const wrapUpText = wrapUp.text
         pageContent += wrapUpText
@@ -343,6 +404,8 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     }
 
     // ── done：终态 ──
+    // 对话中断（#10）：进入成功终态前最后一次检查（abort 落在 review 通过后的间隙也立即中断）
+    throwIfAborted(options.abortSignal)
     actor.send({ type: 'PASS' })
     yield* sync()
     // token 计量落库（#9 验收：token_usage 按 run 经 run API 落库）
@@ -353,6 +416,12 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     await notifyComplete('success', pageContent)
     yield { type: 'done' }
   } catch (error) {
+    // 对话中断（#10）：abort 信号触发 → 中断终态（保留已写文件 + aborted 回调 + 折算退款）；
+    // 与普通失败（failed 终态）区分
+    if (error instanceof GenerationAborted || isAbortError(error)) {
+      yield* abortRun(files?.filesWritten ?? 0)
+      return
+    }
     // 失败路径：统一收尾（catch 中 actor 可能已在终态，fail 内判断活跃态）
     const message = error instanceof Error ? error.message : '生成失败'
     yield* fail(message)
