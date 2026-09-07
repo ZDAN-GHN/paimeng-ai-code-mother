@@ -37,6 +37,15 @@
 
 ## Agent skills
 
+高频技能在此列出以提升命中与触发稳定性；完整可用清单以会话技能目录为准，低频技能不列，避免诱导无效加载：
+
+| 技能 | 触发时机 |
+|---|---|
+| `project-comment-style` | 添加或补全注释、编写类/方法 Javadoc、核对注释样式时 |
+| `memory-management` | 任务产生或修正可复用的事实、决策、约束、踩坑，或既有记忆需增删改时 |
+| `code-review` | 审查分支、PR 或工作区改动，或要求 "review since X" 时 |
+| `agent-design-review` | 首次生成方案设计，或要求审查、修订方案设计时 |
+
 ### Issue tracker
 
 Issues are tracked in this repository's GitHub Issues via the `gh` CLI. See `docs/agents/issue-tracker.md`.
