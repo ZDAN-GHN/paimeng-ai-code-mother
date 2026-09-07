@@ -41,11 +41,11 @@
 
 | 技能 | 触发时机 |
 |---|---|
-| `project-comment-style` | 添加或补全注释、编写类/方法 Javadoc、核对注释样式时 |
+| `project-comment-style` | 添加或补全注释、编写类/方法 Javadoc、核对注释样式等 |
 | `memory-management` | 任务产生或修正可复用的事实、决策、约束、踩坑，或既有记忆需增删改时 |
 | `code-review` | 审查分支、PR 或工作区改动，或要求 "review since X" 时；完成一段自包含改动、准备提交前即使未被要求也应主动使用本技能自查 |
 | `agent-design-review` | 首次生成方案设计，或要求审查、修订方案设计时 |
-| `agents-md` | 新建/更新/维护 AGENTS.md 或 CLAUDE.md、补充项目约定、精简 agent 文档时；更新已有文件一律用本技能，`create-agentsmd` 仅限仓库尚无 AGENTS.md 时首次从零生成 |
+| `agents-md` | 更新/维护 AGENTS.md 或 CLAUDE.md |
 | `codebase-design` | 设计或改进模块接口、划分职责、找接缝等结构设计讨论时（"这个模块怎么设计"、"接口怎么拆"、"这段逻辑放哪"、"怎么更好测"） |
 
 ### Issue tracker
