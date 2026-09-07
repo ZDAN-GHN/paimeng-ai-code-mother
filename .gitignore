@@ -2,6 +2,8 @@
 application-local.yml
 tmp
 wsl-rt-env
+# Docker compose 本地环境变量（含密码，不提交）
+.env
 # Redis 转储（本地运行期产物，不提交）
 dump.rdb
 
