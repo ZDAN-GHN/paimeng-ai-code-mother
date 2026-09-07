@@ -106,6 +106,13 @@
             <version>1.7.10</version>
             <scope>compile</scope>
         </dependency>
+        <!-- JetBrains 空安全注解（Nullable/NotNull，AiCodeGenServiceFactory 与 SpringContextUtil 直接使用；编译期需要，运行期无影响） -->
+        <dependency>
+            <groupId>org.jetbrains</groupId>
+            <artifactId>annotations</artifactId>
+            <version>26.1.0</version>
+            <scope>provided</scope>
+        </dependency>
         <!-- Source: https://mvnrepository.com/artifact/dev.langchain4j/langchain4j-community-redis -->
         <dependency>
             <groupId>dev.langchain4j</groupId>
