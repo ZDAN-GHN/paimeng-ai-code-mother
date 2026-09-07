@@ -96,6 +96,7 @@ public class WorkflowContext implements Serializable {
     private List<ImageResource> illustrations;
     private List<ImageResource> diagrams;
     private List<ImageResource> logos;
+    private List<ImageResource> webImages;
 
     // ========== 上下文操作方法 ==========
 

@@ -4,6 +4,7 @@ import com.zdan.paimengaicodemother.langgraph4j.tools.ImageSearchTool;
 import com.zdan.paimengaicodemother.langgraph4j.tools.LogoGeneratorTool;
 import com.zdan.paimengaicodemother.langgraph4j.tools.MermaidDiagramTool;
 import com.zdan.paimengaicodemother.langgraph4j.tools.UndrawIllustrationTool;
+import com.zdan.paimengaicodemother.langgraph4j.tools.WebImageSearchTool;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
 import lombok.AllArgsConstructor;
@@ -23,6 +24,7 @@ public class ImageCollectionServiceFactory {
 
     private ChatModel openAiChatModel;
     private ImageSearchTool imageSearchTool;
+    private WebImageSearchTool webImageSearchTool;
     private UndrawIllustrationTool undrawIllustrationTool;
     private MermaidDiagramTool mermaidDiagramTool;
     private LogoGeneratorTool logoGeneratorTool;
@@ -36,6 +38,7 @@ public class ImageCollectionServiceFactory {
                 .chatModel(openAiChatModel)
                 .tools(
                         imageSearchTool,
+                        webImageSearchTool,
                         undrawIllustrationTool,
                         mermaidDiagramTool,
                         logoGeneratorTool

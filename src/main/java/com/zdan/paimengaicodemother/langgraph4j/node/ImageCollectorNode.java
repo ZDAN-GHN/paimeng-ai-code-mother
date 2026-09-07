@@ -8,6 +8,7 @@ import com.zdan.paimengaicodemother.langgraph4j.tools.ImageSearchTool;
 import com.zdan.paimengaicodemother.langgraph4j.tools.LogoGeneratorTool;
 import com.zdan.paimengaicodemother.langgraph4j.tools.MermaidDiagramTool;
 import com.zdan.paimengaicodemother.langgraph4j.tools.UndrawIllustrationTool;
+import com.zdan.paimengaicodemother.langgraph4j.tools.WebImageSearchTool;
 import com.zdan.paimengaicodemother.utils.SpringContextUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.AsyncNodeAction;
@@ -46,6 +47,14 @@ public class ImageCollectorNode {
                     for (ImageCollectionPlan.ImageSearchTask task : plan.getContentImageTasks()) {
                         futures.add(CompletableFuture.supplyAsync(() ->
                                 imageSearchTool.searchContentImages(task.query())));
+                    }
+                }
+                // 并发执行全网热词图片搜索
+                if (plan.getWebImageTasks() != null) {
+                    WebImageSearchTool webImageSearchTool = SpringContextUtil.getBean(WebImageSearchTool.class);
+                    for (ImageCollectionPlan.ImageSearchTask task : plan.getWebImageTasks()) {
+                        futures.add(CompletableFuture.supplyAsync(() ->
+                                webImageSearchTool.searchWebImages(task.query())));
                     }
                 }
                 // 并发执行插画图片搜索

@@ -36,6 +36,9 @@ public class ImageAggregatorNode {
             if (context.getLogos() != null) {
                 allImages.addAll(context.getLogos());
             }
+            if (context.getWebImages() != null) {
+                allImages.addAll(context.getWebImages());
+            }
             log.info("图片聚合完成，总共 {} 张图片", allImages.size());
             // 更新最终的图片列表
             context.setImageList(allImages);

@@ -44,6 +44,7 @@ public class CodeGenConcurrentWorkflow {
 
                     // 添加并发图片收集节点
                     .addNode("content_image_collector", ContentImageCollectorNode.create())
+                    .addNode("web_image_collector", WebImageCollectorNode.create())
                     .addNode("illustration_collector", IllustrationCollectorNode.create())
                     .addNode("diagram_collector", DiagramCollectorNode.create())
                     .addNode("logo_collector", LogoCollectorNode.create())
@@ -54,12 +55,14 @@ public class CodeGenConcurrentWorkflow {
 
                     // 并发分支：从计划节点分发到各个收集节点
                     .addEdge("image_plan", "content_image_collector")
+                    .addEdge("image_plan", "web_image_collector")
                     .addEdge("image_plan", "illustration_collector")
                     .addEdge("image_plan", "diagram_collector")
                     .addEdge("image_plan", "logo_collector")
 
                     // 汇聚：所有收集节点都汇聚到聚合器
                     .addEdge("content_image_collector", "image_aggregator")
+                    .addEdge("web_image_collector", "image_aggregator")
                     .addEdge("illustration_collector", "image_aggregator")
                     .addEdge("diagram_collector", "image_aggregator")
                     .addEdge("logo_collector", "image_aggregator")

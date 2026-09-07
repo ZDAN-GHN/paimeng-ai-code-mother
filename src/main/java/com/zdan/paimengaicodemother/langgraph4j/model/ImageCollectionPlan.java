@@ -19,6 +19,11 @@ public class ImageCollectionPlan implements Serializable {
     private List<ImageSearchTask> contentImageTasks;
 
     /**
+     * 全网热词图片搜索任务列表
+     */
+    private List<ImageSearchTask> webImageTasks;
+
+    /**
      * 插画图片搜索任务列表
      */
     private List<IllustrationTask> illustrationTasks;
@@ -34,8 +39,8 @@ public class ImageCollectionPlan implements Serializable {
     private List<LogoTask> logoTasks;
 
     /**
-     * 内容图片搜索任务
-     * 对应 ImageSearchTool.searchContentImages(String query)
+     * 图片搜索任务
+     * 对应 ImageSearchTool.searchContentImages(String query) 与 WebImageSearchTool.searchWebImages(String query)
      */
     public record ImageSearchTask(String query) implements Serializable {
     }

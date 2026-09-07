@@ -27,7 +27,7 @@ public class ImageSearchTool {
 
     private static final String PEXELS_API_URL = "https://api.pexels.com/v1/search";
 
-    @Value("${pexels.api-key}")
+    @Value("${pexels.api-key:}")
     private String pexelsApiKey;
 
     @Tool("搜索内容相关的图片，用于网站内容展示")
