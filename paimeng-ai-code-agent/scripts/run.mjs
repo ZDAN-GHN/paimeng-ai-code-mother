@@ -1,30 +1,34 @@
 #!/usr/bin/env node
 // 运行时环境调度器：统一解析 dev / build / start / test / type-check 的依赖与产物位置。
 //
-// 约定（与 AGENTS.md「运行时环境统一放 wsl-rt-env/，通过命令指定、不建软链」一致）：
-//   - 当前进程为 Linux/WSL 时，固定使用 ../wsl-rt-env/ts-agent/node_modules
-//   - Windows/IDE 时，固定使用服务目录 node_modules
-// 两个平台绝不互相回退，避免加载错误平台的原生二进制。
-import { existsSync } from 'node:fs'
+// 约定（与 AGENTS.md「运行时环境按宿主分流」一致，2026-09-07 起）：
+//   - WSL 宿主：固定使用 ../wsl-rt-env/ts-agent/node_modules 与 dist（经 *-wsl.sh 命令指定）
+//   - 原生 Linux / Windows/IDE：使用服务目录默认 node_modules 与 dist
+// 平台间绝不互相回退，避免加载错误平台的原生二进制。
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawn } from 'node:child_process'
 
 const agentRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)))
 const rtAgentRoot = path.resolve(agentRoot, '..', 'wsl-rt-env', 'ts-agent')
-const isWsl = process.platform === 'linux'
+// WSL 判定：Linux 且 /proc/version 含 microsoft（WSL1 为 Microsoft，WSL2 为 microsoft-standard）；
+// 原生 Linux 不含该标识，走默认目录
+const isWsl =
+  process.platform === 'linux' && /microsoft/i.test(readFileSync('/proc/version', 'utf8'))
 const runtimeNodeModules = path.join(rtAgentRoot, 'node_modules')
 const localNodeModules = path.join(agentRoot, 'node_modules')
 const nodeModules = isWsl ? runtimeNodeModules : localNodeModules
 
 if (!existsSync(nodeModules)) {
-  console.error(`[run] ${isWsl ? 'WSL' : 'Windows/IDE'} dependencies are missing: ${nodeModules}`)
-  console.error(isWsl ? '[run] WSL: bash scripts/install-wsl-node-modules.sh' : '[run] Windows/IDE: npm install')
+  console.error(`[run] ${isWsl ? 'WSL' : 'Linux(原生)/Windows/IDE'} dependencies are missing: ${nodeModules}`)
+  console.error(isWsl ? '[run] WSL: bash scripts/install-wsl-node-modules.sh' : '[run] Linux(原生)/Windows/IDE: npm install')
   process.exit(1)
 }
 
 const node = process.execPath
-const bundle = path.join(rtAgentRoot, 'dist', 'app.bundle.mjs')
+// esbuild 产物跟随所在平台：WSL 在 wsl-rt-env，原生 Linux/Windows 在服务目录 dist/
+const bundle = path.join(isWsl ? rtAgentRoot : agentRoot, 'dist', 'app.bundle.mjs')
 // esbuild ESM 产物 banner：fastify 内部存在 CJS require 调用，注入 createRequire 使 bundle 自包含运行
 const esbuildBanner = "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);"
 

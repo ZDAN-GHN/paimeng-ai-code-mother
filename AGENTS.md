@@ -28,7 +28,7 @@
 ## 硬约定
 
 - 敏感文件不提交：`application-local.yml`、各服务 `.env`；仓库只保留 `*.example` 模板。
-- WSL 运行时环境统一位于 `wsl-rt-env/`；通过服务脚本指定，不建软链。WSL/Linux 只读取此目录，Windows/IDE 只读取各服务本地环境，禁止跨平台回退。
+- 运行时环境按宿主分流（2026-09-07 起）：**原生 Linux 与 Windows/IDE 使用各服务默认目录与标准命令**（Java `target/`、Node `node_modules/` + `dist/`、Python `.venv/`），不指定环境输出目录；**仅 WSL 宿主**统一放 `wsl-rt-env/` 并经 `*-wsl.sh` 脚本命令指定，不建软链。三平台互不回退。
 - 不擅自切换 `python-agent.enabled`，这会改变代码生成主链路。
 - Agent 代理提交的 commit message 必须携带 `<Agent IDE>/<用户信息>` 标注。
 - 每次改动完成后，必须创建对应的 Git commit，以便后续追踪和回滚；禁止留下未提交的改动。

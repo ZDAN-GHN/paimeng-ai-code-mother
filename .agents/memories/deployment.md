@@ -1,22 +1,28 @@
 # 记忆：运行与部署
 
 > 环境依赖、敏感文件、共享工作区、启动命令的工作记忆。目标部署拓扑见 `docs/ts_agent/architecture.md` §1.1/§11；Python Agent 运行细节（退役前）见 `docs/py_agent/task_plan.md` §9（历史参考）。
-> 存在两套本地环境：**WSL 环境**（2026-09-01 起，全栈实机验证通过，默认使用）与 **Windows 环境**（此前 T14a/T18/T20 实机验证所用，仍可用）。二者连接地址相同（127.0.0.1），不要混用同端口的两套实例。
+> 存在三套本地环境：**原生 Linux 环境**（2026-09-07 起，当前宿主 Linux Mint 22.3，MySQL/Redis 经 docker compose 提供，默认使用）、**WSL 环境**（2026-09-01 起全栈实机验证通过，WSL 宿主时使用）与 **Windows 环境**（此前 T14a/T18/T20 实机验证所用，仍可用）。连接地址相同（127.0.0.1），不要混用同端口的多套实例。
 
-## 运行时环境文件布局（wsl-rt-env，2026-09-01 新约定；2026-09-04 强化：**通过命令指定、不建软链**）
+## 运行时环境文件布局（2026-09-07 起按宿主分流；wsl-rt-env 仅限 WSL 宿主）
 
-整个项目在 Linux/WSL 运行的运行时环境文件统一放仓库根目录 `wsl-rt-env/`（已加入根 .gitignore，2026-09-03）。**指向运行时环境一律用命令参数（`-D` 属性 / 环境变量 / venv 直接调用）而非软链**：
+**2026-09-07 起（宿主换为原生 Linux）：原生 Linux 与 Windows/IDE 使用各服务默认运行环境目录（Java `target/`、Node `node_modules/`+`dist/`、Python `.venv/`）与标准命令，不指定环境输出目录；仅 WSL 宿主统一放仓库根目录 `wsl-rt-env/`（已加入根 .gitignore，2026-09-03）并通过命令指定。** 调度器判定标准（两个 `run.mjs` 一致，2026-09-07 修正）：`platform === 'linux'` 且 `/proc/version` 含 `microsoft` 才判为 WSL；原生 Linux 不含该标识，自动走默认目录（TS Agent 与前端 type-check/build 已实测通过，产物落在服务目录）。指向 WSL 运行时环境一律用命令参数（`-D` 属性 / 环境变量 / venv 直接调用）而非软链：
+
+**下表为 WSL 宿主的 `wsl-rt-env/` 布局；原生 Linux / Windows 为默认布局，不使用该目录。**
 
 | 技术栈 | 目标位置 | 说明 |
 |---|---|---|
-| Python | `wsl-rt-env/python/.venv` | uv 虚拟环境；`uv-cache/` 与 `python-install/` 同在该目录。WSL 执行 `bash paimeng-ai-code-rag/scripts/install-wsl-venv.sh` 创建；Windows/IDE 仍使用服务目录 `.venv`。 |
-| 前端 | `wsl-rt-env/frontend/node_modules` | WSL npm 依赖；Vite 缓存为 `wsl-rt-env/frontend/vite-cache`，构建产物为 `wsl-rt-env/frontend/dist`。`npm run` 经 `scripts/run.mjs` 按平台调度：WSL/Linux 只读取该目录，Windows/IDE 只读取服务目录本地 `node_modules`。 |
-| Java | `wsl-rt-env/java/target` | Maven 构建产物；**2026-09-04 起由命令指定**：pom 暴露 `maven.build.directory` 属性（默认 `${project.basedir}/target`），WSL 命令带 `-Dmaven.build.directory=$PWD/wsl-rt-env/java/target`，无软链 |
-| TS Agent | `wsl-rt-env/ts-agent/node_modules` + `wsl-rt-env/ts-agent/dist` | **2026-09-04 起完全无软链**：依赖与 esbuild 产物（`dist/app.bundle.mjs` 自包含打包，运行期不需要 node_modules）都在 wsl-rt-env；服务目录内不放 node_modules。`npm run dev/build/start/test/type-check` 经 `scripts/run.mjs` 按平台选择：WSL/Linux 只使用 wsl-rt-env，Windows/IDE 只使用服务目录本地依赖。 |
+| Python | `wsl-rt-env/python/.venv` | uv 虚拟环境；`uv-cache/` 与 `python-install/` 同在该目录。WSL 执行 `bash paimeng-ai-code-rag/scripts/install-wsl-venv.sh` 创建；原生 Linux/Windows 仍使用服务目录 `.venv`。 |
+| 前端 | `wsl-rt-env/frontend/node_modules` | WSL npm 依赖；Vite 缓存为 `wsl-rt-env/frontend/vite-cache`，构建产物为 `wsl-rt-env/frontend/dist`。`npm run` 经 `scripts/run.mjs` 按宿主调度：WSL 只读取该目录，原生 Linux/Windows 只读取服务目录本地 `node_modules`。 |
+| Java | `wsl-rt-env/java/target` | Maven 构建产物；**2026-09-04 起由命令指定**：pom 暴露 `maven.build.directory` 属性（默认 `${project.basedir}/target`），WSL 命令带 `-Dmaven.build.directory=$PWD/wsl-rt-env/java/target`，无软链；原生 Linux/Windows 不传该属性即默认 `target/`。 |
+| TS Agent | `wsl-rt-env/ts-agent/node_modules` + `wsl-rt-env/ts-agent/dist` | **2026-09-04 起完全无软链**：依赖与 esbuild 产物（`dist/app.bundle.mjs` 自包含打包，运行期不需要 node_modules）都在 wsl-rt-env；服务目录内不放 node_modules。`npm run dev/build/start/test/type-check` 经 `scripts/run.mjs` 按宿主选择：WSL 只使用 wsl-rt-env，原生 Linux/Windows 只使用服务目录本地依赖与 `dist/`。 |
 
 > **迁移状态**：Java、TS Agent、前端和 Python RAG 均已具备无软链的 WSL 运行时路径与安装/调度脚本。前端依赖由 `paimeng-ai-code-mother-frontend/scripts/install-wsl-node-modules.sh` 直接安装到运行时目录；Python 由 `paimeng-ai-code-rag/scripts/install-wsl-venv.sh` 通过 uv 环境变量创建。Windows 与 WSL 的平台相关依赖不能共用：Windows 需要各服务目录下的本地 `node_modules` 或 `.venv`，但原有 IDE 运行配置无需改动。
 
-## 依赖服务 — WSL 环境（当前默认）
+## 依赖服务 — 原生 Linux 环境（当前宿主，2026-09-07 起）
+
+- **MySQL + Redis（docker compose）**：仓库根 `docker-compose.yml`（项目名 `paimeng-infra`）。MySQL **8.0.46**（容器 `paimeng-mysql`，仅绑 127.0.0.1:3306，数据卷 `mysql-data`；**首次启动（数据卷为空）自动执行 `sql/create_table.sql` 建库建表**，其后不重复）+ Redis **7.2**（容器 `paimeng-redis`，仅绑 127.0.0.1:6379，AOF 开启，数据卷 `redis-data`）。启动 `docker compose up -d`，探活 `docker compose ps` 均应 healthy。root 密码在仓库根 `.env`（gitignore；与 `src/main/resources/application-local.yml` 的 `spring.datasource.password` 一致，2026-09-07 生成，勿提交勿外泄）。Docker 安装：`sudo bash scripts/install-docker.sh`（Mint 22.x/Ubuntu 24.04 官方 apt 源，`--mirror` 切阿里云；装后将用户加入 docker 组）。PostgreSQL 继续停用（5432 不应监听）。
+
+## 依赖服务 — WSL 环境（WSL 宿主适用，2026-09-01 全栈验证）
 
 - **灰度状态（2026-09-03 P0 已执行，Issue #2）**：`application-local.yml` 已回切 `python-agent.enabled: false`（过渡期主链路 = 旧 Java AI，当日 WSL 全栈 e2e 全流程验证通过：建应用 → SSE 生成 → 构建 → 部署）；`application.yml` 仓库默认为 `${PYTHON_AGENT_ENABLED:false}`；TS Agent 接入后再新增 `ts-agent.enabled` 灰度。
 
@@ -40,7 +46,21 @@
 - `tmp/code_output/{codeGenType}_{appId}`；Java `CODE_OUTPUT_ROOT_DIR = user.dir/tmp/code_output`，TS Agent 侧 `WORKSPACE_ROOT` 须为同一绝对路径（Java 计算绝对路径传入，Agent 侧沙箱校验）。
 - 本地同机；生产同容器卷或共享卷挂载。
 
-## 启动命令（WSL 环境，2026-09-01 全链路验证）
+## 启动命令（按宿主选择）
+
+### 原生 Linux（当前宿主，2026-09-07 实测依赖安装/type-check/build）
+
+| 项 | 命令 |
+|---|---|
+| MySQL/Redis | `docker compose up -d`（首次启动自动建库建表；探活 `docker compose ps`） |
+| Java | `JAVA_HOME=<JDK21 路径> ./mvnw spring-boot:run`（默认 `target/`，无需 `-D`；端口 8123，context-path `/api`。**不要用 `scripts/run-java-wsl.sh`**——它会把产物写进 `wsl-rt-env/`） |
+| TS Agent 安装依赖 | `cd paimeng-ai-code-agent && npm install --registry=https://registry.npmmirror.com`（DSH 沙箱内加 `--cache ../tmp/npm-cache`） |
+| TS Agent 运行 | `cd paimeng-ai-code-agent && npm run dev`（端口 8092；bundle 在服务目录 `dist/`） |
+| 前端安装依赖 | `cd paimeng-ai-code-mother-frontend && npm install --registry=https://registry.npmmirror.com`（缓存参数同上） |
+| 前端运行 | `cd paimeng-ai-code-mother-frontend && npm run dev`（5173；type-check/build 走本地 `node_modules` 与 `tsconfig.json`） |
+| Python RAG（P4 前） | 不安装不启动；P4 实施后用 uv 默认 `.venv` 的标准命令，不用 `*-wsl.sh` |
+
+### WSL 宿主（2026-09-01 全链路验证）
 
 > 完整启动 SOP 与排障护栏见技能 `project-startup-guardrail`（`.agents/skills/project-startup-guardrail/SKILL.md`）。
 
@@ -54,8 +74,10 @@
 | 前端 WSL 安装依赖 | `cd paimeng-ai-code-mother-frontend && bash scripts/install-wsl-node-modules.sh`（脚本通过 `npm --prefix` 直接安装至 `wsl-rt-env/frontend/`） |
 | 前端 | `cd paimeng-ai-code-mother-frontend && bash scripts/run-wsl.sh`（调度器使用 `wsl-rt-env/frontend/node_modules` 与 `vite-cache`、`dist`） |
 
-## 踩坑与规避（WSL + DSH 沙箱环境）
+## 踩坑与规避（按宿主与沙箱环境）
 
+- **运行时目录按宿主分流（2026-09-07）**：本节及下文旧条目中「WSL/Linux 只使用 wsl-rt-env」自当日起仅指 **WSL 宿主**；原生 Linux 宿主一律默认目录 + 标准命令。两个 `run.mjs` 的 WSL 判定已改为 `platform === 'linux'` 且 `/proc/version` 含 `microsoft`。
+- **npm 官方源不可达 + 家目录写被拦（原生 Linux，2026-09-07 实测）**：`registry.npmjs.org` 网络不通，安装加 `--registry=https://registry.npmmirror.com`；`~/.npm` 缓存写入被 DSH 沙箱 workspace-write 拦截，加 `--cache <仓库>/tmp/npm-cache`。
 - **DSH 沙箱 workspace-write 拦家目录写**：mysqld 需写 `~/.local/opt/mysql8`（data/log/pid），start.sh 须以完整权限运行；`./mvnw spring-boot:run` 同理会写 `~/.m2/repository`（resolver-status.properties），亦须完整权限（2026-09-03 P0 e2e 实测）；`uv run` 因 `~/.cache/uv` 被拒时，使用 `bash paimeng-ai-code-rag/scripts/run-wsl.sh`；npm 安装脚本已将缓存直接写入各自的 `wsl-rt-env/<service>/npm-cache`。
 - **前端 WSL 依赖直装（2026-09-04）**：执行 `cd paimeng-ai-code-mother-frontend && bash scripts/install-wsl-node-modules.sh`；脚本复制受版本控制的 `package.json` / `package-lock.json` 到被忽略的运行时项目后，以 `npm --prefix wsl-rt-env/frontend install` 直接安装实体目录，不创建软链，也不在服务目录暂存依赖。所有 npm 脚本由 `scripts/run.mjs` 按平台调度：WSL/Linux 只使用 WSL 目录；Windows/IDE 只使用服务目录本地依赖。所有 WSL 启动入口为项目内 `scripts/run-*-wsl.sh` 或各模块 `scripts/run-wsl.sh`。
 - **Python RAG WSL 虚拟环境（2026-09-04）**：执行 `cd paimeng-ai-code-rag && bash scripts/install-wsl-venv.sh`；脚本用 `UV_PROJECT_ENVIRONMENT`、`UV_CACHE_DIR`、`UV_PYTHON_INSTALL_DIR` 将环境、缓存和受 uv 管理的解释器留在 `wsl-rt-env/python/`。P4 前不常态启动；Windows 使用 uv 默认的本地 `.venv`。

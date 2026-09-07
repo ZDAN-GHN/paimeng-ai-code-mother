@@ -105,6 +105,15 @@ src/
 
 [VSCode](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (需要禁用 Vetur)
 
+### Linux（原生，当前宿主）/ Windows / IDE
+
+```sh
+npm install --registry=https://registry.npmmirror.com
+npm run dev
+```
+
+使用服务目录内的本地 `node_modules`、Vite 缓存与 `dist/`，不指定环境输出目录，也不会回退读取 WSL 依赖；现有 IDE 的 npm 运行配置不需要修改。
+
 ### WSL
 
 ```sh
@@ -114,22 +123,13 @@ bash scripts/run-wsl.sh
 
 依赖、npm 缓存与 Vite 缓存位于 `../wsl-rt-env/frontend/`，服务目录不保留 `node_modules`。
 
-### Windows / IDE
-
-```sh
-npm install
-npm run dev
-```
-
-Windows 只使用服务目录内的本地 `node_modules`，不会回退读取 WSL 依赖；现有 IDE 的 npm 运行配置不需要修改。
-
 ### WSL 类型检查、编译和压缩
 
 ```sh
 bash scripts/run-wsl.sh build
 ```
 
-Windows / IDE 继续使用原有 `npm run build`。
+原生 Linux / Windows / IDE 继续使用原有 `npm run build`。
 
 ### WSL 代码检查
 

@@ -1,17 +1,20 @@
 #!/usr/bin/env node
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn, spawnSync } from 'node:child_process'
 
 const frontendRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)))
 const runtimeRoot = path.resolve(frontendRoot, '..', 'wsl-rt-env', 'frontend')
-const isWsl = process.platform === 'linux'
+// WSL 判定：Linux 且 /proc/version 含 microsoft（WSL1 为 Microsoft，WSL2 为 microsoft-standard）；
+// 原生 Linux 不含该标识，依赖与缓存走服务目录默认位置（2026-09-07 起按宿主分流）
+const isWsl =
+  process.platform === 'linux' && /microsoft/i.test(readFileSync('/proc/version', 'utf8'))
 const nodeModules = isWsl ? path.join(runtimeRoot, 'node_modules') : path.join(frontendRoot, 'node_modules')
 
 if (!existsSync(nodeModules)) {
-  console.error(`[run] ${isWsl ? 'WSL' : 'Windows/IDE'} dependencies are missing: ${nodeModules}`)
-  console.error(isWsl ? '[run] WSL: bash scripts/install-wsl-node-modules.sh' : '[run] Windows/IDE: npm install')
+  console.error(`[run] ${isWsl ? 'WSL' : 'Linux(原生)/Windows/IDE'} dependencies are missing: ${nodeModules}`)
+  console.error(isWsl ? '[run] WSL: bash scripts/install-wsl-node-modules.sh' : '[run] Linux(原生)/Windows/IDE: npm install')
   process.exit(1)
 }
 

@@ -5,19 +5,24 @@
 ## 运行
 
 ```bash
+# 原生 Linux（当前宿主，2026-09-07 起；依赖与 esbuild 产物在服务目录，无需指定环境目录）
+npm install --registry=https://registry.npmmirror.com
+cp .env.example .env   # 按需修改 PORT / JWT_SECRET / WORKSPACE_ROOT
+npm run dev            # 端口 8092（esbuild 打包 + watch 自动重启）
 # WSL（依赖直接安装到 wsl-rt-env/ts-agent/，服务目录零 node_modules、零软链）
 bash scripts/install-wsl-node-modules.sh
-cp .env.example .env   # 按需修改 PORT / JWT_SECRET / WORKSPACE_ROOT
-bash scripts/run-wsl.sh  # 端口 8092（默认 dev；esbuild 打包 + watch 自动重启）
+bash scripts/run-wsl.sh
 # Windows/IDE：服务目录内直接 npm install，继续使用已有 npm 运行配置
 ```
 
-> WSL 运行、测试与类型检查使用 `bash scripts/run-wsl.sh <dev|start|build|test|type-check>`；该入口会校验 Linux/WSL。内部仍经 `scripts/run.mjs` 调度依赖与构建产物。
+> 运行、测试与类型检查：原生 Linux/Windows 用 `npm run <dev|start|build|test|type-check>`；WSL 宿主用 `bash scripts/run-wsl.sh <...>`（入口校验宿主）。内部经 `scripts/run.mjs` 按 `/proc/version` 是否含 `microsoft` 分流：WSL 用 `wsl-rt-env/`，原生 Linux/Windows 用服务目录默认位置，互不回退。
 
 ## 测试
 
 ```bash
-bash scripts/run-wsl.sh test
+npm run test         # 原生 Linux / Windows
+npm run type-check
+bash scripts/run-wsl.sh test         # 仅 WSL 宿主
 bash scripts/run-wsl.sh type-check
 ```
 

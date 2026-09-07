@@ -13,18 +13,19 @@ disable-model-invocation: true
 
 不用于生产发布、容器编排、数据库结构变更、删除旧链路、修改业务代码或自动修复未知故障。遇到这些需求，应停止并让用户明确授权或切换到专门流程。
 
-默认工作目录是仓库根目录：`/mnt/c/Users/LXH/IdeaProjects/paimeng-ai-code-mother`。所有命令优先从仓库根目录执行；TS Agent 命令进入 `paimeng-ai-code-agent/`（Node，8092），前端命令进入 `paimeng-ai-code-mother-frontend/`。退役 Python 代码位于 `paimeng-ai-code-rag/`（RAG 骨架复用起点，P4 前不安装不启动）。
+默认工作目录是仓库根目录（当前宿主为原生 Linux Mint 22.3，如 `~/github/paimeng-ai-code-mother`；历史路径 `/mnt/c/Users/LXH/IdeaProjects/paimeng-ai-code-mother` 仅 WSL 宿主适用）。所有命令优先从仓库根目录执行；TS Agent 命令进入 `paimeng-ai-code-agent/`（Node，8092），前端命令进入 `paimeng-ai-code-mother-frontend/`。退役 Python 代码位于 `paimeng-ai-code-rag/`（RAG 骨架复用起点，P4 前不安装不启动）。
 
-## 本地环境事实（WSL 默认 / Windows 旧，2026-09-01 实测）
+## 本地环境事实（原生 Linux 当前 / WSL、Windows 历史，2026-09-07 更新）
 
-本地存在两套环境，连接地址都是 127.0.0.1，同端口不可混用；**默认使用 WSL 环境**：
+本地存在三套环境，连接地址都是 127.0.0.1，同端口不可混用；**当前宿主为原生 Linux Mint 22.3（2026-09-07 起），MySQL/Redis 经 docker compose 提供**：
 
-- MySQL：WSL 用户态安装 `~/.local/opt/mysql8`（8.0.46）。未启动时执行 `bash ~/.local/opt/mysql8/start.sh`（仅监听 127.0.0.1:3306，socket `/tmp/mysql-zdan.sock`，日志 `~/.local/opt/mysql8/mysqld.log`）。凭据以 `application.yml` 数据源为准，明细见 `.agents/memories/deployment.md`；2026-09-01 起 root 密码与 `application.yml` 一致（原为空密码，start.sh 的 mysqladmin 已同步）。数据库 `paimeng_ai_code_mother` 已按 `sql/create_table.sql` 建表。
-- Redis：WSL 内源码编译运行（进程名形如 `./src/redis-server *:6379`，无密码）；`redis-cli` 不一定在 PATH。
+- **MySQL/Redis（原生 Linux，当前）**：docker compose（仓库根 `docker-compose.yml`，项目 `paimeng-infra`）。`docker compose up -d` 启动：MySQL **8.0.46**（仅绑 127.0.0.1:3306，数据卷 `mysql-data`，**首次启动（数据卷为空）自动执行 `sql/create_table.sql` 建库建表**）+ Redis **7.2**（仅绑 127.0.0.1:6379，AOF 持久化）。root 密码在仓库根 `.env`（gitignore，与 `application-local.yml` 数据源一致，不外泄不提交）。Docker 未安装时先 `sudo bash scripts/install-docker.sh`（`--mirror` 切阿里云源）。
+- MySQL（WSL 宿主旧环境）：WSL 用户态安装 `~/.local/opt/mysql8`（8.0.46）。未启动时执行 `bash ~/.local/opt/mysql8/start.sh`（仅监听 127.0.0.1:3306，socket `/tmp/mysql-zdan.sock`，日志 `~/.local/opt/mysql8/mysqld.log`）。凭据以 `application.yml` 数据源为准，明细见 `.agents/memories/deployment.md`；2026-09-01 起 root 密码与 `application.yml` 一致（原为空密码，start.sh 的 mysqladmin 已同步）。数据库 `paimeng_ai_code_mother` 已按 `sql/create_table.sql` 建表。
+- Redis（WSL 宿主旧环境）：WSL 内源码编译运行（进程名形如 `./src/redis-server *:6379`，无密码）；`redis-cli` 不一定在 PATH。
 - PostgreSQL：**已停用（2026-09-03 P0，Issue #2）**：无服务、5432 无监听（RAG v2 pgvector 时重启）；不做探活，出现 5432 监听反而是异常。
 - Windows 旧环境（MySQL80 服务 8.0.36 + Docker Redis 7.2.5）仅用于历史实机验证；WSL2 NAT 下 WSL→Windows 无 localhost 转发，Java 的 `localhost:3306/6379` 只会命中 WSL 内实例。
 - DSH 沙箱（workspace-write）会拦截家目录与 `~/.cache` 写入：mysqld 启动、`uv run`、npm 缓存都会失败，替代方案见启动节与排障表。
-- **运行时环境布局约定（2026-09-01 定，2026-09-04 强化「通过命令指定、不建软链」）**：整个项目在 Linux/WSL 的运行时环境文件统一放仓库根目录 `wsl-rt-env/`：`wsl-rt-env/python/.venv`（Python 虚拟环境，替代旧 `.venv-wsl`）、`wsl-rt-env/frontend/node_modules`（前端依赖）、`wsl-rt-env/java/target`（Java 构建产物，**2026-09-04 已迁入**，由 pom 的 `maven.build.directory` 属性 + 命令行 `-Dmaven.build.directory=$PWD/wsl-rt-env/java/target` 指定，无软链）、`wsl-rt-env/ts-agent/`（TS Agent 依赖 node_modules + esbuild 产物 `dist/app.bundle.mjs`）与 `wsl-rt-env/frontend/`（前端依赖、Vite 缓存、构建产物）；各模块的 WSL 安装和启动均通过项目内 `scripts/*.sh` 执行，服务目录不建软链。
+- **运行时环境布局约定（2026-09-07 起按宿主分流）**：**原生 Linux 与 Windows/IDE 使用各服务默认目录与标准命令**（Java `target/`、Node `node_modules/`+`dist/`、Python `.venv/`），不指定环境输出目录；**仅 WSL 宿主**统一放 `wsl-rt-env/`（`wsl-rt-env/python/.venv`、`wsl-rt-env/frontend/node_modules`、`wsl-rt-env/java/target`、`wsl-rt-env/ts-agent/`）并经各模块 `scripts/*-wsl.sh` 命令指定，不建软链。Java 的 `maven.build.directory` 属性默认 `${project.basedir}/target`，WSL 命令带 `-Dmaven.build.directory=$PWD/wsl-rt-env/java/target` 指定；TS Agent 与前端 `npm run` 经 `scripts/run.mjs` 按 `/proc/version` 是否含 `microsoft` 分流（原生 Linux 不含，走默认目录）。三平台互不回退。
 
 ## 启动模式
 
@@ -75,13 +76,16 @@ ss -ltnp | rg ':(3306|6379|8092|8123|5173)\b' || true   # 5432 已停用，出�
 按目标模式检查依赖客户端是否可用和服务是否可连接：
 
 ```bash
-# 将 <configured-user> 替换为本地配置中的用户名；密码只在交互提示中输入
+# 原生 Linux（当前宿主）：compose 健康状态即探活
+docker compose ps   # mysql/redis 均 healthy；需要时 docker exec paimeng-mysql mysqladmin ping -uroot -p
+
+# 通用客户端探活（将 <configured-user> 替换为本地配置中的用户名；密码只在交互提示中输入）
 mysqladmin ping -h 127.0.0.1 -P 3306 -u '<configured-user>' -p
 redis-cli -h 127.0.0.1 -p 6379 ping
-pg_isready -h 127.0.0.1 -p 5432
+pg_isready -h 127.0.0.1 -p 5432   # PostgreSQL 已停用，5432 不应监听
 ```
 
-WSL 环境变体（实测可用）：
+WSL 宿主环境变体（仅 WSL；实测可用）：
 
 ```bash
 # WSL 用户态 mysql 客户端缺 libncurses.so.6 时必须先设 LD_LIBRARY_PATH
@@ -92,13 +96,25 @@ mysqladmin ping -h 127.0.0.1 -P 3306 -u root -p
 python3 -c "import socket;s=socket.create_connection(('127.0.0.1',6379),3);s.sendall(b'PING\r\n');print(s.recv(16))"
 ```
 
-密码不得写入命令行、日志或回复；需要密码时使用已有安全环境、交互输入或让用户自行执行。MySQL 数据库不存在或表未初始化时，只报告事实并提示 `sql/create_table.sql`，不得自动执行建库脚本；**仅当用户明确授权导入时**才执行，且导入前先 `SHOW TABLES` 检查目标库（脚本中 `create table app` 等语句非幂等，重复导入会报错）。PostgreSQL 已停用，不要把 MySQL 业务表迁移到 PostgreSQL。
+密码不得写入命令行、日志或回复；需要密码时使用已有安全环境、交互输入或让用户自行执行。MySQL 数据库不存在或表未初始化时，只报告事实并提示 `sql/create_table.sql`，不得自动执行建库脚本；**仅当用户明确授权导入时**才执行（docker compose 首次启动的自动初始化已于 2026-09-07 获用户授权）。脚本已全表 `if not exists` 幂等（2026-09-07 修复），但重复导入仍应先 `SHOW TABLES` 检查目标库。PostgreSQL 已停用，不要把 MySQL 业务表迁移到 PostgreSQL。
 
 完成标准：目标模式所需依赖均返回成功；失败时按“服务未启动 / 端口错误 / 凭据错误 / 数据库不存在 / 客户端缺失”分类，不继续启动依赖它的应用。
 
 ### 4. 安装或校验项目依赖
 
-只在依赖目录缺失、锁文件变化或用户要求时执行安装：
+只在依赖目录缺失、锁文件变化或用户要求时执行安装。**按宿主选择命令**：
+
+原生 Linux（当前宿主；依赖装各服务目录，npmmirror 源，沙箱内缓存指到 `tmp/`）：
+
+```bash
+cd paimeng-ai-code-agent
+npm install --registry=https://registry.npmmirror.com --cache ../tmp/npm-cache
+cd ../paimeng-ai-code-mother-frontend
+npm install --registry=https://registry.npmmirror.com --cache ../tmp/npm-cache
+cd ..
+```
+
+WSL 宿主（依赖装 `wsl-rt-env/`）：
 
 ```bash
 cd paimeng-ai-code-agent
@@ -123,25 +139,31 @@ export JAVA_HOME=/path/to/jdk-21
 启动长驻进程前先确认目标端口空闲或确认复用已有健康进程。使用独立后台会话/终端并保存日志路径，不能让启动命令无限占用当前交互。命令如下：
 
 ```bash
-# MySQL 未启动时（WSL 用户态；mysqld 需写 ~/.local，DSH 沙箱下须以完整权限运行）
-bash ~/.local/opt/mysql8/start.sh
+# ---- 原生 Linux（当前宿主）----
+docker compose up -d        # MySQL 8.0.46 + Redis 7.2；首次启动自动建库建表
 
 # TS Agent（需要 Agent 流时）
-cd paimeng-ai-code-agent
-bash scripts/run-wsl.sh   # 端口 8092，健康检查 /healthz
+cd paimeng-ai-code-agent && npm run dev   # 端口 8092，健康检查 /healthz；bundle 在服务目录 dist/
+cd ..
 
-# Java Spring Boot（WSL 构建产物在 wsl-rt-env/java/target）
-bash scripts/run-java-wsl.sh
+# Java Spring Boot（默认 target/，无需 -D 指定；不要用 scripts/run-java-wsl.sh）
+JAVA_HOME=<JDK21 路径> ./mvnw spring-boot:run
 
 # Vue 前端
-cd paimeng-ai-code-mother-frontend
-bash scripts/run-wsl.sh
+cd paimeng-ai-code-mother-frontend && npm run dev
+cd ..
+
+# ---- WSL 宿主（旧约定，仅 WSL 环境）----
+# bash ~/.local/opt/mysql8/start.sh          # mysqld 需写 ~/.local，DSH 沙箱下须完整权限
+# cd paimeng-ai-code-agent && bash scripts/run-wsl.sh
+# bash scripts/run-java-wsl.sh               # 构建产物在 wsl-rt-env/java/target
+# cd paimeng-ai-code-mother-frontend && bash scripts/run-wsl.sh
 ```
 
 沙箱与环境护栏（实测踩坑）：
 
-- **TS Agent**：用 `bash paimeng-ai-code-agent/scripts/install-wsl-node-modules.sh` 安装；用 `bash paimeng-ai-code-agent/scripts/run-wsl.sh` 启动。脚本仅允许 Linux/WSL，直接在 `wsl-rt-env/ts-agent/` 安装依赖并运行自包含 bundle；Windows/IDE 只使用服务目录本地依赖。
-- **前端**：用 `bash paimeng-ai-code-mother-frontend/scripts/install-wsl-node-modules.sh` 安装；用 `bash paimeng-ai-code-mother-frontend/scripts/run-wsl.sh` 启动。脚本仅允许 Linux/WSL，依赖、Vite 缓存与构建产物均在 `wsl-rt-env/frontend/`。
+- **TS Agent**：原生 Linux 用 `npm install` + `npm run dev`（依赖与 bundle 在服务目录）；WSL 宿主用 `scripts/install-wsl-node-modules.sh` + `scripts/run-wsl.sh`（装到 `wsl-rt-env/ts-agent/` 并运行自包含 bundle）；Windows/IDE 只使用服务目录本地依赖。`scripts/run.mjs` 按 `/proc/version` 是否含 `microsoft` 分流，互不回退。
+- **前端**：原生 Linux 用 `npm install` + `npm run dev`（依赖、Vite 缓存与构建产物在服务目录）；WSL 宿主用 `scripts/install-wsl-node-modules.sh` + `scripts/run-wsl.sh`（均在 `wsl-rt-env/frontend/`）；Windows/IDE 处理方式与原生 Linux 相同。
 - **Java**：启动约 18-20 秒，健康检查要轮询（如 sleep 25 后再查一次），一次连接失败不要直接判死；日志中 `初始化 Chrome 浏览器失败` 是已知无害告警（仅截图功能不可用），不算启动失败。
 
 推荐顺序是 MySQL/Redis → Java → TS Agent → 前端；Java-only 跳过 TS Agent。若服务已健康运行，不重复启动。记录每个 PID、端口、日志文件和启动命令；不要将 token、API key 或完整配置写入日志报告。
@@ -178,7 +200,7 @@ bash scripts/run-wsl.sh
 | 前端白屏或 API 失败 | dev server 日志、浏览器 Network、Java 地址 | 不直接改前端 SSE 协议 |
 | SSE 卡住/事件不一致 | Java/TS Agent 两侧日志、超时、契约文档 | 先保存最小复现与事件类型，再修改 |
 | MySQL `Access denied for 'root'@'<host>'` | 报错中的来源 host、账号 host 范围（如仅有 `root@localhost`）、密码与 `application.yml` 是否一致 | 只诊断不重置密码、不新建账号，除非用户授权 |
-| vite `Cannot find module @rollup/rollup-linux-x64-gnu` | node_modules 的安装平台、位置（新约定 `wsl-rt-env/frontend/node_modules`）、`node_modules/@rollup`、`@esbuild` 目录内容 | 按启动节命令补装 Linux 二进制（`--no-save`） |
+| vite `Cannot find module @rollup/rollup-linux-x64-gnu` | node_modules 的安装平台、位置（原生 Linux 在服务目录 `node_modules`；WSL 在 `wsl-rt-env/frontend/node_modules`）、`node_modules/@rollup`、`@esbuild` 目录内容 | 按启动节命令补装 Linux 二进制（`--no-save`） |
 | uv/npm 报 `Permission denied`（`~/.cache`、`~/.npm`） | 是否处于 DSH 沙箱 workspace-write 模式 | npm `--cache` 指向仓库 `tmp/`（Python RAG P4 前不涉及 uv）；确需写入时走提权授权 |
 | Java `Failed to determine DatabaseDriver` | 最底层 `Caused by`（实测多为 JDBC `Access denied`） | 修数据库连接根因，不绕过/不改初始化器 |
 
@@ -196,7 +218,7 @@ bash scripts/run-wsl.sh
 ## 交付前自检
 
 - [ ] 已确认启动模式、工作目录、JDK/Node/uv/Maven 版本和端口占用。
-- [ ] 已确认目标环境（WSL 默认 / Windows 旧），未混用同端口的两套实例；WSL 下 MySQL/Redis 探活用了正确变体命令，前端 Linux 二进制已就绪；运行时环境文件位置按 `wsl-rt-env/` 新约定（迁移前按实际路径）核对。
+- [ ] 已确认目标宿主（原生 Linux 当前 / WSL / Windows 旧），未混用同端口的多套实例；运行时目录按宿主分流核对（原生 Linux 用默认目录与标准命令、WSL 用 `wsl-rt-env/`），无跨平台回退。
 - [ ] 已检查三套配置文件存在；只核对敏感键是否存在/非空，没有泄露值。
 - [ ] 目标模式所需 MySQL、Redis 均已探活，或明确记录阻塞原因（PostgreSQL 已停用）。
 - [ ] TS Agent `/healthz`（如启动）、Java 端口/API 文档、前端 URL 均有实际证据。

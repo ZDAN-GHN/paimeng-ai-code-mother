@@ -5,7 +5,8 @@
 ## 约定
 
 - **代码风格**：Prettier 配置为无分号、单引号、100 字符宽度；Vue 3 Composition API；ESLint 检查。
-- **命令**（在 `paimeng-ai-code-mother-frontend/` 内）：WSL 使用 `bash scripts/run-wsl.sh <dev|build|type-check|lint|openapi2ts>`；Windows/IDE 仍使用原有 `npm run <script>` 配置。
+- **命令**（在 `paimeng-ai-code-mother-frontend/` 内）：原生 Linux/Windows 用标准 `npm run <dev|build|type-check|lint|openapi2ts>`；WSL 宿主使用 `bash scripts/run-wsl.sh <...>`。
+- **运行时目录按宿主分流（2026-09-07 起）**：原生 Linux/Windows 用服务目录默认 `node_modules`、Vite 缓存与 `dist/`，不指定环境输出目录；`wsl-rt-env/frontend/` 仅限 WSL 宿主（`run.mjs` 按 `/proc/version` 含 `microsoft` 判定；本机 type-check/build 实测通过）。
 - **WSL 运行时布局（2026-09-04 已实施）**：实体依赖位于 `wsl-rt-env/frontend/node_modules`，Vite 缓存和构建产物分别位于 `wsl-rt-env/frontend/vite-cache`、`wsl-rt-env/frontend/dist`，无软链。WSL 安装固定执行 `bash scripts/install-wsl-node-modules.sh`，启动/构建固定执行 `bash scripts/run-wsl.sh <command>`；两个脚本均校验 Linux/WSL。Windows/IDE 只使用服务目录本地 `node_modules`，原有 npm 运行配置不变。
 - **环境配置**：已包含在 `.env.development`。
 
