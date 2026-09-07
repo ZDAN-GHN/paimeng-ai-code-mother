@@ -43,11 +43,11 @@ services:
     image: searxng/searxng:latest
     container_name: paimeng-searxng
     restart: unless-stopped
-    # 仅监听本机回环，不暴露到局域网
+    # 仅监听本机回环，不暴露到局域网；宿主机端口用 8888，避开 Tomcat/Spring Boot 默认的 8080
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8888:8080"
     environment:
-      SEARXNG_BASE_URL: http://127.0.0.1:8080/
+      SEARXNG_BASE_URL: http://127.0.0.1:8888/
     volumes:
       - ./docker/searxng/settings.yml:/etc/searxng/settings.yml:ro
     healthcheck:

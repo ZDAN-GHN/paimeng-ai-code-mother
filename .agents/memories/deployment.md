@@ -21,7 +21,7 @@
 ## 依赖服务 — 原生 Linux 环境（当前宿主，2026-09-07 起）
 
 - **MySQL + Redis（docker compose）**：仓库根 `docker-compose.yml`（项目名 `paimeng-infra`）。MySQL **8.0.46**（容器 `paimeng-mysql`，仅绑 127.0.0.1:3306，数据卷 `mysql-data`；**首次启动（数据卷为空）自动执行 `sql/create_table.sql` 建库建表**，其后不重复）+ Redis **7.2**（容器 `paimeng-redis`，仅绑 127.0.0.1:6379，AOF 开启，数据卷 `redis-data`）。启动 `docker compose up -d`，探活 `docker compose ps` 均应 healthy。root 密码在仓库根 `.env`（gitignore；与 `src/main/resources/application-local.yml` 的 `spring.datasource.password` 一致，2026-09-07 生成，勿提交勿外泄）。Docker 安装：`sudo bash scripts/install-docker.sh`（Mint 22.x/Ubuntu 24.04 官方 apt 源，`--mirror` 切阿里云；装后将用户加入 docker 组）。PostgreSQL 继续停用（5432 不应监听）。
-- **SearXNG（docker compose，2026-09-07 新增）**：容器 `paimeng-searxng`，仅绑 127.0.0.1:8080，配置 `docker/searxng/settings.yml` 挂载为 `/etc/searxng/settings.yml`（`use_default_settings` 合并 + `search.formats` 开 `json`；境内不可达的 google/duckduckgo/qwant 图片引擎已显式禁用，`limiter: false` 单机免限流）。用途：Java 全网热词图片搜索源（`WebImageSearchTool`，见 `java-backend.md`）；探活 `curl http://127.0.0.1:8080/healthz`，图片搜索自测 `curl 'http://127.0.0.1:8080/search?q=原神&categories=images&format=json'`。
+- **SearXNG（docker compose，2026-09-07 新增）**：容器 `paimeng-searxng`，仅绑 127.0.0.1:**8888**（宿主机端口避开 Tomcat/Spring Boot 默认的 8080；容器内部仍监听 8080，由端口映射转换），配置 `docker/searxng/settings.yml` 挂载为 `/etc/searxng/settings.yml`（`use_default_settings` 合并 + `search.formats` 开 `json`；境内不可达的 google/duckduckgo/qwant 图片引擎已显式禁用，`limiter: false` 单机免限流）。用途：Java 全网热词图片搜索源（`WebImageSearchTool`，见 `java-backend.md`）；探活 `curl http://127.0.0.1:8888/healthz`，图片搜索自测 `curl 'http://127.0.0.1:8888/search?q=原神&categories=images&format=json'`。
 
 ## 依赖服务 — WSL 环境（WSL 宿主适用，2026-09-01 全栈验证）
 

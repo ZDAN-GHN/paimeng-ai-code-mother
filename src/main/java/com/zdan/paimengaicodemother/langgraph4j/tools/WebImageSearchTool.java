@@ -29,7 +29,8 @@ public class WebImageSearchTool {
 
     private static final int SEARCH_COUNT = 8;
 
-    @Value("${searxng.base-url:http://127.0.0.1:8080}")
+    // 宿主机端口为 8888，避开 Tomcat/Spring Boot 默认的 8080
+    @Value("${searxng.base-url:http://127.0.0.1:8888}")
     private String searxngBaseUrl;
 
     @Tool("搜索全网图片素材，覆盖游戏、动漫、品牌、明星等网络热词内容；图片来源公开网络，版权状态不确定，仅用于预览展示")

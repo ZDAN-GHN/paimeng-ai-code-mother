@@ -41,7 +41,7 @@
 ## 2026-09-07 双源图片搜索（素材库 + 全网热词）
 
 - **决策（用户拍板）**：双源并存且工具切分——`ImageSearchTool.searchContentImages`（Pexels，素材库语料，版权清晰）与 `WebImageSearchTool.searchWebImages`（SearXNG 自建聚合，覆盖游戏/动漫/品牌等素材库永远没有的热词，**版权不确定仅预览用途**）。根因认知：Pexels 相关度差是语料基因问题（热词内容不存在），非提示词可修。
-- **实现**：`WebImageSearchTool` 调 `GET {searxng.base-url:http://127.0.0.1:8080}/search?categories=images&format=json`，取 `results[].img_src`/`title` 映射 `ImageResource(CONTENT)`，软失败返回空列表；`ImageCollectionPlan` 新增 `webImageTasks`（复用 `ImageSearchTask` record）；串行流 `ImageCollectorNode`、并发流 `WebImageCollectorNode`（`WorkflowContext.webImages` → `ImageAggregatorNode` 聚合）、`ImageCollectionServiceFactory.tools(...)` 注册；两份图片收集提示词已加双源路由规则（通用内容→contentImageTasks，热词→webImageTasks）。SearXNG 服务见 `deployment.md`。
+- **实现**：`WebImageSearchTool` 调 `GET {searxng.base-url:http://127.0.0.1:8888}/search?categories=images&format=json`（端口 8888，避开 Tomcat/Spring Boot 默认的 8080），取 `results[].img_src`/`title` 映射 `ImageResource(CONTENT)`，软失败返回空列表；`ImageCollectionPlan` 新增 `webImageTasks`（复用 `ImageSearchTask` record）；串行流 `ImageCollectorNode`、并发流 `WebImageCollectorNode`（`WorkflowContext.webImages` → `ImageAggregatorNode` 聚合）、`ImageCollectionServiceFactory.tools(...)` 注册；两份图片收集提示词已加双源路由规则（通用内容→contentImageTasks，热词→webImageTasks）。SearXNG 服务见 `deployment.md`。
 - **测试**：`WebImageSearchToolTest` 为独立单测（`ReflectionTestUtils` 注入 base-url，SearXNG 未启动自动跳过）——**不用 @SpringBootTest**：上下文启动被待恢复配置阻塞（见踩坑）。原神实测 8 张全链路通过（含米哈游官网图/角色立绘）。
 
 ## 2026-09-07 上下文启动潜伏 bug（实测发现）

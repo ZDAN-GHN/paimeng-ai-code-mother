@@ -26,7 +26,7 @@ class WebImageSearchToolTest {
     @BeforeEach
     void setUp() {
         webImageSearchTool = new WebImageSearchTool();
-        ReflectionTestUtils.setField(webImageSearchTool, "searxngBaseUrl", "http://127.0.0.1:8080");
+        ReflectionTestUtils.setField(webImageSearchTool, "searxngBaseUrl", "http://127.0.0.1:8888");
     }
 
     @Test
@@ -56,7 +56,7 @@ class WebImageSearchToolTest {
      */
     private boolean isSearxngUp() {
         try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress("127.0.0.1", 8080), 500);
+            socket.connect(new InetSocketAddress("127.0.0.1", 8888), 500);
             return true;
         } catch (Exception e) {
             return false;
