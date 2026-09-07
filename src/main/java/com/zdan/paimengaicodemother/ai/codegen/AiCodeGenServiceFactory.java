@@ -64,19 +64,15 @@ public class AiCodeGenServiceFactory {
 
     // 阻塞调用对象，阻塞调用大模型，直至回复结果生成结束
     private final ChatModel openAiChatModel;
-    // 流式调用对象，异步调用大模型，直接返回响应式对象，使用其他线程完成 ai 回复内容的接收
-    private final StreamingChatModel openAiStreamingChatModel; // 该对象已弃用，后续代码不会使用到此对象（单例无法实现并发执行 ai 对话）
     // redis 会话记忆存储
     private final RedisChatMemoryStore redisChatMemoryStoreForCodeGen;
     // 会话历史记录服务
     private final ChatHistoryService chatHistoryService;
 
     public AiCodeGenServiceFactory(ChatModel openAiChatModel,
-                                   StreamingChatModel openAiStreamingChatModel,
                                    RedisChatMemoryStore redisChatMemoryStoreForCodeGen,
                                    ChatHistoryService chatHistoryService) {
         this.openAiChatModel = openAiChatModel;
-        this.openAiStreamingChatModel = openAiStreamingChatModel;
         this.redisChatMemoryStoreForCodeGen = redisChatMemoryStoreForCodeGen;
         this.chatHistoryService = chatHistoryService;
     }
@@ -228,7 +224,6 @@ public class AiCodeGenServiceFactory {
     public AiCodeGenService createAiCodeGenService(Class<? extends AiCodeGenService> clazz) {
         return AiServices.builder(clazz)
                 .chatModel(openAiChatModel)
-                .streamingChatModel(openAiStreamingChatModel)
                 .build();
     }
 }
