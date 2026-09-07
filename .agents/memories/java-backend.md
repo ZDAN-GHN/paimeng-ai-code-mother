@@ -46,7 +46,7 @@
 
 ## 编译红线
 
-- **JDK 21 是硬要求**（`<java.version>21</java.version>`）：用 `JAVA_HOME=/home/zdan/.sdkman/candidates/java/current`（sdkman 默认已切到 21）执行 `./mvnw compile`。
+- **JDK 21 是硬要求**（`<java.version>21</java.version>`）：用 `JAVA_HOME=/home/zdan/.sdkman/candidates/java/current`（sdkman 默认已切到 21）执行 `./mvnw compile`。⚠️ 原生 Linux 新宿主（2026-09-07 核实）尚未安装任何 JDK，编译验证前需先安装 JDK 21。
 - **构建产物目录（2026-09-04）**：`pom.xml` 暴露 `maven.build.directory` 属性（默认 `${project.basedir}/target`），`<build><directory>` 引用它。WSL 运行时环境统一放 `wsl-rt-env/`（不建软链），命令带 `-Dmaven.build.directory=$PWD/wsl-rt-env/java/target`；Windows/IDE 不传该属性则用默认 `target/`。⚠️ **不要用 `-Dproject.build.directory` 覆盖**——那是模型派生属性，部分插件（surefire 等）不认，会重建根 `target/`（实测 2026-09-04）。
 - T0 已落地：`config/PythonAgentProperties.java`（含 `callback-timeout-ms`）、`ai/python/PythonAgentRequest.java`（§1.2 字段 + `HistoryItem`）、`ai/python/PythonAgentClient.java`（WebClient，`health()` 可用；`stream()` 阶段 3 前抛明确 BusinessException）。
 - T18 起 `AppServiceImpl` 的 `pythonChatToGenCode` 分支已调用 `PythonAgentClient.stream()`；P0（2026-09-03）回切后该分支关闭（enabled=false），代码保留待 T21 泛化处置。
@@ -58,6 +58,7 @@
 - 浏览器 SSE wire（Java 独占）：`data: {"d":"<文本>"}`（默认 message 事件）、`event: done`（构建后）、`event: business-error`。
 - `AppController` 无类级 `@AuthCheck`；回调 endpoint `/api/app/chat/gen/code/callback` 只校验 Bearer token。
 - 工具展示重组：复用 `ToolManager.generateToolRequestResponse` / `generateToolExecutedResult`（在 Java 侧，不迁移）。
+- **Logo 图片生成后端（2026-09-07 切换）**：`LogoGeneratorTool` 走硅基流动 REST（`POST https://api.siliconflow.cn/v1/images/generations`，模型 `Kwai-Kolors/Kolors`，官方定价页标注免费），`dashscope-sdk-java` 已从 pom 移除；配置键 `siliconflow.api-key` / `siliconflow.image-model`（本地配置未填 key 时接口调用失败、工具返回空列表不阻塞主流程）。⚠️ 官方返回图片 url 有效期仅一小时，下游需及时消费。接口文档：https://api-docs.siliconflow.cn/docs/api/images-generations-post
 
 ## 约定
 
