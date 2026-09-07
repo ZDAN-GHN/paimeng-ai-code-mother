@@ -1,0 +1,25 @@
+# 本地自建 SearXNG 聚合搜索配置（仅监听 127.0.0.1，供项目全网图搜工具使用）
+# 官方推荐做法：use_default_settings 合并默认配置，无需整份拷贝
+use_default_settings: true
+
+server:
+  # 本地回环单用户实例，不上公网，固定值即可
+  secret_key: "paimeng-local-searxng"
+  # 单用户实例无需限流与人机验证
+  limiter: false
+  image_proxy: false
+
+search:
+  # 开放 JSON 输出，供 Java 工具端调用
+  formats:
+    - html
+    - json
+
+engines:
+  # 境内网络不可达的图片引擎显式禁用，避免每次聚合都空等超时（如需启用删除对应条目即可）
+  - name: google images
+    disabled: true
+  - name: duckduckgo images
+    disabled: true
+  - name: qwant images
+    disabled: true

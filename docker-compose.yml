@@ -1,4 +1,4 @@
-# 本地开发基础设施：MySQL + Redis（应用服务 Java / TS Agent / 前端仍在宿主机运行）
+# 本地开发基础设施：MySQL + Redis + SearXNG（应用服务 Java / TS Agent / 前端仍在宿主机运行）
 # 使用：仓库根目录执行 docker compose up -d；环境变量见 .env.example（复制为 .env 后修改）
 name: paimeng-infra
 
@@ -38,6 +38,24 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: paimeng-searxng
+    restart: unless-stopped
+    # 仅监听本机回环，不暴露到局域网
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      SEARXNG_BASE_URL: http://127.0.0.1:8080/
+    volumes:
+      - ./docker/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
 volumes:
   mysql-data:
