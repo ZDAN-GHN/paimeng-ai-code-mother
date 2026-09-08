@@ -88,5 +88,11 @@ src/                   # 按领域切分（#16：13 个技术层目录收敛为 
   llm/
     index.ts           # 脚本化假 LLM：AI SDK LanguageModelV2 provider（customProvider 注册，零在线调用）
     real.ts            # 真实渠道（三渠道 OpenAI 兼容封装，渠道表驱动）
-test/                  # vitest：healthz / 鉴权矩阵 / 沙箱逃逸 / SSE 顺序 / stream 契约 / 需求工程 / 工具契约 / golden e2e
+test/                  # 与 src/ 路径对称分包；helpers/fixtures 与跨域 golden e2e 留顶层
+  server/              # 鉴权矩阵 / healthz / stream 契约 / smoke SSE
+  protocol/            # SSE 帧编码
+  runs/                # run 客户端
+  interview/           # 护轨 / 需求工程（访谈 + 线框）
+  generation/          # 强度 / 沙箱 / 质检门禁集成；workflow、tools、review 子目录随 src 同构
+  llm/                 # 真实渠道离线单测
 ```
