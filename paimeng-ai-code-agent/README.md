@@ -52,35 +52,41 @@ bash scripts/run-wsl.sh type-check
 ## 代码结构
 
 ```
-src/
-  index.ts             # 服务入口（默认端口 8092，esbuild 打包锚点）
-  app/
-    app.ts             # Fastify 应用装配（生产/测试共用构建入口）
-    config.ts          # 环境配置（PORT/JWT_SECRET/WORKSPACE_ROOT/JAVA_INTERNAL_*/PEXELS_*/DASHSCOPE_*）
+src/                   # 按领域切分（#16：13 个技术层目录收敛为 6 个领域目录，零行为变更）
+  server/              # 服务装配与横切面
+    index.ts           # 服务入口（默认端口 8092，esbuild 打包锚点）
+    app.ts             # Fastify 应用装配（buildApp，生产与测试共用）
+    config.ts          # 环境配置（PORT/JWT_SECRET/WORKSPACE_ROOT/JAVA_INTERNAL_*/模型与图片渠道键；图片模型缺省值与第三方图片源常量归属此层）
+    agentRoot.ts       # 服务根目录定位（AGENT_ROOT，提示词等资源解析）
+    agentRoutes.ts     # agent 路由（工作区校验/访谈/线框确认/生成流/冒烟，含需求工程与 codegen 闸门）
+    healthzRoutes.ts   # 健康检查路由
+    jwt.ts             # jose 离线验签
+    authPlugin.ts      # /agent/* 鉴权作用域（钩子不外溢）
+  protocol/            # wire 协议出口
+    events.ts          # 七类 SSE 事件模型（AgentEvent）
+    sse.ts             # SSE 帧序列化
+  runs/                # 运行记录网关（原 internal/，名不副实故改）
+    runClient.ts       # Java 内部 API 客户端（create/update/get/complete + 错误映射）
   interview/           # 需求理解域：访谈 → 线框 → 确认
     index.ts           # 五维访谈：题目生成/收敛判断/结论（脚本化，真实模型替换点）
     wireframe.ts       # 线框生成：单文件 HTML（站点地图 + 灰块 + 占位图，≤5 页）
-    guardrails.ts      # 提示词安全输入护轨（#8：长度/空/敏感词/注入模式，interview 阶段拦截）
+    guardrails.ts      # 提示词安全输入护轨（长度/空/敏感词/注入模式，interview 阶段拦截）
     context.ts         # run.context JSON 类型化解析（interview + wireframe 状态）
-  workflow/            # 生成工作流域
-    index.ts           # 工作流驱动：XState actor 推进 + streamText 消费 + run phase 更新 + 工作区落盘
-    machine.ts         # XState v5 线性工作流状态机（interview→coding→review→done/failed，milestone 聚合）
-    events.ts          # 七类 SSE 事件模型
+  generation/          # 生成主链路域
+    workflow/          # 工作流：驱动 + 状态机 + 输入滑窗
+      index.ts         # 工作流驱动：XState actor 推进 + streamText 消费 + run phase 更新 + 工作区落盘
+      machine.ts       # XState v5 线性工作流状态机（interview→coding→review→done/failed，milestone 聚合）
+      history.ts       # 输入滑窗
+    review/            # 质检三重门禁（质检分 / build 校验 / 视觉 diff 基准 = 已确认线框）
+    tools/
+      index.ts         # 工具注册表（文件六 + 图片四 → AI SDK tool 定义）
+      fileTools.ts     # 文件六工具（写/读/改/删/列目录/退出 + 重要文件保护 + 沙箱）
+      imageTools.ts    # 图片四工具（Pexels/Undraw/DashScope/mmdc + 配额 4 张/run）
+    prompts/           # 提示词加载器（AGENT_ROOT 定位）+ 生产在用 2 份（codegen-html / code-quality-check；其余 5 份原件留档 rag 仓库）
+    intensity.ts       # 三档强度（fast/standard/deep：maxTurns/maxOutputTokens/maxToolCalls/maxImages）
+    workspace.ts       # 工作区沙箱校验（移植自 Python Agent workspace/manager.py）
   llm/
     index.ts           # 脚本化假 LLM：AI SDK LanguageModelV2 provider（customProvider 注册，零在线调用）
-  prompts/
-    index.ts           # 提示词加载器（#8：7 份提示词复制自 Python Agent，经 AGENT_ROOT 定位）
-    *.txt              # 7 份提示词资源
-  codegen/parsing.ts   # 代码块解析（#8：HTML/CSS/JS 正则移植，writeFile 写盘前解析文件集）
-  tools/fileTools.ts   # 文件六工具（#8：写/读/改/删/列目录/退出 + 重要文件保护 + 沙箱）
-  tools/imageTools.ts  # 图片四工具（#8：Pexels/Undraw/DashScope/mmdc + 配额 4 张/run）
-  tools/index.ts       # 工具注册表（#8：文件六 + 图片四 → AI SDK tool 定义）
-  sse/format.ts        # SSE 帧序列化
-  auth/jwt.ts          # jose 离线验签
-  auth/plugin.ts       # /agent/* 鉴权作用域（钩子不外溢）
-  workspace/sandbox.ts # 工作区沙箱校验（移植自 Python Agent workspace/manager.py）
-  routes/              # healthz + agent 路由（含需求工程与闸门）
-  app.ts               # buildApp（生产与测试共用）
-  index.ts             # 入口
-test/                  # vitest：healthz / 鉴权矩阵 / 沙箱逃逸 / SSE 顺序 / stream 契约 / 需求工程 / #8 核心
+    real.ts            # 真实渠道（三渠道 OpenAI 兼容封装，渠道表驱动）
+test/                  # vitest：healthz / 鉴权矩阵 / 沙箱逃逸 / SSE 顺序 / stream 契约 / 需求工程 / 工具契约 / golden e2e
 ```

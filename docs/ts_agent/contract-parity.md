@@ -39,9 +39,9 @@
 | test_stream_with_valid_token | 合法令牌 → 200 + text/event-stream + data: | ✅ `test/stream.test.ts` + golden e2e |
 | test_stream_rejects_path_traversal | workspacePath 越界 → 拒绝 | ✅ `test/workspace.test.ts`（validate 400）+ `stream.test.ts`（流内 error 终态不写文件） |
 | test_stream_rejects_relative_path | 相对路径 → 拒绝 | ✅ `test/workspace.test.ts`（流内经 sandbox 拒绝，语义等价） |
-| test_stream_rejects_invalid_code_gen_type | codeGenType 白名单外 → 422 | ⚠️ 路由白名单存在但白名单外**回退 html** 而非拒绝（`routes/agent.ts` CODE_GEN_TYPE_WHITELIST）→ §五-1 |
+| test_stream_rejects_invalid_code_gen_type | codeGenType 白名单外 → 422 | ⚠️ 路由白名单存在但白名单外**回退 html** 而非拒绝（`server/agentRoutes.ts` CODE_GEN_TYPE_WHITELIST）→ §五-1 |
 | test_stream_rejects_empty_message | message 空 → 422 | ⚠️ 路由只强制 runId/appId/userId，message 不再必填；contract.md 仍写必填 → §五-2 |
-| test_event_schema_aligns_with_java | ai_response/tool_request 字段逐字段 | ✅ `src/workflow/events.ts` + `stream.test.ts` 字段断言 |
+| test_event_schema_aligns_with_java | ai_response/tool_request 字段逐字段 | ✅ `src/protocol/events.ts` + `stream.test.ts` 字段断言 |
 | test_callback_schema_alignment | 回调体逐字段 + status 枚举 | ✅ `run-client.test.ts`（completeRun/freeze/aborted filesWritten；回调形状按 #6/#10 演进为写历史+构建+记账） |
 | test_healthz_does_not_require_auth | 健康检查免鉴权 | ✅ `test/healthz.test.ts` |
 
