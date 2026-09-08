@@ -474,8 +474,6 @@ export function createScriptedLlm(script: LlmScript = 'success') {
   return Object.assign(provider, { records })
 }
 
-export type ScriptedLlmProvider = ReturnType<typeof createScriptedLlm>
-
 // 最小 LLM provider 能力（工作流与质检门禁仅依赖 languageModel 路由到模型）。
 // 以 AI SDK customProvider 工厂的返回形态为准——假 provider（本文件）与真 provider（llm/real.ts）
 // 均经它构建，接口不寄生在任一实现上；注入点（workflow/review/agent 路由）一律声明为本类型。

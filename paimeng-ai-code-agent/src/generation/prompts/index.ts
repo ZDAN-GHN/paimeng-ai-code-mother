@@ -1,5 +1,5 @@
-// 提示词加载器（Issue #8）：7 份提示词从 Python Agent app/prompts/ 直接复用（随包维护在 src/prompts/），
-// codegen 三份已注入「导览组件强制产出」要求（架构 §9 亮点可见性：onboarding tour 生成进应用本身）。
+// 提示词加载器（Issue #8）：提示词从 Python Agent app/prompts/ 直接复用（随包维护在 src/generation/prompts/），
+// codegen 提示词已注入「导览组件强制产出」要求（架构 §9 亮点可见性：onboarding tour 生成进应用本身）。
 // 运行时经 AGENT_ROOT 定位提示词目录（esbuild 打包产物不内联 .txt，须运行时读取）。
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -7,15 +7,10 @@ import { agentRoot } from '../../server/agentRoot.js'
 
 const PROMPTS_DIR = path.join(agentRoot, 'src', 'generation', 'prompts')
 
-// 提示词文件名（与 Python Agent app/prompts/ 一一对应）
+// 提示词文件名（Python Agent app/prompts/ 原件留档 rag 仓库，可随时取回）
 export const PROMPT_NAMES = {
   codegenHtml: 'codegen-html-system-prompt.txt',
-  codegenMultiFile: 'codegen-multi-file-system-prompt.txt',
-  codegenVueProject: 'codegen-vue-project-system-prompt.txt',
-  codegenRouting: 'codegen-routing-system-prompt.txt',
   codeQualityCheck: 'code-quality-check-system-prompt.txt',
-  imageCollectionPlan: 'image-collection-plan-system-prompt.txt',
-  imageCollection: 'image-collection-system-prompt.txt',
 } as const
 
 export type PromptName = (typeof PROMPT_NAMES)[keyof typeof PROMPT_NAMES]

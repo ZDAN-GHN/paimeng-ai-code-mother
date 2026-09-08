@@ -1,21 +1,16 @@
 // 工具注册表（Issue #8）：把工作区文件工具（读/写/改/删/列目录/退出）与图片四工具
 // （内容图/插画/Logo/架构图）包装为 Vercel AI SDK tool 定义，供 coding 阶段 streamText 注册。
 // 工具名对齐旧 Java 实现（camelCase）；文件工具绑定工作区实例，图片工具绑定单 run 配额实例。
+// 图片工具结果为判别联合对象，直接交由 workflow 的 json() 统一序列化一次（契约 tool_executed.result 为单层 JSON 文本）。
 import { jsonSchema, tool } from 'ai'
 import { FileTools } from './fileTools.js'
-import type { ImageTools, ImageToolResult } from './imageTools.js'
+import type { ImageTools } from './imageTools.js'
 
 export interface ToolContext {
   // 文件工具集（绑定当前工作区）
   files: FileTools
   // 图片工具集（绑定单 run 配额）
   images: ImageTools
-}
-
-// 图片工具执行的统一包装：透传判别联合对象，交由 workflow 的 json() 统一序列化一次
-// （避免此处先 JSON.stringify 造成双重编码；契约 tool_executed.result 为单层 JSON 文本）
-async function runImageTool(fn: () => Promise<ImageToolResult>): Promise<ImageToolResult> {
-  return fn()
 }
 
 export function buildTools(context: ToolContext) {
@@ -97,7 +92,7 @@ export function buildTools(context: ToolContext) {
         properties: { query: { type: 'string' } },
         required: ['query'],
       }),
-      execute: async (input) => runImageTool(() => context.images.searchContentImages((input as { query: string }).query)),
+      execute: async (input) => context.images.searchContentImages((input as { query: string }).query),
     }),
 
     searchIllustrations: tool({
@@ -107,7 +102,7 @@ export function buildTools(context: ToolContext) {
         properties: { query: { type: 'string' } },
         required: ['query'],
       }),
-      execute: async (input) => runImageTool(() => context.images.searchIllustrations((input as { query: string }).query)),
+      execute: async (input) => context.images.searchIllustrations((input as { query: string }).query),
     }),
 
     generateLogos: tool({
@@ -117,7 +112,7 @@ export function buildTools(context: ToolContext) {
         properties: { description: { type: 'string' } },
         required: ['description'],
       }),
-      execute: async (input) => runImageTool(() => context.images.generateLogos((input as { description: string }).description)),
+      execute: async (input) => context.images.generateLogos((input as { description: string }).description),
     }),
 
     generateArchitectureDiagram: tool({
@@ -132,7 +127,7 @@ export function buildTools(context: ToolContext) {
       }),
       execute: async (input) => {
         const { mermaidCode, description } = input as { mermaidCode: string; description: string }
-        return runImageTool(() => context.images.generateArchitectureDiagram(mermaidCode, description))
+        return context.images.generateArchitectureDiagram(mermaidCode, description)
       },
     }),
   }
