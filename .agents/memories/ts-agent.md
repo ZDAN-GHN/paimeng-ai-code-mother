@@ -2,7 +2,7 @@
 
 > 目标架构权威：`docs/ts_agent/architecture.md`；wire 契约（#5 定稿）：`docs/ts_agent/contract.md`；对等报告：`docs/ts_agent/contract-parity.md`。本文件只记实施结论、有效约定与移植指针，逐票细节与命令证据见 `docs/ts_agent/progress.md`。
 
-## 当前状态（P3 收尾：#3-#13 已完成，仅剩 #14 灰度+T21）
+## 当前状态（**P3 收官：#3-#14 全部完成**，2026-09-08；TS Agent 直连链路为唯一生成实现）
 
 - **#3 骨架**：Fastify 5 + TS 5.9 + jose 6 + vitest 3，端口 8092；`GET /healthz` 无鉴权，其余路由 JWT 保护；沙箱校验含 realpath 符号链接消解。
 - **#4 run 客户端**：`src/internal/runClient.ts` 对接 Java 内部 API（createRun/updateRun/getRun/getLatestNonTerminalRun/completeRun/freezeCredit，Bearer）；409→`RunConflictError`「当前有进行中的任务」，401/网络失败→`RunApiError`；配置 `JAVA_INTERNAL_BASE_URL`（默认 `http://localhost:8123/api`）/`JAVA_INTERNAL_TOKEN`。
@@ -13,7 +13,7 @@
 - **#9 质检门禁 + 护栏 + 三档**：三工位循环（coding↔review 有界重试 `MAX_QUALITY_RETRIES=2`）+ 三重门禁（`src/review/`：质检分/build/**视觉 diff 基准 = 已确认线框**）+ 护栏（`src/intensity.ts` 三档 fast/standard/deep，超限**优雅收尾绝不硬杀**：finishReason 判定截断 → generateText 注入收尾指令 → 状态机照常推进）+ 输入滑窗（`src/workflow/history.ts`）+ token 计量按 run 落库。
 - **#10 积分 + 对话中断**：冻结时点 = 闸门后进 codegen 前（余额不足 402 唯一 error 事件拒绝）；abortSignal 贯穿 streamText/generateText/质检工位，`throwIfAborted` 覆盖工具执行间隙（仅靠流内感知会漏到 done）；aborted 保留已写文件 + 按里程碑退款（首文件前全额退）；`FileTools.filesWritten` = 已落盘**不同文件数**（modifyFile 计数、同文件去重、deleteFile 移除）。
 - **#11 契约对账**：84 例逐文件对账（72 覆盖 / 3 语义差异 / 9 有意演进），T21「契约对等」判据**通过**；补齐缺口 5 项（golden e2e×2、工具名契约、质检拼接、护轨拒绝回调、回调失败容错），`npm test` **144/144**。教训：2026-09-07 曾基于未 fetch 的本地 clone 误判 #7-#10/#12「幻影关闭」——**核对远程仓库而非本地 clone 再下结论**。
-- **#12 前端通道切换**：Agent 侧零代码改动（JWT 验签 #3 已就位）；`JWT_SECRET` 与 Java `agent.jwt.secret` 同值（均不提交）。
+- **#12 前端通道切换**：Agent 侧零代码改动（JWT 验签 #3 已就位）；`JWT_SECRET` 与 Java `ts-agent.jwt.secret` 同值（均不提交；#14 起配置段更名 ts-agent.*，开关 `ts-agent.enabled` 门禁 Java 签发端点，关闭→40410）。
 
 ## 通用有效约定
 

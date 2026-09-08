@@ -34,12 +34,12 @@
 - **线框闸门**：未确认线框不 codegen；线框**免费 + 独立限频**，积分冻结发生在确认进入 codegen 时刻。
 - **对话中断**：(a) 中止 day-1（保留半成品 + 里程碑退款，首文件前全额退）；(b) 续传挂 run 表稳定后。
 
-## 过渡态（当前）
+## 退役状态（2026-09-08 #14 收官）
 
-- 旧 Java AI 链路为回退主链路（**P0 已执行（2026-09-03）**：`application-local.yml` 已回切 `python-agent.enabled=false`，WSL 全栈 e2e 验证通过，Issue #2）。
+- 旧 Java AI 链路与 Python 中转链**已删除（T21 执行完毕，2026-09-08，Issue #14）**：TS Agent 直连链路为唯一生成实现；`ts-agent.enabled`（默认 true）门禁 JWT 签发，关闭→40410；回退手段 = git 回滚。范围见 `docs/py_agent/t21_delete_plan.md` 顶部执行注记。
 - T21 门禁重定向："TS Agent 契约对等 + 回归全绿"（删除范围仍按 `docs/py_agent/t21_delete_plan.md`，`createApp` 保留 Java 侧 AI 路由）。
 - **目录方案（2026-09-03 用户决策：重命名取代删除）**：旧 Python Agent 目录整体 `git mv` 为 `paimeng-ai-code-rag/`（RAG 骨架复用起点，P4 精简退役代码）；**TS Agent 落位 `paimeng-ai-code-agent/`（目录名复用）**；TS 移植参考 = `docs/py_agent/` 文档 + `paimeng-ai-code-rag/` 代码与 git 历史。
-- Java 侧 `ai/python/*` 已泛化为 `ai/agent/*`（#6 落地：`agent.*` 配置段，`python-agent.*` 别名保留）。
+- Java 侧仅保留 `ai/agent/` 的 Jwt 签发三件与 `ts-agent.*` 直连配置（#14：中转五件与 `agent.*` 段已删）。
 
 ## 踩坑与规避（架构级）
 

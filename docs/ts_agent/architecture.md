@@ -145,13 +145,14 @@ TS Agent ──(Bearer)──> Python RAG :8091              （POST /v1/retriev
 - **微信公众号通知**（用户订阅平台公众号收回调/活动消息）：v1.x（依赖认证服务号，同执照依赖线）。
 - **亮点可见性**：onboarding 导览**生成进应用本身**（提示词强制产出导览组件），不做独立操作文档。
 
-## 10. 过渡与退役（2026-09-03 决策）
+## 10. 过渡与退役（2026-09-03 决策；**2026-09-08 执行完毕，见 §10.0**）
 
-1. **回退主链路**：`python-agent.enabled=false` 回切旧 Java AI 兜底（验证过的回退路径，零成本），TS Agent 建成前保持开发环境可用。
-2. **T21 门禁重定向**：原"Python 灰度 ≥7 天"门禁作废，改为"**TS Agent 契约对等 + 回归全绿**"后删除旧 Java AI（删除范围仍按 `docs/py_agent/t21_delete_plan.md`，含用户已确认的 `createApp` 保留 Java 侧 AI 路由决策）。
-3. **Python Agent 目录处置（2026-09-03 用户决策修订：重命名取代删除）**：`paimeng-ai-code-agent/` 整目录 `git mv` 为 `paimeng-ai-code-rag/`（旧 FastAPI 骨架 auth/config/healthz/Bearer/uv 锁定原位复用），退役代码在 P4 RAG 实施时精简；**TS Agent 落位 `paimeng-ai-code-agent/`（目录名复用）**；TS 移植参考 = `docs/py_agent/` 文档 + `paimeng-ai-code-rag/` 代码与 git 历史（提示词 7 份、解析正则、guardrail 规则）。
+0. **✅ 退役执行完毕（2026-09-08，Issue #14）**：旧 Java AI 实现（`ai/codegen` 执行类、`langgraph4j`、`ai/guardrail`、`core` 旧三件、`ai/tools`、`ai/model` 等）与 Python 中转链遗物（`AgentClient`/`AgentSseAdapter`/`AgentRequest`/`AgentCallbackRequest`/`RunIdSinkRegistry`、端点 `/app/chat/gen/code` 与 `/chat/gen/code/callback`、级联死代码）已按 T21 删除范围 + 用户「根因清除」决策全部删除，保留项（route 路由链、BuilderExecutor、内部 API、JWT 签发、积分协议）完好；代码库只承载直连链路一份实现。灰度开关落地为 `ts-agent.enabled`（默认 true，门禁 `/app/agent/token`，关闭→40410 明确报错）；**回退手段 = git 回滚（配置开关不再承担回退职责）**。范围差异与证据见 `docs/py_agent/t21_delete_plan.md` 顶部执行注记与 `docs/ts_agent/progress.md` #14 条目。
+1. ~~**回退主链路**：`python-agent.enabled=false` 回切旧 Java AI 兜底（验证过的回退路径，零成本），TS Agent 建成前保持开发环境可用。~~（已随 §10.0 退役；历史决策记录保留）
+2. **T21 门禁重定向**：原"Python 灰度 ≥7 天"门禁作废，改为"**TS Agent 契约对等 + 回归全绿**"后删除旧 Java AI（删除范围仍按 `docs/py_agent/t21_delete_plan.md`，含用户已确认的 `createApp` 保留 Java 侧 AI 路由决策）。（**已达成**：契约对等报告 `docs/ts_agent/contract-parity.md` 判据通过 + Java 回归全绿。）
+3. **Python Agent 目录处置（2026-09-03 用户决策修订：重命名取代删除）**：`paimeng-ai-code-agent/` 整目录 `git mv` 为 `paimeng-ai-code-rag/`（旧 FastAPI 骨架 auth/config/healthz/Bearer/uv 锁定原位复用），退役代码在 P4 RAG 实施时精简；**TS Agent 落位 `paimeng-ai-code-agent/`（目录名复用）**；TS 移植参考 = `docs/py_agent/` 文档 + `paimeng-ai-code-rag/` 代码与 git 历史（提示词 7 份、解析正则、guardrail 规则）。（注：Python Agent **目录删除**门槛为 P4 RAG 骨架复用，超出父 spec 范围，维持「目录待删」状态。）
 4. **PG 即刻停用**：runbook 留档（`.agents/memories/deployment.md`），RAG v2 时重启。
-5. **Java 侧**：`ai/python/*` 三类泛化为通用 Agent 客户端（`python-agent.*` 配置段 → `agent.*`），callback endpoint 模式沿用改指向 TS Agent。（**#6 已落地 2026-09-04**：`ai/agent/*` 泛化完成、`agent.*` 配置 + `python-agent.*` 别名保留、新增完成回调 `POST /internal/agent/runs/{runId}/complete`。）
+5. **Java 侧**：`ai/python/*` 三类泛化为通用 Agent 客户端（`python-agent.*` 配置段 → `agent.*`），callback endpoint 模式沿用改指向 TS Agent。（**#6 已落地 2026-09-04**；中转五件与 `agent.*` 段已随 §10.0 于 #14 删除，配置更名为 `ts-agent.*`，仅保留 Jwt 签发三件与直连链路配置。）
 
 ## 11. 实施顺序（依赖关系而非死顺序）
 

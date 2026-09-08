@@ -2,7 +2,7 @@
 
 派蒙 AI 应用工坊：自然语言生成、预览和部署零代码应用。
 
-- 当前过渡态：Java（`src/`，回退主链路）+ TS Agent（`paimeng-ai-code-agent/`，实施中）+ Python RAG（`paimeng-ai-code-rag/`，P4）。
+- 当前架构：TS Agent（`paimeng-ai-code-agent/`，生成主链路，P3 收官）+ Java（`src/`，业务/鉴权/积分/构建，旧 AI 已退役）+ Python RAG（`paimeng-ai-code-rag/`，P4）。
 - `paimeng-ai-code-mother-microservice/` 是废弃尝试，不作为开发或迁移前提。
 - 本文件仅保留 Agent 约定和任务索引；架构、运行细节与进度各自维护在唯一权威资料中。
 
@@ -29,7 +29,7 @@
 
 - 敏感文件不提交：`application-local.yml`、各服务 `.env`；仓库只保留 `*.example` 模板。
 - 运行时环境按宿主分流（2026-09-07 起）：**原生 Linux 与 Windows/IDE 使用各服务默认目录与标准命令**（Java `target/`、Node `node_modules/` + `dist/`、Python `.venv/`），不指定环境输出目录；**仅 WSL 宿主**统一放 `wsl-rt-env/` 并经 `*-wsl.sh` 脚本命令指定，不建软链。三平台互不回退。
-- 不擅自切换 `python-agent.enabled`，这会改变代码生成主链路。
+- 不擅自切换 `ts-agent.enabled`，这会改变代码生成可用链路（关闭后前端得到 40410 明确报错；旧 Java AI 链路已删除，回退手段为 git 回滚）。
 - Agent 代理提交的 commit message 必须携带 `<Agent IDE>/<用户信息>` 标注。
 - 每次改动完成后，必须创建对应的 Git commit，以便后续追踪和回滚；禁止留下未提交的改动。
 - 注释遵循 `project-comment-style`；Java 同时遵循阿里巴巴开发手册。

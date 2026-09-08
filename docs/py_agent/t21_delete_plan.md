@@ -1,6 +1,15 @@
 # T21 删除旧 Java AI 实现 —— 就绪方案（准备期产物）
 
-> 状态：**准备完成，待门禁放行**。T21 按 §5「稳定」定义执行：开发环境灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1 缺陷。
+> 状态：**已执行完毕（2026-09-08，Issue #14）**。门禁为「TS Agent 契约对等 + 回归全绿」（架构 §10.2 重定向）。
+> 实际执行与本计划的差异（用户 2026-09-08 决策「根因清除」）：
+> 1. **中转链遗物一并删除**：计划写作时 `ai/agent/*`（原 PythonAgentClient 三件）与 `core/handler`、`ai/tools` 的保留理由是「Python 中转链复用」；#12 直连架构（浏览器 fetch-SSE + JWT）落地后中转链成为指向已退役端点 `/v1/agent/stream` 的死路径，故 `AgentClient`/`AgentSseAdapter`/`AgentRequest`/`AgentCallbackRequest`/`RunIdSinkRegistry`、端点 `/app/chat/gen/code` 与 `/app/chat/gen/code/callback`、级联死代码（`core/handler`、`ai/tools`、`ChatStreamingChatModelConfig`、`ReasoningStreamingChatModelConfig`、`RedisChatMemoryStoreConfig`、`AgentLegacyAliasPostProcessor`）全部删除——§3 保留清单中这几项以本注记为准作废，其余保留项（route 链、RoutingAiModelConfig、SpringContextUtil、BuilderExecutor、`ai/agent` 中 Jwt 三件、`ai/enums/CodeGenTypeEnum`）完好落地。
+> 2. **langchain4j 依赖按 §4.4 授权收敛**：保留 `langchain4j` + `langchain4j-open-ai-spring-boot-starter`（路由链）；删除 `langchain4j-reactor`、`langchain4j-community-redis-spring-boot-starter`（仅服务已删 ChatMemory/embedding 路径）；连带删除 `langgraph4j-core` 与 `spring-boot-starter-webflux`（仅中转链 WebClient 使用）。Redis 连接改显式声明 `spring-boot-starter-data-redis`（此前靠 community-redis starter 传递引入）。
+> 3. **配置段**：`python-agent.*`/`agent.*` 合并更名为 `ts-agent.*`（灰度开关 `ts-agent.enabled` 默认 true，门禁 `/app/agent/token`，关闭→40410）；§7 的 `langchain4j.open-ai.routing-chat-model` 段在仓库 `application.yml` 本就不存在，现以 `src/main/resources/application-local.yml.example` 模板落档。
+> 4. **开关语义**：删除后「关→旧链路」不再存在（回退手段 = git 回滚）；AC1 按两段式验收（删除前双链路 e2e + 删除后 40410）。
+>
+> 以下为原计划正文（保留作历史依据，与上述注记冲突处以注记为准）：
+
+> 历史状态：准备完成，待门禁放行。原门禁按 §5「稳定」定义：开发环境灰度 ≥7 天 + T19/T20 回归全绿 + 无 P0/P1 缺陷（已被 2026-09-03 门禁重定向取代）。
 > 本文档在门禁期内完成依赖分析与删除清单（2026-09-01），使门禁放行后 T21 为**机械性执行**。
 > 契约与任务定义见 `docs/py_agent/task_plan.md` §3 / §4-T21；进度见 `progress.md`。
 >

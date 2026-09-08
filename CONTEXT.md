@@ -13,8 +13,8 @@
 | 部署标识 (DeployKey) | 应用部署后的唯一访问路径 | `App.deployKey` |
 | 对话历史 (ChatHistory) | 用户与 AI 的对话记录，支持流式消息 | `ChatHistory` |
 | 可视化编辑器 | 前端拖拽式页面编辑器，操作应用生成的代码 | `visualEditor.ts` |
-| AI 工具 (Tool) | AI 在代码生成过程中可调用的文件操作能力（读/写/改/删/列目录） | `ai/tools/*` |
-| 工作流 (Workflow) | 基于 LangGraph4j 编排的多步骤 AI 流程（代码生成 → 质量检查 → 图片采集） | `langgraph4j/*` |
+| 生成运行 (GenerationRun) | 一次代码生成的状态机锚（phase/context/milestones/token 计量），计费与退款按 runId 幂等 | `GenerationRun` |
+| 积分台账 (CreditLedger) | 冻结→结算/退款三态记账，余额驱动日配额 | `CreditLedger` |
 
 ## 架构分层
 
@@ -29,9 +29,9 @@
 │  Service 层 (service/)                              │
 │  业务逻辑，事务管理                                   │
 ├─────────────────────────────────────────────────────┤
-│  AI 层 (ai/ + langgraph4j/)                         │
-│  LangChain4j 模型调用 + LangGraph4j 工作流编排       │
-│  工具系统 (ai/tools/) + 流式消息 (ai/model/message/) │
+│  AI 层 (ai/agent/ + ai/codegen/route/)              │
+│  JWT 签发 + ts-agent 配置 + createApp 类型路由       │
+│  （生成工作流在 TS Agent，Java 不承载生成链路）       │
 ├─────────────────────────────────────────────────────┤
 │  基础设施 (config/ + aop/ + annotation/)            │
 │  权限 AOP、CORS、JSON 序列化、Redis 配置              │
@@ -50,7 +50,7 @@
 - **TS Agent**（`paimeng-ai-code-agent/`，Node + Fastify + Vercel AI SDK + XState v5）：需求访谈、线框、代码生成工作流，fetch-SSE 直连浏览器
 - **Python RAG**（`paimeng-ai-code-rag/`，P4 实施）：检索服务（day-1 few-shot 直查，v2 pgvector）
 
-过渡态：旧 Java AI 链路为回退主链路；Python Agent 已定稿退役，目录已整体重命名为 `paimeng-ai-code-rag/`（RAG 骨架复用起点，退役代码 P4 精简）；TS Agent 落位 `paimeng-ai-code-agent/`（目录名复用）。
+退役状态（2026-09-08，#14 收官）：旧 Java AI 链路与 Python 中转链已按 T21 删除，TS Agent 直连链路为唯一生成实现；`ts-agent.enabled` 门禁 JWT 签发（关闭→40410 明确报错），回退手段为 git 回滚。Python Agent 已定稿退役，目录已整体重命名为 `paimeng-ai-code-rag/`（RAG 骨架复用起点，退役代码 P4 精简，目录删除门槛为 P4）；TS Agent 落位 `paimeng-ai-code-agent/`（目录名复用）。
 
 `paimeng-ai-code-mother-microservice/` 为**废弃的**微服务重构尝试（不作为任何迁移前提），包含 7 个模块：
 
@@ -66,7 +66,7 @@
 
 ## 关键技术决策
 
-1. **AI 框架选型**：LangChain4j（模型交互 + 工具调用） + LangGraph4j（有状态工作流编排）
+1. **AI 架构**：生成工作流在 TS Agent（Node + Vercel AI SDK + XState v5，fetch-SSE 直连浏览器）；Java 侧保留 createApp 类型路由（LangChain4j，`ai/codegen/route/`）与 JWT 签发
 2. **ORM 选型**：MyBatis Flex（轻量、支持代码生成）
 3. **权限模型**：基于自定义 `@AuthCheck` 注解 + AOP 拦截，非 Spring Security
 4. **流式响应**：SSE（Server-Sent Events）推送 AI 生成过程
