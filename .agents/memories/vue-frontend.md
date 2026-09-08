@@ -34,3 +34,12 @@
 
 - 前端同时与 Java（cookie session：业务/登录/积分/历史）和 TS Agent（JWT：生成流）通信；Python RAG 对前端透明。
 - 页面结构（Home/AppChat/AppEdit/AppManage/UserManage/ChatManage/登录注册）见 `CONTEXT.md`。
+
+## #13 前端功能补齐（2026-09-08 完成）
+
+- **需求旅程状态机**（`AppChatPage.vue` `journeyPhase`：idle→interviewing→wireframe_pending→wireframe_confirmed→生成→idle）：首次发送=开始旅程（创建 runId 调 `/agent/interview`），五维选择题以 `InterviewQuestionsCard` 进对话流；收束自动 `requestWireframe`；`WireframeReviewCard` 提供「确认/重新生成线框/重新访谈」。**生成必须复用旅程 runId**（线框闸门与积分冻结校验该 run 的 phase，`createRunId()` 直连必被闸门拒）。
+- **新组件**：`InterviewQuestionsCard`（访谈选择题）、`WireframeReviewCard`（线框确认三动作）、`IntensitySelector`（三档 a-segmented + 预估积分 100×类型×档位，系数与 Java `AgentProperties.Credit` 对齐）。手写 `api/creditController.ts`（`GET /credit/balance`，未纳入 openapi2ts）。
+- **agentSse.ts 扩展**：`requestInterview`/`requestWireframe`/`confirmWireframe`（统一 JWT + `AgentStreamHttpError` 状态码透传）+ stream 参数 `intensity`/`history`；导出共享 `Intensity` 类型。
+- **中止按钮**：生成中发送键切「停止」→ abort 断连 → Agent aborted → 退款；catch 区分 `AbortError`；余额刷新有 2s 延迟补刷（等退款落账竞态）。
+- **契约要点**：线框预览 URL 以接口返回 `relativeUrl` 拼 `${STATIC_BASE_URL}/{codeGenType}_{appId}/`（时间戳破缓存）；401/429/409 走 `AgentStreamHttpError.status` 分派提示；需求工程失败旅程回 idle（用户重发消息重启，避免禁用卡死锁）。
+- **教训**：假 LLM 毫秒级产出使 HTTP 层中止窗口极窄（0.4s 断开已是 done+SETTLED，30ms 才稳定 aborted）；`defineProps` 不写字段注释（project-comment-style）；Message 用判别联合（type 区分四形态）避免可选字段堆叠。

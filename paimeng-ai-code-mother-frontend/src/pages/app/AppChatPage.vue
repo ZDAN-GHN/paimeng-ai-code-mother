@@ -7,7 +7,7 @@
         <a-tag v-if="appInfo?.codeGenType" color="blue" class="code-gen-type-tag">
           {{ formatCodeGenType(appInfo.codeGenType) }}
         </a-tag>
-        <!-- 积分余额（Issue #13）：生成前可见余额，冻结/退款后刷新可见变动 -->
+        <!-- 积分余额：冻结/退款后刷新可见变动（Issue #13） -->
         <a-tag v-if="creditBalance !== undefined" color="gold" class="credit-tag">
           <WalletOutlined /> 积分 {{ creditBalance }}
         </a-tag>
@@ -182,7 +182,7 @@
                 :rows="4"
                 :maxlength="1000"
                 @keydown.enter.prevent="sendMessage"
-                :disabled="isGenerating || !isOwner || journeyPhase === 'interviewing' || journeyPhase === 'wireframe_pending'"
+                :disabled="journeyLocked || isGenerating || !isOwner"
               />
             </a-tooltip>
             <a-textarea
@@ -192,16 +192,16 @@
               :rows="4"
               :maxlength="1000"
               @keydown.enter.prevent="sendMessage"
-              :disabled="isGenerating || journeyPhase === 'interviewing' || journeyPhase === 'wireframe_pending'"
+              :disabled="journeyLocked || isGenerating"
             />
             <div class="input-actions">
-              <!-- 三档推理强度选择器（Issue #13）：选择随生成请求下发，计费系数可见 -->
+              <!-- 三档推理强度：选择随生成请求下发，计费系数可见（Issue #13） -->
               <IntensitySelector
                 v-model="intensity"
                 :code-gen-type="appInfo?.codeGenType"
                 :disabled="isGenerating"
               />
-              <!-- 生成中显示停止按钮：触发对话中断，Agent 保留已写文件并按进度退款 -->
+              <!-- 停止按钮：断连触发对话中断，Agent 保留已写文件并按进度退款 -->
               <a-button v-if="isGenerating" danger type="primary" @click="stopGeneration">
                 <template #icon>
                   <PauseCircleOutlined />
@@ -312,6 +312,7 @@ import {
   createRunId,
   AgentStreamHttpError,
   type AgentStreamEvent,
+  type Intensity,
   type InterviewQuestion,
   type InterviewAnswer,
   type InterviewSummary,
@@ -360,26 +361,42 @@ interface ToolStep {
   status: 'request' | 'executed'
 }
 
-interface Message {
-  type: 'user' | 'ai' | 'interview' | 'wireframe'
+// 对话消息判别联合：type 区分四种形态，字段随形态收紧
+interface BaseMessage {
   content: string
   loading?: boolean
   createTime?: string
+}
+
+interface UserMessage extends BaseMessage {
+  type: 'user'
+}
+
+interface AiMessage extends BaseMessage {
+  type: 'ai'
   // 思考过程（ai_thinking 增量累积）
   thinking?: string
   // 人话里程碑（milestone 事件按序累积）
   milestones?: string[]
   // 工具调用步骤（tool_request / tool_executed 按 id 配对）
   toolSteps?: ToolStep[]
-  // 访谈卡字段（type = interview）：本轮题目与轮次，answered 后禁用
-  questions?: InterviewQuestion[]
-  round?: number
+}
+
+interface InterviewCardMessage extends BaseMessage {
+  type: 'interview'
+  questions: InterviewQuestion[]
+  round: number
   answered?: boolean
-  // 线框卡字段（type = wireframe）：预览地址与页数，settled 后禁用
-  wireframeUrl?: string
-  pageCount?: number
+}
+
+interface WireframeCardMessage extends BaseMessage {
+  type: 'wireframe'
+  wireframeUrl: string
+  pageCount: number
   settled?: boolean
 }
+
+type Message = UserMessage | AiMessage | InterviewCardMessage | WireframeCardMessage
 
 // 用户旅程阶段（Issue #13）：访谈 → 线框 → 确认 → 生成 → 完成，一次完整需求工程旅程
 type JourneyPhase = 'idle' | 'interviewing' | 'wireframe_pending' | 'wireframe_confirmed'
@@ -389,6 +406,10 @@ const userInput = ref('')
 const isGenerating = ref(false)
 // 旅程状态：idle 时发送消息 = 开始新需求旅程（访谈入口）
 const journeyPhase = ref<JourneyPhase>('idle')
+// 需求旅程进行中（访谈作答/待确认线框）：自由文本输入锁定，改由卡片驱动
+const journeyLocked = computed(
+  () => journeyPhase.value === 'interviewing' || journeyPhase.value === 'wireframe_pending',
+)
 // 本次旅程的 runId（Agent 侧 generation_run 主键，访谈/线框/确认/生成全程复用）
 const journeyRunId = ref('')
 // 本次旅程的原始需求（访谈与 codegen 的 message 锚）
@@ -396,7 +417,7 @@ const journeyMessage = ref('')
 // 访谈结论摘要（收束后作为 history 喂 codegen）
 const journeySummary = ref<InterviewSummary>()
 // 三档推理强度（选择器双向绑定，生成时随请求下发）
-const intensity = ref<'fast' | 'standard' | 'deep'>('standard')
+const intensity = ref<Intensity>('standard')
 // 积分余额（header 显示，冻结/退款后刷新可见变动）
 const creditBalance = ref<number>()
 // 线框预览地址（wireframe_pending 阶段右侧预览切到线框）
@@ -632,42 +653,53 @@ const sendMessage = async () => {
   await startJourney(finalMessage)
 }
 
-// 开始需求旅程（Issue #13）：创建 run 并发起五维访谈，题目以卡片形式进对话流
-const startJourney = async (userMessage: string) => {
-  if (!appId.value) return
+// 访谈卡消息工厂（三处旅程函数共用，消除同形字面量）
+const makeInterviewCard = (questions: InterviewQuestion[], round: number): Message => ({
+  type: 'interview',
+  content: '',
+  questions,
+  round,
+  answered: false,
+})
+
+// 调访谈端点并以 loading 占位承载（三处旅程函数共用序列：占位 → 换 token → interview）
+const requestInterviewRound = async (options?: {
+  message?: string
+  answers?: InterviewAnswer[]
+}) => {
   const aiMessageIndex = messages.value.length
   messages.value.push({ type: 'ai', content: '', loading: true })
   await nextTick()
   scrollToBottom()
+  const { token } = await ensureAgentToken()
+  const result = await requestInterview({
+    token,
+    runId: journeyRunId.value,
+    appId: String(appId.value),
+    message: options?.message,
+    answers: options?.answers,
+  })
+  return { aiMessageIndex, result }
+}
+
+// 开始需求旅程（Issue #13）：创建 run 并发起五维访谈，题目以卡片形式进对话流
+const startJourney = async (userMessage: string) => {
+  if (!appId.value) return
   try {
-    const { token } = await ensureAgentToken()
     journeyRunId.value = createRunId()
     journeyMessage.value = userMessage
     journeyPhase.value = 'interviewing'
-    const result = await requestInterview({
-      token,
-      runId: journeyRunId.value,
-      appId: String(appId.value),
-      message: userMessage,
-    })
+    const { aiMessageIndex, result } = await requestInterviewRound({ message: userMessage })
     if (result.complete) {
       // 信息足够直接收束（未出题）：跳过访谈卡直接进入线框
       journeySummary.value = result.summary
       await generateWireframe(aiMessageIndex)
       return
     }
-    messages.value[aiMessageIndex] = {
-      ...messages.value[aiMessageIndex],
-      type: 'interview',
-      content: '',
-      loading: false,
-      questions: result.questions ?? [],
-      round: result.round,
-      answered: false,
-    }
+    messages.value[aiMessageIndex] = makeInterviewCard(result.questions ?? [], result.round)
   } catch (error) {
     journeyPhase.value = 'idle'
-    handleJourneyError(error, aiMessageIndex)
+    handleJourneyError(error, messages.value.length - 1)
   }
 }
 
@@ -675,42 +707,25 @@ const startJourney = async (userMessage: string) => {
 const onInterviewSubmit = async (answers: InterviewAnswer[], messageIndex: number) => {
   if (!appId.value) return
   // 当前卡置为已答（禁用）
-  messages.value[messageIndex].answered = true
-  const aiMessageIndex = messages.value.length
-  messages.value.push({ type: 'ai', content: '', loading: true })
-  await nextTick()
-  scrollToBottom()
+  ;(messages.value[messageIndex] as InterviewCardMessage).answered = true
   try {
-    const { token } = await ensureAgentToken()
-    const result = await requestInterview({
-      token,
-      runId: journeyRunId.value,
-      appId: String(appId.value),
-      answers,
-    })
+    const { aiMessageIndex, result } = await requestInterviewRound({ answers })
     if (!result.complete) {
       // 未收束：第 2 轮只追问缺失维度
-      messages.value[aiMessageIndex] = {
-        ...messages.value[aiMessageIndex],
-        type: 'interview',
-        content: '',
-        loading: false,
-        questions: result.questions ?? [],
-        round: result.round,
-        answered: false,
-      }
+      messages.value[aiMessageIndex] = makeInterviewCard(result.questions ?? [], result.round)
       return
     }
     journeySummary.value = result.summary
     // 收束：占位改为结论摘要，随后生成线框
     messages.value[aiMessageIndex] = {
-      ...messages.value[aiMessageIndex],
-      loading: false,
+      type: 'ai',
       content: `✅ 需求已收束：${summarizeInterview(result.summary)}`,
     }
     await generateWireframe()
   } catch (error) {
-    handleJourneyError(error, aiMessageIndex)
+    // 旅程终止回 idle：用户重新发送消息即可重启需求旅程（旧卡已禁用，避免死锁）
+    journeyPhase.value = 'idle'
+    handleJourneyError(error, messages.value.length - 1)
   }
 }
 
@@ -738,7 +753,8 @@ const generateWireframe = async (messageIndex?: number) => {
       appId: String(appId.value),
       workspacePath,
     })
-    const url = buildWireframeUrl()
+    // 预览地址以接口返回的 relativeUrl 为准（前端只补静态资源前缀，避免两侧路径漂移）
+    const url = buildWireframeUrl(result.wireframe?.relativeUrl ?? 'wireframe/wireframe.html')
     messages.value[aiMessageIndex] = {
       type: 'wireframe',
       content: '',
@@ -750,21 +766,23 @@ const generateWireframe = async (messageIndex?: number) => {
     wireframePreviewUrl.value = url
     scrollToBottom()
   } catch (error) {
-    journeyPhase.value = 'interviewing'
+    // 旅程终止回 idle：用户重新发送消息即可重启需求旅程（避免禁用态卡片造成死锁）
+    journeyPhase.value = 'idle'
     handleJourneyError(error, aiMessageIndex)
   }
 }
 
-// 线框预览地址（Java 静态资源端点；时间戳破缓存支持重新生成后刷新）
-const buildWireframeUrl = () => {
+// 线框预览地址（Java 静态资源端点 + Agent 返回的 relativeUrl；时间戳破缓存支持重新生成后刷新）
+const buildWireframeUrl = (relativeUrl: string) => {
   const codeGenType = appInfo.value?.codeGenType || CodeGenTypeEnum.HTML
-  return `${STATIC_BASE_URL}/${codeGenType}_${appId.value}/wireframe/wireframe.html?t=${Date.now()}`
+  return `${STATIC_BASE_URL}/${codeGenType}_${appId.value}/${relativeUrl}?t=${Date.now()}`
 }
 
 // 确认线框：锁定布局契约（积分冻结发生在随后 codegen 进入时）
 const onWireframeConfirm = async (messageIndex: number) => {
   if (!appId.value) return
-  messages.value[messageIndex].settled = true
+  const card = messages.value[messageIndex] as WireframeCardMessage
+  card.settled = true
   try {
     const { token } = await ensureAgentToken()
     await confirmWireframe({ token, runId: journeyRunId.value, appId: String(appId.value) })
@@ -776,50 +794,46 @@ const onWireframeConfirm = async (messageIndex: number) => {
     await nextTick()
     scrollToBottom()
   } catch (error) {
-    messages.value[messageIndex].settled = false
+    card.settled = false
     handleJourneyError(error, messageIndex)
   }
 }
 
 // 重新生成线框（同一 run，重新出线框再确认）
 const onWireframeRegenerate = async (messageIndex: number) => {
-  messages.value[messageIndex].settled = true
+  ;(messages.value[messageIndex] as WireframeCardMessage).settled = true
   await generateWireframe()
 }
 
 // 重新访谈 = 需求变更：Agent 侧失效旧线框并回到 interview，重新出题
 const onWireframeReinterview = async (messageIndex: number) => {
   if (!appId.value) return
-  messages.value[messageIndex].settled = true
+  ;(messages.value[messageIndex] as WireframeCardMessage).settled = true
   wireframePreviewUrl.value = ''
-  const aiMessageIndex = messages.value.length
-  messages.value.push({ type: 'ai', content: '', loading: true })
-  await nextTick()
-  scrollToBottom()
   try {
-    const { token } = await ensureAgentToken()
     journeyPhase.value = 'interviewing'
-    const result = await requestInterview({
-      token,
-      runId: journeyRunId.value,
-      appId: String(appId.value),
-    })
-    messages.value[aiMessageIndex] = {
-      ...messages.value[aiMessageIndex],
-      type: 'interview',
-      content: '',
-      loading: false,
-      questions: result.questions ?? [],
-      round: result.round,
-      answered: false,
-    }
+    const { aiMessageIndex, result } = await requestInterviewRound()
+    messages.value[aiMessageIndex] = makeInterviewCard(result.questions ?? [], result.round)
   } catch (error) {
     journeyPhase.value = 'idle'
-    handleJourneyError(error, aiMessageIndex)
+    handleJourneyError(error, messages.value.length - 1)
   }
 }
 
-// 需求工程错误处理：401 重新登录 / 429 线框限频 / 其他通用失败
+// 401 统一跳转登录页（与 axios 拦截器口径一致，携带回跳地址）
+const redirectToLogin = () => {
+  setTimeout(() => {
+    window.location.href = `/user/login?redirect=${window.location.href}`
+  }, 1000)
+}
+
+// 需求工程状态码错误提示（401 单独处理跳转，其余命中表则展示具体原因）
+const JOURNEY_ERROR_HINTS: Record<number, string> = {
+  429: '今日线框生成次数已用完，请明天再试',
+  409: '当前有进行中的任务，请稍后再试',
+}
+
+// 需求工程错误处理：401 重新登录 / 状态码表命中提示 / 兜底通用失败
 const handleJourneyError = (error: unknown, messageIndex: number) => {
   console.error('需求工程流程失败：', error)
   const msg = messages.value[messageIndex]
@@ -830,25 +844,16 @@ const handleJourneyError = (error: unknown, messageIndex: number) => {
         msg.content = '登录已过期，请重新登录后继续。'
       }
       message.error('登录已过期，请重新登录')
-      setTimeout(() => {
-        window.location.href = `/user/login?redirect=${window.location.href}`
-      }, 1000)
+      redirectToLogin()
       return
     }
-    if (error.status === 429) {
+    const hint = JOURNEY_ERROR_HINTS[error.status]
+    if (hint) {
       if (msg) {
         msg.loading = false
-        msg.content = '❌ 今日线框生成次数已用完，请明天再试。'
+        msg.content = `❌ ${hint}。`
       }
-      message.warning('今日线框生成次数已用完')
-      return
-    }
-    if (error.status === 409) {
-      if (msg) {
-        msg.loading = false
-        msg.content = '❌ 当前有进行中的任务，请稍后再试。'
-      }
-      message.warning('当前有进行中的任务')
+      message.warning(hint)
       return
     }
   }
@@ -922,30 +927,30 @@ const generateCode = async (userMessage: string, aiMessageIndex: number) => {
       message.error('登录已过期，请重新登录')
       isGenerating.value = false
       streamAbortController.value = null
-      // 与 axios 拦截器一致跳转登录页，携带回跳地址
-      setTimeout(() => {
-        window.location.href = `/user/login?redirect=${window.location.href}`
-      }, 1000)
+      redirectToLogin()
       return
     }
     if ((error as { name?: string })?.name === 'AbortError') {
       // 用户主动中止（中止按钮/离开页面）：Agent 感知断开后按 aborted 终态收尾——
-      // 保留已写文件并按里程碑折算退款（首文件前全额退），余额刷新可见
+      // 保留已写文件并按里程碑折算退款（首文件前全额退），余额延迟刷新等退款落账
       messages.value[aiMessageIndex].content =
         '⏹ 生成已中断。已写入的文件将保留，积分按生成进度折算退回。'
       messages.value[aiMessageIndex].loading = false
       isGenerating.value = false
       journeyPhase.value = 'idle'
-      await loadCreditBalance()
       return
     }
     handleError(error, aiMessageIndex)
     return
   } finally {
     streamAbortController.value = null
-    // 终态后刷新积分（冻结结算/退款可见）并清掉线框预览（done 时切回正式预览）
-    await loadCreditBalance()
+    // 终态后清掉线框预览（done 时切回正式预览）；余额立即刷一次，
+    // 退款落账（Agent 回调 Java 记账）存在秒级延迟，再延迟补刷保证退款可见
     wireframePreviewUrl.value = ''
+    await loadCreditBalance()
+    setTimeout(() => {
+      void loadCreditBalance()
+    }, 2000)
   }
 }
 
@@ -954,9 +959,9 @@ const stopGeneration = () => {
   streamAbortController.value?.abort()
 }
 
-// 事件处理：按七类事件更新消息渲染
+// 事件处理：按七类事件更新消息渲染（事件只发往 ai 占位消息）
 const handleAgentEvent = (event: AgentStreamEvent, aiMessageIndex: number) => {
-  const msg = messages.value[aiMessageIndex]
+  const msg = messages.value[aiMessageIndex] as AiMessage
   if (!msg) return
   switch (event.type) {
     case 'ai_thinking':

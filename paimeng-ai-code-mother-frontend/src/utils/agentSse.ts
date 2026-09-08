@@ -32,6 +32,9 @@ export interface AgentStreamEvent {
   message?: string
 }
 
+// 三档推理强度（与 TS Agent INTENSITY_TIERS / Java AgentIntensityEnum 对齐）
+export type Intensity = 'fast' | 'standard' | 'deep'
+
 // 流式请求参数
 export interface AgentStreamParams {
   token: string
@@ -39,8 +42,8 @@ export interface AgentStreamParams {
   appId: string
   message: string
   workspacePath: string
-  // 三档推理强度（fast/standard/deep，缺省 standard）；决定模型路由、护栏上限与计费档位系数
-  intensity?: string
+  // 三档推理强度（缺省 standard）；决定模型路由、护栏上限与计费档位系数
+  intensity?: Intensity
   // 输入历史滑窗（[{ role, content }]，Agent 侧保留最近 10 轮全文）
   history?: Array<{ role: 'user' | 'assistant'; content: string }>
   // 组件卸载或主动中止时传入 AbortSignal
@@ -155,8 +158,13 @@ interface AgentJsonParams {
   appId: string
 }
 
-// 需求工程端点公共 POST：JWT 鉴权 + JSON 响应；非 2xx 抛 AgentStreamHttpError（401 令牌失效 / 429 线框限频 / 409 阶段冲突）
-async function postAgentJson<T>(params: AgentJsonParams, path: string, body: Record<string, unknown>): Promise<T> {
+// 需求工程端点公共 POST：JWT 鉴权 + JSON 响应；非 2xx 抛 AgentStreamHttpError
+//（401 令牌失效 / 429 线框限频 / 409 阶段冲突）
+async function postAgentJson<T>(
+  params: AgentJsonParams,
+  path: string,
+  body: Record<string, unknown>,
+): Promise<T> {
   const response = await fetch(`${AGENT_BASE_URL}${path}`, {
     method: 'POST',
     headers: {
@@ -185,7 +193,9 @@ export async function requestInterview(
 export async function requestWireframe(
   params: AgentJsonParams & { workspacePath: string },
 ): Promise<WireframeResult> {
-  return postAgentJson<WireframeResult>(params, '/wireframe', { workspacePath: params.workspacePath })
+  return postAgentJson<WireframeResult>(params, '/wireframe', {
+    workspacePath: params.workspacePath,
+  })
 }
 
 // 确认线框（幂等；确认后需求锁定为 codegen 布局契约）

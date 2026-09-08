@@ -22,7 +22,6 @@
 import { LayoutOutlined } from '@ant-design/icons-vue'
 
 defineProps<{
-  // 线框页数（Agent 侧统计，≤5）
   pageCount: number
   disabled?: boolean
   loading?: boolean

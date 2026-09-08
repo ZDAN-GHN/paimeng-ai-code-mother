@@ -37,7 +37,6 @@ const TYPE_MULTIPLIERS: Record<string, number> = {
 const BASE_PRICE = 100
 
 const props = defineProps<{
-  // 应用生成类型（计费系数来源）
   codeGenType?: string
   disabled?: boolean
 }>()
