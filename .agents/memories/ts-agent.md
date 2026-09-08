@@ -2,18 +2,19 @@
 
 > 目标架构权威：`docs/ts_agent/architecture.md`；wire 契约（#5 定稿）：`docs/ts_agent/contract.md`；对等报告：`docs/ts_agent/contract-parity.md`。本文件只记实施结论、有效约定与移植指针，逐票细节与命令证据见 `docs/ts_agent/progress.md`。
 
-## 当前状态（**P3 收官：#3-#14 全部完成**，2026-09-08；TS Agent 直连链路为唯一生成实现）
+## 当前状态（**P3 收官：#3-#14 全部完成 + 架构优雅化第一批开工（#16 目录收敛完成）**，2026-09-08；TS Agent 直连链路为唯一生成实现）
 
 - **#3 骨架**：Fastify 5 + TS 5.9 + jose 6 + vitest 3，端口 8092；`GET /healthz` 无鉴权，其余路由 JWT 保护；沙箱校验含 realpath 符号链接消解。
-- **#4 run 客户端**：`src/internal/runClient.ts` 对接 Java 内部 API（createRun/updateRun/getRun/getLatestNonTerminalRun/completeRun/freezeCredit，Bearer）；409→`RunConflictError`「当前有进行中的任务」，401/网络失败→`RunApiError`；配置 `JAVA_INTERNAL_BASE_URL`（默认 `http://localhost:8123/api`）/`JAVA_INTERNAL_TOKEN`。
-- **#5 最小生成流 + 契约定稿**：XState v5 状态机（`src/workflow/machine.ts`，interview→coding→review→done/failed）+ Vercel AI SDK v7 `streamText` 工具循环（`src/workflow/index.ts`；v7 无 `maxSteps`，用 `stopWhen`）+ 脚本化假 LLM（`src/llm/index.ts`，`LanguageModelV2` + `customProvider`，零在线调用）；模型抛错被 AI SDK 吸收为流内 `error` part，须在 switch 里显式抛出才走 failed。
+- **#4 run 客户端**：`src/runs/runClient.ts` 对接 Java 内部 API（createRun/updateRun/getRun/getLatestNonTerminalRun/completeRun/freezeCredit，Bearer）；409→`RunConflictError`「当前有进行中的任务」，401/网络失败→`RunApiError`；配置 `JAVA_INTERNAL_BASE_URL`（默认 `http://localhost:8123/api`）/`JAVA_INTERNAL_TOKEN`。
+- **#5 最小生成流 + 契约定稿**：XState v5 状态机（`src/generation/workflow/machine.ts`，interview→coding→review→done/failed）+ Vercel AI SDK v7 `streamText` 工具循环（`src/generation/workflow/index.ts`；v7 无 `maxSteps`，用 `stopWhen`）+ 脚本化假 LLM（`src/llm/index.ts`，`LanguageModelV2` + `customProvider`，零在线调用）；模型抛错被 AI SDK 吸收为流内 `error` part，须在 switch 里显式抛出才走 failed。
 - **#6 完成回调**：workflow 终态 `notifyComplete()` 写对话历史 + Java 触发构建；appId/userId 字符串传输防精度丢失；回调失败不阻断主流程。**踩坑：回调必须在 `yield {type:'done'|'error'}` 之前**——路由收到终态即 break，async generator 不再 resume。
 - **#7 需求工程**：五维访谈（每维 2-4 选项、`MAX_INTERVIEW_ROUNDS=2`、状态持久化 `run.context.interview` 跨请求存活；重新访谈会失效旧线框）+ 免费线框（单文件 HTML、`PAGE_LIMIT=5`、落 `{workspace}/wireframe/`）+ **codegen 闸门**（非 `wireframe_confirmed` 拒绝且不再 createRun；未配置内部 API 同样拒绝放行）+ 线框每日配额（Java Redisson，超限 429）。
-- **#8 生成核心移植**：Guardrail（`src/interview/guardrails.ts`）+ 代码块解析（`src/codegen/parsing.ts`，正则对齐 Python）+ 文件六工具（`src/tools/fileTools.ts`，IMPORTANT_FILES 保护 + FilePathError 越界）+ 图片四工具（配额 4 张/run，用尽返回 `IMAGE_QUOTA_EXCEEDED_MESSAGE`）+ 提示词 7 份（`src/prompts/`）+ 10 工具注册（`src/tools/index.ts`）。
-- **#9 质检门禁 + 护栏 + 三档**：三工位循环（coding↔review 有界重试 `MAX_QUALITY_RETRIES=2`）+ 三重门禁（`src/review/`：质检分/build/**视觉 diff 基准 = 已确认线框**）+ 护栏（`src/intensity.ts` 三档 fast/standard/deep，超限**优雅收尾绝不硬杀**：finishReason 判定截断 → generateText 注入收尾指令 → 状态机照常推进）+ 输入滑窗（`src/workflow/history.ts`）+ token 计量按 run 落库。
+- **#8 生成核心移植**：Guardrail（`src/interview/guardrails.ts`）+ 代码块解析（`src/codegen/parsing.ts`，正则对齐 Python；#16 判定零生产调用已删）+ 文件六工具（`src/generation/tools/fileTools.ts`，IMPORTANT_FILES 保护 + FilePathError 越界）+ 图片四工具（配额 4 张/run，用尽返回 `IMAGE_QUOTA_EXCEEDED_MESSAGE`）+ 提示词 7 份（`src/generation/prompts/`，#16 清至生产在用 2 份）+ 10 工具注册（`src/generation/tools/index.ts`）。
+- **#9 质检门禁 + 护栏 + 三档**：三工位循环（coding↔review 有界重试 `MAX_QUALITY_RETRIES=2`）+ 三重门禁（`src/generation/review/`：质检分/build/**视觉 diff 基准 = 已确认线框**）+ 护栏（`src/generation/intensity.ts` 三档 fast/standard/deep，超限**优雅收尾绝不硬杀**：finishReason 判定截断 → generateText 注入收尾指令 → 状态机照常推进）+ 输入滑窗（`src/generation/workflow/history.ts`）+ token 计量按 run 落库。
 - **#10 积分 + 对话中断**：冻结时点 = 闸门后进 codegen 前（余额不足 402 唯一 error 事件拒绝）；abortSignal 贯穿 streamText/generateText/质检工位，`throwIfAborted` 覆盖工具执行间隙（仅靠流内感知会漏到 done）；aborted 保留已写文件 + 按里程碑退款（首文件前全额退）；`FileTools.filesWritten` = 已落盘**不同文件数**（modifyFile 计数、同文件去重、deleteFile 移除）。
 - **#11 契约对账**：84 例逐文件对账（72 覆盖 / 3 语义差异 / 9 有意演进），T21「契约对等」判据**通过**；补齐缺口 5 项（golden e2e×2、工具名契约、质检拼接、护轨拒绝回调、回调失败容错），`npm test` **144/144**。教训：2026-09-07 曾基于未 fetch 的本地 clone 误判 #7-#10/#12「幻影关闭」——**核对远程仓库而非本地 clone 再下结论**。
 - **#12 前端通道切换**：Agent 侧零代码改动（JWT 验签 #3 已就位）；`JWT_SECRET` 与 Java `ts-agent.jwt.secret` 同值（均不提交；#14 起配置段更名 ts-agent.*，开关 `ts-agent.enabled` 门禁 Java 签发端点，关闭→40410）。
+- **#16 目录收敛 + 死代码清场（2026-09-08，零行为变更 156→148/148）**：src/ 收敛为 6 领域目录——server/（装配/路由/鉴权/配置+agentRoot）、protocol/（events+sse 编码）、runs/（原 internal/，名不副实故改）、interview/、generation/（workflow+review+tools+prompts+intensity+workspace）、llm/；**旧路径换算：workflow/review/tools/prompts/intensity/workspace → generation/ 下，internal → runs，routes/auth/app/config → server，sse/ 与 workflow/events → protocol**。死代码清场：parsing.ts（连同 6 例测试）、提示词 7→2 份（原件 rag 仓库留档）、SSE formatEvent/encodeEvent 去 export、runImageTool 透传包装、ScriptedLlmProvider 空别名；config 反向依赖修正（DEFAULT_IMAGE_MODEL + 三图片源常量归 server/config.ts）。commit：8dae1e1/a90c9ab/eee514b/83bf9f2 + 审查整改 2dfaa4e（README 结构节对齐）。
 
 ## 通用有效约定
 
@@ -48,7 +49,7 @@
 
 ## 下一步 / 指针
 
-- **架构优雅化第一批（2026-09-08 架构审查后落地，父 issue #15）**：#16 目录收敛+死代码清场（零行为变更，无阻塞立即可开工）→ #17 真流式 SSE → #18 zod 单源 → #19 质检 generateObject 主链；#20 重试策略参数化（已拍板：短调用恢复 SDK 默认退避、长生成保持 0）；#21 路由收敛收尾（setErrorHandler + 访谈编排归位 + script 参数退场）。审查根因结论在 #15 正文；**XState「图只簿记不驱动控制流」双轨决策待用户拍板（#22，关键变量 = P2 断点续传的快照序列化预期）**，不进第一批链。
+- **架构优雅化第一批（父 issue #15）**：#16 目录收敛 ✅ 完成（2026-09-08，见当前状态）→ **frontier：#17 真流式 SSE、#18 zod 单源、#20 重试策略（均已解锁可开工；#17 与 #18 同改 server/agentRoutes.ts 须串行，建议 #17 先）** → #19 质检 generateObject（等 #18）→ #21 路由收敛收尾（等 #17+#18；setErrorHandler + 访谈编排归位 + script 参数退场）。#20 已拍板：短调用恢复 SDK 默认退避、长生成保持 0。审查根因结论在 #15 正文；**XState「图只簿记不驱动控制流」双轨决策待用户拍板（#22，关键变量 = P2 断点续传的快照序列化预期）**，不进第一批链。
 - 路由模型调用点（自动选档/工位识别）尚未实现——`MODEL_ROUTER` 与 provider 映射已打通，行为设计（规则前置 or LLM 判档、超时回退默认档）需先出设计再动工。
 - 进度日志 `docs/ts_agent/progress.md`（每完成一票追加一行，含命令证据）。
 - npm 坑：命令必须在 `paimeng-ai-code-agent/` 目录内执行（仓库根目录会读到 `/mnt/c/Users/LXH/.npmrc` 报 "config prefix cannot be changed"）。
