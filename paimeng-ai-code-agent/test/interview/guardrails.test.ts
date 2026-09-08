@@ -1,7 +1,7 @@
 // Guardrail 规则用例测试（Issue #8）：从 Python Agent tests/test_guardrails.py 逐条移植，
 // 断言规则集与旧实现语义等价（长度/空输入/敏感词/注入模式四类拒绝 + 正常输入放行）。
 import { describe, expect, it } from 'vitest'
-import { validatePrompt } from '../src/interview/guardrails.js'
+import { validatePrompt } from '../../src/interview/guardrails.js'
 
 // 返回拒绝原因（放行时为空串），对齐 Python 侧 _reason 辅助
 function reason(text: string): string {

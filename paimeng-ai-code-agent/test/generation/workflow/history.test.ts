@@ -1,7 +1,7 @@
 // 输入历史滑窗测试（Issue #9，架构 §3.3 护栏第 3 层「输入侧有界」）：
 // 最近 N 轮全文 + 更早轮次折叠为摘要；空/零槽位/超长摘要边界
 import { describe, expect, it } from 'vitest'
-import { SUMMARY_CHAR_LIMIT, windowHistory, type HistoryTurn } from '../src/generation/workflow/history.js'
+import { SUMMARY_CHAR_LIMIT, windowHistory, type HistoryTurn } from '../../../src/generation/workflow/history.js'
 
 describe('输入历史滑窗（Issue #9）', () => {
   it('历史轮次 ≤ 滑窗 → 全部保留全文，无摘要', () => {

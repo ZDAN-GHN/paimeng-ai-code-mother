@@ -5,8 +5,8 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { buildTestApp, makeToken, makeWorkspaceRoot } from './helpers.js'
-import { RunClient, type Run, type RunPhase } from '../src/runs/runClient.js'
+import { buildTestApp, makeToken, makeWorkspaceRoot } from '../helpers.js'
+import { RunClient, type Run, type RunPhase } from '../../src/runs/runClient.js'
 
 type Call = { method: string; url: string; body: Record<string, unknown> }
 

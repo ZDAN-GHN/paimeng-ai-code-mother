@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { makeToken, makeWorkspaceRoot, buildTestApp } from './helpers.js'
+import { makeToken, makeWorkspaceRoot, buildTestApp } from '../helpers.js'
 
 // 新 SSE 格式解析：帧以空行分隔，每帧 event 行 + 单行 data（JSON）
 type Frame = { event: string; data: Record<string, unknown> }

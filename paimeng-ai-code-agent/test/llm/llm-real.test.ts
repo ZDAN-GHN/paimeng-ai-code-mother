@@ -3,8 +3,8 @@
 // 「HTTP 200 包 error 体」归一化转码（1305→429 / 上游 4xx5xx 原样 / 业务码→400 / 非 JSON→502）。
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { generateText } from 'ai'
-import { createRealLlm, isRealLlmConfigured } from '../src/llm/real.js'
-import type { AgentConfig } from '../src/server/config.js'
+import { createRealLlm, isRealLlmConfigured } from '../../src/llm/real.js'
+import type { AgentConfig } from '../../src/server/config.js'
 
 // 最小完整配置（三渠道齐全；baseUrl 指向不存在的 test 域，配合 stub fetch 保证零外呼）
 function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {

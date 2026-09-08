@@ -10,8 +10,8 @@ import {
   type HttpResponse,
   type ImageConfig,
   type ImageToolResult,
-} from '../src/generation/tools/imageTools.js'
-import { DEFAULT_IMAGE_MODEL } from '../src/server/config.js'
+} from '../../../src/generation/tools/imageTools.js'
+import { DEFAULT_IMAGE_MODEL } from '../../../src/server/config.js'
 
 // 假配置（对齐 Python _FakeSettings）
 const config: ImageConfig = {

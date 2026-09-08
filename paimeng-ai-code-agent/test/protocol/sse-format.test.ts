@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { encodeEventStream } from '../src/protocol/sse.js'
+import { encodeEventStream } from '../../src/protocol/sse.js'
 
 describe('SSE 序列化约定', () => {
   it('事件序列编码为连续帧', () => {

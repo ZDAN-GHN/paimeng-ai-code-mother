@@ -1,11 +1,11 @@
 // 对话中断（Issue #10，架构 §3.5 中止 (a)）：abort 信号 → 取消 LLM → 保留已写文件 → aborted 终态
 // + 回调 Java（status=aborted + filesWritten，Java 侧折算退款 + 历史 [用户中断]）
 import { describe, expect, it, vi } from 'vitest'
-import { makeWorkspaceRoot } from './helpers.js'
-import { runGenerationWorkflow, GenerationAborted } from '../src/generation/workflow/index.js'
-import { RunClient, type Run } from '../src/runs/runClient.js'
-import { makePassingReviewGates } from './helpers.js'
-import type { AgentEvent } from '../src/protocol/events.js'
+import { makeWorkspaceRoot } from '../../helpers.js'
+import { runGenerationWorkflow, GenerationAborted } from '../../../src/generation/workflow/index.js'
+import { RunClient, type Run } from '../../../src/runs/runClient.js'
+import { makePassingReviewGates } from '../../helpers.js'
+import type { AgentEvent } from '../../../src/protocol/events.js'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 

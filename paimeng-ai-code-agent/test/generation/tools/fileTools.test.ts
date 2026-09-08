@@ -4,8 +4,8 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { FileTools, FilePathError, IGNORED_NAMES } from '../src/generation/tools/fileTools.js'
-import { validateWorkspacePath } from '../src/generation/workspace.js'
+import { FileTools, FilePathError, IGNORED_NAMES } from '../../../src/generation/tools/fileTools.js'
+import { validateWorkspacePath } from '../../../src/generation/workspace.js'
 
 // 每个用例独立临时工作区根（根下再建隔离子工作区，对齐 Python fixture 语义）
 function makeTools(): { tools: FileTools; root: string } {

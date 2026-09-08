@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { SignJWT } from 'jose'
 import { describe, expect, it } from 'vitest'
-import { makeToken, makeWorkspaceRoot, buildTestApp, TEST_SECRET } from './helpers.js'
+import { makeToken, makeWorkspaceRoot, buildTestApp, TEST_SECRET } from '../helpers.js'
 
 // 受保护路由取 workspace/validate：合法令牌可以拿到 200，恰好同时验证鉴权放行
 const PROTECTED_URL = '/agent/workspace/validate'

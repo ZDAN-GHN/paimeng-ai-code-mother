@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { buildTestApp, makeToken, makeWorkspaceRoot, type FastifyInstance } from './helpers.js'
+import { buildTestApp, makeToken, makeWorkspaceRoot, type FastifyInstance } from '../helpers.js'
 
 describe('工作区沙箱校验（POST /agent/workspace/validate）', () => {
   let app: FastifyInstance
