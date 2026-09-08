@@ -6,7 +6,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import type { FastifyInstance } from 'fastify'
 import type { AgentConfig } from './config.js'
 import { RunClient, RunApiError } from '../runs/runClient.js'
-import { encodeEventStream } from '../protocol/sse.js'
+import { encodeEvent, encodeEventStream, SSE_HEADERS } from '../protocol/sse.js'
 import type { AgentEvent } from '../protocol/events.js'
 import { runGenerationWorkflow, type StreamRequest } from '../generation/workflow/index.js'
 import type { HistoryTurn } from '../generation/workflow/history.js'
@@ -303,6 +303,7 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     return { runId: input.runId, phase: 'wireframe_confirmed', wireframe }
   })
 
+  // ── codegen 流式端点（Issue #17 真流式）──
   fastify.post('/agent/stream', async (request, reply) => {
     const input = asStreamBody(request.body)
     const userId = input.userId ?? request.user?.sub ?? ''
@@ -313,24 +314,55 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     input.userId = userId
 
     const runClient = resolveRunClient()
-    const events: AgentEvent[] = []
+
+    // 真流式（Issue #17，架构 §9「SSE 流本身即过程可见性」）：接管原生响应逐帧写出，
+    // 每个事件在产生时即送达（首个 data: 帧不等整轮生成完成）。参数校验（400 JSON）发生在接管前；
+    // 此后所有路径——闸门拒绝、冻结失败、生成终态、异常——均以 SSE 帧写出收尾，wire 契约不变。
+    // 响应头单点：writeHead 一次设定（SSE_HEADERS 定义在 protocol/sse.ts，与冒烟端点共用）
+    reply.hijack()
+    reply.raw.writeHead(200, SSE_HEADERS)
+
+    // 对话中断（Issue #10，架构 §3.5 中止 (a)）：感知客户端断开（关页面/中止按钮 abort）→
+    // 取消 LLM 调用 → workflow 走 aborted 终态（保留已写文件 + 历史 [用户中断] + 折算退款）。
+    // reply.raw 'close' 在连接正常结束（writableEnded）与异常断开都会触发，仅后者视为中断；
+    // 接管响应后立即挂上（闸门/冻结等待期间断开同样触发，abortSignal 已贯穿全程）
+    const abortController = new AbortController()
+    reply.raw.on('close', () => {
+      if (!reply.raw.writableEnded) {
+        abortController.abort()
+      }
+    })
+
+    // 逐帧写出（背压：内核缓冲满时等 drain，客户端断开时 close 兜底解除等待，不卡生成循环）；
+    // 连接断开后的帧直接丢弃（abort 信号已中止上游生成，写了也无人接收）
+    const writeFrame = async (event: AgentEvent): Promise<void> => {
+      if (reply.raw.writableEnded || reply.raw.destroyed) return
+      if (!reply.raw.write(encodeEvent(event))) {
+        await new Promise<void>((resolve) => {
+          const settle = (): void => {
+            reply.raw.off('drain', settle)
+            reply.raw.off('close', settle)
+            resolve()
+          }
+          reply.raw.once('drain', settle)
+          reply.raw.once('close', settle)
+        })
+      }
+    }
+
     try {
       // 线框闸门（架构 §4 核心）：codegen 必须持有 wireframe_confirmed（已确认线框即布局契约）。
       // 闸门状态存于 Java generation_run，未配置内部 API 时无法校验 → 拒绝放行
       //（与 interview/wireframe/confirm 的 503 口径一致，避免 codegen 静默绕过闸门）
       if (!runClient) {
-        events.push({ type: 'error', message: 'Java 内部 API 未配置，无法校验线框闸门，拒绝进入代码生成' })
-        reply.header('content-type', 'text/event-stream; charset=utf-8')
-        reply.header('cache-control', 'no-cache')
-        return encodeEventStream(events)
+        await writeFrame({ type: 'error', message: 'Java 内部 API 未配置，无法校验线框闸门，拒绝进入代码生成' })
+        return reply
       }
       const run = await runClient.getRun(input.runId)
       if (!run || run.phase !== 'wireframe_confirmed') {
         const reason = run ? `当前阶段为 ${run.phase}` : '尚未完成需求工程（访谈/线框/确认）'
-        events.push({ type: 'error', message: `未确认线框，无法进入代码生成（${reason}）：请先完成访谈并确认线框` })
-        reply.header('content-type', 'text/event-stream; charset=utf-8')
-        reply.header('cache-control', 'no-cache')
-        return encodeEventStream(events)
+        await writeFrame({ type: 'error', message: `未确认线框，无法进入代码生成（${reason}）：请先完成访谈并确认线框` })
+        return reply
       }
       // #9 视觉 diff 基准 = 已确认线框：从 run.context.wireframe.relativeUrl 解析绝对路径传入 workflow
       //（线框存 {workspace}/wireframe/wireframe.html，relativeUrl 相对工作区；解析后做沙箱校验防越界）
@@ -356,20 +388,9 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
         const reason = err instanceof RunApiError && err.status === 402
           ? err.message
           : `冻结积分失败，无法进入代码生成：${err instanceof Error ? err.message : '未知错误'}`
-        events.push({ type: 'error', message: reason })
-        reply.header('content-type', 'text/event-stream; charset=utf-8')
-        reply.header('cache-control', 'no-cache')
-        return encodeEventStream(events)
+        await writeFrame({ type: 'error', message: reason })
+        return reply
       }
-      // 对话中断（Issue #10，架构 §3.5 中止 (a)）：感知客户端断开（关页面/中止按钮 abort）→
-      // 取消 LLM 调用 → workflow 走 aborted 终态（保留已写文件 + 历史 [用户中断] + 折算退款）。
-      // reply.raw 'close' 在连接正常结束（writableEnded）与异常断开都会触发，仅后者视为中断
-      const abortController = new AbortController()
-      reply.raw.on('close', () => {
-        if (!reply.raw.writableEnded) {
-          abortController.abort()
-        }
-      })
       for await (const event of runGenerationWorkflow(input, {
         workspaceRoot: config.workspaceRoot,
         provider: llmProvider,
@@ -390,17 +411,23 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
         },
         // 对话中断（#10）：连接断开 → abort 信号 → 工作流取消 LLM 并走 aborted 终态
         abortSignal: abortController.signal,
+        // 生成期失败日志走请求关联 logger（Issue #17，不再 console 直落 stdout）
+        logger: request.log,
       })) {
-        // 终态守卫：done/error 都是流的最后一个事件，收到任一即停止消费（防实现缺陷把终态后的事件带进响应）
-        events.push(event)
+        await writeFrame(event)
+        // 终态守卫：done/error 都是流的最后一个事件，收到任一即停止消费（防实现缺陷把终态后的事件写进响应）
         if (event.type === 'done' || event.type === 'error') break
       }
     } catch (error) {
-      events.push({ type: 'error', message: error instanceof Error ? error.message : '生成失败' })
+      // 流中错误以 SSE error 事件收尾（契约：连接已打开，正常关闭而非半截断流）
+      await writeFrame({ type: 'error', message: error instanceof Error ? error.message : '生成失败' })
+    } finally {
+      // 正常路径 end 触发连接关闭（客户端读到流终止）；客户端已断开时无需收尾（destroy 已关闭连接）
+      if (!reply.raw.writableEnded && !reply.raw.destroyed) {
+        reply.raw.end()
+      }
     }
-    reply.header('content-type', 'text/event-stream; charset=utf-8')
-    reply.header('cache-control', 'no-cache')
-    return encodeEventStream(events)
+    return reply
   })
 
   // 冒烟兼容端点，P1 健康检查沿用
@@ -414,8 +441,7 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
       { type: 'milestone', title: '生成完成' },
       { type: 'done' },
     ]
-    reply.header('content-type', 'text/event-stream; charset=utf-8')
-    reply.header('cache-control', 'no-cache')
-    return encodeEventStream(events)
+    // 静态剧本一次性返回；响应头与 /agent/stream 共用 SSE_HEADERS（Issue #17 单点收敛）
+    return reply.headers(SSE_HEADERS).send(encodeEventStream(events))
   })
 }
