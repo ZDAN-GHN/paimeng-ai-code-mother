@@ -25,6 +25,8 @@
 | 护轨拒绝 → failed 完成回调断言 | test_streaming.py 护轨回调例 | `test/stream.test.ts`（既有用例追加断言） |
 | 完成回调失败不阻断主流程 | test_callback.py 容错例 | `test/stream.test.ts`（新增用例） |
 
+> 范围注记（2026-09-08 code-review 整改补记）：`src/llm/index.ts` 中 `buildPageContent` 另含约 100 行 MSW 风格 mock 拦截层（fetch/XHR 补丁 + fixture 规则表，自标 #13 L1 预览态），系随本票提交混入的 src 生产行为改动，不属于 #11 对账范围；其对账结论无影响，测试覆盖债已在 #13 记录（届时补覆盖测试）。
+
 ## 二、逐文件清点表（84 例）
 
 ### `test_contract.py`（11 例）— Java↔Agent 内部契约
@@ -168,7 +170,7 @@
 ## 四、T21 门禁判定
 
 **「契约对等」半边：通过**（72 直接覆盖 + 9 有意演进/退役判据在档 + 3 语义差异列 §五，无能力缺失）。
-**「回归全绿」半边**：TS `npm test` 144/144 + type-check 通过；Java 侧回归证据见 #9/#10 票（相关用例 70/70 + 全量对比基线无回归）。
+**「回归全绿」半边**：TS `npm test` 144/144 + type-check 通过；Java 侧回归证据见 #9/#10 票（#10 交付 70/70、code-review 整改后 **77/77** 为最新在档证据 + 全量对比基线无回归）。
 
 ## 五、P3 联调修正项（本票移交，不阻断 T21）
 

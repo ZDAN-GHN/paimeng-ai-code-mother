@@ -5,12 +5,15 @@ import { describe, expect, it } from 'vitest'
 import { FileTools } from '../src/tools/fileTools.js'
 import { ImageTools, type ImageConfig } from '../src/tools/imageTools.js'
 import { buildTools } from '../src/tools/index.js'
+import { makeWorkspaceRoot } from './helpers.js'
 
 const imageConfig: ImageConfig = { pexelsApiKey: '', dashscopeApiKey: '', imageModel: 'test-model' }
 
 describe('buildTools 工具名绑定契约', () => {
   it('十工具名全集稳定：文件六件 + 图片四件，全部 camelCase（Java ToolManager 依赖）', () => {
-    const names = Object.keys(buildTools({ files: new FileTools('/tmp/paimeng-tools-contract', '/tmp/paimeng-tools-contract'), images: new ImageTools(imageConfig) }))
+    // 仅取工具名不落盘，工作区用测试惯例的临时目录
+    const root = makeWorkspaceRoot()
+    const names = Object.keys(buildTools({ files: new FileTools(root, root), images: new ImageTools(imageConfig) }))
     expect(names.sort()).toEqual([
       // 文件六件（对齐旧 Java ProjectFileWriteTool 等）
       'deleteFile',

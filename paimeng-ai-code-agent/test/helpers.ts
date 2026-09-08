@@ -3,11 +3,51 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { SignJWT } from 'jose'
+import { expect, vi } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import { buildApp } from '../src/app/app.js'
 import type { ReviewGateSet } from '../src/review/index.js'
+import { RunClient, type Run } from '../src/internal/runClient.js'
 
 export const TEST_SECRET = 'test-secret'
+
+// SSE 帧与内部 API 调用记录类型（stream / golden-e2e 共用，避免双份定义漂移）
+export type Frame = { event: string; data: Record<string, unknown> }
+
+export type RunCall = { url: string; body: Record<string, unknown> }
+
+// 按 SSE 帧解析（空行分隔，event: + data: 单行 JSON）；每帧校验 data.type 与 event 名一致
+export function frames(body: string): Frame[] {
+  return body.split('\n\n').filter(Boolean).map((raw) => {
+    const lines = raw.split('\n')
+    const event = lines.find((line) => line.startsWith('event: '))!.slice(7)
+    const data = JSON.parse(lines.find((line) => line.startsWith('data: '))!.slice(6)) as Record<string, unknown>
+    expect(data.type).toBe(event)
+    return { event, data }
+  })
+}
+
+// 伪造 runClient：GET（闸门查询）返回 wireframe_confirmed，写操作按请求体 phase 回显。
+// phase 参数可覆盖 GET 返回的阶段（闸门拒绝/放行用例）；completeFails 注入 /complete 500（容错用例）。
+export function fakeRunClient(calls: RunCall[], gatePhase: Run['phase'] = 'wireframe_confirmed', completeFails = false): RunClient {
+  return new RunClient({
+    baseUrl: 'http://java.invalid',
+    token: 'test',
+    fetchImpl: vi.fn(async (url, init) => {
+      const method = init?.method ?? 'GET'
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {}
+      calls.push({ url: String(url), body })
+      // 回调失败容错（旧 test_callback 语义）：Java 侧 /complete 非 2xx，客户端抛错由工作流吞掉
+      if (completeFails && String(url).endsWith('/complete')) {
+        return new Response(JSON.stringify({ code: 500, message: '内部错误' }), { status: 500 })
+      }
+      const data = method === 'GET'
+        ? { runId: String(url).split('/').at(-1), appId: 1, userId: 1, phase: gatePhase, context: null, milestones: null }
+        : { runId: String(url).split('/').at(-2), appId: 1, userId: 1, phase: body.phase ?? 'interview', context: null, milestones: null }
+      return new Response(JSON.stringify({ code: 0, data, message: 'ok' }), { status: 200 })
+    }),
+  })
+}
 
 // 每个测试独立临时工作区根，避免互相污染
 export function makeWorkspaceRoot(): string {

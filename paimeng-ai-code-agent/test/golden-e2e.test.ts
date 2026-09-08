@@ -3,9 +3,8 @@
 // 按夹具断言工作区产物文件与关键片段——对齐旧 Python Agent tests/test_e2e.py 的夹具语义。
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
-import { makeToken, makeWorkspaceRoot, buildTestApp } from './helpers.js'
-import { RunClient, type Run } from '../src/internal/runClient.js'
+import { describe, expect, it } from 'vitest'
+import { makeToken, makeWorkspaceRoot, buildTestApp, frames, fakeRunClient, type RunCall } from './helpers.js'
 
 interface GoldenFixture {
   codeGenType: 'html' | 'multi_file' | 'vue_project'
@@ -15,37 +14,6 @@ interface GoldenFixture {
 }
 
 const FIXTURES = path.join(import.meta.dirname, 'fixtures')
-
-// 内部 API 调用记录（url + 请求体，用于断言完成回调）
-type RunCall = { url: string; body: Record<string, unknown> }
-
-// 按 SSE 帧解析（空行分隔，event: + data: 单行 JSON）；每帧校验 data.type 与 event 名一致
-function frames(body: string): Array<{ event: string; data: Record<string, unknown> }> {
-  return body.split('\n\n').filter(Boolean).map((raw) => {
-    const lines = raw.split('\n')
-    const event = lines.find((line) => line.startsWith('event: '))!.slice(7)
-    const data = JSON.parse(lines.find((line) => line.startsWith('data: '))!.slice(6)) as Record<string, unknown>
-    expect(data.type).toBe(event)
-    return { event, data }
-  })
-}
-
-// 伪造 runClient：GET（闸门查询）返回 wireframe_confirmed，写操作按请求体 phase 回显（同 stream.test 模式）
-function fakeRunClient(calls: RunCall[]): RunClient {
-  return new RunClient({
-    baseUrl: 'http://java.invalid',
-    token: 'test',
-    fetchImpl: vi.fn(async (url, init) => {
-      const method = init?.method ?? 'GET'
-      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {}
-      calls.push({ url: String(url), body })
-      const data = method === 'GET'
-        ? { runId: String(url).split('/').at(-1), appId: 1, userId: 1, phase: 'wireframe_confirmed' as Run['phase'], context: null, milestones: null }
-        : { runId: String(url).split('/').at(-2), appId: 1, userId: 1, phase: body.phase ?? 'interview', context: null, milestones: null }
-      return new Response(JSON.stringify({ code: 0, data, message: 'ok' }), { status: 200 })
-    }),
-  })
-}
 
 // 逐夹具跑全链：golden HTML 与 golden multi_file 共用同一断言骨架（对齐旧 test_e2e.py 结构）
 describe.each([
