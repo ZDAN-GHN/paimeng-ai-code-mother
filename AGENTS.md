@@ -43,6 +43,7 @@
 |---|---|
 | `project-comment-style` | 添加或补全注释、编写类/方法 Javadoc、核对注释样式等 |
 | `memory-management` | 任务产生或修正可复用的事实、决策、约束、踩坑，或既有记忆需增删改时 |
+| `memory-quality-audit` | 对 `.agents/memories/` 记忆文档或 `MEMORY.md` 做过新增/修改/删除/重命名后，交付前即使未被要求也应主动使用本技能审查记忆质量 |
 | `code-review` | 审查分支、PR 或工作区改动，或要求 "review since X" 时；完成一段自包含改动、准备提交前即使未被要求也应主动使用本技能自查 |
 | `agent-design-review` | 首次生成方案设计，或要求审查、修订方案设计时 |
 | `agents-md` | 更新/维护 AGENTS.md 或 CLAUDE.md |
