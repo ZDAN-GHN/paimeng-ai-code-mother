@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process'
 import { writeFile as writeFsFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
+import { DASHSCOPE_IMAGE_URL, PEXELS_API_URL, UNDRAW_API_URL } from '../../server/config.js'
 
 // ── 图片资源模型（对齐 Java ImageResource / ImageCategoryEnum）──
 
@@ -31,9 +32,6 @@ export interface ImageConfig {
   // Logo 生成模型（Java LogoGeneratorTool 默认值）
   imageModel: string
 }
-
-// Logo 模型默认值（对齐 Java LogoGeneratorTool 的 wan2.2-t2i-flash；config 与 workflow 共享）
-export const DEFAULT_IMAGE_MODEL = 'wan2.2-t2i-flash'
 
 // HTTP 客户端抽象（可注入测试替身；生产默认 fetch）
 export interface HttpClient {
@@ -79,13 +77,6 @@ class FetchHttpClient implements HttpClient {
 // ── 图片工具集（绑定单次 run 的配额状态）──
 
 export class ImageTools {
-  // Pexels 内容图片搜索（对齐 Java ImageSearchTool / Python PEXELS_API_URL）
-  static readonly PEXELS_API_URL = 'https://api.pexels.com/v1/search'
-  // Undraw 插画搜索（对齐 Java UndrawIllustrationTool 的 Next.js 数据接口）
-  static readonly UNDRAW_API_URL = 'https://undraw.co/_next/data/rxbI0cNBbVhP70ybALHAo/search/{query}.json?term={query}'
-  // DashScope 文生图（对齐 Java LogoGeneratorTool / Python DASHSCOPE_IMAGE_URL）
-  static readonly DASHSCOPE_IMAGE_URL = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis'
-
   private readonly config: ImageConfig
   private readonly http: HttpClient
   private readonly renderer: DiagramRenderer
@@ -126,7 +117,7 @@ export class ImageTools {
       return this.noOutput(allowed)
     }
     try {
-      const resp = await this.http.get(ImageTools.PEXELS_API_URL, {
+      const resp = await this.http.get(PEXELS_API_URL, {
         params: { query, per_page: '12', page: '1' },
         headers: { Authorization: this.config.pexelsApiKey },
       })
@@ -148,7 +139,7 @@ export class ImageTools {
     const allowed = this.acquire(12)
     if (allowed === null) return { ok: false, error: IMAGE_QUOTA_EXCEEDED_MESSAGE }
     try {
-      const url = ImageTools.UNDRAW_API_URL.replaceAll('{query}', encodeURIComponent(query))
+      const url = UNDRAW_API_URL.replaceAll('{query}', encodeURIComponent(query))
       const resp = await this.http.get(url, { timeout: 10_000 })
       if (!resp.ok) return this.noOutput(allowed)
       const data = (await resp.json()) as { pageProps?: { initialResults?: Array<{ title?: string; media?: string }> } }
@@ -172,7 +163,7 @@ export class ImageTools {
     }
     const prompt = `生成 Logo，Logo 中禁止包含任何文字！Logo 介绍：${description}`
     try {
-      const resp = await this.http.post(ImageTools.DASHSCOPE_IMAGE_URL, {
+      const resp = await this.http.post(DASHSCOPE_IMAGE_URL, {
         headers: { Authorization: `Bearer ${this.config.dashscopeApiKey}` },
         json: {
           model: this.config.imageModel,

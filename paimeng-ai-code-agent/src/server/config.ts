@@ -2,7 +2,14 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { agentRoot } from './agentRoot.js'
-import { DEFAULT_IMAGE_MODEL } from '../generation/tools/imageTools.js'
+
+// Logo 模型缺省值（对齐 Java LogoGeneratorTool 的 wan2.2-t2i-flash；config 与 workflow 共享）
+export const DEFAULT_IMAGE_MODEL = 'wan2.2-t2i-flash'
+
+// 图片工具第三方源（Pexels 内容图 / Undraw 插画 / DashScope 文生图，对齐 Java/Python 各工具的固定端点）
+export const PEXELS_API_URL = 'https://api.pexels.com/v1/search'
+export const UNDRAW_API_URL = 'https://undraw.co/_next/data/rxbI0cNBbVhP70ybALHAo/search/{query}.json?term={query}'
+export const DASHSCOPE_IMAGE_URL = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis'
 
 export interface AgentConfig {
   port: number

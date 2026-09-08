@@ -3,7 +3,6 @@
 // 配额按「输出」扣减（失败返还，审查整改 A2）；用尽后被拒且有明确报错（判别联合 ok:false，整改 B6）。
 import { describe, expect, it } from 'vitest'
 import {
-  DEFAULT_IMAGE_MODEL,
   DEFAULT_IMAGE_QUOTA,
   IMAGE_QUOTA_EXCEEDED_MESSAGE,
   ImageTools,
@@ -12,6 +11,7 @@ import {
   type ImageConfig,
   type ImageToolResult,
 } from '../src/generation/tools/imageTools.js'
+import { DEFAULT_IMAGE_MODEL } from '../src/server/config.js'
 
 // 假配置（对齐 Python _FakeSettings）
 const config: ImageConfig = {

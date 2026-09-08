@@ -26,7 +26,7 @@ export interface RunCreateRequest {
   appId: number | string
   userId: number | string
   phase: RunPhase
-  // 运行上下文 JSON（访谈结论/已确认线框路径/plan，XState 快照序列化于此）
+  // 运行上下文 JSON（访谈状态 + 线框状态，结构见 interview/context.ts 的 RunContext）
   context?: string
   // 已过里程碑列表 JSON（退款粒度的锚）
   milestones?: string
