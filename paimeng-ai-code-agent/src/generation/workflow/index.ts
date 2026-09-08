@@ -308,7 +308,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
         model: provider.languageModel(modelId),
         system: codegenSystem,
         messages,
-        // 脚本结果确定，失败无需退避重试
+        // 长生成不重试（#20）：分钟级生成中途失败后重试要整段重烧 token 与积分，宁可快速失败
         maxRetries: 0,
         // 输出硬上限（#9 护栏第 1 层，随档位放大）：max_output_tokens 传 provider；max_turns 截断工具循环步数；
         // max_tool_calls 累计工具调用数截断（历史先例 50，标准档）
@@ -364,7 +364,8 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
           model: provider.languageModel(modelId),
           system: `${codegenSystem}\n\n已达本次生成硬上限（工具调用/生成步数/输出长度上限）。请不要再调用工具，基于以下已生成内容立即输出最终完整交代：\n${pageContent}`,
           messages,
-          maxRetries: 0,
+          // 短调用恢复 SDK 默认退避重试（#20：渠道层已归一化 429/502 为可重试错误，瞬时过载可自愈；2 即 SDK 默认值，显式写出便于调整）
+          maxRetries: 2,
           maxOutputTokens: tier.limits.maxOutputTokens,
           // 对话中断（#10）：收尾调用同样受 abort 信号约束
         }, options.abortSignal))
