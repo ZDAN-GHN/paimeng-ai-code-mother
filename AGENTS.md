@@ -47,6 +47,7 @@
 | `agent-design-review` | 首次生成方案设计，或要求审查、修订方案设计时 |
 | `agents-md` | 更新/维护 AGENTS.md 或 CLAUDE.md |
 | `codebase-design` | 设计或改进模块接口、划分职责、找接缝等结构设计讨论时（"这个模块怎么设计"、"接口怎么拆"、"这段逻辑放哪"、"怎么更好测"） |
+| `make-interfaces-feel-better` | 开发或审查前端页面/组件、实现动画与 hover/阴影/圆角/图标等视觉细节、界面"感觉不对"（feels off）想打磨时 |
 
 ### Issue tracker
 
