@@ -84,12 +84,20 @@ export async function makeToken(overrides: { expiresIn?: string | number; sub?: 
 
 export function buildTestApp(workspaceRoot: string = makeWorkspaceRoot(), overrides: Parameters<typeof buildApp>[0] = {}) {
   // javaInternalToken 强制为空：测试默认离线（不读 .env 的 JAVA_INTERNAL_TOKEN，避免误连真实 Java），
-  // 需要内部 API 的用例显式注入 agentRoutes.runClient 假客户端
+  // 需要内部 API 的用例显式注入 agentRoutes.runClient 假客户端。
+  // LLM 渠道密钥同理强制清空（不读 .env 真实 key，防止测试跑真 LLM）；需要真实链路的用例显式覆盖。
   return buildApp({
     jwtSecret: TEST_SECRET,
     workspaceRoot,
     logLevel: 'silent',
     javaInternalToken: '',
+    zhipuApiKey: '',
+    openrouterApiKey: '',
+    deepCodingApiKey: '',
+    modelRouter: '',
+    modelFast: '',
+    modelStandard: '',
+    modelDeep: '',
     ...overrides,
     agentRoutes: {
       // 默认注入全通过门禁替身（既有测试最小 review 语义）；#9 专项测试显式覆盖

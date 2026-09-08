@@ -11,7 +11,8 @@ import type { AgentEvent } from '../workflow/events.js'
 import { runGenerationWorkflow, type StreamRequest } from '../workflow/index.js'
 import type { HistoryTurn } from '../workflow/history.js'
 import type { Intensity } from '../intensity.js'
-import type { ScriptedLlmProvider } from '../llm/index.js'
+import type { LlmProvider } from '../llm/index.js'
+import { createRealLlm, isRealLlmConfigured } from '../llm/real.js'
 import { WorkspacePathError, validateWorkspacePath } from '../workspace/sandbox.js'
 import {
   buildRound1Questions,
@@ -29,7 +30,9 @@ import type { ReviewGateSet } from '../review/index.js'
 
 export interface AgentRouteOptions {
   runClient?: RunClient
-  provider?: ScriptedLlmProvider
+  // LLM provider（测试注入 scripted 替身；缺省按 config 渠道密钥装配真实 provider，
+  // 渠道全空 → 离线回退假 LLM，见 createRealLlm/isRealLlmConfigured）
+  provider?: LlmProvider
   // 图片工具集（测试注入替身；缺省按 config 密钥新建）
   imageTools?: ImageTools
   // 三重门禁执行器（#9）：测试注入替身断言「以已确认线框为基准」与失败触发重试
@@ -114,6 +117,9 @@ function asStreamBody(body: unknown): StreamRequest {
 }
 
 export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, options: AgentRouteOptions = {}): void {
+  // LLM provider 装配（2026-09-08 四档接线）：显式注入优先；否则配置了任一渠道密钥即走真实 provider，
+  // 全空回退离线假 LLM（测试依赖该回退保持离线，见 test/helpers.ts 强制清空渠道密钥）
+  const llmProvider: LlmProvider | undefined = options.provider ?? (isRealLlmConfigured(config) ? createRealLlm(config) : undefined)
   // 会话内共享 runClient（可注入；未配置 Java token 时为 undefined → 离线/冒烟模式跳过内部 API 依赖）
   const resolveRunClient = (): RunClient | undefined =>
     options.runClient ?? (config.javaInternalToken ? new RunClient({ baseUrl: config.javaInternalBaseUrl, token: config.javaInternalToken }) : undefined)
@@ -366,7 +372,7 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
       })
       for await (const event of runGenerationWorkflow(input, {
         workspaceRoot: config.workspaceRoot,
-        provider: options.provider,
+        provider: llmProvider,
         runClient,
         imageTools: options.imageTools,
         reviewGates: options.reviewGates,

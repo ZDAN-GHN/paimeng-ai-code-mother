@@ -8,7 +8,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { generateText } from 'ai'
-import type { ScriptedLlmProvider } from '../llm/index.js'
+import type { LlmProvider } from '../llm/index.js'
 import { loadPrompt, PROMPT_NAMES } from '../prompts/index.js'
 import {
   GATE_NAMES,
@@ -67,7 +67,7 @@ export function parseQualityScore(text: string): QualityScore {
 
 // 默认质检分执行器：generateText 调 reviewer 模型（scripted-quality），提示词复用 code-quality-check
 export class LlmQualityScorer implements QualityScorer {
-  constructor(private readonly provider: ScriptedLlmProvider) {}
+  constructor(private readonly provider: LlmProvider) {}
   async score(codeContent: string, signal?: AbortSignal): Promise<QualityScore> {
     const result = await generateText({
       model: this.provider.languageModel('scripted-quality'),
@@ -203,7 +203,7 @@ export interface ReviewGateSet {
   visualDiff: VisualDiffVerifier
 }
 
-export function buildDefaultReviewGates(provider: ScriptedLlmProvider): ReviewGateSet {
+export function buildDefaultReviewGates(provider: LlmProvider): ReviewGateSet {
   return {
     quality: new LlmQualityScorer(provider),
     build: new DefaultBuildVerifier(),

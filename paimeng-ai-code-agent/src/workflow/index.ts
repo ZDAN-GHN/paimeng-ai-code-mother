@@ -16,7 +16,7 @@ import { generateText, isStepCount, streamText, type ToolSet } from 'ai'
 import type { StepResult } from 'ai'
 import type { AgentEvent } from './events.js'
 import { MAX_QUALITY_ATTEMPTS, MILESTONE_DETAILS, PHASE_BY_STATE, generationMachine } from './machine.js'
-import { createScriptedLlm, type LlmScript, type ScriptedLlmProvider } from '../llm/index.js'
+import { createScriptedLlm, type LlmProvider, type LlmScript } from '../llm/index.js'
 import { resolveIntensity, type Intensity, type IntensityConfig } from '../intensity.js'
 import { windowHistory, type HistoryTurn, type WindowedHistory } from './history.js'
 import { RunClient, type RunPhase } from '../internal/runClient.js'
@@ -48,8 +48,8 @@ export interface StreamRequest {
 }
 
 export interface WorkflowOptions {
-  // 可注入的假 LLM provider（测试/未来真实 provider 替换入口）
-  provider?: ScriptedLlmProvider
+  // 可注入的 LLM provider（测试注入 scripted；生产由路由层按配置装配 real，见 routes/agent.ts）
+  provider?: LlmProvider
   runClient?: RunClient
   workspaceRoot: string
   // 图片四工具配置（#8）：默认取自环境（PEXELS_API_KEY / DASHSCOPE_API_KEY / IMAGE_MODEL），测试可注入
