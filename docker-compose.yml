@@ -1,4 +1,4 @@
-# 本地开发基础设施：MySQL + Redis + SearXNG（应用服务 Java / TS Agent / 前端仍在宿主机运行）
+# 本地开发基础设施：MySQL + Redis + SearXNG + Nginx（应用服务 Java / TS Agent / 前端仍在宿主机运行）
 # 使用：仓库根目录执行 docker compose up -d；环境变量见 .env.example（复制为 .env 后修改）
 name: paimeng-infra
 
@@ -56,6 +56,25 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+
+  nginx:
+    image: nginx:alpine
+    container_name: paimeng-nginx
+    restart: unless-stopped
+    # 部署产物访问入口：http://localhost/{deployKey}（与 Java CODE_DEPLOY_HOST、前端 VITE_DEPLOY_DOMAIN 一致）
+    # 80 端口由 docker daemon 绑定，宿主无需 root；仅监听本机回环
+    ports:
+      - "127.0.0.1:80:80"
+    volumes:
+      - ./docker/nginx/deploy.conf:/etc/nginx/conf.d/default.conf:ro
+      # 部署产物目录只读挂载（写入方为宿主机 Java 进程）
+      - ./tmp/code_deploy:/srv/code_deploy:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
 volumes:
   mysql-data:

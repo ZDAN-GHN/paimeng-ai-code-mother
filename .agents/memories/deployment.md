@@ -22,6 +22,7 @@
 
 - **MySQL + Redis（docker compose）**：仓库根 `docker-compose.yml`（项目名 `paimeng-infra`）。MySQL **8.0.46**（容器 `paimeng-mysql`，仅绑 127.0.0.1:3306，数据卷 `mysql-data`；**首次启动（数据卷为空）自动执行 `sql/create_table.sql` 建库建表**，其后不重复）+ Redis **7.2**（容器 `paimeng-redis`，仅绑 127.0.0.1:6379，AOF 开启，数据卷 `redis-data`）。启动 `docker compose up -d`，探活 `docker compose ps` 均应 healthy。root 密码在仓库根 `.env`（gitignore；与 `src/main/resources/application-local.yml` 的 `spring.datasource.password` 一致，2026-09-07 生成，勿提交勿外泄）。Docker 安装：`sudo bash scripts/install-docker.sh`（Mint 22.x/Ubuntu 24.04 官方 apt 源，`--mirror` 切阿里云；装后将用户加入 docker 组）。PostgreSQL 继续停用（5432 不应监听）。
 - **本地库数据迁移（2026-09-08）**：`paimeng_ai_code_mother` 已导入用户提供的 Navicat 全量 dump `sql/paimeng_ai_code_mother.sql`（2026-09-06 导出，44 应用 / 156 对话 / 2 用户；有效账号 `paimeng666` 已充值 10000 积分）。⚠️ 该 dump 落后于 #10 积分体系：仅含 app/chat_history/user 三表且 user 无 `credits` 列——**每次重新导入后必须补 `ALTER TABLE user ADD COLUMN credits int NOT NULL DEFAULT 0`**（与 `sql/create_table.sql` 定义一致；credit_ledger/generation_run 不在 dump 内、不被 DROP，但需自行 TRUNCATE 旧测试残留）。导入：`docker exec -i paimeng-mysql mysql -uroot -p<pwd> paimeng_ai_code_mother < sql/paimeng_ai_code_mother.sql`。0907 建库时的 e2e 测试用户（id 454742734167748608）已随覆盖消失，依赖它的脚本需改注册新用户。
+- **Nginx（docker compose，2026-09-08 新增）**：容器 `paimeng-nginx`（nginx:alpine），仅绑 127.0.0.1:80，承担**部署产物静态路由**——访问 URL `http://localhost/{deployKey}`（与 Java `AppConstant.CODE_DEPLOY_HOST`、前端 `VITE_DEPLOY_DOMAIN=http://localhost` 一致），产物根只读挂载宿主 `tmp/code_deploy`（Java 部署写入方，目录内 `.gitkeep` 入库防新克隆时 compose 先建 root 属主目录）；配置 `docker/nginx/deploy.conf`，探活 `/healthz`。宿主 80 原被无业务的 Ubuntu Apache 默认页占用（apache2 服务 active+enabled），2026-09-08 用户执行 `systemctl disable --now apache2` 停用让位（勿再装回或启用）。生产等价路由模板见 `deploy/nginx.conf.example`。
 - **SearXNG（docker compose，2026-09-07 新增）**：容器 `paimeng-searxng`，仅绑 127.0.0.1:**8888**（宿主机端口避开 Tomcat/Spring Boot 默认的 8080；容器内部仍监听 8080，由端口映射转换），配置 `docker/searxng/settings.yml` 挂载为 `/etc/searxng/settings.yml`（`use_default_settings` 合并 + `search.formats` 开 `json`；境内不可达的 google/duckduckgo/qwant 图片引擎已显式禁用，`limiter: false` 单机免限流）。用途：Java 全网热词图片搜索源（`WebImageSearchTool`，见 `java-backend.md`）；探活 `curl http://127.0.0.1:8888/healthz`，图片搜索自测 `curl 'http://127.0.0.1:8888/search?q=原神&categories=images&format=json'`。
 
 ## 依赖服务 — WSL 环境（WSL 宿主适用，2026-09-01 全栈验证）
@@ -54,7 +55,7 @@
 
 | 项 | 命令 |
 |---|---|
-| MySQL/Redis/SearXNG | `docker compose up -d`（首次启动自动建库建表；探活 `docker compose ps`；SearXNG 健康检查 `/healthz`） |
+| MySQL/Redis/SearXNG/Nginx | `docker compose up -d`（首次启动自动建库建表；探活 `docker compose ps`；SearXNG 健康检查 `/healthz`；nginx 挂 `docker/nginx/deploy.conf`，部署应用访问 `http://localhost/{deployKey}`） |
 | Java | `JAVA_HOME=<JDK21 路径> ./mvnw spring-boot:run`（默认 `target/`，无需 `-D`；端口 8123，context-path `/api`。**不要用 `scripts/run-java-wsl.sh`**——它会把产物写进 `wsl-rt-env/`） |
 | TS Agent 安装依赖 | `cd paimeng-ai-code-agent && npm install --registry=https://registry.npmmirror.com`（DSH 沙箱内加 `--cache ../tmp/npm-cache`） |
 | TS Agent 运行 | `cd paimeng-ai-code-agent && npm run dev`（端口 8092；bundle 在服务目录 `dist/`） |
@@ -78,6 +79,7 @@
 
 ## 踩坑与规避（按宿主与沙箱环境）
 
+- **compose 端口绑定失败的残留容器（2026-09-08 实测）**：`docker compose up -d <svc>` 因宿主端口被占失败后，容器对象保留无端口绑定的中间态；释放端口后重新 `up` 只会 Start 残留容器（`docker port` 为空、宿主无监听）——必须 `docker compose up -d --force-recreate <svc>` 才恢复端口映射。
 - **运行时目录按宿主分流（2026-09-07）**：本节及下文旧条目中「WSL/Linux 只使用 wsl-rt-env」自当日起仅指 **WSL 宿主**；原生 Linux 宿主一律默认目录 + 标准命令。两个 `run.mjs` 的 WSL 判定已改为 `platform === 'linux'` 且 `/proc/version` 含 `microsoft`。
 - **npm 官方源不可达 + 家目录写被拦（原生 Linux，2026-09-07 实测）**：`registry.npmjs.org` 网络不通，安装加 `--registry=https://registry.npmmirror.com`；`~/.npm` 缓存写入被 DSH 沙箱 workspace-write 拦截，加 `--cache <仓库>/tmp/npm-cache`。
 - **Docker Hub 拉取超时（原生 Linux，2026-09-07 实测）**：`auth.docker.io` 匿名 token 请求 EOF（境内网络），`docker pull` 直连失败。规避：`docker pull docker.m.daocloud.io/searxng/searxng:latest` 后 `docker tag` 回原名；或为 daemon 配置 registry-mirrors（需 root，未做）。
@@ -94,5 +96,5 @@
 
 - `GET http://localhost:8092/healthz` → 200 `{"status":"ok"}`（TS Agent，#3 骨架起）。
 - 旧 Python Agent 8090 不再运行（代码在 `paimeng-ai-code-rag/` 退役暂存）。
-- 全栈：`doc.html` 200 + `8092/healthz` ok + 前端 5173 200 + `ss -tlnp` 见 3306/6379 监听（**5432 停用后不应出现**）。
+- 全栈：`doc.html` 200 + `8092/healthz` ok + 前端 5173 200 + `ss -tlnp` 见 3306/6379/80（nginx）监听（**5432 停用后不应出现**）；部署产物冒烟 `curl -o /dev/null -w "%{http_code}" http://localhost/{deployKey}/` → 200。
 - **生产目标拓扑**（见 `docs/ts_agent/architecture.md` §1.1）：nginx 单域名路由 `/api/*`→Java(8123)、`/agent/*`→TS Agent(Node)；RAG 仅内网。**配置模板已就位（#12）**：`deploy/nginx.conf.example`（/agent 段含 SSE 关键配置：`proxy_buffering off` + `proxy_read_timeout 600s` + HTTP/1.1 空 Connection）。
