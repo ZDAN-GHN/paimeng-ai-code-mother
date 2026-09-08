@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { agentRoot } from './agentRoot.js'
-import { DEFAULT_IMAGE_MODEL } from '../tools/imageTools.js'
+import { DEFAULT_IMAGE_MODEL } from '../generation/tools/imageTools.js'
 
 export interface AgentConfig {
   port: number

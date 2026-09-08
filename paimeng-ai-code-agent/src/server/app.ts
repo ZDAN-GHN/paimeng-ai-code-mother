@@ -1,9 +1,9 @@
 // 应用装配：Fastify 实例 + 路由注册（生产入口与测试共用同一构建入口）
 import Fastify, { type FastifyInstance } from 'fastify'
-import { agentPlugin } from '../auth/plugin.js'
+import { agentPlugin } from './authPlugin.js'
 import { loadConfig, type ConfigOverrides } from './config.js'
-import { buildHealthzRoutes } from '../routes/healthz.js'
-import type { AgentRouteOptions } from '../routes/agent.js'
+import { buildHealthzRoutes } from './healthzRoutes.js'
+import type { AgentRouteOptions } from './agentRoutes.js'
 
 export interface AppOverrides extends ConfigOverrides {
   agentRoutes?: AgentRouteOptions

@@ -9,19 +9,19 @@
 //      随三档强度放大；超限 = 注入收尾指令让模型输出完整交代（绝不硬杀）；输入历史滑窗（最近 N 轮全文 + 更早摘要）；
 //   ③ 三档推理强度：fast/standard/deep → provider.languageModel(tier.modelId) 路由，上限随档位；
 //   ④ token 计量：每轮 streamText/generateText 的 usage 累计，终态前经 run API 落 token_usage。
-// 职责分工：状态机（src/workflow/machine.ts）定拓扑与里程碑；本文件做解释执行——推进状态、发射 SSE 事件、
+// 职责分工：状态机（src/generation/workflow/machine.ts）定拓扑与里程碑；本文件做解释执行——推进状态、发射 SSE 事件、
 // 按 runId 推进 phase、工作区落盘、token 计量落库。
 import { createActor } from 'xstate'
 import { generateText, isStepCount, streamText, type ToolSet } from 'ai'
 import type { StepResult } from 'ai'
-import type { AgentEvent } from './events.js'
+import type { AgentEvent } from '../../protocol/events.js'
 import { MAX_QUALITY_ATTEMPTS, MILESTONE_DETAILS, PHASE_BY_STATE, generationMachine } from './machine.js'
-import { createScriptedLlm, type LlmProvider, type LlmScript } from '../llm/index.js'
+import { createScriptedLlm, type LlmProvider, type LlmScript } from '../../llm/index.js'
 import { resolveIntensity, type Intensity, type IntensityConfig } from '../intensity.js'
 import { windowHistory, type HistoryTurn, type WindowedHistory } from './history.js'
-import { RunClient, type RunPhase } from '../internal/runClient.js'
-import { validateWorkspacePath } from '../workspace/sandbox.js'
-import { validatePrompt } from '../interview/guardrails.js'
+import { RunClient, type RunPhase } from '../../runs/runClient.js'
+import { validateWorkspacePath } from '../workspace.js'
+import { validatePrompt } from '../../interview/guardrails.js'
 import { loadPrompt, PROMPT_NAMES } from '../prompts/index.js'
 import { FileTools } from '../tools/fileTools.js'
 import { DEFAULT_IMAGE_MODEL, ImageTools, type ImageConfig } from '../tools/imageTools.js'

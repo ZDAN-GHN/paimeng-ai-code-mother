@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { generateText } from 'ai'
 import { createRealLlm, isRealLlmConfigured } from '../src/llm/real.js'
-import type { AgentConfig } from '../src/app/config.js'
+import type { AgentConfig } from '../src/server/config.js'
 
 // 最小完整配置（三渠道齐全；baseUrl 指向不存在的 test 域，配合 stub fetch 保证零外呼）
 function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {

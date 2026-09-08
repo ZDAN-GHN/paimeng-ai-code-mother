@@ -14,8 +14,8 @@ import {
   readAndConcatenateCodeFiles,
   type BuildVerifier,
   type VisualDiffVerifier,
-} from '../src/review/index.js'
-import { runReviewGates, type ReviewContext, type ReviewGate } from '../src/review/types.js'
+} from '../src/generation/review/index.js'
+import { runReviewGates, type ReviewContext, type ReviewGate } from '../src/generation/review/types.js'
 import { createScriptedLlm } from '../src/llm/index.js'
 
 // 构造评审上下文（默认 html 类型 + 指定线框基准路径）

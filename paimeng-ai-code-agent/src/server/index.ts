@@ -1,6 +1,6 @@
 // 服务入口：默认端口 8092
-import { loadConfig } from './app/config.js'
-import { buildApp } from './app/app.js'
+import { loadConfig } from './config.js'
+import { buildApp } from './app.js'
 
 const config = loadConfig()
 const app = buildApp(config)

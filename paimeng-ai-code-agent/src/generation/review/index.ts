@@ -8,7 +8,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { generateText } from 'ai'
-import type { LlmProvider } from '../llm/index.js'
+import type { LlmProvider } from '../../llm/index.js'
 import { loadPrompt, PROMPT_NAMES } from '../prompts/index.js'
 import {
   GATE_NAMES,

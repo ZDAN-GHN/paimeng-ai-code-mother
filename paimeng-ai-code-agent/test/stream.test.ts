@@ -5,8 +5,8 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { makeToken, makeWorkspaceRoot, buildTestApp, frames, fakeRunClient, type Frame, type RunCall } from './helpers.js'
-import { RunClient } from '../src/internal/runClient.js'
-import { ImageTools } from '../src/tools/imageTools.js'
+import { RunClient } from '../src/runs/runClient.js'
+import { ImageTools } from '../src/generation/tools/imageTools.js'
 
 // 事件类型序列（用于顺序断言）
 const types = (list: Frame[]) => list.map((frame) => frame.event)

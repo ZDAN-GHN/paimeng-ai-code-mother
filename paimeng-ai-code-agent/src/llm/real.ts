@@ -11,7 +11,7 @@
 // 本文件渠道表、.env.example 模板；漏一处即测试离线失效或启动缺键。
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { customProvider } from 'ai'
-import type { AgentConfig } from '../app/config.js'
+import type { AgentConfig } from '../server/config.js'
 
 // 四档缺省模型（.env 未配置 MODEL_* 时的内置选型）
 export const DEFAULT_MODEL_ROUTER = 'glm-4-flash-250414'

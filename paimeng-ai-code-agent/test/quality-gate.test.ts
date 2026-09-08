@@ -6,10 +6,10 @@ import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { makeToken, makeWorkspaceRoot, buildTestApp, makePassingReviewGates } from './helpers.js'
 import { createScriptedLlm } from '../src/llm/index.js'
-import { RunClient, type Run } from '../src/internal/runClient.js'
-import type { ReviewGateSet } from '../src/review/index.js'
-import type { BuildVerifier, VisualDiffVerifier } from '../src/review/index.js'
-import { validateWorkspacePath } from '../src/workspace/sandbox.js'
+import { RunClient, type Run } from '../src/runs/runClient.js'
+import type { ReviewGateSet } from '../src/generation/review/index.js'
+import type { BuildVerifier, VisualDiffVerifier } from '../src/generation/review/index.js'
+import { validateWorkspacePath } from '../src/generation/workspace.js'
 
 type Frame = { event: string; data: Record<string, unknown> }
 type RunCall = { url: string; body: Record<string, unknown> }
@@ -73,8 +73,8 @@ function makeRetryOnceGates(): ReviewGateSet {
 describe('Issue #9：质检失败有界重试', () => {
   // 用真实 LlmQualityScorer + 质检剧本驱动 workflow（验收 1：质检失败剧本触发有界重试后通过）
   it('quality-fail-then-pass 剧本：第 1 次质检失败触发重试，重试后通过 → done', async () => {
-    const { runGenerationWorkflow } = await import('../src/workflow/index.js')
-    const { LlmQualityScorer } = await import('../src/review/index.js')
+    const { runGenerationWorkflow } = await import('../src/generation/workflow/index.js')
+    const { LlmQualityScorer } = await import('../src/generation/review/index.js')
     const root = makeWorkspaceRoot()
     const provider = createScriptedLlm('quality-fail-then-pass')
     // 质检用真实 scorer（剧本控制 isValid），build/visual diff 用通过替身（聚焦质检重试行为）
@@ -101,8 +101,8 @@ describe('Issue #9：质检失败有界重试', () => {
 
   // 用真实 LlmQualityScorer + quality-fail-always 剧本（验收 1：耗尽后失败终态）
   it('quality-fail-always 剧本：每次质检失败 → 有界重试耗尽 → failed 终态', async () => {
-    const { runGenerationWorkflow } = await import('../src/workflow/index.js')
-    const { LlmQualityScorer } = await import('../src/review/index.js')
+    const { runGenerationWorkflow } = await import('../src/generation/workflow/index.js')
+    const { LlmQualityScorer } = await import('../src/generation/review/index.js')
     const root = makeWorkspaceRoot()
     const provider = createScriptedLlm('quality-fail-always')
     const gates: ReviewGateSet = {
@@ -271,7 +271,7 @@ describe('Issue #9：三档推理强度路由与上限', () => {
   // 路由层面断言「三档请求各自路由到对应模型配置」：用可注入 provider + 记录 languageModel 调用。
   it('fast/standard/deep 请求各自解析到对应档位配置（模型 id + 上限随档位变化）', async () => {
     // 直接验证 resolveIntensity 路由 + INTENSITY_TIERS 上限放大（模型路由断言见 workflow 单测）
-    const { INTENSITY_TIERS, resolveIntensity } = await import('../src/intensity.js')
+    const { INTENSITY_TIERS, resolveIntensity } = await import('../src/generation/intensity.js')
     const fast = resolveIntensity('fast')
     const standard = resolveIntensity('standard')
     const deep = resolveIntensity('deep')
@@ -284,7 +284,7 @@ describe('Issue #9：三档推理强度路由与上限', () => {
   })
 
   it('workflow 按档位路由到对应模型：provider.records 断言三档各自请求到对应模型配置', async () => {
-    const { runGenerationWorkflow } = await import('../src/workflow/index.js')
+    const { runGenerationWorkflow } = await import('../src/generation/workflow/index.js')
     const root = makeWorkspaceRoot()
     // 三档各跑一次，从假 provider 的调用记录断言路由（验收 3：三档请求各自路由到对应模型配置）
     for (const intensity of ['fast', 'standard', 'deep'] as const) {
@@ -302,7 +302,7 @@ describe('Issue #9：三档推理强度路由与上限', () => {
   })
 
   it('workflow 按档位传 maxOutputTokens 给 provider（上限随档位变化）', async () => {
-    const { runGenerationWorkflow } = await import('../src/workflow/index.js')
+    const { runGenerationWorkflow } = await import('../src/generation/workflow/index.js')
     const provider = createScriptedLlm('success')
     const root = makeWorkspaceRoot()
     for await (const _ev of runGenerationWorkflow(

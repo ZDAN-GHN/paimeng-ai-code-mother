@@ -3,9 +3,9 @@
 // 运行时经 AGENT_ROOT 定位提示词目录（esbuild 打包产物不内联 .txt，须运行时读取）。
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { agentRoot } from '../app/agentRoot.js'
+import { agentRoot } from '../../server/agentRoot.js'
 
-const PROMPTS_DIR = path.join(agentRoot, 'src', 'prompts')
+const PROMPTS_DIR = path.join(agentRoot, 'src', 'generation', 'prompts')
 
 // 提示词文件名（与 Python Agent app/prompts/ 一一对应）
 export const PROMPT_NAMES = {

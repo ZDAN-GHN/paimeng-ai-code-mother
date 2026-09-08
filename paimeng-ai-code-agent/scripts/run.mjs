@@ -47,7 +47,7 @@ async function loadEsbuild() {
 }
 
 const esbuildOptions = {
-  entryPoints: [path.join(agentRoot, 'src', 'index.ts')],
+  entryPoints: [path.join(agentRoot, 'src', 'server', 'index.ts')],
   bundle: true,
   platform: 'node',
   format: 'esm',

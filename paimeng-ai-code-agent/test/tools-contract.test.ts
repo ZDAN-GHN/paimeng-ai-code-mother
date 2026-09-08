@@ -2,9 +2,9 @@
 // Java ToolManager 与浏览器事件展示按名取值（旧 test_codegen.test_vue_tools_binding +
 // test_images.test_image_tools_bound_names 的合并语义），改名即跨端契约破坏。
 import { describe, expect, it } from 'vitest'
-import { FileTools } from '../src/tools/fileTools.js'
-import { ImageTools, type ImageConfig } from '../src/tools/imageTools.js'
-import { buildTools } from '../src/tools/index.js'
+import { FileTools } from '../src/generation/tools/fileTools.js'
+import { ImageTools, type ImageConfig } from '../src/generation/tools/imageTools.js'
+import { buildTools } from '../src/generation/tools/index.js'
 import { makeWorkspaceRoot } from './helpers.js'
 
 const imageConfig: ImageConfig = { pexelsApiKey: '', dashscopeApiKey: '', imageModel: 'test-model' }

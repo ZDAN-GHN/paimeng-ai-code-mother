@@ -5,9 +5,9 @@ import path from 'node:path'
 import { SignJWT } from 'jose'
 import { expect, vi } from 'vitest'
 import type { FastifyInstance } from 'fastify'
-import { buildApp } from '../src/app/app.js'
-import type { ReviewGateSet } from '../src/review/index.js'
-import { RunClient, type Run } from '../src/internal/runClient.js'
+import { buildApp } from '../src/server/app.js'
+import type { ReviewGateSet } from '../src/generation/review/index.js'
+import { RunClient, type Run } from '../src/runs/runClient.js'
 
 export const TEST_SECRET = 'test-secret'
 

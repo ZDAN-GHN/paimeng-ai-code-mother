@@ -1,6 +1,6 @@
 // 三重门禁质检器（Issue #9，架构 §6「验收不靠角色签字，靠机器」）：
 // reviewer 工位依次执行三道门禁——结构化质检分（reviewer 模型）→ build 验证 → 视觉 diff（基准=已确认线框）。
-// 任一不过 → 质检失败 → 有界重试（状态机 RETRY，见 src/workflow/machine.ts）；全过 → PASS。
+// 任一不过 → 质检失败 → 有界重试（状态机 RETRY，见 src/generation/workflow/machine.ts）；全过 → PASS。
 // 门禁以接口形式暴露（QualityScorer / BuildVerifier / VisualDiffVerifier），
 // 默认实现供生产（MVP 静态校验 + 结构启发式），测试可注入替身以断言「以已确认线框为基准」与失败触发重试。
 

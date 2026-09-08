@@ -4,7 +4,7 @@ import {
   RunClient,
   RunConflictError,
   type RunCreateRequest,
-} from '../src/internal/runClient.js'
+} from '../src/runs/runClient.js'
 
 // Java 内部 API 客户端单元测试：注入 mock fetch，验证请求形状（方法/路径/头/体）
 // 与错误映射（401 / 409 + 文案 / 业务码非 0 / 网络失败）

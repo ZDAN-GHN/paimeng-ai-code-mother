@@ -3,7 +3,7 @@
 // 返回语义与旧 Java/Python 工具逐条对齐（字符串结果文本）；所有相对路径解析到工作区内，防路径穿越。
 import path from 'node:path'
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
-import { validateWorkspacePath } from '../workspace/sandbox.js'
+import { validateWorkspacePath } from '../workspace.js'
 
 // 需要忽略的文件和目录（对齐 Python IGNORED_NAMES / Java ProjectFileDirReadTool）
 export const IGNORED_NAMES = new Set([

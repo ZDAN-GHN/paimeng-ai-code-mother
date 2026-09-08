@@ -4,16 +4,16 @@
 import path from 'node:path'
 import { mkdir, writeFile } from 'node:fs/promises'
 import type { FastifyInstance } from 'fastify'
-import type { AgentConfig } from '../app/config.js'
-import { RunClient, RunApiError } from '../internal/runClient.js'
-import { encodeEventStream } from '../sse/format.js'
-import type { AgentEvent } from '../workflow/events.js'
-import { runGenerationWorkflow, type StreamRequest } from '../workflow/index.js'
-import type { HistoryTurn } from '../workflow/history.js'
-import type { Intensity } from '../intensity.js'
+import type { AgentConfig } from './config.js'
+import { RunClient, RunApiError } from '../runs/runClient.js'
+import { encodeEventStream } from '../protocol/sse.js'
+import type { AgentEvent } from '../protocol/events.js'
+import { runGenerationWorkflow, type StreamRequest } from '../generation/workflow/index.js'
+import type { HistoryTurn } from '../generation/workflow/history.js'
+import type { Intensity } from '../generation/intensity.js'
 import type { LlmProvider } from '../llm/index.js'
 import { createRealLlm, isRealLlmConfigured } from '../llm/real.js'
-import { WorkspacePathError, validateWorkspacePath } from '../workspace/sandbox.js'
+import { WorkspacePathError, validateWorkspacePath } from '../generation/workspace.js'
 import {
   buildRound1Questions,
   buildRound2FollowUps,
@@ -25,8 +25,8 @@ import {
 } from '../interview/index.js'
 import { WIREFRAME_FILENAME, buildWireframeHtml, countWireframePages } from '../interview/wireframe.js'
 import { parseContext } from '../interview/context.js'
-import type { ImageTools } from '../tools/imageTools.js'
-import type { ReviewGateSet } from '../review/index.js'
+import type { ImageTools } from '../generation/tools/imageTools.js'
+import type { ReviewGateSet } from '../generation/review/index.js'
 
 export interface AgentRouteOptions {
   runClient?: RunClient

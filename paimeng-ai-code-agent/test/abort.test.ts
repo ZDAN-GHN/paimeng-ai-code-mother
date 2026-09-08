@@ -2,10 +2,10 @@
 // + 回调 Java（status=aborted + filesWritten，Java 侧折算退款 + 历史 [用户中断]）
 import { describe, expect, it, vi } from 'vitest'
 import { makeWorkspaceRoot } from './helpers.js'
-import { runGenerationWorkflow, GenerationAborted } from '../src/workflow/index.js'
-import { RunClient, type Run } from '../src/internal/runClient.js'
+import { runGenerationWorkflow, GenerationAborted } from '../src/generation/workflow/index.js'
+import { RunClient, type Run } from '../src/runs/runClient.js'
 import { makePassingReviewGates } from './helpers.js'
-import type { AgentEvent } from '../src/workflow/events.js'
+import type { AgentEvent } from '../src/protocol/events.js'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 

@@ -11,7 +11,7 @@ import {
   type HttpResponse,
   type ImageConfig,
   type ImageToolResult,
-} from '../src/tools/imageTools.js'
+} from '../src/generation/tools/imageTools.js'
 
 // 假配置（对齐 Python _FakeSettings）
 const config: ImageConfig = {

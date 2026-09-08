@@ -2,9 +2,9 @@
 // #9 演进：review 质检失败时有界重试回 coding（先例 MAX_QUALITY_RETRIES=2，架构 §3.1 收敛纪律③），
 // 重试次数经 context.qualityAttempts 计数、guard 钉死在图里——非法转移与无界重试在类型/图层面消灭。
 // 里程碑经 entry action 聚合进 context.milestones（节点跳变 → 人话里程碑，退款粒度锚与 run 更新复用）。
-// 驱动解释器见 src/workflow/index.ts。
+// 驱动解释器见 src/generation/workflow/index.ts。
 import { assign, createMachine } from 'xstate'
-import type { RunPhase } from '../internal/runClient.js'
+import type { RunPhase } from '../../runs/runClient.js'
 
 // 质检失败后的有界重试次数（先例 2 次：首次 + 最多 2 次重试 = 共 3 次尝试）
 export const MAX_QUALITY_RETRIES = 2
