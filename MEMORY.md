@@ -25,7 +25,7 @@
 | #13 | 2026-09-08 | 前端功能补齐：旅程状态机/访谈卡/线框确认/强度选择/中止/余额 |
 | #14 | 2026-09-08 | 灰度开关 ts-agent.enabled + T21 执行：旧 Java AI 与中转链删除，P3 收官 |
 
-- 另：2026-09-07 双源图片搜索 + SearXNG 容器（图片搜索 Java 类已随 #14 删、能力归 TS Agent，见 `deployment.md`）；2026-09-08 nginx 部署路由容器 + 本地库全量 dump 迁移 + 快速档半价定价（`deployment.md`/`java-backend.md`/`vue-frontend.md`）。
+- 另：2026-09-07 双源图片搜索 + SearXNG 容器（图片搜索 Java 类已随 #14 删、能力归 TS Agent，见 `deployment.md`）；2026-09-08 nginx 部署路由容器 + 本地库全量 dump 迁移 + 快速档半价定价（`deployment.md`/`java-backend.md`/`vue-frontend.md`）；2026-09-08 四档模型选型已定（路由 glm-4-flash-250414 / 快速 glm-4.7-flash / 标准 Nemotron 3 Ultra free / 深度 glm-5.3-flash 自备 baseUrl，key 未配、provider 未接入，见 `ts-agent.md`）。
 - #13 仅剩浏览器 UI 人工走查（AC1 勾选留用户）。
 
 ## 领域记忆（`.agents/memories/`）

@@ -20,6 +20,7 @@
 - JWT：HS256 共享密钥离线验签（`algorithms` 白名单防混淆、requiredClaims `exp`/`sub`）；`WORKSPACE_ROOT` 默认按服务目录解析 `../tmp/code_output`（对齐 Java `user.dir/tmp/code_output`）。
 - 测试基建：真实服务实例 `buildApp(overrides)` + `fastify.inject()` + 自签 JWT（`test/helpers.ts`；frames/fakeRunClient/RunCall 已统一提取，golden 与 stream 共用）。
 - 配置键：`PEXELS_API_KEY`/`DASHSCOPE_API_KEY`/`IMAGE_MODEL`/`MODEL_FAST|STANDARD|DEEP`（.env.example 已加）。
+- **模型选型（2026-09-08 用户拍板，key 未配置、真实 provider 未接入，仍为假 provider）**：路由档（新增，拟 `MODEL_ROUTER`）= 智谱 `glm-4-flash-250414`（免费）；快速档 = 智谱 `glm-4.7-flash`（免费，Agentic Coding 强化，FC/结构化输出/流式官方确认）；标准档 = OpenRouter `nvidia/nemotron-3-ultra-550b-a55b:free`（免费档 50 请求/天、充 $10 升 1000/天，国内需代理）；深度档 = `glm-5.3-flash` 走用户自备第三方 baseUrl+key（非智谱官方）。全部 OpenAI 兼容协议，接入用 AI SDK openai-compatible provider。选型来源：`docs.bigmodel.cn/cn/guide/start/pricing`、`openrouter.ai/collections/free-models`。
 
 ## 测试基建坑（跨票复用）
 
@@ -46,6 +47,7 @@
 
 ## 下一步 / 指针
 
+- 真实 provider 接入（P4 前置）：按上述四档选型接 openai-compatible provider + 新增 `MODEL_ROUTER`；智谱 base `https://open.bigmodel.cn/api/paas/v4`、OpenRouter base `https://openrouter.ai/api/v1`、深度档 baseUrl 待用户提供。
 - #14 灰度 + T21 删除旧链路；进度日志 `docs/ts_agent/progress.md`（每完成一票追加一行，含命令证据）。
 - npm 坑：命令必须在 `paimeng-ai-code-agent/` 目录内执行（仓库根目录会读到 `/mnt/c/Users/LXH/.npmrc` 报 "config prefix cannot be changed"）。
 - 运行时目录按宿主分流（原生 Linux 默认 / WSL 用 `wsl-rt-env/`）见 `deployment.md`。
