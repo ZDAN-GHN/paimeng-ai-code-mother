@@ -43,7 +43,7 @@
 
 **Issue #9 新增字段（均可选，缺省有默认）**：
 
-- `intensity`：三档推理强度，`fast` / `standard`（默认）/ `deep`。决定模型路由（对应模型 id）、护栏上限（`max_turns` / `max_output_tokens` / `max_tool_calls` / `max_images` 随档位放大）与价格系数（预留）。
+- `intensity`：三档推理强度，`fast` / `standard`（默认）/ `deep`。决定模型路由（对应模型 id）、护栏上限（`max_turns` / `max_output_tokens` / `max_tool_calls` / `max_images` 随档位放大）与价格系数（fast = 0.5 / standard = 1 / deep = 2，2026-09-08 定价；冻结额 = 基础价 100 × 生成类型系数 × 档位系数，计费权威在 Java `agent.credit.*-multiplier`）。
 - `history`：输入历史滑窗输入，`[{ role: 'user'|'assistant', content }]`。Agent 侧保留**最近 10 轮全文**，更早轮次折叠为摘要并入 system（架构 §3.3 输入侧有界）。
 - `codeGenType`：生成类型（`html` 默认 / `multi_file` / `vue_project`），build 门禁按类型分派。
 

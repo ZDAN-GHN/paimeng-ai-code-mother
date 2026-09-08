@@ -57,8 +57,8 @@ agent:
     html-multiplier: 1
     multi-file-multiplier: 2
     vue-project-multiplier: 3
-    # 强度档位系数：fast/standard/deep（与 TS Agent INTENSITY_TIERS.priceMultiplier 对齐）
-    fast-multiplier: 1
+    # 强度档位系数：fast/standard/deep（与 TS Agent INTENSITY_TIERS.priceMultiplier 对齐；快速档 0.5 折扣）
+    fast-multiplier: 0.5
     standard-multiplier: 1
     deep-multiplier: 2
     # 中断折算：已写文件且进入 review（里程碑≥3）按此比例结算，否则按基础比例（剩余部分退款）

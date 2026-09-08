@@ -128,6 +128,19 @@ class CreditServiceImplTest {
     }
 
     @Test
+    void freeze_fastTier_discountsHalfPrice() {
+        when(appService.getById(1L)).thenReturn(htmlApp());
+        // 冻结后余额 = 5000 - 50
+        when(userService.getById(1L)).thenReturn(user(1L, 4950));
+
+        // html×1 × fast×0.5 × base=100 = 50（快速档半价折扣）
+        CreditFreezeVO vo = service.freeze("run-fast", 1L, 1L, "fast");
+        assertEquals(50, vo.getFrozenAmount());
+        assertEquals(4950, vo.getBalance());
+        verify(userService).deductCredits(1L, 50);
+    }
+
+    @Test
     void freeze_invalidIntensity_fallsBackToStandard() {
         when(appService.getById(1L)).thenReturn(htmlApp());
         when(userService.getById(1L)).thenReturn(user(1L, 400));

@@ -77,11 +77,11 @@ public class AgentProperties {
         private int vueProjectMultiplier = 3;
 
         /**
-         * 推理强度档位系数（与 TS Agent INTENSITY_TIERS.priceMultiplier 对齐：fast/standard = 1，deep = 2）
+         * 推理强度档位系数（与 TS Agent INTENSITY_TIERS.priceMultiplier 对齐：fast = 0.5，standard = 1，deep = 2）
          */
-        private int fastMultiplier = 1;
-        private int standardMultiplier = 1;
-        private int deepMultiplier = 2;
+        private double fastMultiplier = 0.5;
+        private double standardMultiplier = 1;
+        private double deepMultiplier = 2;
 
         /**
          * 中断折算：已写文件且进入 review（里程碑 ≥ 3）时按此比例结算（结算额 = 冻结额 × 比例）

@@ -34,9 +34,9 @@ import { computed, ref } from 'vue'
 
 type Intensity = 'fast' | 'standard' | 'deep'
 
-// 档位系数（对齐 TS INTENSITY_TIERS.priceMultiplier 与 Java AgentIntensityEnum：fast/standard=1，deep=2）
+// 档位系数（对齐 TS INTENSITY_TIERS.priceMultiplier 与 Java AgentProperties.Credit：fast=0.5，standard=1，deep=2）
 const TIER_MULTIPLIERS: Record<Intensity, number> = {
-  fast: 1,
+  fast: 0.5,
   standard: 1,
   deep: 2,
 }
@@ -71,10 +71,10 @@ const currentOption = computed(
   () => tierOptions.find((option) => option.value === intensity.value) ?? tierOptions[1]
 )
 
-// 档位预估冻结积分（计费系数可见）
+// 档位预估冻结积分（计费系数可见；四舍五入与 Java calcFrozenAmount 对齐，保证整数积分）
 const creditOf = (value: Intensity) => {
   const typeMultiplier = TYPE_MULTIPLIERS[props.codeGenType ?? 'html'] ?? 1
-  return BASE_PRICE * typeMultiplier * TIER_MULTIPLIERS[value]
+  return Math.round(BASE_PRICE * typeMultiplier * TIER_MULTIPLIERS[value])
 }
 
 const estimatedCredit = computed(() => creditOf(intensity.value))

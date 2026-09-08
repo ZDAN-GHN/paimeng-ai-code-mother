@@ -15,7 +15,7 @@
 ## 2026-09-03 架构定稿中对 Java 的新增职责
 
 - **签发短时 JWT**（前端 fetch-SSE 直连 TS Agent 用，Agent 离线验签，不回查 Java）。
-- **积分体系**：预冻结 → 结算 → 退款，挂 runId 幂等（复用 `RunIdSinkRegistry` 机制）；按次 + 档位系数计费；MVP 后台手动充值。
+- **积分体系**：预冻结 → 结算 → 退款，挂 runId 幂等（复用 `RunIdSinkRegistry` 机制）；按次 + 档位系数计费（冻结额 = 基础价 100 × 类型系数 × 档位系数，`calcFrozenAmount` 四舍五入落整数）；**2026-09-08 定价：fast=0.5 / standard=1 / deep=2**（快速半价折扣，此前 fast/standard 同价无经济差异，用户反馈驱动；系数改 double 类型）；MVP 后台手动充值。
 - **Agent→Java 内部回调**沿用 `/api/app/chat/gen/code/callback`（Bearer + runId 幂等）：结算积分 / 写历史 / 触发构建。
 
 ## 2026-09-04 generation_run 内部 API（Issue #4 已落地）

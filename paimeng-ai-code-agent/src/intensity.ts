@@ -1,7 +1,8 @@
 // 三档推理强度配置（Issue #9）：快速 / 标准（默认）/ 深度。
-// 每消息可选（请求体 intensity 字段）；档位决定模型映射、护栏硬上限与价格系数（预留）。
+// 每消息可选（请求体 intensity 字段）；档位决定模型映射、护栏硬上限与价格系数（快速半价折扣，2026-09-08 定价）。
 // 对齐架构 §3.4：快速（非推理模型）/ 标准（默认档）/ 深度（推理模型）；价格 ×N 档位系数；
 // 上限随档位放大（快速低上限、深度高上限）。档位是静态常量表——新增档位 = 显式契约变更。
+// 计费权威在 Java（calcFrozenAmount 按 agent.credit.*-multiplier 计算），此系数为契约镜像。
 export type Intensity = 'fast' | 'standard' | 'deep'
 
 export const DEFAULT_INTENSITY: Intensity = 'standard'
@@ -24,7 +25,7 @@ export interface IntensityConfig {
   label: string
   // 模型映射：该档路由到的模型 id（provider.languageModel(modelId)；假 provider 据此断言路由）
   modelId: string
-  // 价格档位系数（预留：按次计价 × 档位系数，见架构 §7；当前不参与实际计费）
+  // 价格档位系数（冻结额 = 基础价 × 生成类型系数 × 本系数；Java agent.credit.*-multiplier 为计费权威）
   priceMultiplier: number
   limits: IntensityLimits
 }
@@ -34,7 +35,8 @@ export const INTENSITY_TIERS: Record<Intensity, IntensityConfig> = {
     key: 'fast',
     label: '快速',
     modelId: 'scripted-fast',
-    priceMultiplier: 1,
+    // 快速档半价折扣（非推理模型成本更低，给用户选快的经济动机）
+    priceMultiplier: 0.5,
     limits: {
       maxTurns: 1,
       maxOutputTokens: 3000,

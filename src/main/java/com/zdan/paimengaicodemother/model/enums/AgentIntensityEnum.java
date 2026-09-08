@@ -13,7 +13,7 @@ import lombok.Getter;
 public enum AgentIntensityEnum {
 
     /**
-     * 快速档（系数 1，上限随档位收紧）
+     * 快速档（系数 0.5，上限随档位收紧）
      */
     FAST("快速", "fast"),
 

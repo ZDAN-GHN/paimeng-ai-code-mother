@@ -1,4 +1,4 @@
-// 三档推理强度配置测试（Issue #9）：档位枚举、模型映射、上限随档位放大、价格系数预留、非法/缺省回退
+// 三档推理强度配置测试（Issue #9）：档位枚举、模型映射、上限随档位放大、价格系数、非法/缺省回退
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_INTENSITY, INTENSITY_TIERS, resolveIntensity } from '../src/intensity.js'
 
@@ -29,10 +29,10 @@ describe('三档推理强度（Issue #9）', () => {
     expect(standard.maxImages).toBeLessThan(deep.maxImages)
   })
 
-  it('标准档为定价基准（priceMultiplier=1），深度档价格系数更高（预留字段）', () => {
+  it('三档定价：标准档基准（×1），快速档半价折扣，深度档加倍', () => {
     expect(INTENSITY_TIERS.standard.priceMultiplier).toBe(1)
-    expect(INTENSITY_TIERS.fast.priceMultiplier).toBeGreaterThanOrEqual(1)
-    expect(INTENSITY_TIERS.deep.priceMultiplier).toBeGreaterThan(INTENSITY_TIERS.standard.priceMultiplier)
+    expect(INTENSITY_TIERS.fast.priceMultiplier).toBe(0.5)
+    expect(INTENSITY_TIERS.deep.priceMultiplier).toBe(2)
   })
 
   it('标准档护栏与历史先例一致：max_tool_calls=50、max_images=4（架构 §3.1/§3.3）', () => {

@@ -280,12 +280,13 @@ public class CreditServiceImpl extends ServiceImpl<CreditLedgerMapper, CreditLed
             // 空 / 非法档位兜底标准档（与 TS 侧 resolveIntensity 缺省 standard 对齐）
             tier = AgentIntensityEnum.STANDARD;
         }
-        int tierMultiplier = switch (tier) {
+        // 档位系数支持小数折扣（fast = 0.5），四舍五入保证台账落整数积分
+        double tierMultiplier = switch (tier) {
             case FAST -> credit.getFastMultiplier();
             case DEEP -> credit.getDeepMultiplier();
             default -> credit.getStandardMultiplier();
         };
-        return base * typeMultiplier * tierMultiplier;
+        return (int) Math.round(base * typeMultiplier * tierMultiplier);
     }
 
     /**
