@@ -39,8 +39,60 @@ export interface AgentStreamParams {
   appId: string
   message: string
   workspacePath: string
+  // 三档推理强度（fast/standard/deep，缺省 standard）；决定模型路由、护栏上限与计费档位系数
+  intensity?: string
+  // 输入历史滑窗（[{ role, content }]，Agent 侧保留最近 10 轮全文）
+  history?: Array<{ role: 'user' | 'assistant'; content: string }>
   // 组件卸载或主动中止时传入 AbortSignal
   signal?: AbortSignal
+}
+
+// ── 需求工程端点（Issue #7 契约）：访谈 / 线框 / 确认，均 JWT 鉴权 ──
+
+// 访谈选择题（每维一道，2-4 个选项）
+export interface InterviewQuestion {
+  key: string
+  dimension: string
+  question: string
+  options: Array<{ id: string; text: string }>
+}
+
+// 访谈结论（收束时返回，喂线框生成的需求摘要）
+export interface InterviewSummary {
+  message: string
+  audience: string
+  style: string
+  pages: string[]
+  data: string
+  interaction: string
+}
+
+// 访谈端点响应：complete=false 带 questions（下一轮题目），true 带 summary
+export interface InterviewResult {
+  runId: string
+  round: number
+  complete: boolean
+  questions?: InterviewQuestion[]
+  summary?: InterviewSummary
+}
+
+// 用户对单个维度的作答（optionId 空表示跳过该维）
+export interface InterviewAnswer {
+  key: string
+  optionId?: string
+  text?: string
+}
+
+// 线框/确认端点响应（phase: wireframe_pending → wireframe_confirmed）
+export interface WireframeResult {
+  runId: string
+  phase: string
+  wireframe?: {
+    relativeUrl: string
+    pageCount: number
+    confirmed?: boolean
+    confirmedAt?: string
+  }
 }
 
 // 非 2xx 响应错误（携带状态码，供上层区分 401 令牌失效与其他失败）
@@ -96,6 +148,51 @@ function parseFrame(frame: string): AgentStreamEvent | null {
   return null
 }
 
+// 需求工程端点公共请求体（runId/appId 必填，userId 由 JWT sub 兜底）
+interface AgentJsonParams {
+  token: string
+  runId: string
+  appId: string
+}
+
+// 需求工程端点公共 POST：JWT 鉴权 + JSON 响应；非 2xx 抛 AgentStreamHttpError（401 令牌失效 / 429 线框限频 / 409 阶段冲突）
+async function postAgentJson<T>(params: AgentJsonParams, path: string, body: Record<string, unknown>): Promise<T> {
+  const response = await fetch(`${AGENT_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${params.token}`,
+    },
+    body: JSON.stringify({ runId: params.runId, appId: params.appId, ...body }),
+  })
+  if (!response.ok) {
+    throw new AgentStreamHttpError(response.status, `Agent 请求失败: ${response.status}`)
+  }
+  return response.json() as Promise<T>
+}
+
+// 发起/续答访谈：无 answers 时返回下一轮题目，有 answers 时推进并判断是否收束
+export async function requestInterview(
+  params: AgentJsonParams & { message?: string; answers?: InterviewAnswer[] },
+): Promise<InterviewResult> {
+  return postAgentJson<InterviewResult>(params, '/interview', {
+    message: params.message,
+    answers: params.answers,
+  })
+}
+
+// 生成线框（免费，每用户每日限频；超限 429）
+export async function requestWireframe(
+  params: AgentJsonParams & { workspacePath: string },
+): Promise<WireframeResult> {
+  return postAgentJson<WireframeResult>(params, '/wireframe', { workspacePath: params.workspacePath })
+}
+
+// 确认线框（幂等；确认后需求锁定为 codegen 布局契约）
+export async function confirmWireframe(params: AgentJsonParams): Promise<WireframeResult> {
+  return postAgentJson<WireframeResult>(params, '/wireframe/confirm', {})
+}
+
 // 发起生成流：POST /agent/stream，逐事件回调；返回终态事件（done/error），连接在终态前断开时返回 null
 export async function streamAgentEvents(
   params: AgentStreamParams,
@@ -112,6 +209,8 @@ export async function streamAgentEvents(
       appId: params.appId,
       message: params.message,
       workspacePath: params.workspacePath,
+      intensity: params.intensity,
+      history: params.history,
     }),
     signal: params.signal,
   })

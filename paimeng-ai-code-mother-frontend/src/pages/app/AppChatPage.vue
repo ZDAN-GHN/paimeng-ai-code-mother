@@ -7,6 +7,10 @@
         <a-tag v-if="appInfo?.codeGenType" color="blue" class="code-gen-type-tag">
           {{ formatCodeGenType(appInfo.codeGenType) }}
         </a-tag>
+        <!-- 积分余额（Issue #13）：生成前可见余额，冻结/退款后刷新可见变动 -->
+        <a-tag v-if="creditBalance !== undefined" color="gold" class="credit-tag">
+          <WalletOutlined /> 积分 {{ creditBalance }}
+        </a-tag>
       </div>
       <div class="header-right">
         <a-button type="default" @click="showAppDetail">
@@ -53,6 +57,41 @@
               <div class="message-content">{{ message.content }}</div>
               <div class="message-avatar">
                 <a-avatar :src="loginUserStore.loginUser.userAvatar" />
+              </div>
+            </div>
+            <!-- 访谈选择题卡（Issue #13）：五维访谈题目在对话流中作答 -->
+            <div
+              v-else-if="message.type === 'interview'"
+              class="ai-message"
+            >
+              <div class="message-avatar">
+                <a-avatar :src="aiAvatar" />
+              </div>
+              <div class="message-content">
+                <InterviewQuestionsCard
+                  :questions="message.questions ?? []"
+                  :round="message.round ?? 1"
+                  :disabled="message.answered"
+                  :loading="message.loading"
+                  button-text="提交答案"
+                  @submit="onInterviewSubmit($event, index)"
+                />
+              </div>
+            </div>
+            <!-- 线框确认卡（Issue #13）：确认 / 重生成 / 回访谈三选一 -->
+            <div v-else-if="message.type === 'wireframe'" class="ai-message">
+              <div class="message-avatar">
+                <a-avatar :src="aiAvatar" />
+              </div>
+              <div class="message-content">
+                <WireframeReviewCard
+                  :page-count="message.pageCount ?? 0"
+                  :disabled="message.settled"
+                  :loading="message.loading"
+                  @confirm="onWireframeConfirm(index)"
+                  @regenerate="onWireframeRegenerate(index)"
+                  @reinterview="onWireframeReinterview(index)"
+                />
               </div>
             </div>
             <div v-else class="ai-message">
@@ -143,7 +182,7 @@
                 :rows="4"
                 :maxlength="1000"
                 @keydown.enter.prevent="sendMessage"
-                :disabled="isGenerating || !isOwner"
+                :disabled="isGenerating || !isOwner || journeyPhase === 'interviewing' || journeyPhase === 'wireframe_pending'"
               />
             </a-tooltip>
             <a-textarea
@@ -153,13 +192,26 @@
               :rows="4"
               :maxlength="1000"
               @keydown.enter.prevent="sendMessage"
-              :disabled="isGenerating"
+              :disabled="isGenerating || journeyPhase === 'interviewing' || journeyPhase === 'wireframe_pending'"
             />
             <div class="input-actions">
+              <!-- 三档推理强度选择器（Issue #13）：选择随生成请求下发，计费系数可见 -->
+              <IntensitySelector
+                v-model="intensity"
+                :code-gen-type="appInfo?.codeGenType"
+                :disabled="isGenerating"
+              />
+              <!-- 生成中显示停止按钮：触发对话中断，Agent 保留已写文件并按进度退款 -->
+              <a-button v-if="isGenerating" danger type="primary" @click="stopGeneration">
+                <template #icon>
+                  <PauseCircleOutlined />
+                </template>
+                停止
+              </a-button>
               <a-button
+                v-else
                 type="primary"
                 @click="sendMessage"
-                :loading="isGenerating"
                 :disabled="!isOwner"
               >
                 <template #icon>
@@ -197,21 +249,26 @@
           </div>
         </div>
         <div class="preview-content">
-          <div v-if="!previewUrl && !isGenerating" class="preview-placeholder">
-            <div class="placeholder-icon">🌐</div>
-            <p>网站文件生成完成后将在这里展示</p>
-          </div>
-          <div v-else-if="isGenerating" class="preview-loading">
+          <div v-if="isGenerating" class="preview-loading">
             <a-spin size="large" />
             <p>正在生成网站...</p>
           </div>
+          <!-- 线框预览（Issue #13）：wireframe_pending 阶段展示待确认线框 -->
+          <div v-else-if="wireframePreviewUrl" class="wireframe-preview">
+            <div class="wireframe-preview-banner">📋 线框预览（确认后开始生成）</div>
+            <iframe :src="wireframePreviewUrl" class="preview-iframe" frameborder="0"></iframe>
+          </div>
           <iframe
-            v-else
+            v-else-if="previewUrl"
             :src="previewUrl"
             class="preview-iframe"
             frameborder="0"
             @load="onIframeLoad"
           ></iframe>
+          <div v-else class="preview-placeholder">
+            <div class="placeholder-icon">🌐</div>
+            <p>网站文件生成完成后将在这里展示</p>
+          </div>
         </div>
       </div>
     </div>
@@ -249,17 +306,27 @@ import { getAgentToken } from '@/api/agentToken'
 import { CodeGenTypeEnum, formatCodeGenType } from '@/utils/codeGenTypes'
 import {
   streamAgentEvents,
+  requestInterview,
+  requestWireframe,
+  confirmWireframe,
   createRunId,
   AgentStreamHttpError,
   type AgentStreamEvent,
+  type InterviewQuestion,
+  type InterviewAnswer,
+  type InterviewSummary,
 } from '@/utils/agentSse'
 import request from '@/request'
 
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import AppDetailModal from '@/components/AppDetailModal.vue'
 import DeploySuccessModal from '@/components/DeploySuccessModal.vue'
+import InterviewQuestionsCard from '@/components/InterviewQuestionsCard.vue'
+import WireframeReviewCard from '@/components/WireframeReviewCard.vue'
+import IntensitySelector from '@/components/IntensitySelector.vue'
 import aiAvatar from '@/assets/aiAvatar.png'
-import { getStaticPreviewUrl } from '@/config/env'
+import { getStaticPreviewUrl, STATIC_BASE_URL } from '@/config/env'
+import { getCreditBalance } from '@/api/creditController'
 import { VisualEditor, type ElementInfo } from '@/utils/visualEditor'
 
 import {
@@ -271,6 +338,8 @@ import {
   EditOutlined,
   CheckCircleOutlined,
   LoadingOutlined,
+  PauseCircleOutlined,
+  WalletOutlined,
 } from '@ant-design/icons-vue'
 
 const route = useRoute()
@@ -292,7 +361,7 @@ interface ToolStep {
 }
 
 interface Message {
-  type: 'user' | 'ai'
+  type: 'user' | 'ai' | 'interview' | 'wireframe'
   content: string
   loading?: boolean
   createTime?: string
@@ -302,11 +371,36 @@ interface Message {
   milestones?: string[]
   // 工具调用步骤（tool_request / tool_executed 按 id 配对）
   toolSteps?: ToolStep[]
+  // 访谈卡字段（type = interview）：本轮题目与轮次，answered 后禁用
+  questions?: InterviewQuestion[]
+  round?: number
+  answered?: boolean
+  // 线框卡字段（type = wireframe）：预览地址与页数，settled 后禁用
+  wireframeUrl?: string
+  pageCount?: number
+  settled?: boolean
 }
+
+// 用户旅程阶段（Issue #13）：访谈 → 线框 → 确认 → 生成 → 完成，一次完整需求工程旅程
+type JourneyPhase = 'idle' | 'interviewing' | 'wireframe_pending' | 'wireframe_confirmed'
 
 const messages = ref<Message[]>([])
 const userInput = ref('')
 const isGenerating = ref(false)
+// 旅程状态：idle 时发送消息 = 开始新需求旅程（访谈入口）
+const journeyPhase = ref<JourneyPhase>('idle')
+// 本次旅程的 runId（Agent 侧 generation_run 主键，访谈/线框/确认/生成全程复用）
+const journeyRunId = ref('')
+// 本次旅程的原始需求（访谈与 codegen 的 message 锚）
+const journeyMessage = ref('')
+// 访谈结论摘要（收束后作为 history 喂 codegen）
+const journeySummary = ref<InterviewSummary>()
+// 三档推理强度（选择器双向绑定，生成时随请求下发）
+const intensity = ref<'fast' | 'standard' | 'deep'>('standard')
+// 积分余额（header 显示，冻结/退款后刷新可见变动）
+const creditBalance = ref<number>()
+// 线框预览地址（wireframe_pending 阶段右侧预览切到线框）
+const wireframePreviewUrl = ref('')
 const messagesContainer = ref<HTMLElement>()
 // 当前生成流的中止控制器（组件卸载时中止，也为后续中止按钮做准备）
 const streamAbortController = ref<AbortController | null>(null)
@@ -452,37 +546,54 @@ const fetchAppInfo = async () => {
   }
 }
 
-// 发送初始消息
+// 发送初始消息（initPrompt 触发，同样从需求旅程开始）
 const sendInitialMessage = async (prompt: string) => {
   // 添加用户消息
   messages.value.push({
     type: 'user',
     content: prompt,
   })
-
-  // 添加AI消息占位符
-  const aiMessageIndex = messages.value.length
-  messages.value.push({
-    type: 'ai',
-    content: '',
-    loading: true,
-  })
-
   await nextTick()
   scrollToBottom()
-
-  // 开始生成
-  isGenerating.value = true
-  await generateCode(prompt, aiMessageIndex)
+  await startJourney(prompt)
 }
 
-// 发送消息
+// 以登录态换取 Agent 短时 JWT 与工作区路径（每次需求工程/生成调用前都换取，TTL 10min）
+const ensureAgentToken = async () => {
+  if (!appId.value) throw new Error('应用ID不存在')
+  const tokenRes = await getAgentToken(appId.value)
+  if (tokenRes.data.code !== 0 || !tokenRes.data.data) {
+    throw new Error(tokenRes.data.message || '获取生成凭据失败')
+  }
+  return tokenRes.data.data
+}
+
+// 查询积分余额（header 显示；冻结/退款后刷新可见变动）
+const loadCreditBalance = async () => {
+  try {
+    const res = await getCreditBalance()
+    if (res.data.code === 0) {
+      creditBalance.value = res.data.data
+    }
+  } catch (error) {
+    console.error('获取积分余额失败：', error)
+  }
+}
+
+// 发送消息：按旅程阶段分发——idle 开始新旅程（访谈）/ 线框已确认直接生成 / 旅程中禁止自由文本
 const sendMessage = async () => {
-  if (!userInput.value.trim() || isGenerating.value) {
+  if (isGenerating.value) {
+    return
+  }
+  if (journeyPhase.value === 'interviewing' || journeyPhase.value === 'wireframe_pending') {
+    message.info('请先完成访谈与线框确认，再继续生成')
+    return
+  }
+  if (journeyPhase.value !== 'wireframe_confirmed' && !userInput.value.trim()) {
     return
   }
 
-  let message = userInput.value.trim()
+  let finalMessage = userInput.value.trim()
   // 如果有选中的元素，将元素信息添加到提示词中
   if (selectedElementInfo.value) {
     let elementContext = `\n\n选中元素信息：`
@@ -493,15 +604,9 @@ const sendMessage = async () => {
     if (selectedElementInfo.value.textContent) {
       elementContext += `\n- 当前内容: ${selectedElementInfo.value.textContent.substring(0, 100)}`
     }
-    message += elementContext
+    finalMessage += elementContext
   }
   userInput.value = ''
-  // 添加用户消息（包含元素信息）
-  messages.value.push({
-    type: 'user',
-    content: message,
-  })
-
   // 发送消息后，清除选中元素并退出编辑模式
   if (selectedElementInfo.value) {
     clearSelectedElement()
@@ -510,42 +615,289 @@ const sendMessage = async () => {
     }
   }
 
-  // 添加AI消息占位符
-  const aiMessageIndex = messages.value.length
+  // 添加用户消息（包含元素信息）
   messages.value.push({
-    type: 'ai',
-    content: '',
-    loading: true,
+    type: 'user',
+    content: finalMessage,
   })
-
   await nextTick()
   scrollToBottom()
 
-  // 开始生成
+  if (journeyPhase.value === 'wireframe_confirmed') {
+    // 线框已确认：本次输入（或空 = 按访谈需求）直接进入代码生成
+    await startGeneration(finalMessage || journeyMessage.value)
+    return
+  }
+  // idle：发送消息 = 开始新需求旅程（五维访谈入口）
+  await startJourney(finalMessage)
+}
+
+// 开始需求旅程（Issue #13）：创建 run 并发起五维访谈，题目以卡片形式进对话流
+const startJourney = async (userMessage: string) => {
+  if (!appId.value) return
+  const aiMessageIndex = messages.value.length
+  messages.value.push({ type: 'ai', content: '', loading: true })
+  await nextTick()
+  scrollToBottom()
+  try {
+    const { token } = await ensureAgentToken()
+    journeyRunId.value = createRunId()
+    journeyMessage.value = userMessage
+    journeyPhase.value = 'interviewing'
+    const result = await requestInterview({
+      token,
+      runId: journeyRunId.value,
+      appId: String(appId.value),
+      message: userMessage,
+    })
+    if (result.complete) {
+      // 信息足够直接收束（未出题）：跳过访谈卡直接进入线框
+      journeySummary.value = result.summary
+      await generateWireframe(aiMessageIndex)
+      return
+    }
+    messages.value[aiMessageIndex] = {
+      ...messages.value[aiMessageIndex],
+      type: 'interview',
+      content: '',
+      loading: false,
+      questions: result.questions ?? [],
+      round: result.round,
+      answered: false,
+    }
+  } catch (error) {
+    journeyPhase.value = 'idle'
+    handleJourneyError(error, aiMessageIndex)
+  }
+}
+
+// 提交访谈答案：推进/收束访谈，收束后自动生成线框
+const onInterviewSubmit = async (answers: InterviewAnswer[], messageIndex: number) => {
+  if (!appId.value) return
+  // 当前卡置为已答（禁用）
+  messages.value[messageIndex].answered = true
+  const aiMessageIndex = messages.value.length
+  messages.value.push({ type: 'ai', content: '', loading: true })
+  await nextTick()
+  scrollToBottom()
+  try {
+    const { token } = await ensureAgentToken()
+    const result = await requestInterview({
+      token,
+      runId: journeyRunId.value,
+      appId: String(appId.value),
+      answers,
+    })
+    if (!result.complete) {
+      // 未收束：第 2 轮只追问缺失维度
+      messages.value[aiMessageIndex] = {
+        ...messages.value[aiMessageIndex],
+        type: 'interview',
+        content: '',
+        loading: false,
+        questions: result.questions ?? [],
+        round: result.round,
+        answered: false,
+      }
+      return
+    }
+    journeySummary.value = result.summary
+    // 收束：占位改为结论摘要，随后生成线框
+    messages.value[aiMessageIndex] = {
+      ...messages.value[aiMessageIndex],
+      loading: false,
+      content: `✅ 需求已收束：${summarizeInterview(result.summary)}`,
+    }
+    await generateWireframe()
+  } catch (error) {
+    handleJourneyError(error, aiMessageIndex)
+  }
+}
+
+// 访谈结论一行摘要（对话流展示用）
+const summarizeInterview = (summary?: InterviewSummary) => {
+  if (!summary) return '需求访谈完成'
+  return `受众 ${summary.audience}｜风格 ${summary.style}｜页面 ${(summary.pages ?? []).length} 个`
+}
+
+// 生成/重新生成线框（免费；每日限频超限 429）；messageIndex 传空时新建占位
+const generateWireframe = async (messageIndex?: number) => {
+  if (!appId.value) return
+  journeyPhase.value = 'wireframe_pending'
+  const aiMessageIndex = messageIndex ?? messages.value.length
+  if (messageIndex == null) {
+    messages.value.push({ type: 'ai', content: '', loading: true })
+    await nextTick()
+    scrollToBottom()
+  }
+  try {
+    const { token, workspacePath } = await ensureAgentToken()
+    const result = await requestWireframe({
+      token,
+      runId: journeyRunId.value,
+      appId: String(appId.value),
+      workspacePath,
+    })
+    const url = buildWireframeUrl()
+    messages.value[aiMessageIndex] = {
+      type: 'wireframe',
+      content: '',
+      wireframeUrl: url,
+      pageCount: result.wireframe?.pageCount ?? 0,
+      settled: false,
+    }
+    // 右侧预览切到线框（确认闸门用户侧：先看线框再决定是否锁定）
+    wireframePreviewUrl.value = url
+    scrollToBottom()
+  } catch (error) {
+    journeyPhase.value = 'interviewing'
+    handleJourneyError(error, aiMessageIndex)
+  }
+}
+
+// 线框预览地址（Java 静态资源端点；时间戳破缓存支持重新生成后刷新）
+const buildWireframeUrl = () => {
+  const codeGenType = appInfo.value?.codeGenType || CodeGenTypeEnum.HTML
+  return `${STATIC_BASE_URL}/${codeGenType}_${appId.value}/wireframe/wireframe.html?t=${Date.now()}`
+}
+
+// 确认线框：锁定布局契约（积分冻结发生在随后 codegen 进入时）
+const onWireframeConfirm = async (messageIndex: number) => {
+  if (!appId.value) return
+  messages.value[messageIndex].settled = true
+  try {
+    const { token } = await ensureAgentToken()
+    await confirmWireframe({ token, runId: journeyRunId.value, appId: String(appId.value) })
+    journeyPhase.value = 'wireframe_confirmed'
+    messages.value.push({
+      type: 'ai',
+      content: '✅ 线框已确认。请在输入框旁选择推理强度，点击发送开始生成（生成将冻结积分）。',
+    })
+    await nextTick()
+    scrollToBottom()
+  } catch (error) {
+    messages.value[messageIndex].settled = false
+    handleJourneyError(error, messageIndex)
+  }
+}
+
+// 重新生成线框（同一 run，重新出线框再确认）
+const onWireframeRegenerate = async (messageIndex: number) => {
+  messages.value[messageIndex].settled = true
+  await generateWireframe()
+}
+
+// 重新访谈 = 需求变更：Agent 侧失效旧线框并回到 interview，重新出题
+const onWireframeReinterview = async (messageIndex: number) => {
+  if (!appId.value) return
+  messages.value[messageIndex].settled = true
+  wireframePreviewUrl.value = ''
+  const aiMessageIndex = messages.value.length
+  messages.value.push({ type: 'ai', content: '', loading: true })
+  await nextTick()
+  scrollToBottom()
+  try {
+    const { token } = await ensureAgentToken()
+    journeyPhase.value = 'interviewing'
+    const result = await requestInterview({
+      token,
+      runId: journeyRunId.value,
+      appId: String(appId.value),
+    })
+    messages.value[aiMessageIndex] = {
+      ...messages.value[aiMessageIndex],
+      type: 'interview',
+      content: '',
+      loading: false,
+      questions: result.questions ?? [],
+      round: result.round,
+      answered: false,
+    }
+  } catch (error) {
+    journeyPhase.value = 'idle'
+    handleJourneyError(error, aiMessageIndex)
+  }
+}
+
+// 需求工程错误处理：401 重新登录 / 429 线框限频 / 其他通用失败
+const handleJourneyError = (error: unknown, messageIndex: number) => {
+  console.error('需求工程流程失败：', error)
+  const msg = messages.value[messageIndex]
+  if (error instanceof AgentStreamHttpError) {
+    if (error.status === 401) {
+      if (msg) {
+        msg.loading = false
+        msg.content = '登录已过期，请重新登录后继续。'
+      }
+      message.error('登录已过期，请重新登录')
+      setTimeout(() => {
+        window.location.href = `/user/login?redirect=${window.location.href}`
+      }, 1000)
+      return
+    }
+    if (error.status === 429) {
+      if (msg) {
+        msg.loading = false
+        msg.content = '❌ 今日线框生成次数已用完，请明天再试。'
+      }
+      message.warning('今日线框生成次数已用完')
+      return
+    }
+    if (error.status === 409) {
+      if (msg) {
+        msg.loading = false
+        msg.content = '❌ 当前有进行中的任务，请稍后再试。'
+      }
+      message.warning('当前有进行中的任务')
+      return
+    }
+  }
+  if (msg) {
+    msg.loading = false
+    msg.content = '抱歉，流程出现了错误，请重试。'
+  }
+  message.error('操作失败，请重试')
+}
+
+// 线框确认后开始生成（isGenerating 状态与占位在此统一设置）
+const startGeneration = async (userMessage: string) => {
   isGenerating.value = true
-  await generateCode(message, aiMessageIndex)
+  const aiMessageIndex = messages.value.length
+  messages.value.push({ type: 'ai', content: '', loading: true })
+  await nextTick()
+  scrollToBottom()
+  await generateCode(userMessage, aiMessageIndex)
 }
 
 // 生成代码 - fetch 流式读取 Agent SSE（新通道：登录态换短时 JWT 直连，不再经 Java 中转）
+// 必须复用本次旅程的 journeyRunId——线框闸门与积分冻结都校验该 run 的阶段
 const generateCode = async (userMessage: string, aiMessageIndex: number) => {
   if (!appId.value) return
   streamAbortController.value = new AbortController()
   try {
     // 1. 以登录态换取短时 JWT + 工作区路径（会话过期由 axios 拦截器统一跳转登录页）
-    const tokenRes = await getAgentToken(appId.value)
-    if (tokenRes.data.code !== 0 || !tokenRes.data.data) {
-      throw new Error(tokenRes.data.message || '获取生成凭据失败')
-    }
-    const { token, workspacePath } = tokenRes.data.data
+    const { token, workspacePath } = await ensureAgentToken()
 
-    // 2. 携带 Authorization 直连 Agent 流式生成，返回值为终态事件
+    // 2. 携带 Authorization 直连 Agent 流式生成，返回值为终态事件；
+    //    intensity 三档随选择器下发，访谈结论作为输入历史帮助模型理解需求
+    const history: Array<{ role: 'user' | 'assistant'; content: string }> = [
+      { role: 'user', content: journeyMessage.value || userMessage },
+    ]
+    if (journeySummary.value) {
+      history.push({
+        role: 'assistant',
+        content: `需求访谈结论：受众 ${journeySummary.value.audience}；风格 ${journeySummary.value.style}；页面 ${journeySummary.value.pages.join('、')}；数据需求 ${journeySummary.value.data}；交互 ${journeySummary.value.interaction}。`,
+      })
+    }
     const terminal = await streamAgentEvents(
       {
         token,
-        runId: createRunId(),
+        runId: journeyRunId.value,
         appId: String(appId.value),
         message: userMessage,
         workspacePath,
+        intensity: intensity.value,
+        history,
         signal: streamAbortController.value.signal,
       },
       (event) => handleAgentEvent(event, aiMessageIndex),
@@ -553,6 +905,7 @@ const generateCode = async (userMessage: string, aiMessageIndex: number) => {
 
     // 3. 终态收尾（done 时 Java 已完成写历史与构建，直接刷新预览）
     isGenerating.value = false
+    journeyPhase.value = 'idle'
     if (terminal?.type === 'done') {
       await fetchAppInfo()
       updatePreview()
@@ -575,11 +928,30 @@ const generateCode = async (userMessage: string, aiMessageIndex: number) => {
       }, 1000)
       return
     }
+    if ((error as { name?: string })?.name === 'AbortError') {
+      // 用户主动中止（中止按钮/离开页面）：Agent 感知断开后按 aborted 终态收尾——
+      // 保留已写文件并按里程碑折算退款（首文件前全额退），余额刷新可见
+      messages.value[aiMessageIndex].content =
+        '⏹ 生成已中断。已写入的文件将保留，积分按生成进度折算退回。'
+      messages.value[aiMessageIndex].loading = false
+      isGenerating.value = false
+      journeyPhase.value = 'idle'
+      await loadCreditBalance()
+      return
+    }
     handleError(error, aiMessageIndex)
     return
   } finally {
     streamAbortController.value = null
+    // 终态后刷新积分（冻结结算/退款可见）并清掉线框预览（done 时切回正式预览）
+    await loadCreditBalance()
+    wireframePreviewUrl.value = ''
   }
+}
+
+// 中止按钮（Issue #13）：中止 fetch 流——Agent 感知连接断开后取消 LLM、保留已写文件、按里程碑退款
+const stopGeneration = () => {
+  streamAbortController.value?.abort()
 }
 
 // 事件处理：按七类事件更新消息渲染
@@ -634,6 +1006,8 @@ const handleAgentEvent = (event: AgentStreamEvent, aiMessageIndex: number) => {
       msg.content = `❌ ${event.message || '生成过程中出现错误'}`
       msg.loading = false
       message.error(event.message || '生成过程中出现错误')
+      // 积分不足（402 冻结拒绝）等失败后刷新余额，保证积分显示与台账一致
+      void loadCreditBalance()
       break
     case 'done':
       // 终态渲染无需处理，收尾统一在 generateCode 中进行
@@ -832,6 +1206,15 @@ const clearSelectedElement = () => {
 }
 
 const getInputPlaceholder = () => {
+  if (journeyPhase.value === 'interviewing') {
+    return '访谈进行中：请在上方卡片中选择答案...'
+  }
+  if (journeyPhase.value === 'wireframe_pending') {
+    return '线框待确认：请先在上方确认或重新生成...'
+  }
+  if (journeyPhase.value === 'wireframe_confirmed') {
+    return '线框已确认：补充生成要求（可留空），选择强度后点击发送'
+  }
   if (selectedElementInfo.value) {
     return `正在编辑 ${selectedElementInfo.value.tagName.toLowerCase()} 元素，描述您想要的修改...`
   }
@@ -841,6 +1224,7 @@ const getInputPlaceholder = () => {
 // 页面加载时获取应用信息
 onMounted(() => {
   fetchAppInfo()
+  loadCreditBalance()
 
   // 监听 iframe 消息
   window.addEventListener('message', (event) => {
@@ -1115,6 +1499,29 @@ onUnmounted(() => {
 
 .preview-loading p {
   margin-top: 16px;
+}
+
+/* 线框预览（Issue #13）：顶部提示条 + 线框 iframe */
+.wireframe-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.wireframe-preview-banner {
+  padding: 8px 12px;
+  background: #e6f4ff;
+  border: 1px solid #91caff;
+  border-radius: 6px 6px 0 0;
+  color: #1677ff;
+  font-size: 13px;
+}
+
+.wireframe-preview .preview-iframe {
+  border: 1px solid #91caff;
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  flex: 1;
 }
 
 .preview-iframe {
