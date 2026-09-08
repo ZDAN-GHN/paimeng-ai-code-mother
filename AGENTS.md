@@ -33,6 +33,7 @@
 - Agent 代理提交的 commit message 必须携带 `<Agent IDE>/<用户信息>` 标注。
 - 每次改动完成后，必须创建对应的 Git commit，以便后续追踪和回滚；禁止留下未提交的改动。
 - 注释遵循 `project-comment-style`；Java 同时遵循阿里巴巴开发手册。
+- 测试分包与被测代码路径对称（全模块适用）：测试文件按被测对象所在包/目录镜像分包，源码按领域分包时测试树同构（含子目录）；跨域集成测试与测试基建（helpers/fixtures）放测试树顶层。
 - **Issue 验收硬门槛（认知对齐原则）**：有验收项的 issue，交付时须逐条勾选 Acceptance criteria 复选框（`- [ ]` → `- [x]`）；有验收却未勾选，一律视作没有验收。
 
 ## Agent skills

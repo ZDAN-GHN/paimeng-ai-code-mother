@@ -34,6 +34,11 @@
 - **线框闸门**：未确认线框不 codegen；线框**免费 + 独立限频**，积分冻结发生在确认进入 codegen 时刻。
 - **对话中断**：(a) 中止 day-1（保留半成品 + 里程碑退款，首文件前全额退）；(b) 续传挂 run 表稳定后。
 
+## 代码布局约定（跨模块，2026-09-08 用户拍板）
+
+- **测试分包与被测代码路径对称，全模块适用**：测试文件镜像被测对象所在包/目录；源码按领域分包时测试树同构（含子目录，如 TS Agent `test/generation/{workflow,tools,review}/`）；跨子域集成测试与测试基建（helpers/fixtures）放测试树顶层。硬约定条目见 `AGENTS.md`。
+- 已落地：TS Agent test/ 六域镜像（b6751ed，纯移动零断言变更 148/148）；Java Maven `src/test/java` 包镜像与本规则天然一致，新增测试沿用；Python RAG 与前端新增测试照此执行。
+
 ## 退役状态（2026-09-08 #14 收官）
 
 - 旧 Java AI 链路与 Python 中转链**已删除（T21 执行完毕，2026-09-08，Issue #14）**：TS Agent 直连链路为唯一生成实现；`ts-agent.enabled`（默认 true）门禁 JWT 签发，关闭→40410；回退手段 = git 回滚。范围见 `docs/py_agent/t21_delete_plan.md` 顶部执行注记。
