@@ -187,14 +187,21 @@ describe('readAndConcatenateCodeFiles（Issue #9）', () => {
   it('拼接工作区代码文件，跳过隐藏/构建产物/非代码扩展名', () => {
     const root = makeWorkspaceRoot()
     mkdirSync(path.join(root, 'node_modules'), { recursive: true })
+    mkdirSync(path.join(root, 'dist'), { recursive: true })
     writeFileSync(path.join(root, 'index.html'), '<html></html>', 'utf8')
     writeFileSync(path.join(root, 'node_modules', 'dep.js'), 'console.log(1)', 'utf8')
+    writeFileSync(path.join(root, 'dist', 'bundle.js'), 'var y=1', 'utf8')
     writeFileSync(path.join(root, '.hidden.ts'), 'const x=1', 'utf8')
     writeFileSync(path.join(root, 'data.txt'), 'not code', 'utf8')
     const content = readAndConcatenateCodeFiles(root)
     expect(content).toContain('index.html')
     expect(content).not.toContain('dep.js')
+    expect(content).not.toContain('bundle.js')
     expect(content).not.toContain('.hidden')
     expect(content).not.toContain('not code')
+  })
+
+  it('目录不存在时返回空字符串', () => {
+    expect(readAndConcatenateCodeFiles(path.join(makeWorkspaceRoot(), 'nope'))).toBe('')
   })
 })

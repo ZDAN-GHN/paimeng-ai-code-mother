@@ -31,8 +31,8 @@ const types = (list: Frame[]) => list.map((frame) => frame.event)
 const milestones = (list: Frame[]) => list.filter((frame) => frame.event === 'milestone').map((frame) => String(frame.data.title))
 
 // 伪造 runClient：GET（闸门查询）返回 wireframe_confirmed，写操作按请求体 phase 回显。
-// phase 参数可覆盖 GET 返回的阶段（闸门拒绝/放行用例）。
-function fakeRunClient(calls: RunCall[], gatePhase: Run['phase'] = 'wireframe_confirmed'): RunClient {
+// phase 参数可覆盖 GET 返回的阶段（闸门拒绝/放行用例）；completeFails 注入 /complete 500（容错用例）。
+function fakeRunClient(calls: RunCall[], gatePhase: Run['phase'] = 'wireframe_confirmed', completeFails = false): RunClient {
   return new RunClient({
     baseUrl: 'http://java.invalid',
     token: 'test',
@@ -40,6 +40,10 @@ function fakeRunClient(calls: RunCall[], gatePhase: Run['phase'] = 'wireframe_co
       const method = init?.method ?? 'GET'
       const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {}
       calls.push({ url: String(url), body })
+      // 回调失败容错（旧 test_callback 语义）：Java 侧 /complete 非 2xx，客户端抛错由工作流吞掉
+      if (completeFails && String(url).endsWith('/complete')) {
+        return new Response(JSON.stringify({ code: 500, message: '内部错误' }), { status: 500 })
+      }
       const data = method === 'GET'
         ? { runId: String(url).split('/').at(-1), appId: 1, userId: 1, phase: gatePhase, context: null, milestones: null }
         : { runId: String(url).split('/').at(-2), appId: 1, userId: 1, phase: body.phase ?? 'interview', context: null, milestones: null }
@@ -235,7 +239,8 @@ describe('POST /agent/stream（#7 线框闸门）', () => {
 describe('POST /agent/stream（Issue #8 Guardrail + 图片配额 + 导览组件）', () => {
   it('Guardrail：输入含敏感词 → interview 阶段拦截，error 终态含明确报错，不进入 coding', async () => {
     const token = await makeToken()
-    const app = buildTestApp(makeWorkspaceRoot(), { agentRoutes: { runClient: fakeRunClient([], 'wireframe_confirmed') } })
+    const calls: RunCall[] = []
+    const app = buildTestApp(makeWorkspaceRoot(), { agentRoutes: { runClient: fakeRunClient(calls, 'wireframe_confirmed') } })
     const response = await app.inject({
       method: 'POST',
       url: '/agent/stream',
@@ -249,6 +254,25 @@ describe('POST /agent/stream（Issue #8 Guardrail + 图片配额 + 导览组件�
     expect(String(result.at(-1)!.data.message)).toBe('输入包含不当内容，请修改后重试')
     expect(result.some((frame) => frame.event === 'tool_request')).toBe(false)
     expect(result.some((frame) => frame.event === 'done')).toBe(false)
+    // 护轨拒绝同样触发 failed 完成回调（旧 test_streaming.test_failed_callback_on_guardrail_rejection 语义）
+    const complete = calls.find((call) => call.url.endsWith('/complete'))!
+    expect(complete.body.status).toBe('failed')
+    expect(complete.body.errorMessage).toBe('输入包含不当内容，请修改后重试')
+  })
+
+  it('Java 完成回调失败（/complete 500）不阻断主流程：仍 done 终态且产物已落盘', async () => {
+    const root = makeWorkspaceRoot()
+    const token = await makeToken()
+    const app = buildTestApp(root, { agentRoutes: { runClient: fakeRunClient([], 'wireframe_confirmed', true) } })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/stream',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-cb-fail', appId: 1, message: 'hello', workspacePath: root },
+    })
+    // 回调失败被工作流吞掉（Java 幂等兜底可补偿），主流程照常成功收尾
+    expect(frames(response.body).at(-1)!.event).toBe('done')
+    expect(readFileSync(path.join(root, 'index.html'), 'utf8')).toContain('<html')
   })
 
   it('Guardrail：输入含注入模式 → error 终态', async () => {

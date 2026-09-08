@@ -30,4 +30,4 @@
 
 ## 下一步
 
-按 `docs/ts_agent/architecture.md` §11 执行：P0（#2）、P1（#3/#4/#5/#6）、P2（#7/#8/#9/#10）均已完成，#12 前端通道切换已完成（Java JWT 签发 + 前端 fetch-SSE + 七类事件渲染）。**当前进行 #13 前端功能补齐：线框确认 UI + 档位选择器 + 中止按钮 + 积分显示 + L1 mock 预览**；随后 #11 对账基于真实实现重跑（修正 `contract-parity.md` 结论）→ #14 灰度+T21。实施进度日志：`docs/ts_agent/progress.md`。每完成一个任务：更新 `.agents/memories/` 对应文档 + 在 `docs/ts_agent/progress.md` 追加一行（含日期与命令证据）。
+按 `docs/ts_agent/architecture.md` §11 执行：P0（#2）、P1（#3/#4/#5/#6）、P2（#7/#8/#9/#10）均已完成，#12 前端通道切换已完成（Java JWT 签发 + 前端 fetch-SSE + 七类事件渲染）。**#11 契约对账已完成（2026-09-07）**：84 例逐文件对账（72 覆盖 / 3 语义差异 / 9 有意演进），缺口补齐 5 项（golden e2e×2、工具名契约、拼接、回调容错），`npm test` **144/144**，对等报告终稿 `docs/ts_agent/contract-parity.md`（T21「契约对等」判据**通过**，附 P3 修正项 5 条）。**当前进行 #13 前端功能补齐：线框确认 UI + 档位选择器 + 中止按钮 + 积分显示 + L1 mock 预览** → #14 灰度+T21。实施进度日志：`docs/ts_agent/progress.md`。每完成一个任务：更新 `.agents/memories/` 对应文档 + 在 `docs/ts_agent/progress.md` 追加一行（含日期与命令证据）。

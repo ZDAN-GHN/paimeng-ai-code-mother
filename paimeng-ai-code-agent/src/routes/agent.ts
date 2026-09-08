@@ -82,6 +82,7 @@ const SCRIPT_WHITELIST: Record<string, NonNullable<StreamRequest['script']>> = {
   success: 'success',
   error: 'error',
   images: 'images',
+  'multi-file': 'multi-file',
   limit: 'limit',
   'limit-length': 'limit-length',
   'quality-fail-then-pass': 'quality-fail-then-pass',

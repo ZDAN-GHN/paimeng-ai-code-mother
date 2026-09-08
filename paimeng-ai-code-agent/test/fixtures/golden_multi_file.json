@@ -1,0 +1,10 @@
+{
+  "codeGenType": "multi_file",
+  "script": "multi-file",
+  "message": "做一个多文件页面",
+  "expectedFiles": {
+    "index.html": ["<div id=\"app\">多文件应用</div>"],
+    "style.css": ["#app { color: red; }"],
+    "script.js": ["app.addEventListener('click', () => alert('ok'));"]
+  }
+}
