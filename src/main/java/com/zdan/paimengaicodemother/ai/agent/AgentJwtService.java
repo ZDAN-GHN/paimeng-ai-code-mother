@@ -33,7 +33,7 @@ public class AgentJwtService {
      */
     public String issueToken(long userId) {
         if (StrUtil.isBlank(properties.getSecret())) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Agent JWT 密钥未配置（agent.jwt.secret）");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "Agent JWT 密钥未配置（ts-agent.jwt.secret）");
         }
         // exp 与 iat 从同一时基整秒计算（与 Agent 侧 jose 的 NumericDate 精度对齐）
         long nowSeconds = System.currentTimeMillis() / 1000;

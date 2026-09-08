@@ -5,46 +5,20 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * Agent 客户端配置（泛化自 python-agent.*，Issue #6）
- * Java → Agent 主通道（Python Agent / TS Agent 通用）与回调终端信号共用的配置段；
- * 旧键 python-agent.* 作为别名保留（expand-contract，见 AgentLegacyAliasPostProcessor）。
+ * TS Agent 链路配置（原 Agent 中转客户端配置，中转字段已随 T21 删除）
+ * ts-agent.enabled 灰度开关门禁 Agent JWT 签发（false 时前端得到明确报错），其余为直连链路运行参数
  *
  * @author LXH
  */
 @Data
 @Component
-@ConfigurationProperties(prefix = "agent")
+@ConfigurationProperties(prefix = "ts-agent")
 public class AgentProperties {
 
     /**
-     * 是否启用 Agent 链路（false 走旧 Java AI 实现，回退链路行为不变）
+     * 是否启用 TS Agent 新链路（false 时签发端点拒绝下发 JWT；旧 Java AI 链路删除后，回退手段为 git 回滚而非开关）
      */
-    private boolean enabled = false;
-
-    /**
-     * Agent 服务地址
-     */
-    private String baseUrl = "http://localhost:8090";
-
-    /**
-     * 内部调用令牌（与 Agent 侧配置一致）
-     */
-    private String token;
-
-    /**
-     * 主通道连接超时，毫秒
-     */
-    private long connectTimeoutMs = 3000;
-
-    /**
-     * 主通道读超时，毫秒（期间既无事件也无回调则判定失败）
-     */
-    private long readTimeoutMs = 300000;
-
-    /**
-     * 回调等待超时，毫秒（主通道结束后等待完成回调的最长时间）
-     */
-    private long callbackTimeoutMs = 60000;
+    private boolean enabled = true;
 
     /**
      * 线框生成每用户每日限频（Issue #7，免费 + 独立限频；滚动 24 小时窗口）

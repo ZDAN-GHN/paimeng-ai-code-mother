@@ -7,14 +7,12 @@ import cn.hutool.json.JSONUtil;
 import com.zdan.paimengaicodemother.ai.agent.AgentJwtProperties;
 import com.zdan.paimengaicodemother.ai.agent.AgentJwtService;
 import com.zdan.paimengaicodemother.ai.agent.AgentProperties;
-import com.zdan.paimengaicodemother.ai.agent.RunIdSinkRegistry;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.exception.GlobalExceptionHandler;
 import com.zdan.paimengaicodemother.model.entity.App;
 import com.zdan.paimengaicodemother.model.entity.User;
 import com.zdan.paimengaicodemother.service.AppService;
-import com.zdan.paimengaicodemother.service.ChatHistoryService;
 import com.zdan.paimengaicodemother.service.ProjectDownloadService;
 import com.zdan.paimengaicodemother.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,18 +47,19 @@ class AppControllerAgentTokenTest {
 
     private AppService appService;
     private UserService userService;
+    private AgentProperties agentProperties;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         appService = mock(AppService.class);
         userService = mock(UserService.class);
+        agentProperties = new AgentProperties();
         AgentJwtProperties jwtProperties = new AgentJwtProperties();
         jwtProperties.setSecret(SECRET);
         AppController controller = new AppController(appService, userService,
-                mock(ProjectDownloadService.class), mock(AgentProperties.class),
-                jwtProperties, new AgentJwtService(jwtProperties),
-                mock(RunIdSinkRegistry.class), mock(ChatHistoryService.class));
+                mock(ProjectDownloadService.class), agentProperties,
+                jwtProperties, new AgentJwtService(jwtProperties));
         // standalone：注册全局异常处理器（BusinessException → 标准 JSON 错误码）
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
@@ -117,6 +116,18 @@ class AppControllerAgentTokenTest {
         mockMvc.perform(get("/app/agent/token").param("appId", String.valueOf(APP_ID)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(40101));
+    }
+
+    /**
+     * 灰度开关关闭 → 40410 明确报错，不下发 JWT（Issue #14）
+     */
+    @Test
+    void disabledSwitchReturns40410() throws Exception {
+        mockOwnedApp(OWNER_ID);
+        agentProperties.setEnabled(false);
+        mockMvc.perform(get("/app/agent/token").param("appId", String.valueOf(APP_ID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40410));
     }
 
     /**

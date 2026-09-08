@@ -5,21 +5,13 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
-import cn.hutool.json.JSONUtil;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.zdan.paimengaicodemother.ai.codegen.route.AiCodeGenTypeRoutingService;
 import com.zdan.paimengaicodemother.ai.codegen.route.AiCodeGenTypeRoutingServiceFactory;
 import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
-import com.zdan.paimengaicodemother.ai.agent.AgentClient;
-import com.zdan.paimengaicodemother.ai.agent.AgentRequest;
-import com.zdan.paimengaicodemother.ai.agent.AgentSseAdapter;
-import com.zdan.paimengaicodemother.ai.agent.RunIdSinkRegistry;
-import com.zdan.paimengaicodemother.ai.agent.AgentProperties;
 import com.zdan.paimengaicodemother.constant.AppConstant;
-import com.zdan.paimengaicodemother.core.AiCodeGeneratorFacade;
 import com.zdan.paimengaicodemother.core.builder.BuilderExecutor;
-import com.zdan.paimengaicodemother.core.handler.StreamHandlerExecutor;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
 import com.zdan.paimengaicodemother.exception.ThrowUtils;
@@ -37,10 +29,7 @@ import com.zdan.paimengaicodemother.service.ChatHistoryService;
 import com.zdan.paimengaicodemother.service.ScreenshotService;
 import com.zdan.paimengaicodemother.service.UserService;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 
 import java.io.File;
 import java.io.Serializable;
@@ -59,35 +48,17 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
     private final UserService userService;
     private final ChatHistoryService chatHistoryService;
-    private final AiCodeGeneratorFacade aiCodeGeneratorFacade;
-    private final StreamHandlerExecutor streamHandlerExecutor;
     private final ScreenshotService screenshotService;
     private final AiCodeGenTypeRoutingServiceFactory aiCodeGenTypeRoutingServiceFactory;
-    private final AgentClient agentClient;
-    private final AgentSseAdapter agentSseAdapter;
-    private final RunIdSinkRegistry runIdSinkRegistry;
-    private final AgentProperties agentProperties;
 
     public AppServiceImpl(UserService userService,
                           ChatHistoryService chatHistoryService,
-                          AiCodeGeneratorFacade aiCodeGeneratorFacade,
-                          StreamHandlerExecutor streamHandlerExecutor,
                           ScreenshotService screenshotService,
-                          AiCodeGenTypeRoutingServiceFactory aiCodeGenTypeRoutingServiceFactory,
-                          AgentClient agentClient,
-                          AgentSseAdapter agentSseAdapter,
-                          RunIdSinkRegistry runIdSinkRegistry,
-                          AgentProperties agentProperties) {
+                          AiCodeGenTypeRoutingServiceFactory aiCodeGenTypeRoutingServiceFactory) {
         this.userService = userService;
         this.chatHistoryService = chatHistoryService;
-        this.aiCodeGeneratorFacade = aiCodeGeneratorFacade;
-        this.streamHandlerExecutor = streamHandlerExecutor;
         this.screenshotService = screenshotService;
         this.aiCodeGenTypeRoutingServiceFactory = aiCodeGenTypeRoutingServiceFactory;
-        this.agentClient = agentClient;
-        this.agentSseAdapter = agentSseAdapter;
-        this.runIdSinkRegistry = runIdSinkRegistry;
-        this.agentProperties = agentProperties;
     }
 
     @Override
@@ -212,186 +183,6 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         validateParam(appId, "override", loginUser);
     }
 
-    @Override
-    public Flux<ServerSentEvent<String>> chatToGenCode(Long appId, String message, User loginUser) {
-        // 参数校验
-        validateParam(appId, message, loginUser);
-        // 用户只能给自己的应用生成代码
-        App app = Optional.ofNullable(this.getById(appId))
-                .orElseThrow(() -> new BusinessException(ErrorCode.PARAMS_ERROR, "应用不存在"));
-        if (!app.getUserId().equals(loginUser.getId())) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "无权限生成代码");
-        }
-        // 调用 AI 前，先将用户消息添加到会话历史中
-        chatHistoryService.addChatMessage(appId, message, ChatHistoryMessageTypeEnum.USER.getValue(), loginUser);
-        String codeGenType = app.getCodeGenType();
-        CodeGenTypeEnum codeGenTypeEnum = Optional.ofNullable(CodeGenTypeEnum.getEnumByValue(codeGenType))
-                .orElseThrow(() -> new BusinessException(ErrorCode.PARAMS_ERROR, "代码生成类型不合法"));
-        // 灰度开关：true 走 Agent 链路，false 走旧 Java AI 实现（行为不变）
-        if (agentProperties.isEnabled()) {
-            return agentChatToGenCode(appId, message, loginUser, codeGenTypeEnum);
-        }
-        // 旧链路（行为与迁移前完全一致）
-        Flux<String> contentFlux = aiCodeGeneratorFacade.generateAndSaveCodeStream(message, codeGenTypeEnum, appId);
-        Flux<String> display = streamHandlerExecutor.doHandle(contentFlux, chatHistoryService, appId, loginUser, codeGenTypeEnum);
-        return display.map(this::dataSse).concatWith(Mono.just(doneSse()));
-    }
-
-    /**
-     * Agent 链路：主通道事件流 → 浏览器显示 + 回调终端信号（T15/T17/T18）
-     * 主通道结束后进入「等待回调」阶段（§1.5），done 由回调触发；超时兜底 business-error
-     *
-     * @param appId          应用 id
-     * @param message        用户提示词
-     * @param loginUser      当前登录用户
-     * @param codeGenTypeEnum 代码生成类型
-     * @return 浏览器 SSE 流（含终端事件）
-     */
-    private Flux<ServerSentEvent<String>> agentChatToGenCode(Long appId, String message, User loginUser,
-                                                             CodeGenTypeEnum codeGenTypeEnum) {
-        // 1. 生成 runId 并注册浏览器连接终端（回调到达 / 超时通过该终端发 done / business-error）
-        String runId = UUID.randomUUID().toString();
-        String workspacePath = StrUtil.format("{}/{}_{}", AppConstant.CODE_OUTPUT_ROOT_DIR, codeGenTypeEnum.getValue(), appId);
-        runIdSinkRegistry.register(runId, appId, codeGenTypeEnum, workspacePath, loginUser);
-        // 2. 构造主通道请求（§1.2：threadId 固定 app:{appId}，history 最近 20 条 bootstrap）
-        AgentRequest request = new AgentRequest();
-        request.setAppId(appId);
-        request.setUserId(loginUser.getId());
-        request.setMessage(message);
-        request.setCodeGenType(codeGenTypeEnum.getValue());
-        request.setRunId(runId);
-        request.setThreadId("app:" + appId);
-        request.setWorkspacePath(workspacePath);
-        request.setHistory(loadRecentHistory(appId));
-        // 3. 调用 Agent 主通道；错误事件触发 failed 终端（幂等）；
-        //    上游调用失败（连接/读超时）时立即触发 business-error 终端，不等回调超时（§1.5 兜底）
-        Flux<AgentClient.SseEvent> agentSse = agentClient.stream(request)
-                .doOnNext(event -> handleAgentErrorEvent(runId, appId, loginUser, event))
-                .onErrorResume(error -> {
-                    log.error("调用 Agent 失败，runId: {}, message: {}", runId, error.getMessage());
-                    runIdSinkRegistry.complete(runId, businessErrorSse(ErrorCode.SYSTEM_ERROR, "AI 服务调用失败，请稍后重试"));
-                    // 错误继续向下传递，由 handler 记录一条错误历史（保持既有语义）
-                    return Flux.error(error);
-                });
-        // 4. 事件分流 → 浏览器显示文本（复用现有 handler，§1.6）
-        Flux<String> display = agentSseAdapter.adapt(agentSse, codeGenTypeEnum, chatHistoryService, appId, loginUser);
-        // 5. 显示文本包 {"d":...}；主通道结束后等待回调终端信号，超时用兜底 business-error
-        Mono<ServerSentEvent<String>> terminal = runIdSinkRegistry.awaitTerminal(
-                runId, agentProperties.getCallbackTimeoutMs(), () -> {
-                    // 幂等：超时仅处理一次
-                    if (runIdSinkRegistry.tryMarkProcessed(runId)) {
-                        chatHistoryService.addChatMessage(appId, "生成超时，请重试",
-                                ChatHistoryMessageTypeEnum.AI.getValue(), loginUser);
-                    }
-                    return businessErrorSse(ErrorCode.OPERATION_ERROR, "生成超时，请重试");
-                });
-        return display.map(this::dataSse).concatWith(terminal);
-    }
-
-    /**
-     * Agent 主通道错误事件处理（§1.3 event:error → 浏览器 business-error + 幂等失败历史）
-     *
-     * @param runId     runId
-     * @param appId     应用 id
-     * @param loginUser 当前登录用户
-     * @param event     SSE 事件
-     */
-    private void handleAgentErrorEvent(String runId, Long appId, User loginUser, AgentClient.SseEvent event) {
-        if (!"error".equals(event.event())) {
-            return;
-        }
-        if (!runIdSinkRegistry.tryMarkProcessed(runId)) {
-            return;
-        }
-        String message = extractErrorMessage(event.data());
-        log.error("Agent 返回错误事件，runId: {}, message: {}", runId, message);
-        chatHistoryService.addChatMessage(appId, "生成失败：" + message,
-                ChatHistoryMessageTypeEnum.AI.getValue(), loginUser);
-        runIdSinkRegistry.complete(runId, businessErrorSse(ErrorCode.OPERATION_ERROR, message));
-    }
-
-    /**
-     * 从错误事件 data（{"message":"..."}）中提取错误消息
-     *
-     * @param data 错误事件载荷
-     * @return 错误消息
-     */
-    private String extractErrorMessage(String data) {
-        if (StrUtil.isBlank(data)) {
-            return "未知错误";
-        }
-        try {
-            return JSONUtil.parseObj(data).getStr("message", "未知错误");
-        } catch (Exception e) {
-            return data;
-        }
-    }
-
-    /**
-     * 加载最近 20 条对话历史（§1.2 history，role user/assistant，时间正序）
-     *
-     * @param appId 应用 id
-     * @return 历史条目列表
-     */
-    private List<AgentRequest.HistoryItem> loadRecentHistory(Long appId) {
-        QueryWrapper queryWrapper = QueryWrapper.create()
-                .eq(ChatHistory::getAppId, appId)
-                .in(ChatHistory::getMessageType,
-                        ChatHistoryMessageTypeEnum.USER.getValue(),
-                        ChatHistoryMessageTypeEnum.AI.getValue())
-                .orderBy(ChatHistory::getCreateTime, false)
-                .limit(0, 20);
-        List<ChatHistory> historyList = chatHistoryService.list(queryWrapper);
-        List<AgentRequest.HistoryItem> items = new ArrayList<>();
-        // 倒序取回正序（老的在前，新的在后）
-        for (int i = historyList.size() - 1; i >= 0; i--) {
-            ChatHistory history = historyList.get(i);
-            if (StrUtil.isBlank(history.getMessage())) {
-                continue;
-            }
-            AgentRequest.HistoryItem item = new AgentRequest.HistoryItem();
-            item.setRole(ChatHistoryMessageTypeEnum.USER.getValue().equals(history.getMessageType()) ? "user" : "assistant");
-            item.setContent(history.getMessage());
-            items.add(item);
-        }
-        return items;
-    }
-
-    /**
-     * 浏览器文本事件：data: {"d":"<显示文本>"}（§1.6）
-     *
-     * @param chunk 显示文本
-     * @return SSE 事件
-     */
-    private ServerSentEvent<String> dataSse(String chunk) {
-        return ServerSentEvent.<String>builder()
-                .data(JSONUtil.toJsonStr(Map.of("d", chunk)))
-                .build();
-    }
-
-    /**
-     * 完成事件：event: done（构建完成后发出）
-     *
-     * @return SSE 事件
-     */
-    private ServerSentEvent<String> doneSse() {
-        return ServerSentEvent.<String>builder().event("done").build();
-    }
-
-    /**
-     * 业务错误事件：event: business-error + data: {"error":true,"code":...,"message":"..."}
-     *
-     * @param code    错误码
-     * @param message 错误消息
-     * @return SSE 事件
-     */
-    private ServerSentEvent<String> businessErrorSse(ErrorCode code, String message) {
-        return ServerSentEvent.<String>builder()
-                .event("business-error")
-                .data(JSONUtil.toJsonStr(Map.of("error", true, "code", code.getCode(), "message", message)))
-                .build();
-    }
-
     /**
      * 参数校验 - 3 param
      */
@@ -407,28 +198,6 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             log.error("error user, the given user's id is illegal, loginUser: {}, userId: {}", loginUser, loginUser.getId());
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户 id 值不合法");
         }
-    }
-
-    /**
-     * 返回 AI 响应流之前，保存对话历史 - 弃用，现已使用处理器处理
-     */
-    @Deprecated
-    private Flux<String> saveAiResponseBeforeReturn(Flux<String> contentFlux, Long appId, User loginUser) {
-        // 字符串拼接器，用于当流式返回所有的代码之后，再保存代码
-        StringBuilder aiResponseBuilder = new StringBuilder();
-        return contentFlux
-                // 实时收集代码片段
-                .doOnNext(aiResponseBuilder::append)
-                .doOnComplete(
-                        () -> chatHistoryService.addChatMessage(appId, aiResponseBuilder.toString(),
-                                ChatHistoryMessageTypeEnum.AI.getValue(), loginUser)
-                )
-                .doOnError(throwable -> {
-                    // 如果 AI 回复失败，也要将异常消息保存到数据库中
-                    String errorMessage = StrUtil.format("AI 回复失败 {} ", throwable.getMessage());
-                    chatHistoryService.addChatMessage(appId, errorMessage,
-                            ChatHistoryMessageTypeEnum.AI.getValue(), loginUser);
-                });
     }
 
     @Override

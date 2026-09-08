@@ -7,6 +7,7 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
+import com.zdan.paimengaicodemother.ai.agent.AgentProperties;
 import com.zdan.paimengaicodemother.ai.enums.CodeGenTypeEnum;
 import com.zdan.paimengaicodemother.core.builder.BuilderExecutor;
 import com.zdan.paimengaicodemother.exception.BusinessException;
@@ -36,7 +37,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RRateLimiter;
 import org.redisson.api.RateType;
 import org.redisson.api.RedissonClient;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -90,17 +90,17 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
     private final ChatHistoryService chatHistoryService;
     private final CreditService creditService;
     private final RedissonClient redissonClient;
-    private final int wireframeDailyLimit;
+    private final AgentProperties agentProperties;
 
     public GenerationRunServiceImpl(AppService appService, ChatHistoryService chatHistoryService,
                                     RedissonClient redissonClient,
-                                    @Value("${agent.wireframe-daily-limit:10}") int wireframeDailyLimit,
+                                    AgentProperties agentProperties,
                                     CreditService creditService) {
         this.appService = appService;
         this.chatHistoryService = chatHistoryService;
         this.redissonClient = redissonClient;
-        this.wireframeDailyLimit = wireframeDailyLimit;
         this.creditService = creditService;
+        this.agentProperties = agentProperties;
     }
 
     @Override
@@ -308,7 +308,7 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
         // 键 TTL 25 小时：滚动 24h 窗口内不被清理，空闲后自动回收
         rateLimiter.expire(Duration.ofHours(25));
         // rate = 每 86400s 允许的令牌数（滚动 24h 窗口），等价「每用户每日 N 次」
-        rateLimiter.trySetRate(RateType.OVERALL, wireframeDailyLimit, Duration.ofSeconds(86400));
+        rateLimiter.trySetRate(RateType.OVERALL, agentProperties.getWireframeDailyLimit(), Duration.ofSeconds(86400));
         if (!rateLimiter.tryAcquire(1)) {
             throw new BusinessException(ErrorCode.TOO_MANY_REQUEST, "今日线框生成次数已用完，请明天再试");
         }

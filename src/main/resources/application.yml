@@ -18,7 +18,6 @@ spring:
       host: localhost
       password:
       port: 6379
-      ttl: 3600
       database: 0
   profiles:
     active: local
@@ -34,25 +33,15 @@ server:
       cookie:
         max-age: 2592000s
 
-# Agent 客户端迁移开关（泛化自 python-agent.*，Issue #6）：代码层已绑定 agent.* 前缀，
-# 此处保留 python-agent.* 段作为旧别名（AgentLegacyAliasPostProcessor 自动复制到 agent.*），
-# 向后兼容既有部署；新配置请直接使用 agent.*（环境变量 AGENT_ENABLED/AGENT_BASE_URL/AGENT_TOKEN 等）。
-python-agent:
-  enabled: ${PYTHON_AGENT_ENABLED:false}
-  base-url: ${PYTHON_AGENT_BASE_URL:http://localhost:8090}
-  token: ${PYTHON_AGENT_TOKEN:}
-  connect-timeout-ms: ${PYTHON_AGENT_CONNECT_TIMEOUT_MS:3000}
-  read-timeout-ms: ${PYTHON_AGENT_READ_TIMEOUT_MS:300000}
-  # 主通道结束后等待完成回调的最长时间，超时未收到回调则判定失败
-  callback-timeout-ms: ${PYTHON_AGENT_CALLBACK_TIMEOUT_MS:60000}
-
-# Agent 客户端补充配置（Issue #7）：线框免费阶段的每用户每日独立限频（与积分体系无关）
-agent:
-  # 线框生成每用户每日限频（滚动 24 小时窗口）
-  wireframe-daily-limit: ${AGENT_WIREFRAME_DAILY_LIMIT:10}
+# TS Agent 链路配置（Issue #14 收官切换，原 python-agent.*/agent.* 段随中转链退役）
+ts-agent:
+  # 灰度开关：门禁 /app/agent/token 的 JWT 签发（false 时前端得到明确报错）；旧 Java AI 链路已删除，回退手段为 git 回滚
+  enabled: ${TS_AGENT_ENABLED:true}
+  # 线框生成每用户每日限频（滚动 24 小时窗口，免费 + 与积分体系无关）
+  wireframe-daily-limit: ${TS_AGENT_WIREFRAME_DAILY_LIMIT:10}
   # 积分计费（Issue #10，架构 §7 按次 + 档位系数；冻结额 = 基础价 × 生成类型系数 × 强度档系数）
   credit:
-    base-price: ${AGENT_CREDIT_BASE_PRICE:100}
+    base-price: ${TS_AGENT_CREDIT_BASE_PRICE:100}
     # 生成类型系数：html/multi_file/vue_project
     html-multiplier: 1
     multi-file-multiplier: 2
@@ -66,8 +55,8 @@ agent:
     interrupted-basic-settle-ratio: 0.5
   # 短时 JWT（Issue #12）：登录态换取浏览器直连 TS Agent 的令牌；secret 与 TS Agent 侧 JWT_SECRET 取同一值
   jwt:
-    secret: ${AGENT_JWT_SECRET:}
-    ttl-minutes: ${AGENT_JWT_TTL_MINUTES:10}
+    secret: ${TS_AGENT_JWT_SECRET:}
+    ttl-minutes: ${TS_AGENT_JWT_TTL_MINUTES:10}
 
 # Java 内部 API（TS Agent 调用 generation_run 等内部端点时校验的 Bearer 服务令牌）
 internal-api:

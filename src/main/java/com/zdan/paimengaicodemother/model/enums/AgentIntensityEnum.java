@@ -5,7 +5,7 @@ import lombok.Getter;
 
 /**
  * 推理强度档位枚举（Issue #10 审查整改：消除 calcFrozenAmount 中 "fast"/"standard"/"deep" 魔法字符串）
- * 与 TS Agent INTENSITY_TIERS 的 key 对齐（fast/standard/deep）；档位系数由 agent.credit.*-multiplier 配置驱动。
+ * 与 TS Agent INTENSITY_TIERS 的 key 对齐（fast/standard/deep）；档位系数由 ts-agent.credit.*-multiplier 配置驱动。
  *
  * @author LXH
  */

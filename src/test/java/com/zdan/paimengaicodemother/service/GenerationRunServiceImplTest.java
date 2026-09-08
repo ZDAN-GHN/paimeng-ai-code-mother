@@ -1,5 +1,6 @@
 package com.zdan.paimengaicodemother.service;
 
+import com.zdan.paimengaicodemother.ai.agent.AgentProperties;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ConcurrentRunException;
 import com.zdan.paimengaicodemother.mapper.GenerationRunMapper;
@@ -60,7 +61,7 @@ class GenerationRunServiceImplTest {
         redissonClient = mock(RedissonClient.class);
         rateLimiter = mock(RRateLimiter.class);
         when(redissonClient.getRateLimiter(anyString())).thenReturn(rateLimiter);
-        service = new GenerationRunServiceImpl(appService, chatHistoryService, redissonClient, 10, creditService);
+        service = new GenerationRunServiceImpl(appService, chatHistoryService, redissonClient, new AgentProperties(), creditService);
         ReflectionTestUtils.setField(service, "mapper", mapper);
     }
 

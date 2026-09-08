@@ -18,6 +18,7 @@ public enum ErrorCode {
     NOT_FOUND_ERROR(40400, "请求数据不存在"),
     FORBIDDEN_ERROR(40300, "禁止访问"),
     CREDIT_NOT_ENOUGH(40201, "积分不足"),
+    AGENT_DISABLED(40410, "代码生成服务未开启"),
     SYSTEM_ERROR(50000, "系统内部异常"),
     OPERATION_ERROR(50001, "操作失败");
 

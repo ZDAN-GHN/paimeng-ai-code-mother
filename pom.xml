@@ -48,11 +48,6 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
-        <!-- Python Agent SSE 客户端 -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-webflux</artifactId>
-        </dependency>
         <!-- 腾讯云对象存储 https://cloud.tencent.com.cn/document/product/436/9511 -->
         <dependency>
             <groupId>com.qcloud</groupId>
@@ -69,6 +64,11 @@
         <dependency>
             <groupId>org.springframework.session</groupId>
             <artifactId>spring-session-data-redis</artifactId>
+        </dependency>
+        <!-- Redis 连接与自动装配（session/缓存/限流依赖；此前靠 langchain4j-community-redis 传递引入，T21 删除后显式声明） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
         <!-- Selenium 网页截图依赖 -->
         <dependency>
@@ -95,29 +95,12 @@
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-open-ai-spring-boot-starter</artifactId>
         </dependency>
-        <dependency>
-            <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j-reactor</artifactId>
-        </dependency>
-        <!-- LangGraph4j 工作流 https://langgraph4j.github.io/langgraph4j/integrations/langchain4j/ -->
-        <dependency>
-            <groupId>org.bsc.langgraph4j</groupId>
-            <artifactId>langgraph4j-core</artifactId>
-            <version>1.7.10</version>
-            <scope>compile</scope>
-        </dependency>
-        <!-- JetBrains 空安全注解（Nullable/NotNull，AiCodeGenServiceFactory 与 SpringContextUtil 直接使用；编译期需要，运行期无影响） -->
+        <!-- JetBrains 空安全注解（Nullable/NotNull，AiCodeGenTypeRoutingServiceFactory 与 SpringContextUtil 直接使用；编译期需要，运行期无影响） -->
         <dependency>
             <groupId>org.jetbrains</groupId>
             <artifactId>annotations</artifactId>
             <version>26.1.0</version>
             <scope>provided</scope>
-        </dependency>
-        <!-- Source: https://mvnrepository.com/artifact/dev.langchain4j/langchain4j-community-redis -->
-        <dependency>
-            <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j-community-redis-spring-boot-starter</artifactId>
-            <version>1.1.0-beta7</version>
         </dependency>
         <!-- 数据访问层依赖 https://mybatis-flex.com/zh/intro/getting-started.html -->
         <dependency>

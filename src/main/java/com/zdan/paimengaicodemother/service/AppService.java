@@ -8,8 +8,6 @@ import com.zdan.paimengaicodemother.model.dto.chathistory.ChatHistoryQueryReques
 import com.zdan.paimengaicodemother.model.entity.App;
 import com.zdan.paimengaicodemother.model.entity.User;
 import com.zdan.paimengaicodemother.model.vo.AppVO;
-import org.springframework.http.codec.ServerSentEvent;
-import reactor.core.publisher.Flux;
 
 import java.util.List;
 
@@ -45,16 +43,6 @@ public interface AppService extends IService<App> {
      * @param appDeployUrl 应用的部署 url
      */
     void generateAppScreenshotAsync(Long appId, String appDeployUrl);
-
-    /**
-     * 通过对话生成应用代码
-     * 返回浏览器 SSE 事件流（data: {"d":...} 文本事件 + 终端 done / business-error，§1.6）
-     *
-     * @param appId     应用 id
-     * @param message   提示词
-     * @param loginUser 当前登录用户
-     */
-    Flux<ServerSentEvent<String>> chatToGenCode(Long appId, String message, User loginUser);
 
     /**
      * 获取应用封装类

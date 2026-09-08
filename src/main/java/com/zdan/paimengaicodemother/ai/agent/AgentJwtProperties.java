@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
  */
 @Data
 @Component
-@ConfigurationProperties(prefix = "agent.jwt")
+@ConfigurationProperties(prefix = "ts-agent.jwt")
 public class AgentJwtProperties {
 
     /**
