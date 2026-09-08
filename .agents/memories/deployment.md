@@ -16,7 +16,7 @@
 | Java | `wsl-rt-env/java/target` | Maven 构建产物；**2026-09-04 起由命令指定**：pom 暴露 `maven.build.directory` 属性（默认 `${project.basedir}/target`），WSL 命令带 `-Dmaven.build.directory=$PWD/wsl-rt-env/java/target`，无软链；原生 Linux/Windows 不传该属性即默认 `target/`。 |
 | TS Agent | `wsl-rt-env/ts-agent/node_modules` + `wsl-rt-env/ts-agent/dist` | **2026-09-04 起完全无软链**：依赖与 esbuild 产物（`dist/app.bundle.mjs` 自包含打包，运行期不需要 node_modules）都在 wsl-rt-env；服务目录内不放 node_modules。`npm run dev/build/start/test/type-check` 经 `scripts/run.mjs` 按宿主选择：WSL 只使用 wsl-rt-env，原生 Linux/Windows 只使用服务目录本地依赖与 `dist/`。 |
 
-> **迁移状态**：Java、TS Agent、前端和 Python RAG 均已具备无软链的 WSL 运行时路径与安装/调度脚本。前端依赖由 `paimeng-ai-code-mother-frontend/scripts/install-wsl-node-modules.sh` 直接安装到运行时目录；Python 由 `paimeng-ai-code-rag/scripts/install-wsl-venv.sh` 通过 uv 环境变量创建。Windows 与 WSL 的平台相关依赖不能共用：Windows 需要各服务目录下的本地 `node_modules` 或 `.venv`，但原有 IDE 运行配置无需改动。
+> **迁移状态**：四个服务的 WSL 运行时路径、安装脚本与调度脚本均已就位（前端/TS Agent 经 `install-wsl-node-modules.sh` 用 `npm --prefix` 直装运行时目录，Python 经 `install-wsl-venv.sh` 用 uv 环境变量定向，均无软链）；Windows 与 WSL 平台相关依赖不共用，Windows 用各服务目录本地 `node_modules`/`.venv`，原有 IDE 运行配置无需改动。
 
 ## 依赖服务 — 原生 Linux 环境（当前宿主，2026-09-07 起）
 
@@ -29,14 +29,14 @@
 
 - **灰度状态（2026-09-03 P0 已执行，Issue #2）**：`application-local.yml` 已回切 `python-agent.enabled: false`（过渡期主链路 = 旧 Java AI，当日 WSL 全栈 e2e 全流程验证通过：建应用 → SSE 生成 → 构建 → 部署）；`application.yml` 仓库默认为 `${PYTHON_AGENT_ENABLED:false}`；TS Agent 接入后再新增 `ts-agent.enabled` 灰度。
 
-- **MySQL**：用户态安装 `~/.local/opt/mysql8`（8.0.46，tarball 解包，非系统服务）。启动 `bash ~/.local/opt/mysql8/start.sh`（监听 0.0.0.0:3306，socket `/tmp/mysql-zdan.sock`，日志 `~/.local/opt/mysql8/mysqld.log`，stop 用同目录 `mysqladmin -uroot -proot --socket=/tmp/mysql-zdan.sock shutdown`）。root 密码 2026-09-01 由空改为 `root`（与 `application.yml` 数据源一致，start.sh 已同步）。库 `paimeng_ai_code_mother` 已按 `sql/create_table.sql` 建表（user/app/chat_history）；另有课程模块的 `course_dev` 库。**Windows IDE 直连**（2026-09-01 实测）：Host = WSL IP（`hostname -I`，重启可能漂移）、Port 3306、账号 `root`（`root@'172.31.%'`）/root；bind 0.0.0.0 仅暴露给 WSL NAT 内网，局域网不可达。
+- **MySQL**：用户态安装 `~/.local/opt/mysql8`（8.0.46，tarball 解包，非系统服务）。启动 `bash ~/.local/opt/mysql8/start.sh`（监听 0.0.0.0:3306，socket `/tmp/mysql-zdan.sock`，日志 `~/.local/opt/mysql8/mysqld.log`，stop 用同目录 `mysqladmin --socket=/tmp/mysql-zdan.sock shutdown`，密码见 `application.yml` 数据源）。库 `paimeng_ai_code_mother` 已按 `sql/create_table.sql` 建表（user/app/chat_history）；另有课程模块的 `course_dev` 库。**Windows IDE 直连**（2026-09-01 实测）：Host = WSL IP（`hostname -I`，重启可能漂移）、Port 3306、账号见 `application.yml`；bind 0.0.0.0 仅暴露给 WSL NAT 内网，局域网不可达。
 - **Redis**：WSL 内源码编译运行（`./src/redis-server *:6379`，无密码）。**2026-09-04 实测：此前源码编译产物已不在 WSL**（Java 后端启动即连 Redisson 会失败），当日为验证 #4 重新源码编译并固化到 `~/.local/opt/redis-7.2.5/`（启动：`~/.local/opt/redis-7.2.5/src/redis-server --port 6379 --daemonize no`）；apt 装 redis-server 需密码，故源码编译为准。
 - **Java 内部 API 服务令牌**：`internal-api.token`（`application.yml` 默认 `${INTERNAL_API_TOKEN:}`，本地 `application-local.yml` 为 `dev-token`，与 TS Agent 侧 `JAVA_INTERNAL_TOKEN` 一致；TS Agent `.env.example` 已加 `JAVA_INTERNAL_BASE_URL=http://localhost:8123/api` + `JAVA_INTERNAL_TOKEN=dev-token`）。
 - **PostgreSQL**：用户态 PG16 @ 127.0.0.1:5432（清华镜像 deb 解包 + `LD_LIBRARY_PATH`），原仅存 LangGraph checkpoint。**已停用（2026-09-03 P0 执行确认）**：checkpoint 职责随 Python Agent 退役消失，`generation_run` 落 MySQL；现状为无服务、无容器自启机制、5432 无监听（用户态安装保留），RAG v2（pgvector）时按本 runbook 重启。
 
 ## 依赖服务 — Windows 环境（此前实机验证所用）
 
-- **MySQL**：Windows 服务 `MySQL80`（8.0.36，监听 3306）。root/root 仅 Windows 本机可达；WSL2 NAT 下 WSL→Windows 无 localhost 转发，直连需网关 IP + 专用账号（未采用，用户决策统一走 WSL 侧）。
+- **MySQL**：Windows 服务 `MySQL80`（8.0.36，监听 3306）。root 账号仅 Windows 本机可达（账号密码见 `application.yml` 本地值）；WSL2 NAT 下 WSL→Windows 无 localhost 转发，直连需网关 IP + 专用账号（未采用，用户决策统一走 WSL 侧）。
 - **Redis**：Docker Desktop 容器（7.2.5，Windows 侧 6379 由 Docker backend 代理）。
 
 ## 敏感文件（不提交）
@@ -80,13 +80,11 @@
 ## 踩坑与规避（按宿主与沙箱环境）
 
 - **compose 端口绑定失败的残留容器（2026-09-08 实测）**：`docker compose up -d <svc>` 因宿主端口被占失败后，容器对象保留无端口绑定的中间态；释放端口后重新 `up` 只会 Start 残留容器（`docker port` 为空、宿主无监听）——必须 `docker compose up -d --force-recreate <svc>` 才恢复端口映射。
-- **运行时目录按宿主分流（2026-09-07）**：本节及下文旧条目中「WSL/Linux 只使用 wsl-rt-env」自当日起仅指 **WSL 宿主**；原生 Linux 宿主一律默认目录 + 标准命令。两个 `run.mjs` 的 WSL 判定已改为 `platform === 'linux'` 且 `/proc/version` 含 `microsoft`。
+- **运行时目录按宿主分流（2026-09-07）**：下文旧条目中「WSL/Linux 只使用 wsl-rt-env」自当日起仅指 **WSL 宿主**（判定 `platform === 'linux'` 且 `/proc/version` 含 `microsoft`）；原生 Linux 宿主一律默认目录 + 标准命令，详见本文件开头 §布局。
 - **npm 官方源不可达 + 家目录写被拦（原生 Linux，2026-09-07 实测）**：`registry.npmjs.org` 网络不通，安装加 `--registry=https://registry.npmmirror.com`；`~/.npm` 缓存写入被 DSH 沙箱 workspace-write 拦截，加 `--cache <仓库>/tmp/npm-cache`。
 - **Docker Hub 拉取超时（原生 Linux，2026-09-07 实测）**：`auth.docker.io` 匿名 token 请求 EOF（境内网络），`docker pull` 直连失败。规避：`docker pull docker.m.daocloud.io/searxng/searxng:latest` 后 `docker tag` 回原名；或为 daemon 配置 registry-mirrors（需 root，未做）。
 - **DSH 沙箱 workspace-write 拦家目录写**：mysqld 需写 `~/.local/opt/mysql8`（data/log/pid），start.sh 须以完整权限运行；`./mvnw spring-boot:run` 同理会写 `~/.m2/repository`（resolver-status.properties），亦须完整权限（2026-09-03 P0 e2e 实测）；`uv run` 因 `~/.cache/uv` 被拒时，使用 `bash paimeng-ai-code-rag/scripts/run-wsl.sh`；npm 安装脚本已将缓存直接写入各自的 `wsl-rt-env/<service>/npm-cache`。
-- **前端 WSL 依赖直装（2026-09-04）**：执行 `cd paimeng-ai-code-mother-frontend && bash scripts/install-wsl-node-modules.sh`；脚本复制受版本控制的 `package.json` / `package-lock.json` 到被忽略的运行时项目后，以 `npm --prefix wsl-rt-env/frontend install` 直接安装实体目录，不创建软链，也不在服务目录暂存依赖。所有 npm 脚本由 `scripts/run.mjs` 按平台调度：WSL/Linux 只使用 WSL 目录；Windows/IDE 只使用服务目录本地依赖。所有 WSL 启动入口为项目内 `scripts/run-*-wsl.sh` 或各模块 `scripts/run-wsl.sh`。
-- **Python RAG WSL 虚拟环境（2026-09-04）**：执行 `cd paimeng-ai-code-rag && bash scripts/install-wsl-venv.sh`；脚本用 `UV_PROJECT_ENVIRONMENT`、`UV_CACHE_DIR`、`UV_PYTHON_INSTALL_DIR` 将环境、缓存和受 uv 管理的解释器留在 `wsl-rt-env/python/`。P4 前不常态启动；Windows 使用 uv 默认的本地 `.venv`。
-- **WSL 启动脚本统一入口（2026-09-04）**：Java 使用根目录 `scripts/run-java-wsl.sh`（`run`/`test`/`compile`）；TS Agent 与前端各自使用 `scripts/run-wsl.sh`（默认 `dev`，可传相应 npm 子命令）；Python RAG 使用既有 `scripts/run-wsl.sh`。全部脚本先校验 Linux/WSL，再指定 `wsl-rt-env/`，故不会要求 Windows 先执行 WSL，也不会影响现有 IDE 配置。
+- **WSL 安装/启动脚本机制（2026-09-04）**：安装入口——TS Agent 与前端各自 `bash scripts/install-wsl-node-modules.sh`（复制受版本控制的 package.json/package-lock.json 后以 `npm --prefix wsl-rt-env/<svc> install` 直装实体目录，不创建软链、不在服务目录暂存依赖）、Python RAG `bash scripts/install-wsl-venv.sh`（`UV_PROJECT_ENVIRONMENT`/`UV_CACHE_DIR`/`UV_PYTHON_INSTALL_DIR` 定向 `wsl-rt-env/python/`，Windows 用 uv 默认本地 `.venv`）。启动入口——Java 根目录 `scripts/run-java-wsl.sh`（`run`/`test`/`compile`），TS Agent/前端/Python 各自 `scripts/run-wsl.sh`（npm 子命令可传）；全部脚本先校验 Linux/WSL 再指向 `wsl-rt-env/`，不影响现有 IDE 配置。
 - **npm 会替换 node_modules 符号链接（TS Agent，2026-09-04 已根治）**：旧方案服务目录放符号链接，`npm install`/`npm ci` 的 reify 都会把它换成实体目录。现方案 esbuild 打包改造后**服务目录零 node_modules、零软链**：WSL 安装命令为 `bash scripts/install-wsl-node-modules.sh`，脚本通过 `npm --prefix wsl-rt-env/ts-agent install` 直接写入运行时目录；运行/测试经 `scripts/run.mjs` 按平台调度，绝不跨平台回退。
 - **TS Agent 无软链方案的工具适配（2026-09-04 实测踩坑）**：① Node ESM 不认 NODE_PATH，vitest 靠 `vitest.config.mjs` 的 `resolve.alias` 指向 `wsl-rt-env/ts-agent/node_modules`（alias 必须写在服务目录内的配置里，配置文件里 `new URL('../wsl-rt-env/...')` 的相对解析以配置文件自身位置为基准）；② tsc 不认 NODE_PATH，`tsconfig.json` 用 `paths` 显式映射到各包 d.ts **文件**（映射到目录无效，NodeNext 下不做 package.json 解析）+ `typeRoots` 双候选，候选列表本地优先、wsl-rt-env 兜底；③ esbuild JS API 不读 NODE_PATH（CLI 才读），等价物是 `nodePaths` 选项；`bin/esbuild` 可能被 postinstall 换成原生 ELF，勿用 `node bin/esbuild` 调用，走 `lib/main.js` 的 JS API；④ esbuild ESM bundle 需 banner 注入 `createRequire`（fastify 内部有 CJS require），CJS 格式则挂 `import.meta.url`；⑤ DrvFs 上 `node --watch` 收不到文件事件（esbuild 自带轮询兜底可收到），dev 的重启链路由 esbuild watch 的 `onEnd` 回调驱动，不用 node --watch。
 - **DrvFs 目录重命名受限**：/mnt/c 上 mv 含打开句柄的目录（如运行中的 tsx watch 占用 node_modules）报 Permission denied——先停相关进程再迁移。

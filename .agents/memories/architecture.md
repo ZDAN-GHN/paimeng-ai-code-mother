@@ -39,7 +39,7 @@
 - 旧 Java AI 链路为回退主链路（**P0 已执行（2026-09-03）**：`application-local.yml` 已回切 `python-agent.enabled=false`，WSL 全栈 e2e 验证通过，Issue #2）。
 - T21 门禁重定向："TS Agent 契约对等 + 回归全绿"（删除范围仍按 `docs/py_agent/t21_delete_plan.md`，`createApp` 保留 Java 侧 AI 路由）。
 - **目录方案（2026-09-03 用户决策：重命名取代删除）**：旧 Python Agent 目录整体 `git mv` 为 `paimeng-ai-code-rag/`（RAG 骨架复用起点，P4 精简退役代码）；**TS Agent 落位 `paimeng-ai-code-agent/`（目录名复用）**；TS 移植参考 = `docs/py_agent/` 文档 + `paimeng-ai-code-rag/` 代码与 git 历史。
-- Java 侧 `ai/python/*` 将泛化为通用 Agent 客户端（`agent.*` 配置段）。
+- Java 侧 `ai/python/*` 已泛化为 `ai/agent/*`（#6 落地：`agent.*` 配置段，`python-agent.*` 别名保留）。
 
 ## 踩坑与规避（架构级）
 
