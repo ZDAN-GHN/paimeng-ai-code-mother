@@ -48,7 +48,8 @@
 
 ## 下一步 / 指针
 
+- **架构优雅化第一批（2026-09-08 架构审查后落地，父 issue #15）**：#16 目录收敛+死代码清场（零行为变更，无阻塞立即可开工）→ #17 真流式 SSE → #18 zod 单源 → #19 质检 generateObject 主链；#20 重试策略参数化（已拍板：短调用恢复 SDK 默认退避、长生成保持 0）；#21 路由收敛收尾（setErrorHandler + 访谈编排归位 + script 参数退场）。审查根因结论在 #15 正文；**XState「图只簿记不驱动控制流」双轨决策待用户拍板（#22，关键变量 = P2 断点续传的快照序列化预期）**，不进第一批链。
 - 路由模型调用点（自动选档/工位识别）尚未实现——`MODEL_ROUTER` 与 provider 映射已打通，行为设计（规则前置 or LLM 判档、超时回退默认档）需先出设计再动工。
-- #14 灰度 + T21 删除旧链路；进度日志 `docs/ts_agent/progress.md`（每完成一票追加一行，含命令证据）。
+- 进度日志 `docs/ts_agent/progress.md`（每完成一票追加一行，含命令证据）。
 - npm 坑：命令必须在 `paimeng-ai-code-agent/` 目录内执行（仓库根目录会读到 `/mnt/c/Users/LXH/.npmrc` 报 "config prefix cannot be changed"）。
 - 运行时目录按宿主分流（原生 Linux 默认 / WSL 用 `wsl-rt-env/`）见 `deployment.md`。

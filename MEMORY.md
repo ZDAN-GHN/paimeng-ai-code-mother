@@ -52,4 +52,6 @@
 
 ## 下一步
 
+**TS Agent 架构优雅化第一批已发票（父 issue #15，2026-09-08 审查落地）**：#16 目录收敛 → #17 真流式 → #18 zod → #19 generateObject，#20 重试策略、#21 路由收敛；XState 双轨决策 #22 待拍板（见 `ts-agent.md`）。
+
 **P4 RAG + 盈利 MVP**：`paimeng-ai-code-rag/` 精简退役代码后 day-1 上线（few-shot 直查）+ 反馈埋点；手动充值已就绪；无执照，微信支付/公众号通知 v1.x。Python Agent **目录删除**门槛 = P4 RAG 骨架复用（当前维持「目录待删」）。每完成一个任务：更新 `.agents/memories/` 对应文档 + 本文件现状与完成链 + `docs/ts_agent/progress.md` 追加一行（含日期与命令证据）。
