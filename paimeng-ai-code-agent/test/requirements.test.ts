@@ -307,3 +307,43 @@ describe('POST /agent/wireframe/confirm（确认闸门 + 跨请求存活）', ()
     expect(String((confirm.json() as { message: string }).message)).toContain('没有待确认的线框')
   })
 })
+
+// 请求体非法时的 4xx 拒绝路径锁定（#18 zod 单源）：错误响应体与旧手写解析逐字节等价
+describe('需求工程端点请求体校验（#18）', () => {
+  it('interview：必填全缺（空 body）→ 400 必填报错', async () => {
+    const token = await makeToken()
+    const app = buildTestApp(makeWorkspaceRoot())
+    const response = await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: {} })
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({ statusCode: 400, error: 'Bad Request', message: 'runId、appId、userId 必填' })
+  })
+
+  it('interview：runId 类型不符（数字）→ 宽容回退后统一 400（类型回退等价）', async () => {
+    const token = await makeToken()
+    const app = buildTestApp(makeWorkspaceRoot())
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/interview',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 123, appId: 1 },
+    })
+    expect(response.statusCode).toBe(400)
+    expect((response.json() as { message: string }).message).toBe('runId、appId、userId 必填')
+  })
+
+  it('wireframe：缺 workspacePath → 400 必填报错', async () => {
+    const token = await makeToken()
+    const app = buildTestApp(makeWorkspaceRoot())
+    const response = await app.inject({ method: 'POST', url: '/agent/wireframe', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-v1', appId: 1 } })
+    expect(response.statusCode).toBe(400)
+    expect((response.json() as { message: string }).message).toBe('runId、appId、workspacePath、userId 必填')
+  })
+
+  it('wireframe/confirm：必填全缺 → 400 必填报错', async () => {
+    const token = await makeToken()
+    const app = buildTestApp(makeWorkspaceRoot())
+    const response = await app.inject({ method: 'POST', url: '/agent/wireframe/confirm', headers: { authorization: `Bearer ${token}` }, payload: {} })
+    expect(response.statusCode).toBe(400)
+    expect((response.json() as { message: string }).message).toBe('runId、appId、userId 必填')
+  })
+})

@@ -3,6 +3,7 @@
 // codegen（/agent/stream）受线框闸门约束——未确认线框的请求被拒（架构 §4 闸门纪律）。
 import path from 'node:path'
 import { mkdir, writeFile } from 'node:fs/promises'
+import { z } from 'zod'
 import type { FastifyInstance } from 'fastify'
 import type { AgentConfig } from './config.js'
 import { RunClient, RunApiError } from '../runs/runClient.js'
@@ -10,7 +11,6 @@ import { encodeEventStream } from '../protocol/sse.js'
 import type { AgentEvent } from '../protocol/events.js'
 import { runGenerationWorkflow, type StreamRequest } from '../generation/workflow/index.js'
 import type { HistoryTurn } from '../generation/workflow/history.js'
-import type { Intensity } from '../generation/intensity.js'
 import type { LlmProvider } from '../llm/index.js'
 import { createRealLlm, isRealLlmConfigured } from '../llm/real.js'
 import { WorkspacePathError, validateWorkspacePath } from '../generation/workspace.js'
@@ -39,46 +39,39 @@ export interface AgentRouteOptions {
   reviewGates?: ReviewGateSet
 }
 
-// ── 请求体解析（宽容取类型，缺省回退）──
+// ── 请求体解析（#18 zod 单源）：形状与宽容回退在 schema 一处定义 ──
+// 字段类型不符回退缺省值（runId→''、message→undefined 等），必填拒绝仍由路由必填校验承担，
+// 非法请求 4xx 路径与错误响应体保持旧手写解析行为不变。
 
-interface InterviewBody {
-  runId: string
-  appId: number | string
-  userId?: number | string
-  message?: string
-  answers?: InterviewAnswer[]
+// 非对象 body（缺省/裸标量/数组）归一为空对象（对齐旧解析「body ?? {}」再逐字段取值的宽容行为）
+function tolerantBody<T extends z.ZodRawShape>(shape: T) {
+  return z.preprocess(
+    (body) => (body && typeof body === 'object' && !Array.isArray(body) ? body : {}),
+    z.object(shape),
+  )
 }
 
-function asInterviewBody(body: unknown): InterviewBody {
-  const input = (body ?? {}) as Record<string, unknown>
-  const answers = Array.isArray(input.answers)
-    ? (input.answers as InterviewAnswer[]).filter((a) => a && typeof a === 'object')
-    : undefined
-  return {
-    runId: typeof input.runId === 'string' ? input.runId : '',
-    appId: typeof input.appId === 'string' || typeof input.appId === 'number' ? input.appId : '',
-    userId: input.userId as number | string | undefined,
-    message: typeof input.message === 'string' ? input.message : undefined,
-    answers,
-  }
-}
+// 访谈请求体：answers 宽容逐条过滤（对象条目才保留，对齐旧解析语义）
+const interviewBodySchema = tolerantBody({
+  runId: z.string().catch(''),
+  appId: z.union([z.string(), z.number()]).catch(''),
+  userId: z.union([z.number(), z.string()]).optional().catch(undefined),
+  message: z.string().optional().catch(undefined),
+  answers: z.array(z.unknown()).optional().catch(undefined)
+    .transform((entries) => entries?.filter((a): a is InterviewAnswer => Boolean(a) && typeof a === 'object')),
+})
 
-interface WireframeBody {
-  runId: string
-  appId: number | string
-  userId?: number | string
-  workspacePath?: string
-}
+type InterviewBody = z.infer<typeof interviewBodySchema>
 
-function asWireframeBody(body: unknown): WireframeBody {
-  const input = (body ?? {}) as Record<string, unknown>
-  return {
-    runId: typeof input.runId === 'string' ? input.runId : '',
-    appId: typeof input.appId === 'string' || typeof input.appId === 'number' ? input.appId : '',
-    userId: input.userId as number | string | undefined,
-    workspacePath: typeof input.workspacePath === 'string' ? input.workspacePath : undefined,
-  }
-}
+// 线框请求体（生成与确认端点共用）
+const wireframeBodySchema = tolerantBody({
+  runId: z.string().catch(''),
+  appId: z.union([z.string(), z.number()]).catch(''),
+  userId: z.union([z.number(), z.string()]).optional().catch(undefined),
+  workspacePath: z.string().optional().catch(undefined),
+})
+
+type WireframeBody = z.infer<typeof wireframeBodySchema>
 
 // 离线剧本白名单（script 查表，替代嵌套三元；其余一律回退 success）
 const SCRIPT_WHITELIST: Record<string, NonNullable<StreamRequest['script']>> = {
@@ -99,22 +92,27 @@ const CODE_GEN_TYPE_WHITELIST: Record<string, NonNullable<StreamRequest['codeGen
   vue_project: 'vue_project',
 }
 
-function asStreamBody(body: unknown): StreamRequest {
-  const input = (body ?? {}) as Record<string, unknown>
-  const runId = typeof input.runId === 'string' ? input.runId : ''
-  const appId = typeof input.appId === 'string' || typeof input.appId === 'number' ? input.appId : ''
-  const message = typeof input.message === 'string' ? input.message : ''
-  const script = typeof input.script === 'string' ? SCRIPT_WHITELIST[input.script] ?? 'success' : 'success'
-  const intensity = typeof input.intensity === 'string' ? (input.intensity as Intensity) : undefined
-  const codeGenType = typeof input.codeGenType === 'string' ? CODE_GEN_TYPE_WHITELIST[input.codeGenType] : undefined
-  // 输入历史滑窗（#9）：宽容解析 history: [{ role, content }]，非法条目丢弃
-  const history = Array.isArray(input.history)
-    ? (input.history as Array<Record<string, unknown>>)
-        .filter((h) => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string')
-        .map((h) => ({ role: h.role as 'user' | 'assistant', content: h.content as string }))
-    : undefined
-  return { runId, appId, userId: input.userId as number | string | undefined, message, workspacePath: input.workspacePath as string | undefined, script, intensity, history, codeGenType }
-}
+// 输入历史条目（#9 历史滑窗）：宽容逐条校验 {role, content}，非法条目丢弃
+const historyTurnSchema = z.object({
+  role: z.enum(['user', 'assistant']),
+  content: z.string(),
+})
+
+// 生成流请求体：script/codeGenType 查表白名单，intensity 非法值回退缺省（resolveIntensity 统一回退标准档）
+const streamBodySchema = tolerantBody({
+  runId: z.string().catch(''),
+  appId: z.union([z.string(), z.number()]).catch(''),
+  userId: z.union([z.number(), z.string()]).optional().catch(undefined),
+  message: z.string().catch(''),
+  workspacePath: z.string().optional().catch(undefined),
+  script: z.string().optional().catch(undefined)
+    .transform((s) => (s ? SCRIPT_WHITELIST[s] ?? 'success' : 'success')),
+  intensity: z.enum(['fast', 'standard', 'deep']).optional().catch(undefined),
+  codeGenType: z.string().optional().catch(undefined)
+    .transform((s) => (s ? CODE_GEN_TYPE_WHITELIST[s] : undefined)),
+  history: z.array(historyTurnSchema.nullable().catch(null)).optional().catch(undefined)
+    .transform((entries) => entries?.filter((turn): turn is HistoryTurn => turn !== null)),
+})
 
 export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, options: AgentRouteOptions = {}): void {
   // LLM provider 装配（2026-09-08 四档接线）：显式注入优先；否则配置了任一渠道密钥即走真实 provider，
@@ -141,7 +139,7 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
   // ── 五维访谈（Issue #7）：选择题访谈，最多 2 轮，信息足够跳过剩余轮次 ──
   // 状态持久化于 run.context.interview（跨请求存活：关页面再回来可续答 / 确认）
   fastify.post('/agent/interview', async (request, reply) => {
-    const input = asInterviewBody(request.body)
+    const input = interviewBodySchema.parse(request.body)
     const userId = input.userId ?? request.user?.sub ?? ''
     if (!input.runId || input.appId === '' || userId === '') {
       return reply.code(400).send({ statusCode: 400, error: 'Bad Request', message: 'runId、appId、userId 必填' })
@@ -226,7 +224,7 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
 
   // ── 线框生成（Issue #7）：免费 + 每用户每日独立限频（Java 内部配额端点），落工作区 wireframe/ ──
   fastify.post('/agent/wireframe', async (request, reply) => {
-    const input = asWireframeBody(request.body)
+    const input = wireframeBodySchema.parse(request.body)
     const userId = input.userId ?? request.user?.sub ?? ''
     if (!input.runId || input.appId === '' || !input.workspacePath || userId === '') {
       return reply.code(400).send({ statusCode: 400, error: 'Bad Request', message: 'runId、appId、workspacePath、userId 必填' })
@@ -272,7 +270,7 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
 
   // ── 线框确认（Issue #7）：wireframe_pending → wireframe_confirmed（积分冻结时刻的挂点，见 #10）──
   fastify.post('/agent/wireframe/confirm', async (request, reply) => {
-    const input = asWireframeBody(request.body)
+    const input = wireframeBodySchema.parse(request.body)
     const userId = input.userId ?? request.user?.sub ?? ''
     if (!input.runId || input.appId === '' || userId === '') {
       return reply.code(400).send({ statusCode: 400, error: 'Bad Request', message: 'runId、appId、userId 必填' })
@@ -304,7 +302,7 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
   })
 
   fastify.post('/agent/stream', async (request, reply) => {
-    const input = asStreamBody(request.body)
+    const input = streamBodySchema.parse(request.body)
     const userId = input.userId ?? request.user?.sub ?? ''
     if (!input.runId || input.appId === '' || !input.message || userId === '') {
       return reply.code(400).send({ statusCode: 400, error: 'Bad Request', message: 'runId、appId、message、userId 必填' })
