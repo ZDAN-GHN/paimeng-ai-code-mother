@@ -398,7 +398,9 @@ class ScriptedLanguageModel implements LanguageModelV2 {
   }
 }
 
-// 质检假模型（reviewer 工位）：按剧本返回 code-quality-check JSON（isValid/errors/suggestions）。
+// 质检假模型（reviewer 工位）：按剧本返回 code-quality-check 纯 JSON 文本（isValid/errors/suggestions）。
+// #19 质检门禁迁移 generateObject：纯 text JSON 正是 SDK 文本解析路径的输入（doGenerate 收到的
+// responseFormat json 提示无需理会，直接回文本即可），schema 校验在 SDK 层完成。
 // quality-fail-then-pass：第 1 次质检失败、第 2 次起通过（有界重试后通过剧本）；
 // quality-fail-always：永远失败（重试耗尽 → failed）。
 class QualityLanguageModel implements LanguageModelV2 {
@@ -446,7 +448,7 @@ class QualityLanguageModel implements LanguageModelV2 {
   }
 
   async doStream(options: LanguageModelV2CallOptions) {
-    // 质检走 generateText（doGenerate）；doStream 为接口完整性
+    // 质检走 generateObject（doGenerate）；doStream 为接口完整性
     this.records.push({ modelId: this.modelId, maxOutputTokens: options.maxOutputTokens, hasToolResult: hasToolResult(options) })
     const text = this.buildQualityJson()
     const parts: LanguageModelV2StreamPart[] = [

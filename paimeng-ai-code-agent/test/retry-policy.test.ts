@@ -34,7 +34,7 @@ function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   }
 }
 
-// 质检通过补全响应（content 为质检 JSON，供 parseQualityScore 解析为通过）
+// 质检通过补全响应（content 为纯 JSON 文本——#19 起 LlmQualityScorer 走 generateObject 文本解析路径，schema 直接产出 typed 对象）
 const QUALITY_PASS_COMPLETION = {
   id: 'chatcmpl-retry',
   object: 'chat.completion',

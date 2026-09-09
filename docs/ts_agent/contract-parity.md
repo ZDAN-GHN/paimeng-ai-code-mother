@@ -108,7 +108,7 @@
 |---|---|---|
 | test_concatenate_includes_code_and_skips_ignored | 拼接只含代码文件，跳过隐藏/node_modules/dist | ✅ `review.test.ts`（本票补 dist 断言） |
 | test_concatenate_missing_dir_returns_empty | 目录缺失返回空 | ✅ `review.test.ts`（本票补） |
-| test_check_quality_parses_json | 质检 JSON → 结构化结果 | ✅ `review.test.ts` parseQualityScore（结构升级：isValid/grade/errors/suggestions） |
+| test_check_quality_parses_json | 质检 JSON → 结构化结果 | ✅ `review.test.ts` generateObject + `qualityScoreOutputSchema`（#19 迁移：typed 契约 isValid/errors/suggestions，grade 本地推导；解析失败走 NoObjectGeneratedError 错误路径） |
 | test_check_quality_fallback_pass_on_error | 解析异常按通过兜底 | 🗄️ 有意变更（#9 设计）：无法解析视为**未通过**（宁可重试不放行劣质产物），判据见 `review.test.ts` 注释与 #9 记录 |
 
 ### `test_images.py`（8 例）— 图片四工具

@@ -1,13 +1,15 @@
 // 三重门禁具体实现（Issue #9）：
 // ① 结构化质检分（QualityScoreGate）：调 reviewer 模型（scripted-quality + code-quality-check 提示词）
-//    输出 code-quality-check JSON（isValid/errors/suggestions），isValid 即门禁通过判定；
+//    经 generateObject + zod schema 输出 code-quality-check 结构化分（isValid/errors/suggestions，#19），
+//    isValid 即门禁通过判定；
 // ② build 验证（BuildGate）：html 单文件做静态结构校验（L0 无 npm 项目），multi_file/vue_project 跑 npm run build；
 // ③ 视觉 diff（VisualDiffGate）：以已确认线框为基准做结构启发式对比（页面区段覆盖）。
 // 各门禁的「执行器」（scorer / buildVerifier / visualDiff）可注入替身——测试断言失败触发重试、
 // 「以已确认线框为基准」的基准来源正确。
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
-import { generateText } from 'ai'
+import { NoObjectGeneratedError, generateObject } from 'ai'
+import { z } from 'zod'
 import type { LlmProvider } from '../../llm/index.js'
 import { loadPrompt, PROMPT_NAMES } from '../prompts/index.js'
 import { SHORT_CALL_MAX_RETRIES } from '../retryPolicy.js'
@@ -39,56 +41,64 @@ export interface QualityScorer {
   score(codeContent: string, signal?: AbortSignal): Promise<QualityScore>
 }
 
-// 从模型输出提取 JSON（去除 ```json 代码块围栏；对齐 Python _extract_json）
-export function extractJsonText(text: string): string {
-  if (!text) return ''
-  const content = text.trim()
-  const fence = /```(?:json)?\s*([\s\S]*?)```/.exec(content)
-  if (fence) return fence[1]!.trim()
-  const start = content.indexOf('{')
-  const end = content.lastIndexOf('}')
-  if (start !== -1 && end > start) return content.slice(start, end + 1)
-  return content
-}
+// 质检 LLM 输出契约（#19：generateObject + zod schema 结构化输出，替代手搓 JSON 解析）。
+// isValid/errors/suggestions 是要求模型输出的显式契约：isValid 即门禁判定，errors/suggestions
+// 作失败交代回喂 coder。grade 与 usage 是本地字段，不进该 schema——grade 由 isValid/errors
+// 推导（见 LlmQualityScorer），usage 来自 SDK 计量。
+export const qualityScoreOutputSchema = z.object({
+  isValid: z.boolean(),
+  errors: z.array(z.string()),
+  suggestions: z.array(z.string()),
+})
 
-// 解析质检 JSON：失败 → 视为质检无法判定（不通过，宁可重试不放行劣质产物）
-export function parseQualityScore(text: string): QualityScore {
-  try {
-    const data = JSON.parse(extractJsonText(text)) as { isValid?: unknown; errors?: unknown; suggestions?: unknown }
-    const errors = Array.isArray(data.errors) ? data.errors.filter((e): e is string => typeof e === 'string') : []
-    const suggestions = Array.isArray(data.suggestions)
-      ? data.suggestions.filter((s): s is string => typeof s === 'string')
-      : []
-    const isValid = data.isValid === true
-    return { isValid, grade: isValid ? 100 : Math.max(0, 100 - errors.length * 20), errors, suggestions }
-  } catch {
-    return { isValid: false, grade: 0, errors: ['质检结果无法解析，视为未通过'], suggestions: [] }
-  }
-}
-
-// 默认质检分执行器：generateText 调 reviewer 模型（scripted-quality），提示词复用 code-quality-check
+// 默认质检分执行器：generateObject 调 reviewer 模型（scripted-quality），提示词复用 code-quality-check。
+// #19 从 generateText + 手搓 JSON 解析迁移为结构化输出：zod schema 直接产出 typed 对象，
+// 输出不合 schema 走 SDK 的 NoObjectGeneratedError 错误路径（不再剥围栏/探 JSON/清洗字段）
 export class LlmQualityScorer implements QualityScorer {
   constructor(private readonly provider: LlmProvider) {}
   async score(codeContent: string, signal?: AbortSignal): Promise<QualityScore> {
-    const result = await generateText({
-      model: this.provider.languageModel('scripted-quality'),
-      system: loadPrompt(PROMPT_NAMES.codeQualityCheck),
-      prompt: codeContent,
-      // 短调用恢复 SDK 默认退避重试（#20；次数单源见 generation/retryPolicy.ts）
-      maxRetries: SHORT_CALL_MAX_RETRIES,
-      // 对话中断（#10 审查整改）：reviewer 工位的质检模型调用同样受 abort 信号约束
-      //（中断落在 review 时 LLM 即时取消，而非延迟到下一检查点）
-      ...(signal ? { abortSignal: signal } : {}),
-    })
-    const score = parseQualityScore(result.text)
-    // 质检模型调用同样产生 token 消耗（#9 计量）：随评分回传，由 workflow 累计进 run.token_usage
-    return {
-      ...score,
-      usage: {
-        inputTokens: result.usage.inputTokens ?? 0,
-        outputTokens: result.usage.outputTokens ?? 0,
-        totalTokens: result.usage.totalTokens ?? 0,
-      },
+    try {
+      const result = await generateObject({
+        model: this.provider.languageModel('scripted-quality'),
+        schema: qualityScoreOutputSchema,
+        system: loadPrompt(PROMPT_NAMES.codeQualityCheck),
+        prompt: codeContent,
+        // 短调用恢复 SDK 默认退避重试（#20；次数单源见 generation/retryPolicy.ts）
+        maxRetries: SHORT_CALL_MAX_RETRIES,
+        // 对话中断（#10 审查整改）：reviewer 工位的质检模型调用同样受 abort 信号约束
+        //（中断落在 review 时 LLM 即时取消，而非延迟到下一检查点）
+        ...(signal ? { abortSignal: signal } : {}),
+      })
+      const { isValid, errors, suggestions } = result.object
+      return {
+        isValid,
+        // grade 为本地推导字段（不在模型输出契约内）：通过满分，按错误数递减（口径对齐 #9 原 parseQualityScore）
+        grade: isValid ? 100 : Math.max(0, 100 - errors.length * 20),
+        errors,
+        suggestions,
+        // 质检模型调用同样产生 token 消耗（#9 计量）：随评分回传，由 workflow 累计进 run.token_usage
+        usage: {
+          inputTokens: result.usage.inputTokens ?? 0,
+          outputTokens: result.usage.outputTokens ?? 0,
+          totalTokens: result.usage.totalTokens ?? 0,
+        },
+      }
+    } catch (error) {
+      // #19：模型输出非 JSON 或不合 schema → SDK 抛 NoObjectGeneratedError，catch 转等价回退
+      //（视为未通过，宁可重试不放行劣质产物）；其余错误（网络重试耗尽 / abort）沿 SDK 错误路径上抛
+      if (!NoObjectGeneratedError.isInstance(error)) throw error
+      return {
+        isValid: false,
+        grade: 0,
+        errors: ['质检结果无法解析，视为未通过'],
+        suggestions: [],
+        // 模型调用已发生只是解析失败：usage 随错误对象尽力回传（计量不丢，对齐原 generateText 成功后本地解析失败的场景）
+        usage: {
+          inputTokens: error.usage?.inputTokens ?? 0,
+          outputTokens: error.usage?.outputTokens ?? 0,
+          totalTokens: error.usage?.totalTokens ?? 0,
+        },
+      }
     }
   }
 }

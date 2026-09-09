@@ -1,7 +1,10 @@
-// 三重门禁质检器测试（Issue #9）：结构化质检分解析、build 门禁（html 静态校验）、
+// 三重门禁质检器测试（Issue #9；#19 质检输出迁移 generateObject + zod schema）：
+// 结构化质检分（schema 显式契约 + NoObjectGeneratedError 错误路径）、build 门禁（html 静态校验）、
 // 视觉 diff 门禁（以已确认线框为基准：基准缺失失败、覆盖线框页面区段通过、缺区段失败）、门禁汇总
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { customProvider } from 'ai'
+import type { LanguageModelV2, LanguageModelV2StreamPart } from '@ai-sdk/provider'
 import { describe, expect, it, vi } from 'vitest'
 import { makeWorkspaceRoot } from '../../helpers.js'
 import {
@@ -9,57 +12,67 @@ import {
   DefaultVisualDiffVerifier,
   LlmQualityScorer,
   QualityScoreGate,
-  extractJsonText,
-  parseQualityScore,
   readAndConcatenateCodeFiles,
   type BuildVerifier,
   type VisualDiffVerifier,
 } from '../../../src/generation/review/index.js'
 import { runReviewGates, type ReviewContext, type ReviewGate } from '../../../src/generation/review/types.js'
-import { createScriptedLlm } from '../../../src/llm/index.js'
+import { createScriptedLlm, type LlmProvider } from '../../../src/llm/index.js'
 
 // 构造评审上下文（默认 html 类型 + 指定线框基准路径）
 function makeContext(overrides: Partial<ReviewContext> = {}): ReviewContext {
   return { workspacePath: makeWorkspaceRoot(), wireframePath: undefined, codeGenType: 'html', codeContent: '', ...overrides }
 }
 
+// 返回坏输出的质检假模型：驱动 generateObject 抛 NoObjectGeneratedError 的 SDK 错误路径
+// （#19 等价迁移：原 parseQualityScore「无法解析 → 视为未通过」的手搓回退）
+class BrokenOutputQualityModel implements LanguageModelV2 {
+  readonly specificationVersion = 'v2' as const
+  readonly provider = 'scripted'
+  readonly modelId = 'scripted-quality'
+  readonly supportedUrls = {}
+  constructor(private readonly text: string) {}
+  async doGenerate() {
+    return {
+      content: [{ type: 'text' as const, text: this.text }],
+      finishReason: 'stop' as const,
+      usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+      warnings: [],
+    }
+  }
+  async doStream() {
+    // 质检走 generateObject（doGenerate）；doStream 为接口完整性（立即闭合的空流，不应被消费）
+    return {
+      stream: new ReadableStream<LanguageModelV2StreamPart>({
+        start(controller) {
+          controller.close()
+        },
+      }),
+    }
+  }
+}
+
+function brokenQualityProvider(text: string): LlmProvider {
+  return customProvider({ languageModels: { 'scripted-quality': new BrokenOutputQualityModel(text) } })
+}
+
 describe('结构化质检分（Issue #9）', () => {
-  it('extractJsonText：去除 ```json 代码块围栏', () => {
-    expect(extractJsonText('```json\n{"isValid": true}\n```')).toBe('{"isValid": true}')
-    expect(extractJsonText('前缀\n{"a": 1}\n后缀')).toBe('{"a": 1}')
-    expect(extractJsonText('plain text')).toBe('plain text')
-  })
-
-  it('parseQualityScore：合法 JSON → isValid/grade/errors/suggestions', () => {
-    const score = parseQualityScore('{"isValid": false, "errors": ["缺根元素"], "suggestions": ["补全 html 根"]}')
-    expect(score.isValid).toBe(false)
-    expect(score.grade).toBeLessThan(100)
-    expect(score.errors).toEqual(['缺根元素'])
-    expect(score.suggestions).toEqual(['补全 html 根'])
-  })
-
-  it('parseQualityScore：isValid=true → 满分', () => {
-    expect(parseQualityScore('{"isValid": true}').isValid).toBe(true)
-    expect(parseQualityScore('{"isValid": true}').grade).toBe(100)
-  })
-
-  it('parseQualityScore：无法解析 → 视为未通过（宁可重试不放行劣质产物）', () => {
-    const score = parseQualityScore('not json at all')
-    expect(score.isValid).toBe(false)
-    expect(score.grade).toBe(0)
-  })
-
-  it('LlmQualityScorer：success 剧本 → 质检通过', async () => {
+  it('LlmQualityScorer：success 剧本 → 质检通过（isValid=true → grade 满分）', async () => {
     const scorer = new LlmQualityScorer(createScriptedLlm('success'))
     const score = await scorer.score('<html><body>ok</body></html>')
     expect(score.isValid).toBe(true)
     expect(score.grade).toBe(100)
   })
 
-  it('LlmQualityScorer：quality-fail-always 剧本 → 质检失败', async () => {
+  it('LlmQualityScorer：quality-fail-always 剧本 → 质检失败（typed 对象透传 + grade 按错误数递减）', async () => {
     const scorer = new LlmQualityScorer(createScriptedLlm('quality-fail-always'))
     const score = await scorer.score('<html><body>bad</body></html>')
     expect(score.isValid).toBe(false)
+    // #19 等价迁移：原「parseQualityScore 合法 JSON → isValid/grade/errors/suggestions」——
+    // 模型输出的 errors/suggestions 经 schema 直接成为 typed 对象字段，grade 本地推导（100 - 1*20）
+    expect(score.errors).toEqual(['生成页面缺少必要的视觉还原（模拟质检失败）'])
+    expect(score.suggestions).toEqual(['按已确认线框调整页面布局与区块结构'])
+    expect(score.grade).toBe(80)
   })
 
   it('LlmQualityScorer：quality-fail-then-pass → 第 1 次失败、第 2 次通过（有界重试后通过）', async () => {
@@ -68,6 +81,24 @@ describe('结构化质检分（Issue #9）', () => {
     const second = await scorer.score('<html></html>')
     expect(first.isValid).toBe(false)
     expect(second.isValid).toBe(true)
+  })
+
+  it('LlmQualityScorer：模型输出非 JSON → NoObjectGeneratedError 错误路径 → 视为未通过（宁可重试不放行劣质产物）', async () => {
+    const scorer = new LlmQualityScorer(brokenQualityProvider('not json at all'))
+    const score = await scorer.score('<html><body>bad</body></html>')
+    expect(score.isValid).toBe(false)
+    expect(score.grade).toBe(0)
+    expect(score.errors).toEqual(['质检结果无法解析，视为未通过'])
+    // 解析失败但模型调用已发生：usage 计量不丢（等价原 generateText 成功后本地解析失败的场景）
+    expect(score.usage).toEqual({ inputTokens: 5, outputTokens: 5, totalTokens: 10 })
+  })
+
+  it('LlmQualityScorer：模型输出不合 schema（字段类型错）→ 同样视为未通过（#19 schema 显式契约）', async () => {
+    const scorer = new LlmQualityScorer(brokenQualityProvider('{"isValid": "yes", "errors": [], "suggestions": []}'))
+    const score = await scorer.score('<html></html>')
+    expect(score.isValid).toBe(false)
+    expect(score.grade).toBe(0)
+    expect(score.errors).toEqual(['质检结果无法解析，视为未通过'])
   })
 
   it('QualityScoreGate 通过 → passed', async () => {
