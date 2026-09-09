@@ -48,6 +48,12 @@ export interface StreamRequest {
   codeGenType?: CodeGenType
 }
 
+// 生成期结构化日志（Issue #17）：路由注入请求关联 logger（fastify request.log），
+// 生成过程中的失败日志经它落盘（结构化 + reqId 请求关联），不再 console 直落 stdout
+export interface WorkflowLogger {
+  error(mergeObject: object, message: string): void
+}
+
 export interface WorkflowOptions {
   // 可注入的 LLM provider（测试注入 scripted；生产由路由层按配置装配 real，见 routes/agent.ts）
   provider?: LlmProvider
@@ -66,6 +72,8 @@ export interface WorkflowOptions {
   // 中止信号（Issue #10 对话中断，架构 §3.5 中止 (a)）：连接断开/用户中止时由路由 abort，
   // 工作流取消 LLM 调用、保留已写文件并走 aborted 终态（历史 [用户中断] + 折算退款）
   abortSignal?: AbortSignal
+  // 生成期结构化日志（Issue #17）：路由注入 request.log；缺省不落日志（纯函数式调用方与测试）
+  logger?: WorkflowLogger
 }
 
 // 用户中断哨兵错误：abort 信号触发后由 error part 分支抛出，顶层 catch 据此走 aborted 终态
@@ -195,7 +203,8 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
         ...(options_.filesWritten !== undefined ? { filesWritten: options_.filesWritten } : {}),
       })
     } catch (error) {
-      console.error(`[workflow] 完成回调失败，runId: ${request.runId}: ${(error as Error).message}`)
+      // 回调失败不阻断主流程；经请求关联 logger 结构化落盘（Issue #17，替代 console.error）
+      options.logger?.error({ err: error, runId: request.runId }, '完成回调失败')
     }
   }
 
