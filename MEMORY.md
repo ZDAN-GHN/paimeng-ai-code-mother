@@ -28,6 +28,8 @@
 | #17 | 2026-09-08 | 真流式 SSE：hijack 逐帧写出、首帧即达（AC5 经实际直连路径验证 14ms/102ms） |
 | #18 | 2026-09-08 | zod 单源：10 工具 + 3 body 解析 schema 统一、input as 清零、FileToolResult 判别联合 |
 | #20 | 2026-09-08 | 重试策略参数化：短调用恢复 SDK 退避（单源常量）、长生成保持 0 |
+| #19 | 2026-09-08 | 质检门禁换 generateObject：手搓 JSON 解析归零、typed 契约显式化 |
+| #21 | 2026-09-08 | 路由收敛：错误单点 httpError、双轨预检（边界=首帧）、编排归位、script 退场 |
 
 - 另：2026-09-07 双源图片搜索 + SearXNG 容器（图片搜索 Java 类已随 #14 删、能力归 TS Agent，见 `deployment.md`）；2026-09-08 nginx 部署路由容器 + 本地库全量 dump 迁移 + 快速档半价定价（`deployment.md`/`java-backend.md`/`vue-frontend.md`）；2026-09-08 四档真实 LLM provider 接入完成（路由 glm-4-flash-250414 / 快速 glm-4.7-flash / 标准 Nemotron 3 Ultra free / 深度 qwen3.7-plus@DashScope Coding，`src/llm/real.ts` + `MODEL_ROUTER` 等新配置键，路由调用点为后续特性，见 `ts-agent.md`）。
 - #13 仅剩浏览器 UI 人工走查（AC1 勾选留用户）。
@@ -56,6 +58,6 @@
 
 ## 下一步
 
-**TS Agent 架构优雅化第一批进行中（父 issue #15，4/6）**：#16 目录收敛 / #17 真流式 / #18 zod / #20 重试 ✅（2026-09-08，148→160/160）；frontier = #19 质检 generateObject / #21 路由收敛（#21 落地后 #15 收口）；XState 双轨决策 #22 待拍板（见 `ts-agent.md`）。
+**TS Agent 架构优雅化第一批收口（父 issue #15，6/6）**：#16 目录收敛 / #17 真流式 / #18 zod / #19 质检 generateObject / #20 重试 / #21 路由收敛 ✅（2026-09-08，148→158/158）；frontier 清空，XState 双轨决策 #22 待拍板（见 `ts-agent.md`）。
 
 **P4 RAG + 盈利 MVP**：`paimeng-ai-code-rag/` 精简退役代码后 day-1 上线（few-shot 直查）+ 反馈埋点；手动充值已就绪；无执照，微信支付/公众号通知 v1.x。Python Agent **目录删除**门槛 = P4 RAG 骨架复用（当前维持「目录待删」）。每完成一个任务：更新 `.agents/memories/` 对应文档 + 本文件现状与完成链 + `docs/ts_agent/progress.md` 追加一行（含日期与命令证据）。
