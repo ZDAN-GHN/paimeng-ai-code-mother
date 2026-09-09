@@ -379,6 +379,59 @@ describe('POST /agent/stream（#10 冻结积分）', () => {
     expect(body.message).toContain('积分不足')
   })
 
+  // 预检上游故障的 runClient：闸门查询（GET run）或冻结（POST freeze）返回 500——覆盖 #21 预检 502 分支（审查整改补测）
+  function upstreamFailureRunClient(failPoint: 'gate' | 'freeze'): RunClient {
+    return new RunClient({
+      baseUrl: 'http://java.invalid',
+      token: 'test',
+      fetchImpl: vi.fn(async (url, init) => {
+        const method = init?.method ?? 'GET'
+        const isFreeze = method === 'POST' && String(url).endsWith('/credit/freeze')
+        const failed = (failPoint === 'freeze' && isFreeze) || (failPoint === 'gate' && method === 'GET')
+        if (failed) {
+          return new Response(JSON.stringify({ code: 50000, data: null, message: 'Java 内部服务异常' }), { status: 500 })
+        }
+        const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {}
+        const data = method === 'GET'
+          ? { runId: String(url).split('/').at(-1), appId: 1, userId: 1, phase: 'wireframe_confirmed', context: null, milestones: null }
+          : { runId: String(url).split('/').at(-2), appId: 1, userId: 1, phase: body.phase ?? 'interview', context: null, milestones: null }
+        return new Response(JSON.stringify({ code: 0, data, message: 'ok' }), { status: 200 })
+      }),
+    })
+  }
+
+  it('闸门查询上游故障（Java 500）→ hijack 前 502 预检拒绝，不半截开流', async () => {
+    const token = await makeToken()
+    const app = buildTestApp(makeWorkspaceRoot(), { agentRoutes: { runClient: upstreamFailureRunClient('gate') } })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/stream',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-gate-502', appId: 1, message: 'hello', workspacePath: makeWorkspaceRoot() },
+    })
+    // 双轨边界（#21）：闸门查询在 hijack 前完成，上游 5xx 以 502 JSON 表达而非 SSE error
+    expect(response.statusCode).toBe(502)
+    const body = response.json() as { statusCode: number; error: string; message: string }
+    expect(body).toMatchObject({ statusCode: 502, error: 'Bad Gateway' })
+    expect(body.message).toContain('校验线框闸门失败')
+  })
+
+  it('冻结其他上游故障（Java 500 非 402）→ hijack 前 502 预检拒绝，不半截开流', async () => {
+    const token = await makeToken()
+    const app = buildTestApp(makeWorkspaceRoot(), { agentRoutes: { runClient: upstreamFailureRunClient('freeze') } })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/stream',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-freeze-502', appId: 1, message: 'hello', workspacePath: makeWorkspaceRoot() },
+    })
+    // 余额不足 402 与其他上游故障 502 的分流：非 402 的 RunApiError 统一 502 并携带原因
+    expect(response.statusCode).toBe(502)
+    const body = response.json() as { statusCode: number; error: string; message: string }
+    expect(body).toMatchObject({ statusCode: 502, error: 'Bad Gateway' })
+    expect(body.message).toContain('冻结积分失败')
+  })
+
   it('冻结成功（默认 200 的 fakeRunClient）→ 正常进入 codegen 产出 done', async () => {
     const root = makeWorkspaceRoot()
     const token = await makeToken()
