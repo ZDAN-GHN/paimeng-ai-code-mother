@@ -58,6 +58,8 @@
 
 ## 下一步
 
-**TS Agent 架构优雅化第一批收口（父 issue #15，6/6）**：#16 目录收敛 / #17 真流式 / #18 zod / #19 质检 generateObject / #20 重试 / #21 路由收敛 ✅（2026-09-08，148→158/158）；frontier 清空，XState 双轨决策 #22 待拍板（见 `ts-agent.md`）。
+**多类型生成迁移（multi_file / vue_project）**：设计定稿 `docs/ts_agent/codegen-multi-type-design.md`（2026-09-09，经 agent-design-review 修订）。关键发现：**现行 html 提示词仍是代码块输出约定，与唯一落盘机制（writeFile 工具调用）错位**——真实通道未做过落盘 e2e，假 LLM 测试矩阵（直接发 tool-call）系统性掩盖，属带病状态。四票切分待开：A 提示词约定对齐（最前置）/ B multi_file 接线（StackProfile 策略接缝 + 真门禁）/ C per-type 预算 / D vue_project 设计先行（构建反馈环归属决策）。与 #22 正交。
+
+**TS Agent 架构优雅化第一批收口（父 issue #15，6/6）**：#16 目录收敛 / #17 真流式 / #18 zod / #19 质检 generateObject / #20 重试 / #21 路由收敛 ✅（2026-09-08，148→160/160，含双轴审查整改 +2）；frontier 清空，XState 双轨决策 #22 待拍板（见 `ts-agent.md`）。
 
 **P4 RAG + 盈利 MVP**：`paimeng-ai-code-rag/` 精简退役代码后 day-1 上线（few-shot 直查）+ 反馈埋点；手动充值已就绪；无执照，微信支付/公众号通知 v1.x。Python Agent **目录删除**门槛 = P4 RAG 骨架复用（当前维持「目录待删」）。每完成一个任务：更新 `.agents/memories/` 对应文档 + 本文件现状与完成链 + `docs/ts_agent/progress.md` 追加一行（含日期与命令证据）。
