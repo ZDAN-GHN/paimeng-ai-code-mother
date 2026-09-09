@@ -2,7 +2,7 @@
 
 > 目标架构权威：`docs/ts_agent/architecture.md`；wire 契约（#5 定稿）：`docs/ts_agent/contract.md`；对等报告：`docs/ts_agent/contract-parity.md`。本文件只记实施结论、有效约定与移植指针，逐票细节与命令证据见 `docs/ts_agent/progress.md`。
 
-## 当前状态（**P3 收官：#3-#14 全部完成 + 架构优雅化第一批开工（#16 目录收敛完成）**，2026-09-08；TS Agent 直连链路为唯一生成实现）
+## 当前状态（**P3 收官 + 架构优雅化第一批 4/6（#16 目录收敛、#17 真流式、#18 zod 单源、#20 重试策略完成）**，2026-09-08；TS Agent 直连链路为唯一生成实现）
 
 - **#3 骨架**：Fastify 5 + TS 5.9 + jose 6 + vitest 3，端口 8092；`GET /healthz` 无鉴权，其余路由 JWT 保护；沙箱校验含 realpath 符号链接消解。
 - **#4 run 客户端**：`src/runs/runClient.ts` 对接 Java 内部 API（createRun/updateRun/getRun/getLatestNonTerminalRun/completeRun/freezeCredit，Bearer）；409→`RunConflictError`「当前有进行中的任务」，401/网络失败→`RunApiError`；配置 `JAVA_INTERNAL_BASE_URL`（默认 `http://localhost:8123/api`）/`JAVA_INTERNAL_TOKEN`。
@@ -16,6 +16,7 @@
 - **#12 前端通道切换**：Agent 侧零代码改动（JWT 验签 #3 已就位）；`JWT_SECRET` 与 Java `ts-agent.jwt.secret` 同值（均不提交；#14 起配置段更名 ts-agent.*，开关 `ts-agent.enabled` 门禁 Java 签发端点，关闭→40410）。
 - **#16 目录收敛 + 死代码清场（2026-09-08，零行为变更 156→148/148）**：src/ 收敛为 6 领域目录——server/（装配/路由/鉴权/配置+agentRoot）、protocol/（events+sse 编码）、runs/（原 internal/，名不副实故改）、interview/、generation/（workflow+review+tools+prompts+intensity+workspace）、llm/；**旧路径换算：workflow/review/tools/prompts/intensity/workspace → generation/ 下，internal → runs，routes/auth/app/config → server，sse/ 与 workflow/events → protocol**。死代码清场：parsing.ts（连同 6 例测试）、提示词 7→2 份（原件 rag 仓库留档）、SSE formatEvent/encodeEvent 去 export、runImageTool 透传包装、ScriptedLlmProvider 空别名；config 反向依赖修正（DEFAULT_IMAGE_MODEL + 三图片源常量归 server/config.ts）。commit：8dae1e1/a90c9ab/eee514b/83bf9f2 + 审查整改 2dfaa4e（README 结构节对齐）。
 - **test/ 与 src/ 路径对称分包（2026-09-08，b6751ed）**：test/{server,protocol,runs,interview,generation,llm}/ 镜像 src（generation 内 workflow/tools/review 子目录同构，跨子域的 quality-gate 集成落域根）；helpers.ts、fixtures/ 与跨域 golden-e2e 留顶层；纯移动零断言变更 148/148。
+- **#17 真流式 + #18 zod 单源 + #20 重试参数化（2026-09-08，三票 worktree 并行 + 主会话整合）**：`/agent/stream` hijack 后 reply.raw 逐帧直写（SSE_HEADERS 单点、断连走既有 abort 通路、日志 logger 化；**「Java 转发链路」已随 T21 消失**，实际浏览器路径 = Vite 代理/nginx 直连 8092，nginx example 已配 proxy_buffering off）；zod 成为工具入参与路由 body 单源（`input as` 清零、FileToolResult 判别联合、宽容回退语义等价 4xx 路径不变）；重试按类别参数化（短调用 `SHORT_CALL_MAX_RETRIES` 单源、长生成 0）。测试 148→**160/160**。执行教训：三票并行用 git worktree 隔离可行（rename 检测化解测试树移动冲突）；#18 实施中断于收尾阶段，核验现场后恢复原 agent 续跑即可。留档给 #21：三个 body schema 的 runId/appId/userId 字段形状重复 ×3、stream handler 4 处 error 帧同形；已知微隙：hijack/close 微秒级间隙（帧被守卫丢弃不挂死）。
 
 ## 通用有效约定
 
@@ -32,6 +33,7 @@
 - e2e 假 LLM 产物仅单页区段，多页线框必触发视觉 diff 失败、重试耗尽——**e2e 成功剧本须选单页线框（pageCount=1）**。
 - 被闸门拒绝的 run 停在非终态，会挡同 app 后续 createRun（409）——测试残留须经内部 API `PATCH /internal/runs/{runId}` phase=failed 清理。
 - AI SDK 并行执行工具时 tool-result 顺序与 tool-call 可不同（断言须按 id 配对）；JS 正则用 `exec`（非 Python `search`）。
+- **离线/假 LLM 验证环境须同时清空渠道 key 与 MODEL_***：.env 的 MODEL_* 会覆盖假 LLM 的 scripted 模型路由（customProvider 抛 No such languageModel，SSE 立即 error 终态）——真服务冒烟已两次踩中。
 
 ## 移植参考（Python Agent 实测资产，代码现位于 `paimeng-ai-code-rag/`）
 
@@ -50,7 +52,7 @@
 
 ## 下一步 / 指针
 
-- **架构优雅化第一批（父 issue #15）**：#16 目录收敛 ✅ 完成（2026-09-08，见当前状态）→ **frontier：#17 真流式 SSE、#18 zod 单源、#20 重试策略（均已解锁可开工；#17 与 #18 同改 server/agentRoutes.ts 须串行，建议 #17 先）** → #19 质检 generateObject（等 #18）→ #21 路由收敛收尾（等 #17+#18；setErrorHandler + 访谈编排归位 + script 参数退场）。#20 已拍板：短调用恢复 SDK 默认退避、长生成保持 0。审查根因结论在 #15 正文；**XState「图只簿记不驱动控制流」双轨决策待用户拍板（#22，关键变量 = P2 断点续传的快照序列化预期）**，不进第一批链。
+- **架构优雅化第一批（父 issue #15）**：#16/#17/#18/#20 ✅ 完成（2026-09-08，见当前状态）→ **frontier：#19 质检 generateObject、#21 路由收敛（均已解锁）**。#21 弹药（双轴审查留档）：三个 body schema 的 runId/appId/userId 字段形状重复 ×3 可提取共享 shape、stream handler 4 处 error 帧同形可折局部 fail()；#21 落地后 #15 收口。审查根因结论在 #15 正文；**XState「图只簿记不驱动控制流」双轨决策待用户拍板（#22，关键变量 = P2 断点续传的快照序列化预期）**，不进第一批链。
 - 路由模型调用点（自动选档/工位识别）尚未实现——`MODEL_ROUTER` 与 provider 映射已打通，行为设计（规则前置 or LLM 判档、超时回退默认档）需先出设计再动工。
 - 进度日志 `docs/ts_agent/progress.md`（每完成一票追加一行，含命令证据）。
 - npm 坑：命令必须在 `paimeng-ai-code-agent/` 目录内执行（仓库根目录会读到 `/mnt/c/Users/LXH/.npmrc` 报 "config prefix cannot be changed"）。
