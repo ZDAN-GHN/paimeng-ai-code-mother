@@ -376,3 +376,32 @@ describe('POST /agent/stream（#10 冻结积分）', () => {
     expect(result.some((frame) => frame.event === 'error')).toBe(false)
   })
 })
+
+// 请求体非法时的 4xx 拒绝路径锁定（#18 zod 单源）：错误响应体与旧手写解析逐字节等价
+describe('POST /agent/stream 请求体校验（#18）', () => {
+  it('缺 message → 400 必填报错（message 宽容回退空串后统一拒绝）', async () => {
+    const token = await makeToken()
+    const app = buildTestApp(makeWorkspaceRoot())
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/stream',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-v1', appId: 1 },
+    })
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({ statusCode: 400, error: 'Bad Request', message: 'runId、appId、message、userId 必填' })
+  })
+
+  it('appId 类型不符（布尔）→ 400 必填报错（类型回退等价）', async () => {
+    const token = await makeToken()
+    const app = buildTestApp(makeWorkspaceRoot())
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/stream',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-v2', appId: true, message: 'hello' },
+    })
+    expect(response.statusCode).toBe(400)
+    expect((response.json() as { message: string }).message).toBe('runId、appId、message、userId 必填')
+  })
+})

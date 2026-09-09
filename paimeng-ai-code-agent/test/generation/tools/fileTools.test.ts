@@ -1,11 +1,17 @@
 // 文件类工具行为测试（Issue #8）：从 Python Agent tests/test_tools.py 逐条移植，
 // 断言写/读/改/删/列目录/退出语义与旧实现等价，且含工作区沙箱校验（防路径穿越）。
+// #18 结果通道改判别联合：断言按 ok 字段分支后校验载荷（对齐 imageTools.test.ts 的分支断言风格）。
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { FileTools, FilePathError, IGNORED_NAMES } from '../../../src/generation/tools/fileTools.js'
+import { FileTools, FilePathError, IGNORED_NAMES, type FileToolResult } from '../../../src/generation/tools/fileTools.js'
 import { validateWorkspacePath } from '../../../src/generation/workspace.js'
+
+// 判别联合读类结果的取值辅助：非 content 臂返回空串，让 contains 断言失败可见
+function contentOf(result: FileToolResult): string {
+  return 'content' in result ? result.content : ''
+}
 
 // 每个用例独立临时工作区根（根下再建隔离子工作区，对齐 Python fixture 语义）
 function makeTools(): { tools: FileTools; root: string } {
@@ -20,7 +26,7 @@ describe('FileTools 文件类工具（语义对齐旧实现）', () => {
   it('写入文件自动创建父目录', async () => {
     const { tools, root } = makeTools()
     const result = await tools.writeFile('src/components/Button.vue', '<template>hi</template>')
-    expect(result).toBe('文件写入成功：src/components/Button.vue')
+    expect(result).toEqual({ ok: true, message: '文件写入成功：src/components/Button.vue' })
     const { readFile } = await import('node:fs/promises')
     expect(await readFile(path.join(root, 'src/components/Button.vue'), 'utf8')).toBe('<template>hi</template>')
   })
@@ -60,47 +66,47 @@ describe('FileTools 文件类工具（语义对齐旧实现）', () => {
   it('读文件往返一致', async () => {
     const { tools } = makeTools()
     await tools.writeFile('a.txt', 'hello')
-    expect(await tools.readFile('a.txt')).toBe('hello')
+    expect(await tools.readFile('a.txt')).toEqual({ ok: true, content: 'hello' })
   })
 
-  it('读不存在的文件返回错误文本', async () => {
+  it('读不存在的文件返回 ok:false 与明确错误', async () => {
     const { tools } = makeTools()
-    expect(await tools.readFile('missing.txt')).toContain('文件不存在或不是文件')
+    expect(await tools.readFile('missing.txt')).toEqual({ ok: false, error: expect.stringContaining('文件不存在或不是文件') })
   })
 
   it('修改文件用新内容替换旧内容', async () => {
     const { tools } = makeTools()
     await tools.writeFile('a.txt', 'aaa bbb ccc')
     const result = await tools.modifyFile('a.txt', 'bbb', 'XXX')
-    expect(result).toBe('文件修改成功: a.txt')
-    expect(await tools.readFile('a.txt')).toBe('aaa XXX ccc')
+    expect(result).toEqual({ ok: true, message: '文件修改成功: a.txt' })
+    expect(await tools.readFile('a.txt')).toEqual({ ok: true, content: 'aaa XXX ccc' })
   })
 
-  it('旧内容不存在时返回警告且不改文件', async () => {
+  it('旧内容不存在时返回失败且不改文件', async () => {
     const { tools } = makeTools()
     await tools.writeFile('a.txt', 'hello')
     const result = await tools.modifyFile('a.txt', 'nope', 'XXX')
-    expect(result).toContain('未找到要替换的内容')
-    expect(await tools.readFile('a.txt')).toBe('hello')
+    expect(result).toEqual({ ok: false, error: expect.stringContaining('未找到要替换的内容') })
+    expect(await tools.readFile('a.txt')).toEqual({ ok: true, content: 'hello' })
   })
 
   it('删除普通文件成功', async () => {
     const { tools } = makeTools()
     await tools.writeFile('tmp.txt', 'x')
-    expect(await tools.deleteFile('tmp.txt')).toBe('文件删除成功: tmp.txt')
-    expect(await tools.readFile('tmp.txt')).toContain('文件不存在或不是文件')
+    expect(await tools.deleteFile('tmp.txt')).toEqual({ ok: true, message: '文件删除成功: tmp.txt' })
+    expect(await tools.readFile('tmp.txt')).toEqual({ ok: false, error: expect.stringContaining('文件不存在或不是文件') })
   })
 
   it('重要文件（如 package.json）不允许删除', async () => {
     const { tools } = makeTools()
     await tools.writeFile('package.json', '{}')
     const result = await tools.deleteFile('package.json')
-    expect(result).toContain('不允许删除重要文件')
-    expect(await tools.readFile('package.json')).toBe('{}')
+    expect(result).toEqual({ ok: false, error: expect.stringContaining('不允许删除重要文件') })
+    expect(await tools.readFile('package.json')).toEqual({ ok: true, content: '{}' })
   })
 
   it('退出工具返回终止提示词', () => {
-    expect(FileTools.exit()).toBe('不要继续调用工具，可以输出最终结果了')
+    expect(FileTools.exit()).toEqual({ ok: true, message: '不要继续调用工具，可以输出最终结果了' })
   })
 
   it('目录读取展示相对结构并忽略构建产物', async () => {
@@ -109,12 +115,19 @@ describe('FileTools 文件类工具（语义对齐旧实现）', () => {
     await tools.writeFile('assets/style.css', 'body{}')
     await tools.writeFile('node_modules/pkg/index.js', 'x')
     await tools.writeFile('app.log', 'log')
-    const structure = await tools.readDir()
+    const result = await tools.readDir()
+    expect(result.ok).toBe(true)
+    const structure = contentOf(result)
     expect(structure).toContain('项目目录结构:')
     expect(structure).toContain('index.html')
     expect(structure).toContain('style.css')
     expect(structure).not.toContain('node_modules')
     expect(structure).not.toContain('app.log')
+  })
+
+  it('目录不存在时返回 ok:false 与明确错误', async () => {
+    const { tools } = makeTools()
+    expect(await tools.readDir('missing-dir')).toEqual({ ok: false, error: expect.stringContaining('目录不存在或不是目录') })
   })
 
   it('相对路径带 .. 越界被拒绝', async () => {

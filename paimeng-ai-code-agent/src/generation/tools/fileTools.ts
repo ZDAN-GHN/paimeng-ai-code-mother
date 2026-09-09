@@ -1,9 +1,18 @@
 // 文件类工具集（Issue #8）：从 Python Agent 的 app/tools/file_tools.py 按语义移植，
 // 绑定到单个工作区（已通过沙箱校验），提供 写/读/改/删/列目录/退出 六个操作。
-// 返回语义与旧 Java/Python 工具逐条对齐（字符串结果文本）；所有相对路径解析到工作区内，防路径穿越。
+// #18 结果通道改判别联合：成功失败按 ok 字段分支（对齐 imageTools 的 ImageToolResult 示范），
+// 不再靠中文前缀人肉区分；所有相对路径解析到工作区内，防路径穿越。
 import path from 'node:path'
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { validateWorkspacePath } from '../workspace.js'
+
+// 文件工具结果（判别联合）：读类工具 ok:true 携带 content（文件内容/目录结构文本），
+// 动作类工具 ok:true 携带 message（操作确认文本），ok:false 携带 error（操作未达成）。
+// 边界取舍：删除不存在的文件 = 终态已达成 → ok:true；替换内容未找到（文件未动）→ ok:false
+export type FileToolResult =
+  | { ok: true; content: string }
+  | { ok: true; message: string }
+  | { ok: false; error: string }
 
 // 需要忽略的文件和目录（对齐 Python IGNORED_NAMES / Java ProjectFileDirReadTool）
 export const IGNORED_NAMES = new Set([
@@ -66,71 +75,74 @@ export class FileTools {
     }
   }
 
-  async writeFile(relativeFilePath: string, content: string): Promise<string> {
+  async writeFile(relativeFilePath: string, content: string): Promise<FileToolResult> {
     const target = this.resolve(relativeFilePath)
     await mkdir(path.dirname(target), { recursive: true })
     await writeFile(target, content, 'utf8')
     // 首文件落盘阈值（中断退款折算：filesWritten=0 → 全额退款；同文件重复写去重）
     this.writtenFiles.add(relativeFilePath)
-    return `文件写入成功：${relativeFilePath}`
+    return { ok: true, message: `文件写入成功：${relativeFilePath}` }
   }
 
-  async readFile(relativeFilePath: string): Promise<string> {
+  async readFile(relativeFilePath: string): Promise<FileToolResult> {
     const target = this.resolve(relativeFilePath)
     const content = await this.readExistingFile(target)
-    return content ?? `错误：文件不存在或不是文件 - ${relativeFilePath}`
+    return content === null
+      ? { ok: false, error: `文件不存在或不是文件 - ${relativeFilePath}` }
+      : { ok: true, content }
   }
 
-  async modifyFile(relativeFilePath: string, oldContent: string, newContent: string): Promise<string> {
+  async modifyFile(relativeFilePath: string, oldContent: string, newContent: string): Promise<FileToolResult> {
     const target = this.resolve(relativeFilePath)
     const originalContent = await this.readExistingFile(target)
     if (originalContent === null) {
-      return `错误：文件不存在或不是文件 - ${relativeFilePath}`
+      return { ok: false, error: `文件不存在或不是文件 - ${relativeFilePath}` }
     }
     if (!originalContent.includes(oldContent)) {
-      return `警告：文件中未找到要替换的内容，文件未修改 - ${relativeFilePath}`
+      return { ok: false, error: `文件中未找到要替换的内容，文件未修改 - ${relativeFilePath}` }
     }
     const modifiedContent = originalContent.replace(oldContent, newContent)
     if (modifiedContent === originalContent) {
-      return `信息：替换后文件内容未发生变化 - ${relativeFilePath}`
+      return { ok: true, message: `替换后文件内容未发生变化 - ${relativeFilePath}` }
     }
     await writeFile(target, modifiedContent, 'utf8')
     // 落盘计数：修改已存在文件也是磁盘写入（续跑场景首笔写可能经 modifyFile，需计入「已写文件」）
     this.writtenFiles.add(relativeFilePath)
-    return `文件修改成功: ${relativeFilePath}`
+    return { ok: true, message: `文件修改成功: ${relativeFilePath}` }
   }
 
-  async deleteFile(relativeFilePath: string): Promise<string> {
+  async deleteFile(relativeFilePath: string): Promise<FileToolResult> {
     const target = this.resolve(relativeFilePath)
     let info
     try {
       info = await stat(target)
     } catch {
-      return `警告：文件不存在，无需删除 - ${relativeFilePath}`
+      // 文件不存在 = 删除的终态已达成（rm -f 语义），按 ok:true 幂等返回
+      return { ok: true, message: `文件不存在，无需删除 - ${relativeFilePath}` }
     }
     if (!info.isFile()) {
-      return `错误：指定路径不是文件，无法删除 - ${relativeFilePath}`
+      return { ok: false, error: `指定路径不是文件，无法删除 - ${relativeFilePath}` }
     }
     if (IMPORTANT_FILES.has(path.basename(target).toLowerCase())) {
-      return `错误：不允许删除重要文件 - ${path.basename(target)}`
+      return { ok: false, error: `不允许删除重要文件 - ${path.basename(target)}` }
     }
     await rm(target, { force: true })
     // 落盘文件数随删除移除（「已写文件」指当前盘上文件）
     this.writtenFiles.delete(relativeFilePath)
-    return `文件删除成功: ${relativeFilePath}`
+    return { ok: true, message: `文件删除成功: ${relativeFilePath}` }
   }
 
   // 读取目录结构（忽略构建产物等，按深度缩进展示；对齐 Python read_dir）
-  async readDir(relativeDirPath?: string): Promise<string> {
+  async readDir(relativeDirPath?: string): Promise<FileToolResult> {
     const root = relativeDirPath ? this.resolve(relativeDirPath) : this.root
     let info
     try {
       info = await stat(root)
     } catch {
-      return `错误：目录不存在或不是目录 - ${relativeDirPath ?? ''}`
+      return { ok: false, error: `目录不存在或不是目录 - ${relativeDirPath ?? ''}` }
     }
     if (!info.isDirectory()) {
-      return `错误：目录不存在或不是目录 - ${relativeDirPath ?? ''}`
+      return { ok: false, error: `目录不存在或不是目录 - ${relativeDirPath ?? ''}` }
     }
     const files: { rel: string; depth: number }[] = []
     await this.walk(root, root, files)
@@ -139,7 +151,7 @@ export class FileTools {
     for (const file of files) {
       lines.push('  '.repeat(file.depth) + path.basename(file.rel))
     }
-    return lines.join('\n')
+    return { ok: true, content: lines.join('\n') }
   }
 
   // 递归收集目录下文件（跳过忽略项）
@@ -167,7 +179,7 @@ export class FileTools {
     }
   }
 
-  static exit(): string {
-    return '不要继续调用工具，可以输出最终结果了'
+  static exit(): FileToolResult {
+    return { ok: true, message: '不要继续调用工具，可以输出最终结果了' }
   }
 }
