@@ -16,7 +16,7 @@ import { generateText, isStepCount, streamText, type ToolSet } from 'ai'
 import type { StepResult } from 'ai'
 import type { AgentEvent } from '../../protocol/events.js'
 import { MAX_QUALITY_ATTEMPTS, MILESTONE_DETAILS, PHASE_BY_STATE, generationMachine } from './machine.js'
-import { createScriptedLlm, type LlmProvider, type LlmScript } from '../../llm/index.js'
+import { createScriptedLlm, type LlmProvider } from '../../llm/index.js'
 import { DEFAULT_IMAGE_MODEL } from '../../server/config.js'
 import { resolveIntensity, type Intensity, type IntensityConfig } from '../intensity.js'
 import { SHORT_CALL_MAX_RETRIES } from '../retryPolicy.js'
@@ -40,7 +40,6 @@ export interface StreamRequest {
   userId?: number | string
   message: string
   workspacePath?: string
-  script?: LlmScript
   // 三档推理强度（#9）：缺省 standard；请求体可选，随每消息
   intensity?: Intensity
   // 输入历史（#9 历史滑窗）：最近 N 轮全文 + 更早摘要，缺省单轮
@@ -56,7 +55,7 @@ export interface WorkflowLogger {
 }
 
 export interface WorkflowOptions {
-  // 可注入的 LLM provider（测试注入 scripted；生产由路由层按配置装配 real，见 routes/agent.ts）
+  // 可注入的 LLM provider（测试注入 scripted；生产由路由层按配置装配 real，见 server/agentRoutes.ts）
   provider?: LlmProvider
   runClient?: RunClient
   workspaceRoot: string
@@ -149,7 +148,8 @@ function buildModelMessages(request: StreamRequest, history: WindowedHistory): A
 
 export async function* runGenerationWorkflow(request: StreamRequest, options: WorkflowOptions): AsyncGenerator<AgentEvent> {
   const { runClient, workspaceRoot } = options
-  const provider = options.provider ?? createScriptedLlm(request.script ?? 'success')
+  // 缺省离线假 LLM（success 剧本）；剧本选择已收敛到注入的 provider（公共请求体不再携带 script——#21）
+  const provider = options.provider ?? createScriptedLlm('success')
   // 三档强度：路由到对应模型 id、护栏上限随档位（#9）
   const tier = resolveIntensity(request.intensity)
 

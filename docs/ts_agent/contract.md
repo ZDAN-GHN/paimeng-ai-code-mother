@@ -1,6 +1,6 @@
 # TS Agent 浏览器 SSE 契约
 
-状态：Issue #5 定稿；Issue #7 增补需求工程（访谈/线框/确认）与 codegen 闸门；Issue #9 增补三工位质检循环、护栏、三档强度与 token 计量；Issue #10 增补积分冻结/结算/退款与对话中断（aborted 终态）。该协议由浏览器通过 `fetch` 直连 TS Agent，Java 不中转生成流。
+状态：Issue #5 定稿；Issue #7 增补需求工程（访谈/线框/确认）与 codegen 闸门；Issue #9 增补三工位质检循环、护栏、三档强度与 token 计量；Issue #10 增补积分冻结/结算/退款与对话中断（aborted 终态）；Issue #21 增补错误双轨语义（预检 JSON / 流内 SSE error）并退场 `script` 测试参数。该协议由浏览器通过 `fetch` 直连 TS Agent，Java 不中转生成流。
 
 ## 需求工程与 codegen 闸门（Issue #7）
 
@@ -15,9 +15,9 @@
 
 - **访谈**：固定 5 维（受众/风格/页面清单/数据需求/交互），每维 2-4 选项选择题，**最多 2 轮**；各维均已作答即收束（跳过剩余轮次），`complete: true` + `summary` 喂线框。答案经 `answers: [{ key, optionId, text? }]` 提交，跨请求续答。
 - **线框**：快速档模型产出单文件 HTML（灰块 + 占位图 + 页内锚点可点击跳转 + 站点地图），存 `{workspace}/wireframe/wireframe.html`，**页面数 ≤ 5**；免费但每用户每日独立限频（Java 内部配额端点，超出 → HTTP 429）。
-- **闸门（核心）**：未确认线框的 codegen 请求被拒——`/agent/stream` 先经 Java 内部 API 校验 run 阶段，非 `wireframe_confirmed` 时输出唯一 `error` 事件（明确报错），不发任何业务事件。已确认线框即 codegen 布局契约与视觉 diff 基准。**闸门状态存于 Java `generation_run`，未配置 Java 内部 API 时 codegen 拒绝放行**（`error` 事件「Java 内部 API 未配置，无法校验线框闸门」），与需求工程端点的 503 口径一致，避免绕过闸门。
+- **闸门（核心）**：未确认线框的 codegen 请求被拒——`/agent/stream` 在接管响应（hijack）**之前**先经 Java 内部 API 校验 run 阶段：非 `wireframe_confirmed` → 预检 **409**、run 不存在 → **400**、Java 内部 API 未配置 → **503**，均返回标准错误 JSON（`{statusCode, error, message}`，见「错误双轨」），不发任何业务事件。已确认线框即 codegen 布局契约与视觉 diff 基准。**闸门状态存于 Java `generation_run`，未配置 Java 内部 API 时 codegen 拒绝放行**（预检 503「Java 内部 API 未配置，无法校验线框闸门」），与需求工程端点的 503 口径一致，避免绕过闸门。
 - **重新访谈 = 需求变更**：`wireframe_pending` 阶段重新访谈会使 run 回到 `interview` 并**失效既有未确认线框**（旧线框不能再被确认，须重新生成），防止锁定与新需求不一致的布局契约。
-- **积分冻结（Issue #10，架构 §7 扣费协议）**：`/agent/stream` 通过线框闸门后、进入 codegen 前，TS Agent 调 Java 内部 `POST /internal/agent/runs/{runId}/credit/freeze`（请求体 `{ intensity }`）预扣积分——冻结额 = 基础价 × 生成类型系数 × 强度档位系数。**余额不足 → HTTP 402**，TS Agent 输出唯一 `error` 事件（明确报错），**不进入 codegen**（不产生任何 token 消耗）；其他冻结失败同样拒绝放行。冻结幂等（同 runId 重复冻结返回既有台账，不重复扣款）。
+- **积分冻结（Issue #10，架构 §7 扣费协议）**：`/agent/stream` 通过线框闸门后、进入 codegen 前，TS Agent 调 Java 内部 `POST /internal/agent/runs/{runId}/credit/freeze`（请求体 `{ intensity }`）预扣积分——冻结额 = 基础价 × 生成类型系数 × 强度档位系数。**余额不足 → 预检 HTTP 402**（错误 JSON 透传 Java 明确报错的 message），**不进入 codegen**（不产生任何 token 消耗）；其他冻结上游故障 → **预检 502**。两者均发生在 SSE 开流之前。冻结幂等（同 runId 重复冻结返回既有台账，不重复扣款）。
 
 ## 请求
 
@@ -29,7 +29,6 @@
   "appId": "1001",
   "message": "生成一个个人主页",
   "workspacePath": "/repo/tmp/code_output/html_1001",
-  "script": "success",
   "intensity": "standard",
   "history": [
     { "role": "user", "content": "做一个宠物店网站" },
@@ -39,7 +38,7 @@
 }
 ```
 
-`runId`、`appId`、`message` 必填。`userId` 可由请求提供；生产请求通常从 JWT 的 `sub` 获取。`script` 仅用于离线验收，值为 `success`（默认）、`error`、`images`、`limit` 或质检剧本（`quality-fail-then-pass` / `quality-fail-always`）。
+`runId`、`appId`、`message` 必填。`userId` 可由请求提供；生产请求通常从 JWT 的 `sub` 获取。**`script` 测试参数已退场（Issue #21）**：公共请求体不再接受剧本字段（含旧白名单值 `success` / `error` / `images` / `multi-file` / `limit` / `limit-length` / `quality-fail-then-pass` / `quality-fail-always`），离线剧本经服务装配注入的 LLM provider 表达（`buildApp` 的 `agentRoutes.provider`；缺省为离线假 LLM success 剧本）。
 
 **Issue #9 新增字段（均可选，缺省有默认）**：
 
@@ -95,3 +94,8 @@ Agent 创建 run 时使用 `interview`。工作流节点推进时更新同一 `r
 ## 终态与错误
 
 成功响应不得在 `done` 后继续产生事件。失败响应不得发送 `done`，`error` 后不得产生业务事件。工作区路径必须位于配置的 `WORKSPACE_ROOT` 内，否则返回错误终态并且不得写文件。
+
+**错误双轨（Issue #21，边界 = 首帧写出）**：`/agent/stream` 的失败按发生时刻分两轨——
+
+- **流开始前（预检）**：必填校验、线框闸门、积分冻结等失败发生在接管响应（hijack）之前，返回标准状态码 + 错误 JSON `{statusCode, error, message}`（`error` 为标准状态文案，`message` 为人话原因）。映射：缺必填 → 400；run 不存在 → 400；非 `wireframe_confirmed` → 409；积分冻结余额不足 → 402（透传后端 message）；闸门/冻结上游故障（Java 不可达 / 5xx）→ 502；Java 内部 API 未配置 → 503。此时响应不是 SSE 流。需求工程端点（interview / wireframe / confirm）的错误 JSON 同一形状、同一单点产出（Fastify `setErrorHandler`）。
+- **流开始后**：任何失败仍以 SSE `error` 事件收尾（唯一失败终态，其后无业务事件），wire 事件形状、事件顺序与终态语义不变。

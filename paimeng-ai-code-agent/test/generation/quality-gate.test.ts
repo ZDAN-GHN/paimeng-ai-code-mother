@@ -84,8 +84,9 @@ describe('Issue #9：质检失败有界重试', () => {
       visualDiff: { name: 'visual-diff', verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
     }
     const events: Frame[] = []
+    // 剧本经注入的 provider 表达（#21）：StreamRequest 不再携带 script 字段
     for await (const ev of runGenerationWorkflow(
-      { runId: 'r', appId: 1, message: 'hello', workspacePath: root, script: 'quality-fail-then-pass' },
+      { runId: 'r', appId: 1, message: 'hello', workspacePath: root },
       { provider, workspaceRoot: root, wireframePath: undefined, reviewGates: gates },
     )) {
       events.push({ event: ev.type, data: { ...(ev as object) } })
@@ -111,8 +112,9 @@ describe('Issue #9：质检失败有界重试', () => {
       visualDiff: { name: 'visual-diff', verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
     }
     const events: Frame[] = []
+    // 剧本经注入的 provider 表达（#21）：StreamRequest 不再携带 script 字段
     for await (const ev of runGenerationWorkflow(
-      { runId: 'r', appId: 1, message: 'hello', workspacePath: root, script: 'quality-fail-always' },
+      { runId: 'r', appId: 1, message: 'hello', workspacePath: root },
       { provider, workspaceRoot: root, wireframePath: undefined, reviewGates: gates },
     )) {
       events.push({ event: ev.type, data: { ...(ev as object) } })
@@ -131,13 +133,14 @@ describe('Issue #9：质检失败有界重试', () => {
       agentRoutes: {
         runClient: fakeRunClient([], {}),
         reviewGates: makeRetryOnceGates(),
+        provider: createScriptedLlm('success'),
       },
     })
     const response = await app.inject({
       method: 'POST',
       url: '/agent/stream',
       headers: { authorization: `Bearer ${token}` },
-      payload: { runId: 'run-q1', appId: 1, message: 'hello', workspacePath: root, script: 'success' },
+      payload: { runId: 'run-q1', appId: 1, message: 'hello', workspacePath: root },
     })
     const result = frames(response.body)
     const eventTypes = types(result)
@@ -162,13 +165,13 @@ describe('Issue #9：质检失败有界重试', () => {
       visualDiff: { name: 'visual-diff', verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
     }
     const app = buildTestApp(root, {
-      agentRoutes: { runClient: fakeRunClient([], {}), reviewGates: alwaysFail },
+      agentRoutes: { runClient: fakeRunClient([], {}), reviewGates: alwaysFail, provider: createScriptedLlm('success') },
     })
     const response = await app.inject({
       method: 'POST',
       url: '/agent/stream',
       headers: { authorization: `Bearer ${token}` },
-      payload: { runId: 'run-q2', appId: 1, message: 'hello', workspacePath: root, script: 'success' },
+      payload: { runId: 'run-q2', appId: 1, message: 'hello', workspacePath: root },
     })
     const result = frames(response.body)
     expect(types(result).at(-1)).toBe('error')
@@ -192,13 +195,13 @@ describe('Issue #9：质检失败有界重试', () => {
       visualDiff: { name: 'visual-diff', verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
     }
     const app = buildTestApp(root, {
-      agentRoutes: { runClient: fakeRunClient([], {}), reviewGates: alwaysFail },
+      agentRoutes: { runClient: fakeRunClient([], {}), reviewGates: alwaysFail, provider: createScriptedLlm('success') },
     })
     await app.inject({
       method: 'POST',
       url: '/agent/stream',
       headers: { authorization: `Bearer ${token}` },
-      payload: { runId: 'run-q3', appId: 1, message: 'hello', workspacePath: root, script: 'success' },
+      payload: { runId: 'run-q3', appId: 1, message: 'hello', workspacePath: root },
     })
     // 首次 + 2 次重试 = 3 次质检尝试后耗尽
     expect(qualityCalls).toBe(3)
@@ -211,14 +214,14 @@ describe('Issue #9：硬上限优雅收尾（绝不硬杀）', () => {
     const calls: RunCall[] = []
     const token = await makeToken()
     const app = buildTestApp(root, {
-      agentRoutes: { runClient: fakeRunClient(calls, {}) },
+      agentRoutes: { runClient: fakeRunClient(calls, {}), provider: createScriptedLlm('limit') },
     })
     const response = await app.inject({
       method: 'POST',
       url: '/agent/stream',
       headers: { authorization: `Bearer ${token}` },
-      // 快速档 maxTurns=1：一轮后即截断；limit 剧本工具调用无休止
-      payload: { runId: 'run-limit', appId: 1, message: 'hello', workspacePath: root, script: 'limit', intensity: 'fast' },
+      // 快速档 maxTurns=1：一轮后即截断；limit 剧本工具调用无休止（剧本经 provider 注入，#21）
+      payload: { runId: 'run-limit', appId: 1, message: 'hello', workspacePath: root, intensity: 'fast' },
     })
     const result = frames(response.body)
     const eventTypes = types(result)
@@ -243,13 +246,13 @@ describe('Issue #9：硬上限优雅收尾（绝不硬杀）', () => {
     const calls: RunCall[] = []
     const token = await makeToken()
     const app = buildTestApp(root, {
-      agentRoutes: { runClient: fakeRunClient(calls, {}) },
+      agentRoutes: { runClient: fakeRunClient(calls, {}), provider: createScriptedLlm('limit-length') },
     })
     const response = await app.inject({
       method: 'POST',
       url: '/agent/stream',
       headers: { authorization: `Bearer ${token}` },
-      payload: { runId: 'run-limit-length', appId: 1, message: 'hello', workspacePath: root, script: 'limit-length', intensity: 'fast' },
+      payload: { runId: 'run-limit-length', appId: 1, message: 'hello', workspacePath: root, intensity: 'fast' },
     })
     const result = frames(response.body)
     const eventTypes = types(result)
@@ -333,13 +336,13 @@ describe('Issue #9：token 计量按 run 落库', () => {
     const calls: RunCall[] = []
     const token = await makeToken()
     const app = buildTestApp(root, {
-      agentRoutes: { runClient: fakeRunClient(calls, {}) },
+      agentRoutes: { runClient: fakeRunClient(calls, {}), provider: createScriptedLlm('success') },
     })
     await app.inject({
       method: 'POST',
       url: '/agent/stream',
       headers: { authorization: `Bearer ${token}` },
-      payload: { runId: 'run-token', appId: 1, message: 'hello', workspacePath: root, script: 'success' },
+      payload: { runId: 'run-token', appId: 1, message: 'hello', workspacePath: root },
     })
     // 找到携带 tokenUsage 的更新
     const tokenUpdate = calls.find((c) => c.body.tokenUsage != null)
@@ -355,13 +358,13 @@ describe('Issue #9：token 计量按 run 落库', () => {
     const calls: RunCall[] = []
     const token = await makeToken()
     const app = buildTestApp(root, {
-      agentRoutes: { runClient: fakeRunClient(calls, {}) },
+      agentRoutes: { runClient: fakeRunClient(calls, {}), provider: createScriptedLlm('error') },
     })
     await app.inject({
       method: 'POST',
       url: '/agent/stream',
       headers: { authorization: `Bearer ${token}` },
-      payload: { runId: 'run-token-fail', appId: 1, message: 'hello', workspacePath: root, script: 'error' },
+      payload: { runId: 'run-token-fail', appId: 1, message: 'hello', workspacePath: root },
     })
     const tokenUpdate = calls.find((c) => c.body.tokenUsage != null)
     expect(tokenUpdate).toBeTruthy()
@@ -398,13 +401,13 @@ describe('Issue #9：视觉 diff 以已确认线框为基准', () => {
 
     const token = await makeToken()
     const app = buildTestApp(root, {
-      agentRoutes: { runClient: fakeRunClient([], context), reviewGates: gates },
+      agentRoutes: { runClient: fakeRunClient([], context), reviewGates: gates, provider: createScriptedLlm('success') },
     })
     await app.inject({
       method: 'POST',
       url: '/agent/stream',
       headers: { authorization: `Bearer ${token}` },
-      payload: { runId: 'run-vd', appId: 1, message: 'hello', workspacePath: root, script: 'success' },
+      payload: { runId: 'run-vd', appId: 1, message: 'hello', workspacePath: root },
     })
     // 视觉 diff 基准 = 工作区 wireframe/wireframe.html 的绝对路径（经沙箱校验）
     expect(receivedWireframePath).toBe(validateWorkspacePath(path.join(root, 'wireframe', 'wireframe.html'), root))
@@ -425,13 +428,13 @@ describe('Issue #9：视觉 diff 以已确认线框为基准', () => {
     }
     const token = await makeToken()
     const app = buildTestApp(root, {
-      agentRoutes: { runClient: fakeRunClient([], context), reviewGates: gates },
+      agentRoutes: { runClient: fakeRunClient([], context), reviewGates: gates, provider: createScriptedLlm('success') },
     })
     const response = await app.inject({
       method: 'POST',
       url: '/agent/stream',
       headers: { authorization: `Bearer ${token}` },
-      payload: { runId: 'run-vd2', appId: 1, message: 'hello', workspacePath: root, script: 'success' },
+      payload: { runId: 'run-vd2', appId: 1, message: 'hello', workspacePath: root },
     })
     const result = frames(response.body)
     expect(types(result).at(-1)).toBe('error')

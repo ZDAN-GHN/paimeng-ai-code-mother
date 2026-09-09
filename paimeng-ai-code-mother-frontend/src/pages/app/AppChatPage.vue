@@ -847,7 +847,8 @@ const handleJourneyError = (error: unknown, messageIndex: number) => {
       redirectToLogin()
       return
     }
-    const hint = JOURNEY_ERROR_HINTS[error.status]
+    // 命中提示表时优先后端 message（#21 起错误体单点携带人话原因），缺失时回退状态码静态提示
+    const hint = error.message || JOURNEY_ERROR_HINTS[error.status]
     if (hint) {
       if (msg) {
         msg.loading = false
@@ -928,6 +929,21 @@ const generateCode = async (userMessage: string, aiMessageIndex: number) => {
       isGenerating.value = false
       streamAbortController.value = null
       redirectToLogin()
+      return
+    }
+    // 生成路径预检失败（#21 双轨：流开始前的失败返回标准 4xx/503 JSON 而非 SSE）：按状态码给出可读提示，
+    // 优先后端 message（402 透传积分不足明细 / 409 指明当前阶段 / 503 服务未就绪），缺失时回退静态提示
+    if (error instanceof AgentStreamHttpError && (error.status === 402 || error.status === 409 || error.status === 503)) {
+      const FALLBACK_HINTS: Record<number, string> = {
+        402: '积分余额不足，请充值后再试',
+        409: '需求尚未确认，请先完成访谈并确认线框后重新生成',
+        503: '生成服务暂不可用，请稍后再试',
+      }
+      const hint = error.message || FALLBACK_HINTS[error.status]!
+      messages.value[aiMessageIndex].content = `❌ ${hint}`
+      messages.value[aiMessageIndex].loading = false
+      message.warning(hint)
+      isGenerating.value = false
       return
     }
     if ((error as { name?: string })?.name === 'AbortError') {

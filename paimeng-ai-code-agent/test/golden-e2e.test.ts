@@ -5,10 +5,12 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { makeToken, makeWorkspaceRoot, buildTestApp, frames, fakeRunClient, type RunCall } from './helpers.js'
+import { createScriptedLlm, type LlmScript } from '../src/llm/index.js'
 
 interface GoldenFixture {
   codeGenType: 'html' | 'multi_file' | 'vue_project'
-  script: string
+  // 剧本名（#21 起 script 不再进 wire，仅用于构造注入的 agentRoutes.provider）
+  script: LlmScript
   message: string
   expectedFiles: Record<string, string[]>
 }
@@ -25,8 +27,9 @@ describe.each([
     const root = makeWorkspaceRoot()
     const token = await makeToken()
     const calls: RunCall[] = []
+    // 剧本经 provider 注入表达（#21）：夹具 script 字段驱动 createScriptedLlm，不再走请求体
     const response = await buildTestApp(root, {
-      agentRoutes: { runClient: fakeRunClient(calls) },
+      agentRoutes: { runClient: fakeRunClient(calls), provider: createScriptedLlm(fixture.script) },
     }).inject({
       method: 'POST',
       url: '/agent/stream',
@@ -36,7 +39,6 @@ describe.each([
         appId: 1,
         message: fixture.message,
         workspacePath: root,
-        script: fixture.script,
         codeGenType: fixture.codeGenType,
       },
     })

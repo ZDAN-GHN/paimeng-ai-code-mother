@@ -35,7 +35,7 @@ bash scripts/run-wsl.sh type-check
 | `POST /agent/interview` | JWT | 五维访谈（受众/风格/页面清单/数据需求/交互，每维 2-4 选项选择题），最多 2 轮、信息足够跳过；状态持久化于 run context |
 | `POST /agent/wireframe` | JWT | 快速档线框：单文件 HTML（灰块/占位图/可点击跳转/站点地图，≤5 页），存 `{workspace}/wireframe/`，run → wireframe_pending；免费 + 每用户每日限频（超限 429） |
 | `POST /agent/wireframe/confirm` | JWT | 确认线框 → run → wireframe_confirmed（codegen 布局契约；幂等） |
-| `POST /agent/stream` | JWT | 生成流：XState 线性工作流 + Vercel AI SDK 假 LLM（provider + 工具循环）+ SSE；**线框闸门**——非 wireframe_confirmed 的请求被拒（error 事件明确报错）；#8 起含 Guardrail 输入校验（拒绝→failed）、文件六工具 + 图片四工具（**图片配额 4 张/run**）、写盘前代码块解析、产物含应用内导览组件 |
+| `POST /agent/stream` | JWT | 生成流：XState 线性工作流 + Vercel AI SDK 假 LLM（provider + 工具循环）+ SSE；**线框闸门**——非 wireframe_confirmed 的请求在开流前被预检拒绝（400/409/503/402/502 错误 JSON，开流后失败仍以 error 事件收尾，见 contract.md「错误双轨」）；#8 起含 Guardrail 输入校验（拒绝→failed）、文件六工具 + 图片四工具（**图片配额 4 张/run**）、写盘前代码块解析、产物含应用内导览组件 |
 | `GET /agent/smoke/sse` | JWT | 兼容性冒烟端点：按新 SSE 格式输出脚本化事件 |
 
 ## 鉴权约定
@@ -58,7 +58,8 @@ src/                   # 按领域切分（#16：13 个技术层目录收敛为 
     app.ts             # Fastify 应用装配（buildApp，生产与测试共用）
     config.ts          # 环境配置（PORT/JWT_SECRET/WORKSPACE_ROOT/JAVA_INTERNAL_*/模型与图片渠道键；图片模型缺省值与第三方图片源常量归属此层）
     agentRoot.ts       # 服务根目录定位（AGENT_ROOT，提示词等资源解析）
-    agentRoutes.ts     # agent 路由（工作区校验/访谈/线框确认/生成流/冒烟，含需求工程与 codegen 闸门）
+    agentRoutes.ts     # agent 路由（工作区校验/访谈/线框确认/生成流/冒烟，含需求工程与 codegen 闸门；路由只做协议解析与 HTTP 翻译）
+    httpError.ts       # HTTP 错误单点（#21）：httpError 工厂 + setErrorHandler 统一产出 {statusCode, error, message}
     healthzRoutes.ts   # 健康检查路由
     jwt.ts             # jose 离线验签
     authPlugin.ts      # /agent/* 鉴权作用域（钩子不外溢）
@@ -68,7 +69,8 @@ src/                   # 按领域切分（#16：13 个技术层目录收敛为 
   runs/                # 运行记录网关（原 internal/，名不副实故改）
     runClient.ts       # Java 内部 API 客户端（create/update/get/complete + 错误映射）
   interview/           # 需求理解域：访谈 → 线框 → 确认
-    index.ts           # 五维访谈：题目生成/收敛判断/结论（脚本化，真实模型替换点）
+    index.ts           # 五维访谈：题目生成/收敛判断/结论（选项表与人话结论单源，脚本化，真实模型替换点）
+    conduct.ts         # 访谈编排（run 获取/创建、幂等重放、阶段冲突、轮次推进，#21 自路由归位）
     wireframe.ts       # 线框生成：单文件 HTML（站点地图 + 灰块 + 占位图，≤5 页）
     guardrails.ts      # 提示词安全输入护轨（长度/空/敏感词/注入模式，interview 阶段拦截）
     context.ts         # run.context JSON 类型化解析（interview + wireframe 状态）

@@ -1,10 +1,13 @@
 // POST /agent/stream 契约测试（Issue #5 + #7 闸门 + #8 生成核心）：按事件语义断言，不比对完整响应字节。
 // 覆盖：成功剧本完整事件序列与顺序约束、error 剧本终态语义、run phase 随工作流推进、
-// 工作区沙箱、未确认线框时 codegen 被闸门拒绝（#7 闸门纪律）、Guardrail 拦截 / 图片配额 / 导览组件（#8）。
+// 工作区沙箱、未确认线框时 codegen 被闸门拒绝（#7 闸门纪律，#21 起为 hijack 前预检 JSON）、
+// Guardrail 拦截 / 图片配额 / 导览组件（#8）。
+// 剧本注入（#21）：script 请求参数已退场，离线剧本统一经 agentRoutes.provider 注入表达。
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { makeToken, makeWorkspaceRoot, buildTestApp, frames, fakeRunClient, type Frame, type RunCall } from '../helpers.js'
+import { createScriptedLlm } from '../../src/llm/index.js'
 import { RunClient } from '../../src/runs/runClient.js'
 import { ImageTools } from '../../src/generation/tools/imageTools.js'
 
@@ -112,12 +115,15 @@ describe('POST /agent/stream（error 剧本）', () => {
   it('error 后不再发任何业务事件，run → failed，且回调 Java 标记失败', async () => {
     const calls: RunCall[] = []
     const token = await makeToken()
-    const app = buildTestApp(makeWorkspaceRoot(), { agentRoutes: { runClient: fakeRunClient(calls) } })
+    // error 剧本经 provider 注入（#21）：script 请求参数已退场
+    const app = buildTestApp(makeWorkspaceRoot(), {
+      agentRoutes: { runClient: fakeRunClient(calls), provider: createScriptedLlm('error') },
+    })
     const response = await app.inject({
       method: 'POST',
       url: '/agent/stream',
       headers: { authorization: `Bearer ${token}` },
-      payload: { runId: 'run-2', appId: 1, message: 'fail', script: 'error' },
+      payload: { runId: 'run-2', appId: 1, message: 'fail' },
     })
     const result = frames(response.body)
     const eventTypes = types(result)
@@ -135,8 +141,8 @@ describe('POST /agent/stream（error 剧本）', () => {
   })
 })
 
-describe('POST /agent/stream（#7 线框闸门）', () => {
-  it('未确认线框（wireframe_pending）→ 闸门拒绝，error 事件含明确报错且无业务事件', async () => {
+describe('POST /agent/stream（#7 线框闸门，#21 预检 JSON）', () => {
+  it('未确认线框（wireframe_pending）→ hijack 前 409 预检拒绝，message 含明确报错且无 SSE 流', async () => {
     const token = await makeToken()
     const app = buildTestApp(makeWorkspaceRoot(), { agentRoutes: { runClient: fakeRunClient([], 'wireframe_pending') } })
     const response = await app.inject({
@@ -145,25 +151,36 @@ describe('POST /agent/stream（#7 线框闸门）', () => {
       headers: { authorization: `Bearer ${token}` },
       payload: { runId: 'run-gate-1', appId: 1, message: 'hello' },
     })
-    expect(response.statusCode).toBe(200)
-    const result = frames(response.body)
-    // 闸门拒绝：唯一事件是 error，无 done / 里程碑等业务事件
-    expect(types(result)).toEqual(['error'])
-    expect(String(result[0]!.data.message)).toContain('未确认线框')
-    expect(String(result[0]!.data.message)).toContain('wireframe_pending')
+    // 双轨边界（#21）= 首帧写出：闸门是 hijack 前的预检，失败返回标准 409 JSON 而非 SSE 流
+    expect(response.statusCode).toBe(409)
+    expect(String(response.headers['content-type'])).toContain('application/json')
+    const body = response.json() as { statusCode: number; error: string; message: string }
+    expect(body).toMatchObject({ statusCode: 409, error: 'Conflict' })
+    expect(body.message).toContain('未确认线框')
+    expect(body.message).toContain('wireframe_pending')
+    expect(response.body).not.toContain('event:')
   })
 
-  it('run 不存在 → 闸门拒绝，error 事件含明确报错', async () => {
+  it('run 不存在 → hijack 前 400 预检拒绝，message 含明确报错', async () => {
     const token = await makeToken()
-    const app = buildTestApp(makeWorkspaceRoot(), { agentRoutes: { runClient: fakeRunClient([], 'wireframe_pending') } })
+    // GET 查询返回 data:null（getRun 契约：不存在 → null）→ 走「run 不存在」预检 400 分支
+    const missingRunClient = new RunClient({
+      baseUrl: 'http://java.invalid',
+      token: 'test',
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify({ code: 0, data: null, message: 'ok' }), { status: 200 })),
+    })
+    const app = buildTestApp(makeWorkspaceRoot(), { agentRoutes: { runClient: missingRunClient } })
     const response = await app.inject({
       method: 'POST',
       url: '/agent/stream',
       headers: { authorization: `Bearer ${token}` },
       payload: { runId: 'run-gate-2', appId: 999, message: 'hello' },
     })
-    // 不存在与 wireframe_pending 同走拒绝路径（reason 文案不同），断言核心：闸门拦截
-    expect(types(frames(response.body))).toEqual(['error'])
+    // 不存在走预检 400（reason 文案区别于 409 阶段不符），核心断言：未开流即拒绝
+    expect(response.statusCode).toBe(400)
+    const body = response.json() as { statusCode: number; error: string; message: string }
+    expect(body).toMatchObject({ statusCode: 400, error: 'Bad Request' })
+    expect(body.message).toContain('run 不存在')
   })
 
   it('已确认线框（wireframe_confirmed）→ 闸门放行，正常产出 done', async () => {
@@ -181,7 +198,7 @@ describe('POST /agent/stream（#7 线框闸门）', () => {
     expect(result.some((frame) => frame.event === 'error')).toBe(false)
   })
 
-  it('未配置 Java 内部 API → 拒绝放行（无法校验闸门，不静默绕过）', async () => {
+  it('未配置 Java 内部 API → 503 预检拒绝（无法校验闸门，不静默绕过）', async () => {
     // 不注入 runClient（buildTestApp 默认 javaInternalToken 为空）→ 与需求工程端点 503 口径一致拒绝
     const token = await makeToken()
     const app = buildTestApp(makeWorkspaceRoot())
@@ -191,10 +208,10 @@ describe('POST /agent/stream（#7 线框闸门）', () => {
       headers: { authorization: `Bearer ${token}` },
       payload: { runId: 'run-gate-4', appId: 1, message: 'hello' },
     })
-    expect(response.statusCode).toBe(200)
-    const result = frames(response.body)
-    expect(types(result)).toEqual(['error'])
-    expect(String(result[0]!.data.message)).toContain('未配置')
+    expect(response.statusCode).toBe(503)
+    const body = response.json() as { statusCode: number; error: string; message: string }
+    expect(body).toMatchObject({ statusCode: 503, error: 'Service Unavailable' })
+    expect(body.message).toContain('未配置')
   })
 })
 
@@ -287,12 +304,15 @@ describe('POST /agent/stream（Issue #8 Guardrail + 图片配额 + 导览组件�
         },
       },
     )
-    const app = buildTestApp(root, { agentRoutes: { runClient: fakeRunClient([], 'wireframe_confirmed'), imageTools } })
+    // images 剧本经 provider 注入（#21）：script 请求参数已退场
+    const app = buildTestApp(root, {
+      agentRoutes: { runClient: fakeRunClient([], 'wireframe_confirmed'), imageTools, provider: createScriptedLlm('images') },
+    })
     const response = await app.inject({
       method: 'POST',
       url: '/agent/stream',
       headers: { authorization: `Bearer ${token}` },
-      payload: { runId: 'run-img-1', appId: 1, message: '需要产品图', workspacePath: root, script: 'images' },
+      payload: { runId: 'run-img-1', appId: 1, message: '需要产品图', workspacePath: root },
     })
     const result = frames(response.body)
     // 契约不变量：同一 id 的 tool_request 先于其 tool_executed（并行执行时结果顺序可与请求不同，按 id 配对断言）
@@ -343,7 +363,7 @@ describe('POST /agent/stream（#10 冻结积分）', () => {
     })
   }
 
-  it('余额不足（402）→ error 事件明确拒绝，不进入 codegen（无业务事件）', async () => {
+  it('余额不足（402）→ hijack 前 402 预检拒绝，保留后端 message，不进入 codegen', async () => {
     const token = await makeToken()
     const app = buildTestApp(makeWorkspaceRoot(), { agentRoutes: { runClient: freezeRejectingRunClient() } })
     const response = await app.inject({
@@ -352,13 +372,11 @@ describe('POST /agent/stream（#10 冻结积分）', () => {
       headers: { authorization: `Bearer ${token}` },
       payload: { runId: 'run-credit-1', appId: 1, message: 'hello', workspacePath: makeWorkspaceRoot() },
     })
-    expect(response.statusCode).toBe(200)
-    const result = frames(response.body)
-    // 冻结失败：唯一事件是 error，无任何生成业务事件（不产生 token 消耗）
-    expect(types(result)).toEqual(['error'])
-    expect(String(result[0]!.data.message)).toContain('积分不足')
-    expect(result.some((frame) => frame.event === 'done')).toBe(false)
-    expect(result.some((frame) => frame.event === 'milestone')).toBe(false)
+    // 双轨边界（#21）：冻结发生在 hijack 前，402 以标准 JSON 返回且透传 Java 明确报错
+    expect(response.statusCode).toBe(402)
+    const body = response.json() as { statusCode: number; error: string; message: string }
+    expect(body).toMatchObject({ statusCode: 402, error: 'Payment Required' })
+    expect(body.message).toContain('积分不足')
   })
 
   it('冻结成功（默认 200 的 fakeRunClient）→ 正常进入 codegen 产出 done', async () => {

@@ -108,6 +108,17 @@ export class AgentStreamHttpError extends Error {
   }
 }
 
+// 解析非 2xx 响应体中的后端 message（错误体单点形状 {statusCode, error, message}，见 contract.md）；
+// 非 JSON / 缺 message（如网关错误页）时返回 null，由调用方回退状态码文案
+async function readServerErrorMessage(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.json()) as { message?: unknown }
+    return typeof body.message === 'string' && body.message !== '' ? body.message : null
+  } catch {
+    return null
+  }
+}
+
 // 生成 runId（Agent 以此创建 generation_run，全局唯一）
 export function createRunId(): string {
   // crypto.randomUUID 仅在安全上下文可用（localhost 视为安全），否则退化为随机串
@@ -159,7 +170,7 @@ interface AgentJsonParams {
 }
 
 // 需求工程端点公共 POST：JWT 鉴权 + JSON 响应；非 2xx 抛 AgentStreamHttpError
-//（401 令牌失效 / 429 线框限频 / 409 阶段冲突）
+//（401 令牌失效 / 429 线框限频 / 409 阶段冲突）；错误 message 优先后端返回的人话文案
 async function postAgentJson<T>(
   params: AgentJsonParams,
   path: string,
@@ -174,7 +185,8 @@ async function postAgentJson<T>(
     body: JSON.stringify({ runId: params.runId, appId: params.appId, ...body }),
   })
   if (!response.ok) {
-    throw new AgentStreamHttpError(response.status, `Agent 请求失败: ${response.status}`)
+    const serverMessage = await readServerErrorMessage(response)
+    throw new AgentStreamHttpError(response.status, serverMessage ?? `Agent 请求失败: ${response.status}`)
   }
   return response.json() as Promise<T>
 }
@@ -224,8 +236,11 @@ export async function streamAgentEvents(
     }),
     signal: params.signal,
   })
+  // 非 2xx = 流开始前的预检失败（#21 双轨边界：首帧写出前失败返回标准 4xx/503 JSON，
+  // 不再是 SSE 流）：解析后端 {statusCode, error, message} 展示人话原因（402 积分不足 / 409 线框未确认 / 503 服务未就绪）
   if (!response.ok || !response.body) {
-    throw new AgentStreamHttpError(response.status, `Agent 流请求失败: ${response.status}`)
+    const serverMessage = await readServerErrorMessage(response)
+    throw new AgentStreamHttpError(response.status, serverMessage ?? `Agent 流请求失败: ${response.status}`)
   }
   const reader = response.body.getReader()
   const decoder = new TextDecoder('utf-8')

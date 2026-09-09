@@ -15,6 +15,10 @@ export const MAX_INTERVIEW_ROUNDS = 2
 export interface InterviewOption {
   id: string
   text: string
+  // 人话结论（收束摘要用，#21 选项单源；缺省沿用选项文案）
+  summaryText?: string
+  // pages 维专用：该选项对应的页面清单（喂 summary.pages）
+  pages?: string[]
 }
 
 export interface InterviewQuestion {
@@ -86,16 +90,17 @@ const QUESTIONS: Record<InterviewDimension, Omit<InterviewQuestion, 'key' | 'dim
   pages: {
     question: '需要哪些页面？（MVP 上限 5 页）',
     options: [
-      { id: 'single', text: '单页（只有首页）' },
-      { id: 'home-detail', text: '首页 + 详情页' },
-      { id: 'home-list-detail', text: '首页 + 列表 + 详情' },
-      { id: 'full', text: '完整站点（首页+列表+详情+关于+联系）' },
+      { id: 'single', text: '单页（只有首页）', pages: ['首页'] },
+      { id: 'home-detail', text: '首页 + 详情页', pages: ['首页', '详情'] },
+      { id: 'home-list-detail', text: '首页 + 列表 + 详情', pages: ['首页', '列表', '详情'] },
+      { id: 'full', text: '完整站点（首页+列表+详情+关于+联系）', pages: ['首页', '列表', '详情', '关于', '联系'] },
     ],
   },
   data: {
     question: '需要展示什么内容 / 数据？',
     options: [
-      { id: 'light', text: '少量图文介绍' },
+      // summaryText 与选项文案不同：摘要用完整句式（#21 单源后差异显式化）
+      { id: 'light', text: '少量图文介绍', summaryText: '以少量图文介绍为主' },
       { id: 'gallery', text: '图文 + 作品 / 商品列表' },
       { id: 'form', text: '图文 + 列表 + 预约 / 表单' },
       { id: 'rich', text: '内容较丰富（含详情与多分类）' },
@@ -112,16 +117,24 @@ const QUESTIONS: Record<InterviewDimension, Omit<InterviewQuestion, 'key' | 'dim
   },
 }
 
+// 对外题目形态：选项只暴露 id + 文案（summaryText/pages 是摘要单源的内部字段，不进 wire）
+function toWireOptions(options: InterviewOption[]): Array<{ id: string; text: string }> {
+  return options.map(({ id, text }) => ({ id, text }))
+}
+
+function questionOf(key: InterviewDimension): InterviewQuestion {
+  return { key, dimension: DIMENSION_LABELS[key], question: QUESTIONS[key].question, options: toWireOptions(QUESTIONS[key].options) }
+}
+
 // 第 1 轮题目：五个维度各一道选择题（message 供真实模型生成题目，脚本化暂不参与）
 export function buildRound1Questions(message?: string): InterviewQuestion[] {
   void message
-  return INTERVIEW_DIMENSIONS.map((key) => ({ key, dimension: DIMENSION_LABELS[key], ...QUESTIONS[key] }))
+  return INTERVIEW_DIMENSIONS.map(questionOf)
 }
 
 // 第 2 轮追问：仅对尚未作答的维度补问（脚本化收敛规则：缺信息才追问，不硬凑轮数）
 export function buildRound2FollowUps(state: InterviewState): InterviewQuestion[] {
-  return INTERVIEW_DIMENSIONS.filter((key) => !state.answers[key]?.optionId)
-    .map((key) => ({ key, dimension: DIMENSION_LABELS[key], ...QUESTIONS[key] }))
+  return INTERVIEW_DIMENSIONS.filter((key) => !state.answers[key]?.optionId).map(questionOf)
 }
 
 // 合并本轮答案到访谈状态（保留既有作答，仅覆盖本轮出现的维度）
@@ -143,47 +156,25 @@ export function decideNextRound(state: InterviewState): { complete: boolean; que
   return { complete: false, questions: buildRound2FollowUps(state) }
 }
 
-// 选项 id → 人话结论的映射（脚本化收敛；缺失维度落到默认值）
-const AUDIENCE_TEXT: Record<string, string> = {
-  personal: '个人 / 个人品牌',
-  merchant: '小微商家',
-  creator: '内容创作者',
-  local: '本地服务机构',
-}
-const STYLE_TEXT: Record<string, string> = {
-  modern: '简约现代',
-  vivid: '活泼多彩',
-  business: '商务稳重',
-  artistic: '文艺清新',
-}
-const PAGE_SETS: Record<string, string[]> = {
-  single: ['首页'],
-  'home-detail': ['首页', '详情'],
-  'home-list-detail': ['首页', '列表', '详情'],
-  full: ['首页', '列表', '详情', '关于', '联系'],
-}
-const DATA_TEXT: Record<string, string> = {
-  light: '以少量图文介绍为主',
-  gallery: '图文 + 作品 / 商品列表',
-  form: '图文 + 列表 + 预约 / 表单',
-  rich: '内容较丰富（含详情与多分类）',
-}
-const INTERACTION_TEXT: Record<string, string> = {
-  view: '以浏览为主',
-  'view-form': '浏览 + 表单提交',
-  'view-form-map': '浏览 + 表单 + 地图',
-  full: '完整交互（搜索 / 登录 / 收藏）',
-}
-
-// 由访谈状态生成收敛结论（喂线框生成）；缺失维度落到默认值，页面数上限 5
+// 由访谈状态生成收敛结论（喂线框生成）：选项即结论（summaryText 缺省沿用选项文案，#21 单源），
+// 未作答/跳过（optionId 空或未知）落到每维第一项——即原缺省值，页面数上限 5
 export function buildSummary(state: InterviewState): InterviewSummary {
-  const pages = (PAGE_SETS[state.answers.pages?.optionId ?? 'single'] ?? ['首页']).slice(0, PAGE_LIMIT)
+  const summaryFor = (key: InterviewDimension): string => {
+    const selected = QUESTIONS[key].options.find((option) => option.id === state.answers[key]?.optionId)
+    const option = selected ?? QUESTIONS[key].options[0]!
+    return option.summaryText ?? option.text
+  }
+  const pagesFor = (): string[] => {
+    const selected = QUESTIONS.pages.options.find((option) => option.id === state.answers.pages?.optionId)
+    const option = selected ?? QUESTIONS.pages.options[0]!
+    return (option.pages ?? ['首页']).slice(0, PAGE_LIMIT)
+  }
   return {
     message: state.message?.trim() || '个人主页',
-    audience: AUDIENCE_TEXT[state.answers.audience?.optionId ?? 'personal'] ?? '个人 / 个人品牌',
-    style: STYLE_TEXT[state.answers.style?.optionId ?? 'modern'] ?? '简约现代',
-    pages,
-    data: DATA_TEXT[state.answers.data?.optionId ?? 'light'] ?? '以少量图文介绍为主',
-    interaction: INTERACTION_TEXT[state.answers.interaction?.optionId ?? 'view'] ?? '以浏览为主',
+    audience: summaryFor('audience'),
+    style: summaryFor('style'),
+    pages: pagesFor(),
+    data: summaryFor('data'),
+    interaction: summaryFor('interaction'),
   }
 }
