@@ -19,6 +19,7 @@ import { MAX_QUALITY_ATTEMPTS, MILESTONE_DETAILS, PHASE_BY_STATE, generationMach
 import { createScriptedLlm, type LlmProvider, type LlmScript } from '../../llm/index.js'
 import { DEFAULT_IMAGE_MODEL } from '../../server/config.js'
 import { resolveIntensity, type Intensity, type IntensityConfig } from '../intensity.js'
+import { SHORT_CALL_MAX_RETRIES } from '../retryPolicy.js'
 import { windowHistory, type HistoryTurn, type WindowedHistory } from './history.js'
 import { RunClient, type RunPhase } from '../../runs/runClient.js'
 import { validateWorkspacePath } from '../workspace.js'
@@ -373,8 +374,8 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
           model: provider.languageModel(modelId),
           system: `${codegenSystem}\n\n已达本次生成硬上限（工具调用/生成步数/输出长度上限）。请不要再调用工具，基于以下已生成内容立即输出最终完整交代：\n${pageContent}`,
           messages,
-          // 短调用恢复 SDK 默认退避重试（#20：渠道层已归一化 429/502 为可重试错误，瞬时过载可自愈；2 即 SDK 默认值，显式写出便于调整）
-          maxRetries: 2,
+          // 短调用恢复 SDK 默认退避重试（#20；次数单源见 generation/retryPolicy.ts）
+          maxRetries: SHORT_CALL_MAX_RETRIES,
           maxOutputTokens: tier.limits.maxOutputTokens,
           // 对话中断（#10）：收尾调用同样受 abort 信号约束
         }, options.abortSignal))

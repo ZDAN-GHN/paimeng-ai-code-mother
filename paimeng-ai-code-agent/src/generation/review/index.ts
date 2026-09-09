@@ -10,6 +10,7 @@ import path from 'node:path'
 import { generateText } from 'ai'
 import type { LlmProvider } from '../../llm/index.js'
 import { loadPrompt, PROMPT_NAMES } from '../prompts/index.js'
+import { SHORT_CALL_MAX_RETRIES } from '../retryPolicy.js'
 import {
   GATE_NAMES,
   runReviewGates,
@@ -73,8 +74,8 @@ export class LlmQualityScorer implements QualityScorer {
       model: this.provider.languageModel('scripted-quality'),
       system: loadPrompt(PROMPT_NAMES.codeQualityCheck),
       prompt: codeContent,
-      // 短调用恢复 SDK 默认退避重试（#20：渠道层已归一化 429/502 为可重试错误，瞬时过载可自愈；2 即 SDK 默认值，显式写出便于调整）
-      maxRetries: 2,
+      // 短调用恢复 SDK 默认退避重试（#20；次数单源见 generation/retryPolicy.ts）
+      maxRetries: SHORT_CALL_MAX_RETRIES,
       // 对话中断（#10 审查整改）：reviewer 工位的质检模型调用同样受 abort 信号约束
       //（中断落在 review 时 LLM 即时取消，而非延迟到下一检查点）
       ...(signal ? { abortSignal: signal } : {}),

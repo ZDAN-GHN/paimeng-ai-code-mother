@@ -319,6 +319,9 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     // 响应头单点：writeHead 一次设定（SSE_HEADERS 定义在 protocol/sse.ts，与冒烟端点共用）
     reply.hijack()
     reply.raw.writeHead(200, SSE_HEADERS)
+    // 接管后 raw 的错误脱离 Fastify 错误通道：销毁中的流上 write 可能异步 emit 'error'，
+    // 无人监听会冒泡为进程级未捕获异常——挂 no-op 兜底，断开语义仍由下方 close 分支承担
+    reply.raw.on('error', () => {})
 
     // 对话中断（Issue #10，架构 §3.5 中止 (a)）：感知客户端断开（关页面/中止按钮 abort）→
     // 取消 LLM 调用 → workflow 走 aborted 终态（保留已写文件 + 历史 [用户中断] + 折算退款）。
