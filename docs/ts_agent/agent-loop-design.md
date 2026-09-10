@@ -31,12 +31,12 @@
 | 编号 | 裁决结果 | 说明 |
 |---|---|---|
 | **J1** | ✅ **事件载体 = PG（用户修正原方案）** | 原稿把事件日志放在 MySQL 新表，**偏离了 `architecture.md:139` 的存储分工原则**。裁决改为 PG 存事件载体，与本项目既有原则「**交易归 MySQL**（业务 + chat_history + generation_run + 积分台账，同库同事务）；**记忆归 PG**（pgvector + JSONB 优势）」一致 |
-| **J2** | 待裁决 | 澄清以「回合结束 + `awaiting_user` + 下次请求续跑」表达 |
+| **J2** | ✅ **已裁决（2026-09-10）** | 澄清以「回合结束 + `awaiting_user` + 下次请求续跑」表达（否决长连接内暂停等人） |
 | **J3** | ✅ **花钱动作做成模型工具 + 必须请求用户确认（用户修正原方案）** | 模型可调 `request_generation`；但**批准只能来自人类**（代码强制、fail-closed）。这意味着原文的 R1「source 强制在阶段 C 才需要」**提前到本设计生效** |
-| **J4** | 待裁决 | run 生命周期保留极小 XState 状态机 |
-| **J5** | 待裁决 | 新端点 `POST /agent/turn`，旧三端点一次性退役 |
-| **J6** | 待裁决 | 预算以 `maxTokenBudget` 为主控、`maxTurns` 仅兜底 |
-| **J7** | 待裁决 | `codeGenType` 非法值改预检 400（取消静默回退 `html`），`AgentTokenVO` 回传权威 `codeGenType` |
+| **J4** | ✅ **已裁决（2026-09-10）** | run 生命周期保留极小 XState 状态机（否决删除 xstate 依赖） |
+| **J5** | ✅ **已裁决（2026-09-10）** | 新端点 `POST /agent/turn`，旧三端点一次性退役 |
+| **J6** | ✅ **已裁决（2026-09-10）** | 预算以 `maxTokenBudget` 为主控、`maxTurns` 仅兜底 |
+| **J7** | ✅ **已裁决（2026-09-10）** | `codeGenType` 非法值改预检 400（取消静默回退 `html`），`AgentTokenVO` 回传权威 `codeGenType` |
 
 ### 0.3 由 J1/J3 打开并已定的四个派生决策（2026-09-10，用户确认「符合想法」）
 
@@ -497,10 +497,10 @@ turns:
 | 花钱动作 | **模型工具 + 人类审批（J3）**：`request_generation` 只**提议**，冻结只发生在人类批准的 `confirm_generation` 回合 | 否决「模型可自决开跑」：DSH 的对照证明非人类生产方必须自报 source、不能继承人类权限（R1） |
 | 审批原语 | **通用 seam + fail-closed（D4）** | 否决「只服务生成」：Q11 已认定花钱/部署发布/应用级删除都不可逆，逐个现造会重复三遍；否决 fail-open：等于没有强制 |
 | 工作区路径 | **Java 为权威**：`AgentTokenVO` 计算并由前端原样回传 | 否决「TS 按 `codeGenType + appId` 自行推导」：Java 侧用的是数据库 app 记录的 `codeGenType` 且根目录来自 `AppConstant.CODE_OUTPUT_ROOT_DIR`，TS 侧默认 `workspaceRoot` 与之不等价，推导会导致产物写错目录、构建目录不匹配 |
-| `codeGenType` 非法值 | **预检 400**（取消静默回退 `html`，J7 待裁决） | 静默回退会让工作区类型、构建分派与计费类型系数三者不一致（按次付费下是真金白银的错配）。此改动同时了结 `contract-parity.md` 的 P3 修正项「codeGenType 回退 vs 422」 |
-| 澄清形态 | 回合结束 + `awaiting_user` + 下次请求续跑（J2 待裁决） | 否决长连接内暂停等人（fetch-SSE 经反向代理，超时/断连语义不可控） |
+| `codeGenType` 非法值 | **预检 400**（取消静默回退 `html`；J7 已裁决） | 静默回退会让工作区类型、构建分派与计费类型系数三者不一致（按次付费下是真金白银的错配）。此改动同时了结 `contract-parity.md` 的 P3 修正项「codeGenType 回退 vs 422」 |
+| 澄清形态 | 回合结束 + `awaiting_user` + 下次请求续跑（J2 已裁决） | 否决长连接内暂停等人（fetch-SSE 经反向代理，超时/断连语义不可控） |
 | 线框闸门 | 由模型按需产出、可确认但非必经 | 否决全退（Q10=B 已定）；否决照旧必经（与「一句话跑完」矛盾） |
-| XState | 保留极小 run 生命周期机（J4 待裁决） | 否决全删：Q4=B；且它是「非法转移类型层消灭」的现成保障，删除属额外风险 |
+| XState | 保留极小 run 生命周期机（J4 已裁决） | 否决全删：Q4=B；且它是「非法转移类型层消灭」的现成保障，删除属额外风险 |
 | 计费锚 | 保持 `phase+milestones` 上报 | 否决立即改工具事实推导：数据源（门禁记录/文件清单）当前**零结构化落库**，需先建载体，且 handoff §2 禁止无评估改扣费 |
 | 幂等粒度 | 批次级（PG 唯一键 `(app_id, turn_id, batch_seq)`） | 否决回合级：与流式多次 append 结构性冲突（§4.2/§4.4） |
 
@@ -631,12 +631,12 @@ turns:
 | # | 设计选择 | 状态 |
 |---|---|---|
 | J1 | 事件载体 = **PG `session_event`**（用户修正原 MySQL 方案） | ✅ 已裁决 |
-| J2 | 澄清以「回合结束 + `awaiting_user` + 下次请求续跑」表达 | ⏳ 待裁决 |
+| J2 | 澄清以「回合结束 + `awaiting_user` + 下次请求续跑」表达 | ✅ 已裁决 |
 | J3 | 花钱动作 = **模型工具 `request_generation` + 人类审批**（用户修正原「不做成工具」） | ✅ 已裁决 |
-| J4 | run 生命周期保留极小 XState 状态机 | ⏳ 待裁决 |
-| J5 | 统一端点用新路径 `POST /agent/turn`，旧三端点一次性退役 | ⏳ 待裁决 |
-| J6 | 预算主控用 `maxTokenBudget`，`maxTurns` 仅兜底 | ⏳ 待裁决 |
-| J7 | `codeGenType` 非法值改**预检 400**（取消静默回退 `html`），`AgentTokenVO` 回传权威 `codeGenType` | ⏳ 待裁决 |
+| J4 | run 生命周期保留极小 XState 状态机 | ✅ 已裁决 |
+| J5 | 统一端点用新路径 `POST /agent/turn`，旧三端点一次性退役 | ✅ 已裁决 |
+| J6 | 预算主控用 `maxTokenBudget`，`maxTurns` 仅兜底 | ✅ 已裁决 |
+| J7 | `codeGenType` 非法值改**预检 400**（取消静默回退 `html`），`AgentTokenVO` 回传权威 `codeGenType` | ✅ 已裁决 |
 | D1 | TS 直连 PG（写事件 + 重放读） | ✅ 已定（J1 派生，用户确认） |
 | D2 | compose 增 postgres+pgvector 服务，RAG v2 复用同实例分库 | ✅ 已定（J1 派生，用户确认） |
 | D3 | 不投影 `generation_run`，其用途与内容零变化 | ✅ 已定（J1 派生，用户确认） |
@@ -661,3 +661,7 @@ turns:
 | **J1=PG**：数据地基由 MySQL 新表改为 PG `session_event`；TS 直连；compose 增 postgres 服务；Java 侧事件表/服务/端点**全部取消** | §0.2/§0.3/§0.4（R5）、§2.1/§2.2/§2.3、§3.1、§3.2（约束 1/2/7/8 新增与改写）、§3.3、§4.1、§4.2、§4.4（由 HTTP 契约改为 TS 存储契约）、§4.7、§5（A1/A2/A6 重写）、§6（A1/A2/A6 重写）、§7、§8（加 compose/deployment/RAG 引用） |
 | **J3=模型工具 + 请求确认**：新增 `request_generation` 工具、`approval/asked`/`approval/decided` 事件、`src/approval/` 原语、`awaiting_user(reason=approval)`、`GenerationApprovalCard.vue`；R1 由「阶段 C 才需要」提前为**立即生效** | §0.1（Q6/Q9 改写）、§0.2、§0.4（R1）、§2.1、§3.1、§3.2（约束 8 新增）、§4.1（审批时序图）、§4.3（两个审批事件）、§4.5（请求体 `approvalId`、工具面、终态帧、卡片去向）、§4.6（`awaiting_approval` 不产生 phase）、§4.9、§5（A3/A4/A7）、§6（A3 审批验收、e2e 加审批步骤、无审批直连被拒）、§7 |
 | **D1–D4**：TS 直连 PG、compose 起 PG、不投影 `generation_run`、通用 approval seam + fail-closed | 同上各处 |
+
+### 第三轮（J2/J4/J5/J6/J7 授权）
+
+2026-09-10 用户授权 J2/J4/J5/J6/J7：**接受方案原提议，无内容修改**，仅将 §0.2/§4.9/§9 的状态由「待裁决」改为「已裁决」。**设计自此全部定稿**，无遗留待裁决项；实施授权（按 A0–A8 立 issue）另行确认。
