@@ -59,6 +59,6 @@ Issues are tracked in this repository's GitHub Issues via the `gh` CLI. See `doc
 
 This repository uses a single-context domain-doc layout. See `docs/agents/domain.md`.
 
-## DSH 行为准则
+## DSH 行为准则 （非 DSH Agent 不用读）
 
 [DSHEXT.md](./DSHEXT.md)

@@ -124,7 +124,7 @@ XState 去向：降级为 fallback 与强制地板（门禁必须过才能 done�
 ## Recommended Next Work
 
 1. **阶段 0 立 issue（可立即做，独立于 Skill 化）**：① 服务端注入访谈结论 + 线框进 codegen system（收口前端伪消息接缝，同时修「coder 看不到布局契约」）；② blocker 稳定代码枚举（`quality-gate-exhausted` / `limit-reached` / `guardrail-rejected` + 人话说明双字断）
-2. **沉淀决策记录（待用户确认）**：把本轮结论（市场对照 + 终态架构 + 评估先行的切换判据）写成 `docs/ts_agent/architecture-evolution.md` 供 P4 后设计轮引用——**用户尚未答复是否要写**
+2. **沉淀决策记录——已决：本轮不做**（用户 2026-09-10 决策「先不用」）：不写 `docs/ts_agent/architecture-evolution.md`；本轮结论（市场对照 + 终态架构 + 评估先行的切换判据）**以本 handoff 为唯一载体**，后续如 P4 后设计轮确有需要，再评估是否沉淀——下一会话请勿自行创建该文档
 3. **P4 后启动阶段 1**：服务端收口旅程（规则引擎版统一入口 + 前端 `journeyPhase` 退役 + 行为等价 e2e 对比）
 4. **阶段 2 前置条件**：真实渠道评估体系（≥20 条黄金旅程脚本）；评估通过后再切模型驾驶
 5. **待用户决策的产品问题**：线框闸门（架构 §4）相对市场是「加摩擦」的选择（bolt/Replit 选立即生成 + 快速预览 + 迭代），值得在真实模型联调时 A/B 验证价值
