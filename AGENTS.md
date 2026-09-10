@@ -1,4 +1,4 @@
-# Agents Instructions
+# Paimeng Dev SOP
 
 派蒙 AI 应用工坊：自然语言生成、预览和部署零代码应用。
 
@@ -58,7 +58,3 @@ Issues are tracked in this repository's GitHub Issues via the `gh` CLI. See `doc
 ### Domain docs
 
 This repository uses a single-context domain-doc layout. See `docs/agents/domain.md`.
-
-## DSH 行为准则 （非 DSH Agent 不用读）
-
-[DSHEXT.md](./DSHEXT.md)
