@@ -8,22 +8,22 @@
 
 ## 核心入口
 
-| 内容 | 资料 |
-|---|---|
-| 项目领域、Java 既有分层、核心实体 | [CONTEXT.md](CONTEXT.md) |
-| 跨会话记忆、当前状态、领域资料索引与下一步 | [MEMORY.md](MEMORY.md) |
+| 内容                            | 资料                                                             |
+| ----------------------------- | -------------------------------------------------------------- |
+| 项目领域、Java 既有分层、核心实体           | [CONTEXT.md](CONTEXT.md)                                       |
+| 跨会话记忆、当前状态、领域资料索引与下一步         | [MEMORY.md](MEMORY.md)                                         |
 | 目标架构、服务拓扑、wire 协议、计费、RAG、退役方案 | [docs/ts_agent/architecture.md](docs/ts_agent/architecture.md) |
-| Issue 状态、创建与关闭流程 | [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md) |
+| Issue 状态、创建与关闭流程              | [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md)   |
 
 ## 按任务查阅
 
-| 任务 | 资料 |
-|---|---|
-| TS Agent 实施、服务运行、测试 | [Agent README](paimeng-ai-code-agent/README.md)；进度与验证证据见 [docs/ts_agent/progress.md](docs/ts_agent/progress.md) |
-| Vue 前端开发、运行、测试 | [前端 README](paimeng-ai-code-mother-frontend/README.md) |
-| Python RAG（P4） | [RAG README](paimeng-ai-code-rag/README.md) |
-| 依赖、启动、排障、运行时目录、共享工作区 | [启动 SOP](.agents/skills/project-startup-guardrail/SKILL.md) |
-| Python Agent 历史移植参考与旧 Java AI 删除 | [docs/py_agent/](docs/py_agent/)（非当前架构权威）；删除范围见 [t21_delete_plan.md](docs/py_agent/t21_delete_plan.md) |
+| 任务                               | 资料                                                                                                              |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| TS Agent 实施、服务运行、测试              | [Agent README](paimeng-ai-code-agent/README.md)；进度与验证证据见 [docs/ts_agent/progress.md](docs/ts_agent/progress.md) |
+| Vue 前端开发、运行、测试                   | [前端 README](paimeng-ai-code-mother-frontend/README.md)                                                          |
+| Python RAG（P4）                   | [RAG README](paimeng-ai-code-rag/README.md)                                                                     |
+| 依赖、启动、排障、运行时目录、共享工作区             | [启动 SOP](.agents/skills/project-startup-guardrail/SKILL.md)                                                     |
+| Python Agent 历史移植参考与旧 Java AI 删除 | [docs/py_agent/](docs/py_agent/)（非当前架构权威）；删除范围见 [t21_delete_plan.md](docs/py_agent/t21_delete_plan.md)          |
 
 ## 硬约定
 
@@ -40,16 +40,16 @@
 
 高频技能在此列出以提升命中与触发稳定性；完整可用清单以会话技能目录为准，低频技能不列，避免诱导无效加载：
 
-| 技能 | 触发时机 |
-|---|---|
-| `project-comment-style` | 添加或补全注释、编写类/方法 Javadoc、核对注释样式等 |
-| `memory-management` | 任务产生或修正可复用的事实、决策、约束、踩坑，或既有记忆需增删改时 |
-| `memory-quality-audit` | 对 `.agents/memories/` 记忆文档或 `MEMORY.md` 做过新增/修改/删除/重命名后，交付前即使未被要求也应主动使用本技能审查记忆质量 |
-| `code-review` | 审查分支、PR 或工作区改动，或要求 "review since X" 时；完成一段自包含改动、准备提交前即使未被要求也应主动使用本技能自查 |
-| `agent-design-review` | 首次生成方案设计，或要求审查、修订方案设计时 |
-| `agents-md` | 更新/维护 AGENTS.md 或 CLAUDE.md |
-| `codebase-design` | 设计或改进模块接口、划分职责、找接缝等结构设计讨论时（"这个模块怎么设计"、"接口怎么拆"、"这段逻辑放哪"、"怎么更好测"） |
-| `make-interfaces-feel-better` | 开发或审查前端页面/组件、实现动画与 hover/阴影/圆角/图标等视觉细节、界面"感觉不对"（feels off）想打磨时 |
+| 技能                            | 触发时机                                                                             |
+| ----------------------------- | -------------------------------------------------------------------------------- |
+| `project-comment-style`       | 添加或补全注释、编写类/方法 Javadoc、核对注释样式等                                                   |
+| `memory-management`           | 任务产生或修正可复用的事实、决策、约束、踩坑，或既有记忆需增删改时                                                |
+| `memory-quality-audit`        | 对 `.agents/memories/` 记忆文档或 `MEMORY.md` 做过新增/修改/删除/重命名后，交付前即使未被要求也应主动使用本技能审查记忆质量 |
+| `code-review`                 | 审查分支、PR 或工作区改动，或要求 "review since X" 时；完成一段自包含改动、准备提交前即使未被要求也应主动使用本技能自查           |
+| `agent-design-review`         | 首次生成方案设计，或要求审查、修订方案设计时                                                           |
+| `agents-md`                   | 更新/维护 AGENTS.md 或 CLAUDE.md                                                      |
+| `codebase-design`             | 设计或改进模块接口、划分职责、找接缝等结构设计讨论时（"这个模块怎么设计"、"接口怎么拆"、"这段逻辑放哪"、"怎么更好测"）                  |
+| `make-interfaces-feel-better` | 开发或审查前端页面/组件、实现动画与 hover/阴影/圆角/图标等视觉细节、界面"感觉不对"（feels off）想打磨时                   |
 
 ### Issue tracker
 
@@ -58,3 +58,7 @@ Issues are tracked in this repository's GitHub Issues via the `gh` CLI. See `doc
 ### Domain docs
 
 This repository uses a single-context domain-doc layout. See `docs/agents/domain.md`.
+
+## DSH 行为准则
+
+[DSHEXT.md](./DSHEXT.md)
