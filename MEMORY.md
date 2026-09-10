@@ -58,6 +58,8 @@
 
 ## 下一步
 
+**Agent Loop 改造（事件溯源状态层 + 模型接管旅程决策）**：设计定稿 `docs/ts_agent/agent-loop-design.md`（2026-09-10 三轮审查 + J1–J7/D1–D4 裁决，裁决记录 #25）。实施已切 6 票并挂 GitHub 原生依赖边（父 spec #1，票索引见设计 §5）：`#26` A1+A2（PG 会话事件地基 + TS 会话存储，本批 6 票中唯一无阻塞的起点）→ `#27` A0+E1（基线快照 + eval 体系）→ `#28` A3（审批原语 + 统一回合端点 `POST /agent/turn`）→（`#29` A4+A5 ∥ `#30` A6）→ `#31` A7+A8（前端事件驱动 + 回归切换）；`#27`/`#28` 另受阶段 0（#23/#24）前置，阶段 0 尚未开工，且 **A0 基线必须在任何行为改动前采集**（时序约束，非阻塞边）。
+
 **多类型生成迁移（multi_file / vue_project）**：设计定稿 `docs/ts_agent/codegen-multi-type-design.md`（2026-09-09，经 agent-design-review 修订）。关键发现：**现行 html 提示词仍是代码块输出约定，与唯一落盘机制（writeFile 工具调用）错位**——真实通道未做过落盘 e2e，假 LLM 测试矩阵（直接发 tool-call）系统性掩盖，属带病状态。四票切分待开：A 提示词约定对齐（最前置）/ B multi_file 接线（StackProfile 策略接缝 + 真门禁）/ C per-type 预算 / D vue_project 设计先行（构建反馈环归属决策）。与 #22 正交。
 
 **TS Agent 架构优雅化第一批收口（父 issue #15，6/6）**：#16 目录收敛 / #17 真流式 / #18 zod / #19 质检 generateObject / #20 重试 / #21 路由收敛 ✅（2026-09-08，148→160/160，含双轴审查整改 +2）；frontier 清空，XState 双轨决策 #22 待拍板（见 `ts-agent.md`）。
