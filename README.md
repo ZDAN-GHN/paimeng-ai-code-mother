@@ -1,71 +1,58 @@
 # 派蒙 AI 应用工坊
 
-一个基于AI的代码生成平台，提供可视化的代码开发和管理功能。项目目前是单体项目，后续将重构为分布式架构，重构的代码将放在[paimeng-ai-code-mother-microservice](paimeng-ai-code-mother-microservice)包中。
+派蒙 AI 应用工坊是一个面向非技术用户的零代码应用生成平台。用户用自然语言描述需求，平台引导需求澄清、生成可预览的应用代码，并支持部署和后续可视化编辑。
 
-## 项目运行效果
+## 当前架构
 
-### 主页面展示
+项目采用三服务架构：
 
-![1775726653204](image/README/1775726653204.png)
+| 服务 | 目录 | 职责 |
+| --- | --- | --- |
+| Java 业务后端 | `src/` | REST 业务、登录鉴权、积分与充值、聊天历史、构建和部署 |
+| TS Agent | `paimeng-ai-code-agent/` | 需求访谈、线框、代码生成、工具执行和浏览器 SSE 流 |
+| Python RAG | `paimeng-ai-code-rag/` | P4 阶段的检索服务；当前不承载代码生成主链路 |
 
-### AI 代码生成页面
+浏览器通过 cookie 与 Java 业务接口通信，通过短时 JWT 和 fetch-SSE 直连 TS Agent。TS Agent 通过受保护的内部 API 回调 Java 完成记账、写入历史和触发构建。完整的服务拓扑、鉴权边界和数据分工以 [目标架构设计](docs/ts_agent/architecture.md) 为准。
 
-![1775725994280](image/README/1775725994280.png)
-
-### 可视化编辑效果
-
-![1775726048289](image/README/1775726048289.png)
-
-### 精选应用
-
-![1775726110974](image/README/1775726110974.png)
-
-### 项目部署
-
-项目部署后可以直接访问：
-
-![1775726147415](image/README/1775726147415.png)
-
-### 应用后台管理
-
-![1775726545814](image/README/1775726545814.png)
+`paimeng-ai-code-mother-microservice/` 是废弃的微服务重构尝试，不作为开发或迁移前提。旧 Java AI 生成链路和 Python Agent 中转链已退役，TS Agent 是唯一的生成主链路。
 
 ## 技术栈
 
-### 前端技术栈
+- 前端：[Vue 3](https://vuejs.org/) + TypeScript + Vite + Ant Design Vue + Pinia
+- Java 后端：Spring Boot 3 + MyBatis Flex + MySQL + Redis
+- TS Agent：Node.js + Fastify + Vercel AI SDK + XState v5
+- RAG：Python + FastAPI，P4 阶段接入
+- 本地基础设施：Docker Compose 提供 MySQL、Redis、SearXNG 和 Nginx
 
-- **Vue 3**：渐进式JavaScript框架
-- **TypeScript**：类型安全的JavaScript超集
-- **Vite**：下一代前端构建工具
-- **Ant Design Vue**：企业级UI组件库
-- **Pinia**：Vue官方状态管理库
-- **Vue Router**：Vue官方路由管理器
-- **Axios**：HTTP客户端
+## 项目结构
 
-### 后端技术栈
+```text
+.
+├── src/                                  # Java 业务后端
+├── paimeng-ai-code-agent/                # TS Agent
+├── paimeng-ai-code-mother-frontend/      # Vue 3 前端
+├── paimeng-ai-code-rag/                  # Python RAG（P4）
+├── docs/ts_agent/                        # 架构、契约、设计与进度
+├── .agents/memories/                     # 跨会话工作记忆
+├── sql/                                  # 数据库初始化与迁移资料
+└── docker-compose.yml                    # 本地基础设施
+```
 
-- **Spring Boot 3**：Spring 应用快速构建框架
-- **LangChain4j**：AI 应用开发框架
-- **LangGraph4j**：AI 工作流框架
-- **MyBatis Flex**：ORM框架
-- **MySQL**：关系型数据库
-- **Redis**：缓存数据库
-- **Nginx**：快速部署应用
-- **Selenium**：浏览器操作框架
-- **webdrivermanager**：浏览器驱动自动化管理框架，
+## 文档入口
 
-## 开发规范
+| 主题 | 文档 |
+| --- | --- |
+| 项目领域概念、既有 Java 分层和核心实体 | [CONTEXT.md](CONTEXT.md) |
+| 架构、服务拓扑、计费和 RAG 规划 | [docs/ts_agent/architecture.md](docs/ts_agent/architecture.md) |
+| 浏览器与 TS Agent 的 wire 协议 | [docs/ts_agent/contract.md](docs/ts_agent/contract.md) |
+| TS Agent 实施进度和验证证据 | [docs/ts_agent/progress.md](docs/ts_agent/progress.md) |
+| TS Agent 运行和测试 | [paimeng-ai-code-agent/README.md](paimeng-ai-code-agent/README.md) |
+| Vue 前端运行和测试 | [paimeng-ai-code-mother-frontend/README.md](paimeng-ai-code-mother-frontend/README.md) |
+| Python RAG 规划和运行 | [paimeng-ai-code-rag/README.md](paimeng-ai-code-rag/README.md) |
+| 本地环境、启动和排障 | [.agents/skills/project-startup-guardrail/SKILL.md](.agents/skills/project-startup-guardrail/SKILL.md) |
 
-### 前端规范
+## 当前阶段
 
-- 使用 TypeScript 进行类型检查
-- 遵循 Vue 3 Composition API 风格
-- 使用 ESLint 进行代码质量检查
-- 使用 Prettier 进行代码格式化
+TS Agent 主链路已完成 P3 切换。下一阶段包括 P4 RAG 与盈利 MVP、multi_file 和 vue_project 的真实生成能力，以及已完成设计的 [Agent Loop 改造](docs/ts_agent/agent-loop-design.md)。
 
-### 后端规范
-
-- 遵循阿里巴巴Java开发手册
-- 使用 MyBatis Flex 进行数据库操作
-- 统一返回结果格式
-- 全局异常处理
+开发约定、提交要求和按任务索引见 [AGENTS.md](AGENTS.md)。
