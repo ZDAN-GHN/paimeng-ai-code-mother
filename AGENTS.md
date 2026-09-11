@@ -58,3 +58,23 @@ Issues are tracked in this repository's GitHub Issues via the `gh` CLI. See `doc
 ### Domain docs
 
 This repository uses a single-context domain-doc layout. See `docs/agents/domain.md`.
+
+### Web project rules
+
+本仓库不是单一 TypeScript 全栈应用：Java `src/` 是业务后端，`paimeng-ai-code-mother-frontend/` 是 Vue 3 前端，`paimeng-ai-code-agent/` 是 Node TS Agent，`paimeng-ai-code-rag/` 是 Python RAG。不要把默认的 pnpm、React、共享 Zod 包或前端 Vitest 约定套用到不存在的模块。
+
+按任务读取详细规则：
+
+| 任务 | 详细规则 |
+| --- | --- |
+| 通用工程、目录边界、变更范围 | [.agents/rules/engineering.md](.agents/rules/engineering.md)、[project-boundaries.md](.agents/rules/project-boundaries.md) |
+| TypeScript、API 契约、前端 | [typescript.md](.agents/rules/typescript.md)、[api-contracts.md](.agents/rules/api-contracts.md)、[frontend.md](.agents/rules/frontend.md) |
+| 管理后台 UI | [admin-ui.md](.agents/rules/admin-ui.md) |
+| Java、数据库、错误与日志 | [backend.md](.agents/rules/backend.md)、[database.md](.agents/rules/database.md)、[errors.md](.agents/rules/errors.md)、[logging.md](.agents/rules/logging.md) |
+| 测试与交付验证 | [testing.md](.agents/rules/testing.md) |
+
+> Frontend and backend must share API contracts. Request/response schemas and inferred types must live in a shared contract layer. Frontend code must not hand-write backend response types.
+
+在本仓库中，Java OpenAPI/接口定义与前端 `src/api/` 生成类型共同承担该契约层；TS Agent 的浏览器 wire 协议以 `docs/ts_agent/contract.md` 与 TS 侧 Zod schema 为准。
+
+规则文档只补充本入口，不替代 `CONTEXT.md`、架构文档、启动 SOP 和各子项目 README；发生冲突时，以更具体、更新的项目权威文档为准。
