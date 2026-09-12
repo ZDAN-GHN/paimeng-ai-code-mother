@@ -5,6 +5,7 @@ tmp/*
 tmp/code_deploy/*
 !tmp/code_deploy/.gitkeep
 wsl-rt-env
+.agents/worktrees/
 # Docker compose 本地环境变量（含密码，不提交）
 .env
 # Redis 转储（本地运行期产物，不提交）
