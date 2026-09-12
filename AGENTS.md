@@ -28,7 +28,7 @@
 ## 硬约定
 
 - 敏感文件不提交：`application-local.yml`、各服务 `.env`；仓库只保留 `*.example` 模板。
-- 运行时环境按宿主分流（2026-09-07 起）：**原生 Linux 与 Windows/IDE 使用各服务默认目录与标准命令**（Java `target/`、Node `node_modules/` + `dist/`、Python `.venv/`），不指定环境输出目录；**仅 WSL 宿主**统一放 `wsl-rt-env/` 并经 `*-wsl.sh` 脚本命令指定，不建软链。三平台互不回退。
+- Subagent 的独立 Git worktree 统一保存到 `.agents/worktrees/`；创建前必须明确可复现基线，禁止隐式依赖主工作区未提交改动。
 - 不擅自切换 `ts-agent.enabled`，这会改变代码生成可用链路（关闭后前端得到 40410 明确报错；旧 Java AI 链路已删除，回退手段为 git 回滚）。
 - Agent 参与或生成的提交必须在 commit message 末尾添加 `Assisted-by: <agent-name>/<model-id>` trailer（例如 `Assisted-by: Pi/gpt-5.6-terra`）；不得使用 `Co-authored-by` 替代；`Signed-off-by` 仅由人类添加。
 - 每次改动完成后，必须创建对应的 Git commit，以便后续追踪和回滚；禁止留下未提交的改动。
