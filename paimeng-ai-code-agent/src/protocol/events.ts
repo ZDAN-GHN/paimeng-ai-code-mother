@@ -82,3 +82,5 @@ export type AgentEvent =
   | AwaitingUserEvent
   | DoneEvent
   | ErrorEvent
+
+export type AgentTurnEvent = AgentEvent & { seq: number }

@@ -11,7 +11,7 @@ import type { AgentConfig } from './config.js'
 import { httpError } from './httpError.js'
 import { RunClient, RunApiError } from '../runs/runClient.js'
 import { encodeEvent, encodeEventStream, SSE_HEADERS } from '../protocol/sse.js'
-import type { AgentEvent } from '../protocol/events.js'
+import type { AgentEvent, AgentTurnEvent } from '../protocol/events.js'
 import { runGenerationWorkflow, type StreamRequest } from '../generation/workflow/index.js'
 import type { HistoryTurn } from '../generation/workflow/history.js'
 import type { LlmProvider } from '../llm/index.js'
@@ -103,7 +103,7 @@ const streamBodySchema = tolerantBody({
 const turnBodySchema = tolerantBody({
   appId: z.union([z.string(), z.number()]).catch(''),
   message: z.string().optional().catch(undefined),
-  action: z.string().optional().catch(undefined),
+  action: z.enum(['chat', 'confirm_generation']).optional().catch(undefined),
   approvalId: z.string().optional().catch(undefined),
   intensity: z.enum(['fast', 'standard', 'deep']).optional().catch(undefined),
   codeGenType: z.enum(['html', 'multi_file', 'vue_project']).optional().catch(undefined),
@@ -121,13 +121,17 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     options.runClient ?? (config.javaInternalToken ? new RunClient({ baseUrl: config.javaInternalBaseUrl, token: config.javaInternalToken }) : undefined)
 
   fastify.post('/agent/turn', async (request, reply) => {
-    const input = turnBodySchema.parse(request.body) as TurnBody
+    const input = turnBodySchema.parse(request.body)
     const userId = request.user?.sub ?? ''
     if (input.appId === '' || userId === '') throw httpError(400, 'appId 必填')
-    if (!input.action || !['chat', 'confirm_generation'].includes(input.action)) throw httpError(400, 'action 必填且必须为 chat 或 confirm_generation')
-    const action = input.action as 'chat' | 'confirm_generation'
-    if (action === 'chat' && !input.message?.trim()) throw httpError(400, 'chat action 必须提供非空 message')
-    if (action === 'confirm_generation' && !input.approvalId) throw httpError(400, 'confirm_generation 必须提供 approvalId')
+    const action = input.action
+    if (!action) throw httpError(400, 'action 必填且必须为 chat 或 confirm_generation')
+    if (action === 'chat') {
+      const message = input.message?.trim()
+      if (!message) throw httpError(400, 'chat action 必须提供非空 message')
+    } else if (!input.approvalId) {
+      throw httpError(400, 'confirm_generation 必须提供 approvalId')
+    }
     if (!input.codeGenType || !input.workspacePath) throw httpError(400, 'codeGenType、workspacePath 必填')
     try {
       validateWorkspacePath(input.workspacePath, config.workspaceRoot)
@@ -137,10 +141,12 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     }
     if (!options.sessionStore) throw httpError(503, '会话存储未配置，无法处理统一回合')
     const turnId = `turn-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-    const events = [
-      { kind: 'session/turn-start' as const, source: 'human' as const, payload: { turnId, action } },
-      ...(action === 'chat' ? [{ kind: 'user/message' as const, source: 'human' as const, payload: { text: input.message!.trim() } }] : []),
-    ]
+    const events = action === 'chat'
+      ? [
+          { kind: 'session/turn-start' as const, source: 'human' as const, payload: { turnId, action } },
+          { kind: 'user/message' as const, source: 'human' as const, payload: { text: input.message?.trim() ?? '' } },
+        ]
+      : [{ kind: 'session/turn-start' as const, source: 'human' as const, payload: { turnId, action } }]
     let batch
     try {
       batch = await options.sessionStore.appendBatch({
@@ -149,14 +155,14 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     } catch (error) {
       throw httpError(503, `会话事件写入失败：${error instanceof Error ? error.message : '未知错误'}`)
     }
-    const terminal: AgentEvent = {
+    const terminal: AgentTurnEvent = {
       type: 'error',
       seq: batch.seqTo + 1,
       message: action === 'chat'
         ? '统一回合的模型工具尚未接入，当前请求已安全拒绝'
         : '统一回合的审批与生成尚未接入，当前请求已安全拒绝',
     }
-    const responseEvents: AgentEvent[] = [terminal]
+    const responseEvents: AgentTurnEvent[] = [terminal]
     return reply.headers(SSE_HEADERS).send(encodeEventStream(responseEvents))
   })
 

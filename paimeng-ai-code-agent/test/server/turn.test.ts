@@ -35,13 +35,18 @@ describe('POST /agent/turn', () => {
     expect(response.statusCode).toBe(200)
     const output = frames(response.body)
     expect(output).toHaveLength(1)
-    expect(output[0]).toMatchObject({ event: 'error', data: { type: 'error', seq: 3 } })
+    expect(output[0]!.event).toBe('error')
+    expect(output[0]!.data).toEqual(expect.objectContaining({ type: 'error', seq: 3 }))
+    expect(typeof output[0]!.data.seq).toBe('number')
+    expect(output[0]!.data.seq).toBeGreaterThan(2)
+    expect(output.at(-1)!.data.type).toBe('error')
     expect(store.batches).toHaveLength(1)
     expect((store.batches[0] as { events: unknown[] }).events).toHaveLength(2)
   })
 
   it.each([
     [{ ...validPayload('/tmp'), action: 'unknown' }, 'action'],
+    [{ ...validPayload('/tmp'), action: 'confirm_generation', approvalId: undefined }, 'approvalId'],
     [{ ...validPayload('/tmp'), message: '   ' }, 'message'],
     [{ ...validPayload('/tmp'), codeGenType: undefined }, 'codeGenType'],
     [{ ...validPayload('/tmp'), workspacePath: undefined }, 'workspacePath'],
