@@ -14,9 +14,35 @@ export interface WireframeState {
   confirmedAt?: string
 }
 
+export interface PlanningArtifact {
+  pages: string[]
+  siteMap: Array<{ page: string; anchor: string; linksTo: string[] }>
+  pageSummaries: Array<{ page: string; blocks: string[] }>
+}
+
 export interface RunContext {
   interview?: InterviewState
   wireframe?: WireframeState
+  planning?: PlanningArtifact
+}
+
+// 从已解析的访谈结论装配有界规划摘要；不把线框 HTML 全文放入模型上下文。
+export function buildPlanningArtifact(summary: {
+  pages: string[]
+}): PlanningArtifact {
+  const pages = summary.pages.slice(0, 5)
+  return {
+    pages,
+    siteMap: pages.map((page, index) => ({
+      page,
+      anchor: `page-${index}`,
+      linksTo: pages.filter((_, targetIndex) => targetIndex !== index),
+    })),
+    pageSummaries: pages.map((page) => ({
+      page,
+      blocks: ['顶部导航栏（logo + 菜单占位）', '主视觉 Banner 图片占位', '三列内容卡片图片占位', '页脚占位'],
+    })),
+  }
 }
 
 // 解析 run.context JSON 文本为类型化上下文（非法/空 → 空对象，调用方按缺省处理）

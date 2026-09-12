@@ -884,17 +884,6 @@ const generateCode = async (userMessage: string, aiMessageIndex: number) => {
     // 1. 以登录态换取短时 JWT + 工作区路径（会话过期由 axios 拦截器统一跳转登录页）
     const { token, workspacePath } = await ensureAgentToken()
 
-    // 2. 携带 Authorization 直连 Agent 流式生成，返回值为终态事件；
-    //    intensity 三档随选择器下发，访谈结论作为输入历史帮助模型理解需求
-    const history: Array<{ role: 'user' | 'assistant'; content: string }> = [
-      { role: 'user', content: journeyMessage.value || userMessage },
-    ]
-    if (journeySummary.value) {
-      history.push({
-        role: 'assistant',
-        content: `需求访谈结论：受众 ${journeySummary.value.audience}；风格 ${journeySummary.value.style}；页面 ${journeySummary.value.pages.join('、')}；数据需求 ${journeySummary.value.data}；交互 ${journeySummary.value.interaction}。`,
-      })
-    }
     const terminal = await streamAgentEvents(
       {
         token,
@@ -903,7 +892,6 @@ const generateCode = async (userMessage: string, aiMessageIndex: number) => {
         message: userMessage,
         workspacePath,
         intensity: intensity.value,
-        history,
         signal: streamAbortController.value.signal,
       },
       (event) => handleAgentEvent(event, aiMessageIndex),

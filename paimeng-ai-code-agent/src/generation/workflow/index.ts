@@ -24,6 +24,8 @@ import { windowHistory, type HistoryTurn, type WindowedHistory } from './history
 import { RunClient, type RunPhase } from '../../runs/runClient.js'
 import { validateWorkspacePath } from '../workspace.js'
 import { validatePrompt } from '../../interview/guardrails.js'
+import type { InterviewSummary } from '../../interview/index.js'
+import type { PlanningArtifact } from '../../interview/context.js'
 import { loadPrompt, PROMPT_NAMES } from '../prompts/index.js'
 import { FileTools } from '../tools/fileTools.js'
 import { ImageTools, type ImageConfig } from '../tools/imageTools.js'
@@ -46,6 +48,9 @@ export interface StreamRequest {
   history?: HistoryTurn[]
   // 生成类型（build 门禁分派；缺省 html = MVP 静态部署主链路）
   codeGenType?: CodeGenType
+  // 服务端重建的会话结论与规划产物；前端不再通过伪 assistant history 传递
+  sessionConclusion?: InterviewSummary
+  planningArtifact?: PlanningArtifact
 }
 
 // 生成期结构化日志（Issue #17）：路由注入请求关联 logger（fastify request.log），
@@ -65,8 +70,13 @@ export interface WorkflowOptions {
   imageTools?: ImageTools
   // 三重门禁执行器（#9）：测试注入替身断言「以已确认线框为基准」与失败触发重试；缺省默认执行器
   reviewGates?: ReviewGateSet
-  // 已确认线框的绝对路径（#9 视觉 diff 基准）：由路由从 run.context.wireframe.relativeUrl 解析传入
+  // 已确认线框的绝对路径（#9 视觉 diff 基准）：由路由解析传入
   wireframePath?: string
+  // 线框相对工作区路径，供模型按需 readFile；wireframePath 仍为门禁使用的绝对路径
+  wireframeRelativePath?: string
+  // 服务端重建的会话结论与规划产物；前端不再通过伪 assistant history 传递
+  sessionConclusion?: InterviewSummary
+  planningArtifact?: PlanningArtifact
   // 三档模型映射覆盖（#9，预留）：接入真实 provider 时按档位覆盖 modelId；缺省用 INTENSITY_TIERS 默认
   modelOverrides?: Partial<Record<Intensity, string>>
   // 中止信号（Issue #10 对话中断，架构 §3.5 中止 (a)）：连接断开/用户中止时由路由 abort，
@@ -301,10 +311,20 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
       const windowed = windowedHistoryOf(request)
       const codegenSystem = [
         loadPrompt(PROMPT_NAMES.codegenHtml),
+        // 服务端注入会话五维结论，保持需求上下文不依赖浏览器伪消息。
+        ...(options.sessionConclusion
+          ? [`\n会话结论（服务端重建）：\n${json(options.sessionConclusion)}`]
+          : []),
+        // 只注入有界规划摘要；线框 HTML 全文仍通过相对路径按需读取。
+        ...(options.planningArtifact
+          ? [`\n规划产物：\n${json(options.planningArtifact)}`]
+          : []),
+        ...(options.wireframeRelativePath ? [`\n线框文件相对路径：${options.wireframeRelativePath}`] : []),
         // 重试时把质检意见注入 system（修复意见是上一轮 reviewer 门禁的失败细节，去重注入避免重复）
         ...(qualityOpinions.length > 0
           ? [`\n上一轮质检未通过，请根据以下意见修复生成结果：\n${[...new Set(qualityOpinions)].join('\n')}`]
           : []),
+
         // 档位说明（真实 provider 消费；假 LLM 忽略）
         `\n本次生成推理强度档位：${tier.label}（模型 ${tier.modelId}）。`,
         // 输入历史滑窗（#9）：更早轮次摘要并入 system，成本有界

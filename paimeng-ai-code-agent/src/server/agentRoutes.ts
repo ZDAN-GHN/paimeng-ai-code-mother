@@ -20,7 +20,7 @@ import { WorkspacePathError, validateWorkspacePath } from '../generation/workspa
 import { buildSummary, type InterviewAnswer } from '../interview/index.js'
 import { conductInterview } from '../interview/conduct.js'
 import { WIREFRAME_FILENAME, buildWireframeHtml, countWireframePages } from '../interview/wireframe.js'
-import { parseContext } from '../interview/context.js'
+import { parseContext, buildPlanningArtifact } from '../interview/context.js'
 import type { ImageTools } from '../generation/tools/imageTools.js'
 import type { ReviewGateSet } from '../generation/review/index.js'
 
@@ -259,6 +259,8 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     // #9 视觉 diff 基准 = 已确认线框：从 run.context.wireframe.relativeUrl 解析绝对路径传入 workflow
     //（线框存 {workspace}/wireframe/wireframe.html，relativeUrl 相对工作区；解析后做沙箱校验防越界）
     const context = parseContext(run.context)
+    const sessionConclusion = context.interview?.complete ? buildSummary(context.interview) : undefined
+    const planningArtifact = context.planning ?? (sessionConclusion ? buildPlanningArtifact(sessionConclusion) : undefined)
     let wireframePath: string | undefined
     if (context.wireframe?.relativeUrl) {
       try {
@@ -329,6 +331,9 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
         imageTools: options.imageTools,
         reviewGates: options.reviewGates,
         wireframePath,
+        wireframeRelativePath: context.wireframe?.relativeUrl,
+        sessionConclusion,
+        planningArtifact,
         // 三档模型映射（#9，预留）：接入真实 provider 时按档位覆盖模型 id
         modelOverrides: {
           fast: config.modelFast,

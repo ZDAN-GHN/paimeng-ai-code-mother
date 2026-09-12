@@ -32,6 +32,7 @@ export interface ScriptedCallRecord {
   modelId: string
   maxOutputTokens: number | undefined
   hasToolResult: boolean
+  system?: string
 }
 
 // 用户消息 → 页面内容（评审内容即 ai_response 增量文本的拼接）
@@ -287,6 +288,7 @@ class ScriptedLanguageModel implements LanguageModelV2 {
       modelId: this.modelId,
       maxOutputTokens: options.maxOutputTokens,
       hasToolResult: hasToolResult(options),
+      system: options.prompt ? JSON.stringify(options.prompt) : undefined,
     })
   }
 
