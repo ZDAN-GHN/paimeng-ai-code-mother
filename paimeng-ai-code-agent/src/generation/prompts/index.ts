@@ -10,6 +10,7 @@ const PROMPTS_DIR = path.join(agentRoot, 'src', 'generation', 'prompts')
 // 提示词文件名（Python Agent app/prompts/ 原件留档 rag 仓库，可随时取回）
 export const PROMPT_NAMES = {
   codegenHtml: 'codegen-html-system-prompt.txt',
+  codegenMultiFile: 'codegen-multi-file-system-prompt.txt',
   codeQualityCheck: 'code-quality-check-system-prompt.txt',
 } as const
 
