@@ -41,6 +41,23 @@ type EventRow = QueryResultRow & {
   created_at: Date | string
 }
 
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))
+  return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(',')}}`
+}
+
+function sameEvent(row: EventRow, event: SessionEventInput, eventIndex: number): boolean {
+  return row.event_index === eventIndex &&
+    row.kind === event.kind &&
+    row.version === (event.version ?? 1) &&
+    row.ignorable === (event.ignorable ?? false) &&
+    row.source === event.source &&
+    (row.run_id ?? null) === (event.runId ?? null) &&
+    canonicalJson(row.payload) === canonicalJson(event.payload)
+}
+
 function toRecord(row: EventRow): SessionEventRecord {
   return {
     id: String(row.id),
@@ -83,7 +100,9 @@ export class PgSessionStore implements SessionStore {
         [input.appId, input.turnId, input.batchSeq],
       )
       if (existing.rowCount) {
-        if (existing.rowCount !== input.events.length) throw new Error('批次重放事件数量不一致')
+        if (existing.rowCount !== input.events.length || existing.rows.some((row, index) => !sameEvent(row, input.events[index]!, index))) {
+          throw new Error('批次重放事件内容不一致')
+        }
         const first = Number(existing.rows[0]?.seq)
         const last = Number(existing.rows.at(-1)?.seq)
         await client.query('COMMIT')
@@ -128,6 +147,7 @@ export class PgSessionStore implements SessionStore {
     )
     const hasMore = result.rows.length > limit
     const rows = hasMore ? result.rows.slice(0, limit) : result.rows
+    const lastScannedSeq = rows.at(-1)?.seq
     const events = rows.flatMap((row) => {
       if (!isSessionEventKind(row.kind)) {
         if (!row.ignorable) throw new UnknownEventKindError(row.kind)
@@ -135,7 +155,7 @@ export class PgSessionStore implements SessionStore {
       }
       return [toRecord(row)]
     })
-    return { events, lastSeq: events.at(-1)?.seq ?? (input.afterSeq ?? 0), hasMore }
+    return { events, lastSeq: lastScannedSeq === undefined ? (input.afterSeq ?? 0) : Number(lastScannedSeq), hasMore }
   }
 
   async assertHumanApproved(input: { appId: string; approvalId: string }): Promise<{ ok: true } | { ok: false; reason: string }> {
