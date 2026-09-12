@@ -1,4 +1,12 @@
-// Java 内部 API 客户端：generation_run 生命周期（#4）
+export const FAILURE_CODES = [
+  'guardrail-rejected',
+  'quality-gate-exhausted',
+  'limit-reached',
+  'model-error',
+  'unknown',
+] as const
+export type FailureCode = (typeof FAILURE_CODES)[number]
+
 // TS Agent 不直连 MySQL（架构红线），run 状态经 Java 内部 API 读写（docs/ts_agent/architecture.md §3.2）
 // 端点：POST /internal/runs（创建）、PATCH /internal/runs/{runId}（推进）、GET /internal/apps/{appId}/runs/latest-nonterminal（断点续传查询）
 
@@ -64,6 +72,7 @@ export interface AgentCompleteRequest {
   // 中断时已落盘文件数（aborted 时供「首个文件落盘前 = 全额退款」折算；success/failed 忽略）
   filesWritten?: number
   errorMessage?: string
+  errorCode?: FailureCode
 }
 
 // 冻结积分响应（Issue #10）：Java 返回台账关联与冻结结果

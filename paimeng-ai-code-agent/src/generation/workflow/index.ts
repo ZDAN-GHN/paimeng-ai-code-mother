@@ -21,7 +21,7 @@ import { DEFAULT_IMAGE_MODEL } from '../../server/config.js'
 import { resolveIntensity, type Intensity, type IntensityConfig } from '../intensity.js'
 import { SHORT_CALL_MAX_RETRIES } from '../retryPolicy.js'
 import { windowHistory, type HistoryTurn, type WindowedHistory } from './history.js'
-import { RunClient, type RunPhase } from '../../runs/runClient.js'
+import { RunClient, type FailureCode, type RunPhase } from '../../runs/runClient.js'
 import { validateWorkspacePath } from '../workspace.js'
 import { validatePrompt } from '../../interview/guardrails.js'
 import type { InterviewSummary } from '../../interview/index.js'
@@ -197,7 +197,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
   async function notifyComplete(
     status: 'success' | 'failed' | 'aborted',
     aiContent: string,
-    options_: { errorMessage?: string; filesWritten?: number } = {},
+    options_: { errorMessage?: string; errorCode?: FailureCode; filesWritten?: number } = {},
   ): Promise<void> {
     if (!runClient) return
     try {
@@ -211,6 +211,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
         ],
         workspacePath: request.workspacePath ?? workspaceRoot,
         ...(options_.errorMessage ? { errorMessage: options_.errorMessage } : {}),
+        ...(options_.errorCode ? { errorCode: options_.errorCode } : {}),
         ...(options_.filesWritten !== undefined ? { filesWritten: options_.filesWritten } : {}),
       })
     } catch (error) {
@@ -221,7 +222,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
 
   // 统一失败收尾（消除 guardrail/review/catch 多处重复）：状态机进 failed（若仍活跃）→
   // 同步 phase/milestone → 落 token 计量 → 回调 Java 标记失败 → 发射唯一 error 终态；调用后不再发业务事件
-  async function* fail(message: string): AsyncGenerator<AgentEvent> {
+  async function* fail(message: string, errorCode: FailureCode = 'unknown'): AsyncGenerator<AgentEvent> {
     if (actor.getSnapshot().status === 'active') {
       actor.send({ type: 'FAIL', error: message })
     }
@@ -229,7 +230,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     if (runClient) {
       await runClient.updateRun(request.runId, { tokenUsage: json(tokenUsage) })
     }
-    await notifyComplete('failed', '', { errorMessage: message })
+    await notifyComplete('failed', '', { errorMessage: message, errorCode })
     yield { type: 'error', message }
   }
 
@@ -278,7 +279,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     // Guardrail 校验用户输入（Issue #8）：拒绝 → failed 终态 + 明确报错，不进入 coding
     const guardrail = validatePrompt(request.message)
     if (!guardrail.isAllowed) {
-      yield* fail(guardrail.reason)
+      yield* fail(guardrail.reason, 'guardrail-rejected')
       return
     }
 
@@ -437,7 +438,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
         continue
       }
       // 重试耗尽 → failed 终态（错误交代含质检失败原因）
-      yield* fail('重试次数已用尽，生成结果仍未能通过质量门禁：' + verdict.errors.join('；'))
+      yield* fail('重试次数已用尽，生成结果仍未能通过质量门禁：' + verdict.errors.join('；'), 'quality-gate-exhausted')
       return
     }
 
@@ -462,6 +463,6 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     }
     // 失败路径：统一收尾（catch 中 actor 可能已在终态，fail 内判断活跃态）
     const message = error instanceof Error ? error.message : '生成失败'
-    yield* fail(message)
+    yield* fail(message, 'model-error')
   }
 }

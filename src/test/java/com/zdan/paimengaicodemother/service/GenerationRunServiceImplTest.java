@@ -330,10 +330,11 @@ class GenerationRunServiceImplTest {
 
         AgentCompleteRequest request = completeRequest("run-1", "failed", null);
         request.setErrorMessage("boom");
+        request.setErrorCode("model-error");
         service.completeRun("run-1", request);
 
         verify(chatHistoryService, times(1))
-                .addChatMessage(eq(1L), eq("生成失败：boom"), eq("ai"), any(User.class));
+                .addChatMessage(eq(1L), eq("生成失败[model-error]:boom"), eq("ai"), any(User.class));
     }
 
     /**
@@ -462,7 +463,7 @@ class GenerationRunServiceImplTest {
 
         verify(creditService).refundRun(eq("run-1"), eq(AgentCompleteStatusEnum.FAILED), isNull(), any());
         verify(chatHistoryService, times(1))
-                .addChatMessage(eq(1L), eq("生成失败：boom"), eq("ai"), any(User.class));
+                .addChatMessage(eq(1L), eq("生成失败[unknown]:boom"), eq("ai"), any(User.class));
         verify(mapper).update(argThat(r -> "failed".equals(r.getPhase())
                 && "run-1".equals(r.getRunId())), anyBoolean());
     }
@@ -618,7 +619,7 @@ class GenerationRunServiceImplTest {
 
         // 空 ai 跳过，只写 user + Java 错误历史
         verify(chatHistoryService, times(1)).addChatMessage(eq(1L), eq("hello"), eq("user"), any(User.class));
-        verify(chatHistoryService, times(1)).addChatMessage(eq(1L), eq("生成失败：boom"), eq("ai"), any(User.class));
+        verify(chatHistoryService, times(1)).addChatMessage(eq(1L), eq("生成失败[unknown]:boom"), eq("ai"), any(User.class));
         verify(chatHistoryService, times(2)).addChatMessage(anyLong(), anyString(), anyString(), any(User.class));
         // 退款不被空消息阻断
         verify(creditService).refundRun(eq("run-1"), eq(AgentCompleteStatusEnum.FAILED), isNull(), any());

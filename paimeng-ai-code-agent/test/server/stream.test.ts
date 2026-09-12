@@ -138,6 +138,7 @@ describe('POST /agent/stream（error 剧本）', () => {
     const complete = calls.find((call) => call.url.endsWith('/complete'))!
     expect(complete.body.status).toBe('failed')
     expect(complete.body.errorMessage).toBe('假 LLM 剧本故意失败')
+    expect(complete.body.errorCode).toBe('model-error')
   })
 })
 
@@ -237,6 +238,7 @@ describe('POST /agent/stream（Issue #8 Guardrail + 图片配额 + 导览组件�
     const complete = calls.find((call) => call.url.endsWith('/complete'))!
     expect(complete.body.status).toBe('failed')
     expect(complete.body.errorMessage).toBe('输入包含不当内容，请修改后重试')
+    expect(complete.body.errorCode).toBe('guardrail-rejected')
   })
 
   it('Java 完成回调失败（/complete 500）不阻断主流程：仍 done 终态且产物已落盘', async () => {

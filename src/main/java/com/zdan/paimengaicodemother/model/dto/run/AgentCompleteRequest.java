@@ -49,6 +49,11 @@ public class AgentCompleteRequest implements Serializable {
     private String workspacePath;
 
     /**
+     * 稳定失败代码（服务端分流/埋点使用；为空时按 unknown 处理）
+     */
+    private String errorCode;
+
+    /**
      * 失败时的错误信息（status=failed 时写错误历史；aborted 时可附中断原因）
      */
     private String errorMessage;

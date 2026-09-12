@@ -254,8 +254,12 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
         } else if (status == AgentCompleteStatusEnum.FAILED) {
             creditService.refundRun(runId, status, null, milestoneCount);
             // 失败无产物可构建，写错误历史让会话有可见反馈
+            String errorCode = StrUtil.blankToDefault(request.getErrorCode(), "unknown");
+            String errorMessage = StrUtil.blankToDefault(request.getErrorMessage(), "生成失败");
+            log.warn("Agent 生成失败，runId: {}，errorCode: {}，message: {}", runId, errorCode, errorMessage);
+            // 稳定代码供服务端检索，人话文案保持在后缀，避免调用方只能解析自由文本。
             chatHistoryService.addChatMessage(request.getAppId(),
-                    "生成失败：" + StrUtil.blankToDefault(request.getErrorMessage(), "生成失败"),
+                    "生成失败[" + errorCode + "]:" + errorMessage,
                     ChatHistoryMessageTypeEnum.AI.getValue(), user);
             markRunTerminal(runId, GenerationRunPhaseEnum.FAILED);
         } else if (status == AgentCompleteStatusEnum.ABORTED) {
