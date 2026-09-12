@@ -235,7 +235,8 @@ CREATE TABLE IF NOT EXISTS session_event
     run_id     VARCHAR(64),                                            -- 所属 run；会话级事件为 NULL
     seq        BIGINT      NOT NULL,                                   -- 会话内单调序号，从 1 开始，连续无空洞
     turn_id    VARCHAR(64) NOT NULL,                                   -- 所属回合
-    batch_seq  INTEGER     NOT NULL,                                   -- 回合内批次号，从 1 开始
+    batch_seq  INTEGER     NOT NULL,                                   -- 回合内批次号，从 1 开始；同批事件共享
+    event_index INTEGER     NOT NULL,                                   -- 批内事件序号，从 0 开始
     kind       VARCHAR(64) NOT NULL,                                   -- 事件类型（白名单见 §4.3）
     version    INTEGER     NOT NULL DEFAULT 1,                         -- 载荷版本；未知 kind 且 ignorable=false 时拒绝解释
     ignorable  BOOLEAN     NOT NULL DEFAULT FALSE,                     -- true=读路径可跳过该未知事件
@@ -243,7 +244,8 @@ CREATE TABLE IF NOT EXISTS session_event
     payload    JSONB       NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT uk_app_seq UNIQUE (app_id, seq),
-    CONSTRAINT uk_app_turn_batch UNIQUE (app_id, turn_id, batch_seq),  -- 批次级幂等键（重放不重复追加）
+    CONSTRAINT uk_app_turn_batch_event UNIQUE (app_id, turn_id, batch_seq, event_index), -- 批内事件幂等键
+    CONSTRAINT ck_batch_event_index CHECK (event_index >= 0),
     CONSTRAINT ck_source CHECK (source IN ('human', 'model', 'system'))
 );
 
@@ -257,16 +259,16 @@ CREATE INDEX IF NOT EXISTS idx_app_created ON session_event (app_id, created_at)
 -- 1) 取每 app 事务级互斥锁，保证 seq 连续无空洞
 SELECT pg_advisory_xact_lock(hashtext($1));            -- $1 = app_id
 -- 2) 分配 seq（同事务）
-INSERT INTO session_event (app_id, user_id, run_id, seq, turn_id, batch_seq, kind, version, ignorable, source, payload)
+INSERT INTO session_event (app_id, user_id, run_id, seq, turn_id, batch_seq, event_index, kind, version, ignorable, source, payload)
 SELECT $1, $2, $3,
        (SELECT COALESCE(MAX(seq), 0) FROM session_event WHERE app_id = $1) + 1,
-       $4, $5, $6, $7, $8, $9, $10::jsonb
-ON CONFLICT (app_id, turn_id, batch_seq) DO NOTHING   -- 批次重放幂等
+       $4, $5, $6, $7, $8, $9, $10, $11::jsonb
+ON CONFLICT (app_id, turn_id, batch_seq, event_index) DO NOTHING   -- 批内事件重放幂等
 RETURNING seq;
 ```
 
-- **幂等粒度 = 批次级**（`(app_id, turn_id, batch_seq)`）。**禁止**用回合级键：一个回合必然产生 N 次 append，回合级键会让第 2 批起被丢弃，导致日志残缺、`seq` 断号（破坏 Q1 根基）。
-- 同一批次的多个事件在同一事务内一次性插入（`batch_seq` 相同、`seq` 连续递增）。
+- **幂等粒度 = 批内事件级**，批次身份仍是 `(app_id, turn_id, batch_seq)`，事件键为 `(app_id, turn_id, batch_seq, event_index)`。**禁止**用回合级键：一个回合必然产生 N 次 append，回合级键会让第 2 批起被丢弃，导致日志残缺。
+- 同一批次的多个事件在同一事务内一次性插入（`batch_seq` 相同、`event_index` 从 0 连续递增、`seq` 连续递增）；重复同一批次的同一事件由唯一键幂等丢弃。
 
 **`generation_run` 不变更 DDL、不改用途**（D3）：它仍是计费锚/并发/续传，由既有 `PATCH /internal/runs/{runId}` 通道维护；会话上下文一律重放 PG 得到，`generation_run.context` 退化为陈旧副本（保留兼容读）。
 
@@ -311,7 +313,7 @@ export interface SessionEventInput {
 }
 
 export interface SessionStore {
-  /** 追加一批事件；返回本批 seq 区间。同 (appId, turnId, batchSeq) 重放返回首次结果，不重复追加 */
+  /** 追加一批事件；返回本批 seq 区间。同 (appId, turnId, batchSeq) 重放返回首次结果，不重复追加；存储层为 events 分配 0 起连续 event_index */
   appendBatch(input: {
     appId: string; userId: string; turnId: string; batchSeq: number;
     events: SessionEventInput[];
@@ -531,8 +533,8 @@ turns:
 
 **A1（PG 地基）**
 - `docker compose up -d && docker compose ps` → `postgres` 容器 **healthy**，`ss -tlnp | grep 5432` 见 127.0.0.1:5432 监听（**注意**：这修改了 `.agents/memories/deployment.md:97` 原有的「5432 停用后不应出现」验收口径，须同步）；
-- `psql "$PG_DSN" -c '\d session_event'` 输出含 `uk_app_seq`、`uk_app_turn_batch`、`ck_source` 与 `payload jsonb`（贴实测输出到 issue）；
-- 重复执行初始化脚本不报错（`CREATE TABLE IF NOT EXISTS` 幂等）。
+- `psql "$PG_DSN" -c '\d session_event'` 输出含 `uk_app_seq`、`uk_app_turn_batch_event`、`ck_batch_event_index`、`ck_source` 与 `payload jsonb`（贴实测输出到 issue）；同批两条事件必须共享 `batch_seq`、使用不同 `event_index` 并可同时落库；重复同一事件键必须 no-op。
+- 重复执行初始化脚本不报错（`CREATE TABLE IF NOT EXISTS` 幂等）。本地旧表按 #57 的重建说明处理；生产迁移不在本票范围内。
 
 **A2（TS 会话存储）**
 - `cd paimeng-ai-code-agent && npm run test && npm run type-check` 全绿，覆盖：
