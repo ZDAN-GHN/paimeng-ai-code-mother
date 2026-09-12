@@ -28,7 +28,14 @@ Required top-level fields are `id`, `title`, `category`, `tags`, `executionMode`
 
 `executionMode=fake_llm` means the journey is deterministic and can run in CI without provider credentials. `executionMode=real_model` marks journeys whose final gate is provider/network validation by the main agent. This distinction does not change runtime behavior.
 
-## Validation
+The runner validates the frozen journeys and writes the documented report shape:
+
+```sh
+node eval/run.mjs --journeys eval/journeys --base eval/fixtures/baseline --out ../docs/ts_agent/agent-loop-eval-report.md
+```
+
+The default `offline` mode is deterministic and does not invoke a provider. It records the turn inputs and expected events as journey-definition checks, leaves observed SSE/run/callback fields empty, and marks `real_model` journeys as `not-captured`. Use `--mode real` only when a provider capture adapter is available; the current runner fails closed because it cannot fabricate real-model baseline records. Runner tests can be executed with `node --test eval/run.test.mjs`.
+
 
 ```sh
 cd paimeng-ai-code-agent
