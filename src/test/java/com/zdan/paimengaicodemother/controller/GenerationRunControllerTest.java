@@ -4,16 +4,19 @@ import com.zdan.paimengaicodemother.config.InternalApiProperties;
 import com.zdan.paimengaicodemother.exception.BusinessException;
 import com.zdan.paimengaicodemother.exception.ConcurrentRunException;
 import com.zdan.paimengaicodemother.exception.ErrorCode;
+import com.zdan.paimengaicodemother.model.dto.run.AgentCompleteRequest;
 import com.zdan.paimengaicodemother.model.dto.run.RunCreateRequest;
 import com.zdan.paimengaicodemother.model.vo.CreditFreezeVO;
 import com.zdan.paimengaicodemother.model.vo.RunVO;
 import com.zdan.paimengaicodemother.service.GenerationRunService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -198,8 +201,23 @@ class GenerationRunControllerTest {
     }
 
     /**
-     * 完成回调：参数非法（service 抛 PARAMS_ERROR）→ 400
+     * 完成回调：errorCode 从 HTTP JSON 解析并传入 service
      */
+    @Test
+    void completeRunForwardsErrorCodeFromJson() throws Exception {
+        mockMvc.perform(post("/internal/agent/runs/run-1/complete")
+                        .header("Authorization", AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"appId\":1,\"userId\":1,\"status\":\"failed\",\"errorCode\":\"model-error\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        ArgumentCaptor<AgentCompleteRequest> requestCaptor = ArgumentCaptor.forClass(AgentCompleteRequest.class);
+        verify(generationRunService).completeRun(eq("run-1"), requestCaptor.capture());
+        assertEquals("model-error", requestCaptor.getValue().getErrorCode());
+    }
+
+
     @Test
     void completeRunInvalidParamReturns400() throws Exception {
         doThrow(new BusinessException(ErrorCode.PARAMS_ERROR, "status 仅接受 success/failed"))
