@@ -50,10 +50,17 @@ describe('session context reconstruction', () => {
   })
 
   it('rejects non-ignorable unknown events and skips ignorable unknown events', () => {
-    const unknown = event({ kind: 'future/event' as SessionEventRecord['kind'], payload: {}, ignorable: false })
+    const unknown = { ...event({ payload: {} }), kind: 'future/event', ignorable: false }
     expect(() => rebuildSessionContext([unknown], { appId: 'app-1', userId: 'user-1' })).toThrow(UnknownEventKindError)
     const ignored = rebuildSessionContext([{ ...unknown, ignorable: true }, event({ seq: 2 })], { appId: 'app-1', userId: 'user-1' })
     expect(ignored.history.map((message) => message.content)).toEqual(['第一轮需求'])
+  })
+
+  it('rejects invalid history window options', () => {
+    expect(() => rebuildSessionContext([], { appId: 'app-1', userId: 'user-1', recentTurns: 0 })).toThrow('recentTurns 必须为正整数')
+    expect(() => rebuildSessionContext([], { appId: 'app-1', userId: 'user-1', recentTurns: 1.5 })).toThrow('recentTurns 必须为正整数')
+    expect(() => rebuildSessionContext([], { appId: 'app-1', userId: 'user-1', summaryCharLimit: 0 })).toThrow('summaryCharLimit 必须为正整数')
+    expect(() => rebuildSessionContext([], { appId: 'app-1', userId: 'user-1', summaryCharLimit: 1.5 })).toThrow('summaryCharLimit 必须为正整数')
   })
 
   it('isolates events by app and user', () => {
@@ -85,6 +92,29 @@ describe('session context reconstruction', () => {
     expect(cursors).toEqual([0, 3])
     expect(result.history).toHaveLength(4)
     expect(result.systemPrompt).toContain('已记录预约入口需求。')
+  })
+
+  it('always replays the full prefix even when a legacy afterSeq is supplied', async () => {
+    const store: SessionStore = {
+      appendBatch: async () => ({ seqFrom: 1, seqTo: 1, firstSeqNext: 2, appended: 1 }),
+      replay: async (input) => {
+        expect(input.afterSeq).toBe(0)
+        return { events: contextEvents(), lastSeq: 6, hasMore: false }
+      },
+      assertHumanApproved: async () => ({ ok: false, reason: '未找到人类批准' }),
+    }
+    const result = await loadSessionContext(store, { appId: 'app-1', userId: 'user-1', afterSeq: 5 })
+    expect(result.history).toHaveLength(4)
+    expect(result.lastSeq).toBe(6)
+  })
+
+  it('rejects a non-advancing pagination cursor', async () => {
+    const store: SessionStore = {
+      appendBatch: async () => ({ seqFrom: 1, seqTo: 1, firstSeqNext: 2, appended: 1 }),
+      replay: async () => ({ events: [], lastSeq: 0, hasMore: true }),
+      assertHumanApproved: async () => ({ ok: false, reason: '未找到人类批准' }),
+    }
+    await expect(loadSessionContext(store, { appId: 'app-1', userId: 'user-1' })).rejects.toThrow('会话事件重放游标未前进')
   })
 
   it('replays from the store on every load without a persistent projection', async () => {
