@@ -23,6 +23,7 @@ import { WIREFRAME_FILENAME, buildWireframeHtml, countWireframePages } from '../
 import { parseContext, buildPlanningArtifact } from '../interview/context.js'
 import type { ImageTools } from '../generation/tools/imageTools.js'
 import type { ReviewGateSet } from '../generation/review/index.js'
+import type { SessionStore } from '../session/store.js'
 
 export interface AgentRouteOptions {
   runClient?: RunClient
@@ -33,6 +34,8 @@ export interface AgentRouteOptions {
   imageTools?: ImageTools
   // 三重门禁执行器（#9）：测试注入替身断言「以已确认线框为基准」与失败触发重试
   reviewGates?: ReviewGateSet
+  // 会话事件存储（#38）：未配置时统一回合端点 fail-closed，不绕过事件记录
+  sessionStore?: SessionStore
 }
 
 // ── 请求体解析（#18 zod 单源）：形状与宽容回退在 schema 一处定义 ──
@@ -97,6 +100,18 @@ const streamBodySchema = tolerantBody({
     .transform((entries) => entries?.filter((turn): turn is HistoryTurn => turn !== null)),
 })
 
+const turnBodySchema = tolerantBody({
+  appId: z.union([z.string(), z.number()]).catch(''),
+  message: z.string().optional().catch(undefined),
+  action: z.string().optional().catch(undefined),
+  approvalId: z.string().optional().catch(undefined),
+  intensity: z.enum(['fast', 'standard', 'deep']).optional().catch(undefined),
+  codeGenType: z.enum(['html', 'multi_file', 'vue_project']).optional().catch(undefined),
+  workspacePath: z.string().optional().catch(undefined),
+})
+
+type TurnBody = z.infer<typeof turnBodySchema>
+
 export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, options: AgentRouteOptions = {}): void {
   // LLM provider 装配（2026-09-08 四档接线）：显式注入优先；否则配置了任一渠道密钥即走真实 provider，
   // 全空回退离线假 LLM（测试依赖该回退保持离线，见 test/helpers.ts 强制清空渠道密钥）
@@ -104,6 +119,46 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
   // 会话内共享 runClient（可注入；未配置 Java token 时为 undefined → 离线/冒烟模式跳过内部 API 依赖）
   const resolveRunClient = (): RunClient | undefined =>
     options.runClient ?? (config.javaInternalToken ? new RunClient({ baseUrl: config.javaInternalBaseUrl, token: config.javaInternalToken }) : undefined)
+
+  fastify.post('/agent/turn', async (request, reply) => {
+    const input = turnBodySchema.parse(request.body) as TurnBody
+    const userId = request.user?.sub ?? ''
+    if (input.appId === '' || userId === '') throw httpError(400, 'appId 必填')
+    if (!input.action || !['chat', 'confirm_generation'].includes(input.action)) throw httpError(400, 'action 必填且必须为 chat 或 confirm_generation')
+    const action = input.action as 'chat' | 'confirm_generation'
+    if (action === 'chat' && !input.message?.trim()) throw httpError(400, 'chat action 必须提供非空 message')
+    if (action === 'confirm_generation' && !input.approvalId) throw httpError(400, 'confirm_generation 必须提供 approvalId')
+    if (!input.codeGenType || !input.workspacePath) throw httpError(400, 'codeGenType、workspacePath 必填')
+    try {
+      validateWorkspacePath(input.workspacePath, config.workspaceRoot)
+    } catch (error) {
+      if (error instanceof WorkspacePathError) throw httpError(400, error.message)
+      throw error
+    }
+    if (!options.sessionStore) throw httpError(503, '会话存储未配置，无法处理统一回合')
+    const turnId = `turn-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    const events = [
+      { kind: 'session/turn-start' as const, source: 'human' as const, payload: { turnId, action } },
+      ...(action === 'chat' ? [{ kind: 'user/message' as const, source: 'human' as const, payload: { text: input.message!.trim() } }] : []),
+    ]
+    let batch
+    try {
+      batch = await options.sessionStore.appendBatch({
+        appId: String(input.appId), userId, turnId, batchSeq: 1, events,
+      })
+    } catch (error) {
+      throw httpError(503, `会话事件写入失败：${error instanceof Error ? error.message : '未知错误'}`)
+    }
+    const terminal: AgentEvent = {
+      type: 'error',
+      seq: batch.seqTo + 1,
+      message: action === 'chat'
+        ? '统一回合的模型工具尚未接入，当前请求已安全拒绝'
+        : '统一回合的审批与生成尚未接入，当前请求已安全拒绝',
+    }
+    const responseEvents: AgentEvent[] = [terminal]
+    return reply.headers(SSE_HEADERS).send(encodeEventStream(responseEvents))
+  })
 
   fastify.post('/agent/workspace/validate', async (request) => {
     const body = (request.body ?? {}) as { workspacePath?: unknown }
