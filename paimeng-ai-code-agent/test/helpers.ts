@@ -92,7 +92,6 @@ export function buildTestApp(workspaceRoot: string = makeWorkspaceRoot(), overri
     logLevel: 'silent',
     javaInternalToken: '',
     zhipuApiKey: '',
-    openrouterApiKey: '',
     deepCodingApiKey: '',
     modelRouter: '',
     modelFast: '',

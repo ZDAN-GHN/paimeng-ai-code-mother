@@ -3,10 +3,10 @@
 // 「HTTP 200 包 error 体」归一化转码（1305→429 / 上游 4xx5xx 原样 / 业务码→400 / 非 JSON→502）。
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { generateText } from 'ai'
-import { createRealLlm, isRealLlmConfigured } from '../../src/llm/real.js'
+import { createRealLlm, DEFAULT_MODEL_STANDARD, isRealLlmConfigured } from '../../src/llm/real.js'
 import type { AgentConfig } from '../../src/server/config.js'
 
-// 最小完整配置（三渠道齐全；baseUrl 指向不存在的 test 域，配合 stub fetch 保证零外呼）
+// 最小完整配置（两渠道齐全；baseUrl 指向不存在的 test 域，配合 stub fetch 保证零外呼）
 function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
     port: 0,
@@ -24,8 +24,6 @@ function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     modelDeep: '',
     zhipuApiKey: 'zhipu-key',
     zhipuBaseUrl: 'https://zhipu.invalid/api/paas/v4',
-    openrouterApiKey: 'or-key',
-    openrouterBaseUrl: 'https://openrouter.invalid/api/v1',
     deepCodingApiKey: 'deep-key',
     deepCodingBaseUrl: 'https://coding.invalid/v1',
     ...overrides,
@@ -79,20 +77,19 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('isRealLlmConfigured（三渠道全空回退 / 任一配置走真实）', () => {
-  it('三渠道全空 → false（离线回退假 LLM）', () => {
-    expect(isRealLlmConfigured(baseConfig({ zhipuApiKey: '', openrouterApiKey: '', deepCodingApiKey: '' }))).toBe(false)
+describe('isRealLlmConfigured（两渠道全空回退 / 任一配置走真实）', () => {
+  it('两渠道全空 → false（离线回退假 LLM）', () => {
+    expect(isRealLlmConfigured(baseConfig({ zhipuApiKey: '', deepCodingApiKey: '' }))).toBe(false)
   })
 
   it('任一渠道配置 → true（真实性由 createRealLlm fail-fast 校验）', () => {
-    expect(isRealLlmConfigured(baseConfig({ openrouterApiKey: '', deepCodingApiKey: '' }))).toBe(true)
+    expect(isRealLlmConfigured(baseConfig({ deepCodingApiKey: '' }))).toBe(true)
   })
 })
 
 describe('createRealLlm（fail-fast 与别名注册）', () => {
   it('缺任一渠道 key → 抛错且提示缺哪个键', () => {
     expect(() => createRealLlm(baseConfig({ zhipuApiKey: '' }))).toThrow(/ZHIPU_API_KEY/)
-    expect(() => createRealLlm(baseConfig({ openrouterApiKey: '' }))).toThrow(/OPENROUTER_API_KEY/)
     expect(() => createRealLlm(baseConfig({ deepCodingApiKey: '' }))).toThrow(/DASHSCOPE_CODING_API_KEY/)
   })
 
@@ -114,9 +111,12 @@ describe('智谱 thinking 关闭补丁（快速/路由/质检注入，标准/深
     expect(calls[0]!.body.thinking).toEqual({ type: 'disabled' })
   })
 
-  it('标准档（OpenRouter 渠道）请求体不含 thinking 字段', async () => {
+  it('标准档使用 DashScope Coding 的 qwen3.6-plus 且请求体不含 thinking 字段', async () => {
     const { calls } = stubFetch()
     await completeOnce('scripted-standard')
+    expect(DEFAULT_MODEL_STANDARD).toBe('qwen3.6-plus')
+    expect(calls[0]!.url).toBe('https://coding.invalid/v1/chat/completions')
+    expect(calls[0]!.body.model).toBe('qwen3.6-plus')
     expect(calls[0]!.body.thinking).toBeUndefined()
   })
 

@@ -8,7 +8,7 @@ import { createRealLlm } from '../src/llm/real.js'
 import { LlmQualityScorer } from '../src/generation/review/index.js'
 import type { AgentConfig } from '../src/server/config.js'
 
-// 最小完整配置（三渠道齐全；baseUrl 指向不存在的 test 域，配合 stub fetch 保证零外呼）
+// 最小完整配置（两渠道齐全；baseUrl 指向不存在的 test 域，配合 stub fetch 保证零外呼）
 function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
     port: 0,
@@ -26,8 +26,6 @@ function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     modelDeep: '',
     zhipuApiKey: 'zhipu-key',
     zhipuBaseUrl: 'https://zhipu.invalid/api/paas/v4',
-    openrouterApiKey: 'or-key',
-    openrouterBaseUrl: 'https://openrouter.invalid/api/v1',
     deepCodingApiKey: 'deep-key',
     deepCodingBaseUrl: 'https://coding.invalid/v1',
     ...overrides,

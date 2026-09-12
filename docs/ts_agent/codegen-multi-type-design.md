@@ -71,7 +71,7 @@
 - 注释遵循 `project-comment-style`；Agent 提交 message 带 `[DSH Web/ZDAN]`。
 - 测试分包与被测代码路径对称（`stackProfile.test.ts` 镜像 `src/generation/stackProfile.ts`）。
 - **不能动**：machine.ts 拓扑与事件集（只扩 input 字段）；SSE 事件契约（`docs/ts_agent/contract.md`）；Java 侧任何文件；`.env` 不提交（仓库只留 `*.example`）。
-- 真实通道验收需 `.env` 配置（ZHIPU_API_KEY / OPENROUTER_API_KEY / DEEP_CODING_API_KEY，判定函数 `src/llm/real.ts:25` `isRealLlmConfigured`）——属人工验收项。
+- 真实通道验收需 `.env` 配置（ZHIPU_API_KEY / DASHSCOPE_CODING_API_KEY，判定函数 `src/llm/real.ts:isRealLlmConfigured`）——属人工验收项。
 
 ## 4. 技术方案
 
