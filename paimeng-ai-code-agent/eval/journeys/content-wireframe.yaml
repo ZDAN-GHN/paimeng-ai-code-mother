@@ -1,0 +1,1 @@
+{"id":"content-wireframe","title":"内容站线框","category":"content","tags":["wireframe"],"executionMode":"real_model","expect":["deterministic_gate"],"turns":[{"action":"chat","message":"先看看博客首页和文章页线框","expectEvents":["wireframe","awaiting_user"]},{"action":"answer","message":"确认这个内容结构","expectEvents":["generation/proposed","approval/asked","awaiting_user"]}]}

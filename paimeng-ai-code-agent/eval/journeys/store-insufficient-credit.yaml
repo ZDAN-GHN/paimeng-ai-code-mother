@@ -1,0 +1,1 @@
+{"id":"store-insufficient-credit","title":"店铺余额不足","category":"store","tags":["insufficient-credit"],"executionMode":"fake_llm","expect":["credit"],"turns":[{"action":"chat","message":"做一个大型商品店","expectEvents":["generation/proposed","approval/asked","awaiting_user"]},{"action":"confirm_generation","approvalId":"approval-store-credit","expectEvents":["error"]}]}

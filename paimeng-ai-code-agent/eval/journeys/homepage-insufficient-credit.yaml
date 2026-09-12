@@ -1,0 +1,1 @@
+{"id":"homepage-insufficient-credit","title":"主页余额不足","category":"homepage","tags":["insufficient-credit"],"executionMode":"fake_llm","expect":["credit"],"turns":[{"action":"chat","message":"做一个高强度个人主页","expectEvents":["generation/proposed","approval/asked","awaiting_user"]},{"action":"confirm_generation","approvalId":"approval-homepage-credit","expectEvents":["error"]}]}

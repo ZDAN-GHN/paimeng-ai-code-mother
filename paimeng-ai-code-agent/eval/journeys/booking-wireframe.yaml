@@ -1,0 +1,1 @@
+{"id":"booking-wireframe","title":"预约服务线框","category":"booking","tags":["wireframe"],"executionMode":"real_model","expect":["deterministic_gate"],"turns":[{"action":"chat","message":"先设计一个理发预约页面线框","expectEvents":["wireframe","awaiting_user"]},{"action":"answer","message":"线框符合预期","expectEvents":["generation/proposed","approval/asked","awaiting_user"]}]}

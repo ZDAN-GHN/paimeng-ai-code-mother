@@ -1,0 +1,1 @@
+{"id":"store-ambiguous","title":"店铺需求澄清","category":"store","tags":["clarification"],"executionMode":"fake_llm","expect":["approval"],"turns":[{"action":"chat","message":"帮我做个店铺网站，具体内容以后再说","expectEvents":["questions","awaiting_user"]},{"action":"answer","answers":[{"key":"audience","optionId":"local"}],"expectEvents":["generation/proposed","approval/asked","awaiting_user"]}]}

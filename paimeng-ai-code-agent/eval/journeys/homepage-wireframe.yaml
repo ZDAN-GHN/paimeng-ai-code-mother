@@ -1,0 +1,1 @@
+{"id":"homepage-wireframe","title":"主页线框路径","category":"homepage","tags":["wireframe"],"executionMode":"real_model","expect":["deterministic_gate"],"turns":[{"action":"chat","message":"先给我看看个人主页的布局","expectEvents":["wireframe","awaiting_user"]},{"action":"answer","message":"布局可以，继续生成","expectEvents":["generation/proposed","approval/asked","awaiting_user"]}]}

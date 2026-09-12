@@ -1,0 +1,1 @@
+{"id":"store-wireframe","title":"店铺线框路径","category":"store","tags":["wireframe"],"executionMode":"real_model","expect":["deterministic_gate"],"turns":[{"action":"chat","message":"先做一个商品店铺线框","expectEvents":["wireframe","awaiting_user"]},{"action":"answer","message":"线框确认","expectEvents":["generation/proposed","approval/asked","awaiting_user"]}]}
