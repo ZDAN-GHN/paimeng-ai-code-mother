@@ -19,15 +19,15 @@ test('parses the documented runner arguments and offline mode', () => {
   assert.throws(() => parseArgs(['--unknown']), /unknown argument/)
 })
 
-test('rejects missing required inputs before writing output', () => {
-  assert.throws(() => run(parseArgs(['--journeys', journeys, '--out', 'report.md'])), /missing required argument: --base/)
+test('rejects missing required inputs before writing output', async () => {
+  await assert.rejects(() => run(parseArgs(['--journeys', journeys, '--out', 'report.md'])), /missing required argument: --base/)
 })
 
-test('offline report is deterministic in shape and does not claim observed provider data', () => {
+test('offline report is deterministic in shape and does not claim observed provider data', async () => {
   const dir = tempDir()
   const out = path.join(dir, 'report.md')
   try {
-    const report = run({ mode: 'offline', journeys, base: path.join(root, 'eval', 'fixtures', 'baseline'), out }, ['--journeys', journeys, '--base', 'eval/fixtures/baseline', '--out', out])
+    const report = await run({ mode: 'offline', journeys, base: path.join(root, 'eval', 'fixtures', 'baseline'), out }, ['--journeys', journeys, '--base', 'eval/fixtures/baseline', '--out', out])
     assert.equal(report.journeyCount, 25)
     assert.equal(report.providerInvoked, false)
     assert.equal(report.records.filter((record) => record.captureStatus === 'offline-validated').length, 19)
@@ -39,11 +39,11 @@ test('offline report is deterministic in shape and does not claim observed provi
   }
 })
 
-test('real mode fails closed without creating a fabricated report', () => {
+test('real mode fails closed without creating a fabricated report', async () => {
   const dir = tempDir()
   const out = path.join(dir, 'report.md')
   try {
-    assert.throws(() => run({ mode: 'real', journeys, base: path.join(root, 'eval', 'fixtures', 'baseline'), out }), /real capture is unavailable/)
+    await assert.rejects(() => run({ mode: 'real', journeys, base: path.join(root, 'eval', 'fixtures', 'baseline'), out }), /EVAL_JWT is required/)
     assert.equal(existsSync(out), false)
   } catch (error) {
     if (error.code === 'ENOENT') return

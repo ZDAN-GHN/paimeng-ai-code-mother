@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { loadCaptureAdapter, redactForError } from './capture.mjs'
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url))
 const REQUIRED_FIELDS = ['requestSequence', 'sseEvents', 'runPhases', 'callbackPayloads', 'model', 'channel', 'command', 'exactHead', 'crossMessageMemory']
@@ -131,7 +132,7 @@ export function renderReport(report) {
   return `# Agent Loop Evaluation Report\n\n- Report version: ${report.reportVersion}\n- Mode: ${report.mode}\n- Provider invoked: ${report.providerInvoked}\n- Journeys: ${report.journeyCount}\n- Offline validated: ${report.counts.offlineValidated}\n- Not captured: ${report.counts.notCaptured}\n\n## Journey status\n\n| ID | Execution mode | Status | Observed runtime data |\n| --- | --- | --- | --- |\n${rows}\n\n## Metrics\n\nThe five runtime metrics are intentionally null until a real capture supplies observed events and run data.\n\n~~~json\n${JSON.stringify(report, null, 2)}\n~~~\n`
 }
 
-export function run(options, argv = []) {
+export async function run(options, argv = []) {
   if (options.help) return 'Usage: node eval/run.mjs --journeys <dir> --base <dir> --out <file> [--mode offline|real]'
   const journeysDir = requirePath(options.journeys, '--journeys')
   const baseDir = requirePath(options.base, '--base')
@@ -139,21 +140,42 @@ export function run(options, argv = []) {
   if (!existsSync(baseDir)) throw new Error(`baseline directory does not exist: ${baseDir}`)
   const entries = validateJourneys(journeysDir)
   const command = ['node', 'eval/run.mjs', ...argv].join(' ')
-  if (options.mode === 'real') throw new Error('real capture is unavailable: no provider capture adapter is configured; no baseline records were written')
+  if (options.mode === 'real') {
+    const adapter = await loadCaptureAdapter()
+    if (!adapter || typeof adapter.capture !== 'function') throw new Error('capture adapter must export capture(journey)')
+    const captured = []
+    for (const entry of entries) {
+      if (entry.journey.executionMode !== 'real_model') continue
+      const evidence = await adapter.capture(entry.journey)
+      const required = ['requestSequence', 'sseEvents', 'runPhases', 'callbackPayloads', 'model', 'channel', 'crossMessageMemory']
+      if (evidence.complete !== true || required.some((field) => evidence[field] === undefined)) throw new Error(`incomplete capture evidence for ${entry.journey.id}`)
+      captured.push({ ...entry.journey, ...evidence, id: entry.journey.id, executionMode: entry.journey.executionMode, captureStatus: 'captured', observed: true, command, exactHead: gitHead() })
+    }
+    if (captured.length !== entries.filter(({ journey }) => journey.executionMode === 'real_model').length) throw new Error('real capture did not cover all real_model journeys')
+    for (const record of captured) writeFileSync(path.join(baseDir, `${record.id}.json`), `${JSON.stringify(record, null, 2)}\n`, 'utf8')
+    const report = buildReport(options, entries, command)
+    report.mode = 'real'
+    report.providerInvoked = true
+    report.counts = { offlineValidated: 0, notCaptured: entries.length - captured.length, captured: captured.length }
+    report.records = entries.map(({ journey }) => captured.find((record) => record.id === journey.id) ?? recordFor(journey, options, command))
+    mkdirSync(path.dirname(outFile), { recursive: true })
+    writeFileSync(outFile, renderReport(report), 'utf8')
+    return report
+  }
   const report = buildReport(options, entries, command)
   mkdirSync(path.dirname(outFile), { recursive: true })
   writeFileSync(outFile, renderReport(report), 'utf8')
   return report
 }
 
-export function main(argv = process.argv.slice(2)) {
+export async function main(argv = process.argv.slice(2)) {
   try {
     const options = parseArgs(argv)
-    const result = run(options, argv)
+    const result = await run(options, argv)
     if (typeof result === 'string') console.log(result)
     else console.log(`wrote ${result.journeyCount} journey records to report (${result.counts.notCaptured} not captured)`)
   } catch (error) {
-    console.error(`eval runner blocked: ${error.message}`)
+    console.error(`eval runner blocked: ${redactForError(error)}`)
     process.exitCode = 1
   }
 }

@@ -34,7 +34,8 @@ The runner validates the frozen journeys and writes the documented report shape:
 node eval/run.mjs --journeys eval/journeys --base eval/fixtures/baseline --out ../docs/ts_agent/agent-loop-eval-report.md
 ```
 
-The default `offline` mode is deterministic and does not invoke a provider. It records the turn inputs and expected events as journey-definition checks, leaves observed SSE/run/callback fields empty, and marks `real_model` journeys as `not-captured`. Use `--mode real` only when a provider capture adapter is available; the current runner fails closed because it cannot fabricate real-model baseline records. Runner tests can be executed with `node --test eval/run.test.mjs`.
+The default `offline` mode is deterministic and does not invoke a provider. It records the turn inputs and expected events as journey-definition checks, leaves observed SSE/run/callback fields empty, and marks `real_model` journeys as `not-captured`. Use `--mode real` only when a provider capture adapter is available. The default adapter calls the local Agent HTTP path and requires `EVAL_JWT`, `EVAL_APP_ID`, `EVAL_USER_ID`, and `EVAL_WORKSPACE_PATH`; `EVAL_AGENT_URL` defaults to `http://127.0.0.1:8092`. For a controlled integration, set `EVAL_CAPTURE_ADAPTER` to an adapter module exporting `capture(journey)`. The built-in HTTP adapter is a transport adapter only: it intentionally reports `complete: false` until an integration adapter supplies Java callback and model/channel evidence. A configured adapter must return `complete: true` plus every required field; otherwise the runner fails closed.
+
 
 
 ```sh
