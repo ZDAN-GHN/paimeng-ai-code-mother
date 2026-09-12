@@ -24,6 +24,28 @@ services:
       retries: 10
       start_period: 30s
 
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: paimeng-postgres
+    restart: unless-stopped
+    # 仅监听本机回环；TS Agent 直连会话事件库，RAG v2 复用此实例并分库
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-paimeng}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在仓库根目录 .env 中设置 POSTGRES_PASSWORD}
+      TZ: Asia/Shanghai
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./sql/pg/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   redis:
     image: redis:7.2
     container_name: paimeng-redis
@@ -78,4 +100,5 @@ services:
 
 volumes:
   mysql-data:
+  pg-data:
   redis-data:
