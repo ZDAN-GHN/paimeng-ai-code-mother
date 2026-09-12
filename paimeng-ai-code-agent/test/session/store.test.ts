@@ -52,7 +52,7 @@ const enabled = Boolean(process.env.PGHOST && process.env.PGDATABASE && process.
 describe.skipIf(!enabled)('PgSessionStore integration', () => {
   const pool = createSessionPool()
   const store = new PgSessionStore(pool)
-  const appId = `test-${Date.now()}`
+  const appId = String(Date.now())
   const userId = '9001'
   let turn = 0
 
