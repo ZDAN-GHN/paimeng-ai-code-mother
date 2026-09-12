@@ -1,0 +1,75 @@
+{
+  "issue": 37,
+  "status": "blocked",
+  "captureVersion": 1,
+  "capturedAt": "2026-09-12T20:00:00+08:00",
+  "exactHead": "7b9ccbc8e0352cee00245a210ffd59a4e49d2d62",
+  "providerInvoked": false,
+  "model": null,
+  "channel": null,
+  "crossMessageMemory": {
+    "baselineRetentionRate": 0,
+    "status": "contractual-zero-not-measured",
+    "note": "No provider request was made because the documented baseline runner is absent. The pre-Agent-Loop baseline contract records cross-message memory as zero; this value is not a provider observation."
+  },
+  "journeys": [
+    {"id":"booking-abort","status":"not-captured"},
+    {"id":"booking-approval","status":"not-captured"},
+    {"id":"booking-artifact-failure","status":"not-captured"},
+    {"id":"booking-wireframe","status":"not-captured"},
+    {"id":"content-abort","status":"not-captured"},
+    {"id":"content-approval","status":"not-captured"},
+    {"id":"content-direct","status":"not-captured"},
+    {"id":"content-heuristic-failure","status":"not-captured"},
+    {"id":"content-wireframe","status":"not-captured"},
+    {"id":"homepage-ambiguous","status":"not-captured"},
+    {"id":"homepage-direct","status":"not-captured"},
+    {"id":"homepage-insufficient-credit","status":"not-captured"},
+    {"id":"homepage-limit","status":"not-captured"},
+    {"id":"homepage-memory","status":"not-captured"},
+    {"id":"homepage-wireframe","status":"not-captured"},
+    {"id":"portfolio-approval","status":"not-captured"},
+    {"id":"portfolio-direct","status":"not-captured"},
+    {"id":"portfolio-heuristic-failure","status":"not-captured"},
+    {"id":"portfolio-limit","status":"not-captured"},
+    {"id":"portfolio-memory","status":"not-captured"},
+    {"id":"store-ambiguous","status":"not-captured"},
+    {"id":"store-approval","status":"not-captured"},
+    {"id":"store-build-failure","status":"not-captured"},
+    {"id":"store-insufficient-credit","status":"not-captured"},
+    {"id":"store-wireframe","status":"not-captured"}
+  ],
+  "recordSchema": {
+    "requiredPerJourney": [
+      "requestSequence",
+      "sseEvents",
+      "runPhases",
+      "callbackPayloads",
+      "model",
+      "channel",
+      "command",
+      "exactHead",
+      "crossMessageMemory"
+    ],
+    "unavailableBecause": "The required eval/run.mjs capture runner is absent from this HEAD. No per-journey record is fabricated."
+  },
+  "commands": [
+    {
+      "command": "cd paimeng-ai-code-agent && node eval/validate.mjs",
+      "result": "passed",
+      "summary": "25 golden journeys validated; 25 unique IDs, 5 categories, fake_llm and real_model coverage."
+    },
+    {
+      "command": "cd paimeng-ai-code-agent && node eval/run.mjs --journeys eval/journeys --base eval/fixtures/baseline --out ../docs/ts_agent/agent-loop-eval-report.md",
+      "result": "blocked",
+      "summary": "eval/run.mjs is absent at the exact path required by the architecture and README contract."
+    }
+  ],
+  "environment": {
+    "postgres": "healthy on 127.0.0.1:5432",
+    "tsAgent": "GET /healthz returned 200 with status ok",
+    "java": "GET /api/doc.html returned 200",
+    "frontend": "GET / returned 200"
+  },
+  "blocker": "The repository has no eval/run.mjs baseline capture runner. Implementing it would exceed issue #37 ownership and alter eval runner semantics; a follow-up implementation ticket is required before real-model capture can proceed."
+}
