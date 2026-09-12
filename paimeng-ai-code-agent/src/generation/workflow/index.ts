@@ -100,6 +100,13 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
+// AI SDK/provider 异常才归类为 model-error；工作区、工具、门禁和内部 API 异常必须保守归为 unknown，避免错误分流
+function classifyFailureCode(error: unknown): FailureCode {
+  if (!(error instanceof Error)) return 'unknown'
+  const modelErrorNames = new Set(['AI_APICallError', 'AI_RetryError', 'APICallError', 'RetryError', 'ModelInvocationError'])
+  return modelErrorNames.has(error.name) ? 'model-error' : 'unknown'
+}
+
 // 每次模型调用/关键决策点前检查中止信号（#10）：abort 可能落在模型调用间隙（工具执行后、下一轮调用前），
 // 显式检查保证中断立即生效，不被正常路径拖到 done 后才处理（对话中断的产品语义：中断即停）
 function throwIfAborted(abortSignal?: AbortSignal): void {
@@ -463,6 +470,6 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     }
     // 失败路径：统一收尾（catch 中 actor 可能已在终态，fail 内判断活跃态）
     const message = error instanceof Error ? error.message : '生成失败'
-    yield* fail(message, 'model-error')
+    yield* fail(message, classifyFailureCode(error))
   }
 }

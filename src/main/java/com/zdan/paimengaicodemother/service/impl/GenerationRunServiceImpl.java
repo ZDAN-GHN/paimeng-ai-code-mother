@@ -42,6 +42,7 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -186,6 +187,12 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
         return toVO(getLatestNonTerminalRunEntity(appId, userId));
     }
 
+    private static final Set<String> FAILURE_CODES = Set.of(
+            "guardrail-rejected", "quality-gate-exhausted", "limit-reached", "model-error", "unknown");
+
+    private static String normalizeFailureCode(String errorCode) {
+        return FAILURE_CODES.contains(errorCode) ? errorCode : "unknown";
+    }
     @Override
     public void completeRun(String runId, AgentCompleteRequest request) {
         ThrowUtils.throwIf(StrUtil.isBlank(runId), ErrorCode.PARAMS_ERROR, "runId 不能为空");
@@ -254,7 +261,7 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
         } else if (status == AgentCompleteStatusEnum.FAILED) {
             creditService.refundRun(runId, status, null, milestoneCount);
             // 失败无产物可构建，写错误历史让会话有可见反馈
-            String errorCode = StrUtil.blankToDefault(request.getErrorCode(), "unknown");
+            String errorCode = normalizeFailureCode(StrUtil.blankToDefault(request.getErrorCode(), "unknown"));
             String errorMessage = StrUtil.blankToDefault(request.getErrorMessage(), "生成失败");
             log.warn("Agent 生成失败，runId: {}，errorCode: {}，message: {}", runId, errorCode, errorMessage);
             // 稳定代码供服务端检索，人话文案保持在后缀，避免调用方只能解析自由文本。

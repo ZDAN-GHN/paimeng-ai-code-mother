@@ -338,8 +338,23 @@ class GenerationRunServiceImplTest {
     }
 
     /**
-     * 幂等：同 runId 重复回调只处理一次（不重复写历史/构建）
+     * 非法稳定失败代码归一为 unknown，避免跨服务调用方注入未冻结的分流值
      */
+    @Test
+    void completeRunNormalizesUnknownFailureCode() {
+        App app = new App();
+        app.setId(1L);
+        when(appService.getById(1L)).thenReturn(app);
+
+        AgentCompleteRequest request = completeRequest("run-1", "failed", null);
+        request.setErrorMessage("boom");
+        request.setErrorCode("future-code");
+        service.completeRun("run-1", request);
+
+        verify(chatHistoryService).addChatMessage(eq(1L), eq("生成失败[unknown]:boom"), eq("ai"), any(User.class));
+    }
+
+
     @Test
     void completeRunIdempotentSkipsRepeat() {
         App app = new App();

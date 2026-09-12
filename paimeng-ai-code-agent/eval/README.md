@@ -52,4 +52,4 @@ The validator checks JSON/YAML syntax, required fields, unique IDs, action/event
 | Insufficient credit | `store-insufficient-credit`, `homepage-insufficient-credit` | fake_llm |
 | Multi-message memory | `homepage-memory`, `portfolio-memory` | fake_llm |
 
-The matrix intentionally has 20 journeys and five product categories. The validator also requires every journey to declare whether it is fake-LLM-only or real-model validated.
+The matrix contains 25 journeys across five product categories. The validator requires all 25 journeys, and each journey declares whether it is fake-LLM-only or real-model validated.

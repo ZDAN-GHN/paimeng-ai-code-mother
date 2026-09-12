@@ -38,7 +38,14 @@ export interface ScriptedCallRecord {
 // 用户消息 → 页面内容（评审内容即 ai_response 增量文本的拼接）
 // 产物含应用内导览组件（onboarding tour，Issue #8 验收「生成产物包含应用内导览组件」）。
 // #9：产物带页面区段骨架（section id="page-N"，对齐线框结构）——视觉 diff 门禁以已确认线框为基准
-// 对比页面区段，假 LLM 产物须含可比的骨架，默认门禁才被真实执行而非空转。
+export class ScriptedModelError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ModelInvocationError'
+  }
+}
+
+
 // #13 L1 预览态：产物内置 MSW 风格 mock 拦截层（fetch/XHR 打补丁 + fixture 规则表），
 // 页面自带列表加载与表单提交演示——预览 iframe 中应用交互全可演示（架构 §L1，MVP）。
 export function buildPageContent(message: string): string {
@@ -296,7 +303,7 @@ class ScriptedLanguageModel implements LanguageModelV2 {
     this.record(options)
     if (this.script === 'error') {
       // error 剧本：模型一进流式即失败（工作流 catch 后走 failed 终态，error 后不再发业务事件）
-      throw new Error('假 LLM 剧本故意失败')
+      throw new ScriptedModelError('假 LLM 剧本故意失败')
     }
     if (this.script === 'limit' || this.script === 'limit-length') {
       // 超限剧本（limit）：工具调用无休止（每次都不带工具结果则继续调用工具，永不自然收尾）——
