@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-TS Agent（`paimeng-ai-code-agent/`）是唯一代码生成主链路，P3 已收官；Java 负责业务、鉴权、积分、历史、构建与部署；Python RAG（`paimeng-ai-code-rag/`）尚待 P4 实施。旧 Java AI 与 Python Agent 中转链已退役，`ts-agent.enabled` 默认开启且只门禁 JWT 签发，回退方式为 Git 回滚。
+TS Agent（`paimeng-ai-code-agent/`）是唯一代码生成主链路，P3 已收官；Agent Loop 第一批已落地 PostgreSQL `session_event` 基础设施、黄金旅程 fixtures、服务端规划上下文、稳定失败码和多类型提示词契约，后续实施入口和证据见 `docs/ts_agent/progress.md` 及对应 GitHub issues。Java 负责业务、鉴权、积分、历史、构建与部署；Python RAG（`paimeng-ai-code-rag/`）尚待 P4 实施。旧 Java AI 与 Python Agent 中转链已退役，`ts-agent.enabled` 默认开启且只门禁 JWT 签发，回退方式为 Git 回滚。
 
 ## 领域记忆
 

@@ -18,7 +18,7 @@
       "message": "optional user input",
       "answers": [{"key": "style", "optionId": "minimal", "text": "optional"}],
       "approvalId": "optional approval id",
-      "expectEvents": ["questions", "wireframe", "generation/proposed", "approval/asked", "awaiting_user", "milestone", "tool_request", "tool_executed", "done", "error", "aborted"]
+      "expectEvents": ["questions", "ai_response", "wireframe", "generation/proposed", "approval/asked", "awaiting_user", "milestone", "tool_request", "tool_executed", "done", "error", "aborted"]
     }
   ]
 }

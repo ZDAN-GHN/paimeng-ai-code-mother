@@ -19,7 +19,12 @@
 - **#17 真流式 + #18 zod 单源 + #20 重试参数化（2026-09-08，三票 worktree 并行 + 主会话整合）**：`/agent/stream` hijack 后 reply.raw 逐帧直写（SSE_HEADERS 单点、断连走既有 abort 通路、日志 logger 化；**「Java 转发链路」已随 T21 消失**，实际浏览器路径 = Vite 代理/nginx 直连 8092，nginx example 已配 proxy_buffering off）；zod 成为工具入参与路由 body 单源（`input as` 清零、FileToolResult 判别联合、宽容回退语义等价 4xx 路径不变）；重试按类别参数化（短调用 `SHORT_CALL_MAX_RETRIES` 单源、长生成 0）。测试 148→**160/160**。执行教训：三票并行用 git worktree 隔离可行（rename 检测化解测试树移动冲突）；#18 实施中断于收尾阶段，核验现场后恢复原 agent 续跑即可。留档给 #21：三个 body schema 的 runId/appId/userId 字段形状重复 ×3、stream handler 4 处 error 帧同形；已知微隙：hijack/close 微秒级间隙（帧被守卫丢弃不挂死）。
 - **#19 质检 generateObject + #21 路由收敛（2026-09-08，双 subagent 并行 + 主会话整合，第一批 6/6 收口）**：质检门禁 `generateObject` + `qualityScoreOutputSchema`（zod 显式契约），`extractJsonText`/`parseQualityScore` 手搓解析归零——**ai@7 generateObject 固走「responseFormat json + text 解析 + schema 校验」，假模型纯 text JSON 零改动兼容；真渠道不支持 responseFormat 时 SDK 退回文本解析路径，行为等价**（全量测试可见 zhipu warning）；`NoObjectGeneratedError.isInstance` 精确分流 → 等价回退「视为未通过」，RetryError/AbortError 上抛。路由错误单点 `httpError`+`setErrorHandler`（含 authPlugin 401，手拼字面量清零）；双轨边界=**首帧写出**（预检 503/400/409/402/502 在 hijack 前，流内仍 SSE error 收尾）；访谈编排归位 `interview/conduct.ts` + 选项/人话单源（`summaryText`/`pages`）；script 全退场（请求体/StreamRequest/白名单），e2e 全改 `provider: createScriptedLlm(...)` 注入；前端 fetch-SSE 非 2xx 解析后端 message + 402/409/503 提示（`agentSse.ts` readServerErrorMessage）。测试 158/158 全绿。遗留观察：Java 404→`getRun` throw→预检 502 非 400（400 依赖 Java 回 data:null）；前端 502 无专门提示分支；#21 弹药（body schema shape 重复 ×3、error 帧同形折 fail()）未消费。commit：6a00642、d1ee42c。
 
-## 通用有效约定
+## Agent Loop 第一批实施（2026-09-12）
+
+- #23 已由服务端从 `run.context.interview` 重建会话结论和有界规划产物，codegen system 不再依赖前端伪 assistant history；线框遵循 R2，仅注入相对路径供 `readFile` 按需读取，完整契约见 issue #23 和 `docs/ts_agent/agent-loop-design.md`。
+- #24 的稳定失败码冻结为 `guardrail-rejected`、`quality-gate-exhausted`、`limit-reached`、`model-error`、`unknown`；TS 只把可识别的 provider 异常归类为 `model-error`，Java 回调将未知值归一为 `unknown`。
+- #34 的 PostgreSQL `session_event` 是后续 session store 的运行时前置；运行规则和探活命令见 `deployment.md`，实现依赖图见 GitHub #1 子 issue。
+- #36 冻结 25 条黄金旅程与确定性校验器（`paimeng-ai-code-agent/eval/`）；#50 规定 html/multi_file 生成通过 `writeFile` 写文件。真实 provider/browser 验收仍由主 agent 执行，不能因离线测试通过而提前关闭相关 issue。
 
 - JWT：HS256 共享密钥离线验签（`algorithms` 白名单防混淆、requiredClaims `exp`/`sub`）；`WORKSPACE_ROOT` 默认按服务目录解析 `../tmp/code_output`（对齐 Java `user.dir/tmp/code_output`）。
 - 测试基建：真实服务实例 `buildApp(overrides)` + `fastify.inject()` + 自签 JWT（`test/helpers.ts`；frames/fakeRunClient/RunCall 已统一提取，golden 与 stream 共用）。
