@@ -2,15 +2,15 @@
   "issue": 37,
   "status": "blocked",
   "captureVersion": 1,
-  "capturedAt": "2026-09-12T20:00:00+08:00",
-  "exactHead": "7b9ccbc8e0352cee00245a210ffd59a4e49d2d62",
+  "capturedAt": "2026-09-12T20:45:00+08:00",
+  "exactHead": "1f03f13f2ff4d557a18c6267f80cec92751ac0c2",
   "providerInvoked": false,
   "model": null,
   "channel": null,
   "crossMessageMemory": {
     "baselineRetentionRate": 0,
     "status": "contractual-zero-not-measured",
-    "note": "No provider request was made because the documented baseline runner is absent. The pre-Agent-Loop baseline contract records cross-message memory as zero; this value is not a provider observation."
+    "note": "No provider request was made because EVAL_JWT was not configured in the safe evaluation environment. The pre-Agent-Loop baseline contract records cross-message memory as zero; this value is not a provider observation.",
   },
   "journeys": [
     {"id":"booking-abort","status":"not-captured"},
@@ -60,9 +60,9 @@
       "summary": "25 golden journeys validated; 25 unique IDs, 5 categories, fake_llm and real_model coverage."
     },
     {
-      "command": "cd paimeng-ai-code-agent && node eval/run.mjs --journeys eval/journeys --base eval/fixtures/baseline --out ../docs/ts_agent/agent-loop-eval-report.md",
+      "command": "cd paimeng-ai-code-agent && node eval/run.mjs --mode real --journeys eval/journeys --base eval/fixtures/baseline --out ../docs/ts_agent/agent-loop-eval-report.md",
       "result": "blocked",
-      "summary": "eval/run.mjs is absent at the exact path required by the architecture and README contract."
+      "summary": "Runner fail-closed before provider invocation: EVAL_JWT is required for real capture; no baseline output was written."
     }
   ],
   "environment": {
@@ -71,5 +71,5 @@
     "java": "GET /api/doc.html returned 200",
     "frontend": "GET / returned 200"
   },
-  "blocker": "The repository has no eval/run.mjs baseline capture runner. Implementing it would exceed issue #37 ownership and alter eval runner semantics; a follow-up implementation ticket is required before real-model capture can proceed."
+  "blocker": "The safe evaluation environment does not provide EVAL_JWT, so the real capture adapter stopped before any provider request. No baseline records were fabricated or written. Re-run the documented real command with the approved evaluation identity configured; do not place the credential in the repository."
 }
