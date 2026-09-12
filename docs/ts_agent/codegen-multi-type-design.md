@@ -151,9 +151,9 @@ export function resolveStackProfile(codeGenType: CodeGenType | undefined): Stack
 
 ### 4.6 构建反馈环归属（票 D 决策项）
 
-- **方案 A（Agent 侧 npm build 进 review 门禁）**：构建错误喂回 coder 闭环收敛，一次成功率高；代价 = Agent 运行时引入 Node 工具链 + 依赖安装沙箱 + 超时/缓存治理，review 轮次成本上升。
-- **方案 B（现状：Java BuilderExecutor 构建回调 + 对话修复轮）**：Agent 零基建；代价 = 生成期盲于构建错误，一次成功率全押质检门禁。
-- 本设计**不预定结论**；票 D 出两案对比设计稿（含安全面：生成代码执行 npm install 的供应链风险）过 agent-design-review 后定。
+- **方案 B（已选，受控反馈环）**：Java `BuilderExecutor` 作为 `vue_project` 唯一权威构建执行器；TS Agent 只做不执行代码的结构预检，通过 Java 内部回调接收结构化构建结果，失败时回灌 coder 并执行有界修复轮。Agent 零 npm 工具链和依赖安装沙箱；代价是一次内部回调往返，且需冻结回调幂等、超时、隔离和诊断过滤契约。
+- 方案 A（Agent 侧 npm build）仅在后续证明回调延迟或吞吐成为实际瓶颈时重新评估；不在本票实施。
+- 详细决策、请求/响应字段、威胁模型、超时与缓存约束见 `docs/ts_agent/vue-project-build-feedback-design.md`。
 
 ### 4.7 数据流（票 B 后）
 
