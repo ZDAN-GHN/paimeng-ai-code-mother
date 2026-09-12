@@ -42,7 +42,6 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Set;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -193,6 +192,7 @@ public class GenerationRunServiceImpl extends ServiceImpl<GenerationRunMapper, G
     private static String normalizeFailureCode(String errorCode) {
         return FAILURE_CODES.contains(errorCode) ? errorCode : "unknown";
     }
+
     @Override
     public void completeRun(String runId, AgentCompleteRequest request) {
         ThrowUtils.throwIf(StrUtil.isBlank(runId), ErrorCode.PARAMS_ERROR, "runId 不能为空");
