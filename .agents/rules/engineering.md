@@ -6,7 +6,7 @@
 
 ## 包管理与运行
 
-这是多模块仓库，不使用根级 pnpm workspace。Node 子项目分别在自己的目录执行 `npm install`、`npm run type-check` 和构建命令。原生 Linux/Windows 使用模块默认 `node_modules`、`dist`；仅 WSL 使用各模块的 `scripts/*-wsl.sh` 和 `wsl-rt-env/`，详见启动 SOP。
+这是多模块仓库，不使用根级 pnpm workspace。Node 子项目分别在自己的目录执行 `npm install`、`npm run type-check` 和构建命令，并使用模块目录内的 `node_modules` 与构建产物。
 
 ## 改动原则
 

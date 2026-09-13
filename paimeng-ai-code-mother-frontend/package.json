@@ -4,14 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node scripts/run.mjs dev",
-    "build": "node scripts/run.mjs build",
-    "openapi2ts": "node scripts/run.mjs openapi2ts",
-    "preview": "node scripts/run.mjs preview",
-    "build-only": "node scripts/run.mjs build-only",
-    "type-check": "node scripts/run.mjs type-check",
-    "lint": "node scripts/run.mjs lint",
-    "format": "node scripts/run.mjs format"
+    "dev": "vite",
+    "build": "run-p type-check build-only",
+    "openapi2ts": "node ./node_modules/@umijs/openapi/dist/cli.js --config openapi2ts.config.ts",
+    "preview": "vite preview",
+    "build-only": "vite build",
+    "type-check": "vue-tsc --noEmit -p tsconfig.json",
+    "lint": "eslint . --fix",
+    "format": "prettier --write src/"
   },
   "dependencies": {
     "ant-design-vue": "^4.2.6",

@@ -27,7 +27,7 @@
     </scm>
     <properties>
         <java.version>21</java.version>
-        <!-- 运行时构建产物目录：默认 target/（Windows/IDE 不变）；WSL 通过 -Dmaven.build.directory=... 指向 wsl-rt-env/java/target -->
+        <!-- 运行时构建产物目录，默认 target/。 -->
         <maven.build.directory>${project.basedir}/target</maven.build.directory>
     </properties>
 

@@ -1,7 +1,0 @@
-{
-  "files": [],
-  "references": [
-    { "path": "./tsconfig.wsl.node.json" },
-    { "path": "./tsconfig.wsl.app.json" }
-  ]
-}
