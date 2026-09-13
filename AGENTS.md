@@ -2,7 +2,8 @@
 
 ## Scope
 - Active services: Java backend in `paimeng-ai-code-backend/`, TS Agent in `paimeng-ai-code-agent/`, Vue frontend in `paimeng-ai-code-frontend/`, and P4 RAG work in `paimeng-ai-code-rag/`.
-- `archive/paimeng-ai-code-microservice/` is a deprecated experiment; do not use it as a development or migration baseline.
+- Shared infrastructure belongs in `infra/`; deployment configuration and operational scripts belong in `ops/`; static project resources belong in `assets/`.
+- `runtime/tmp/` is local runtime state; `archive/paimeng-ai-code-microservice/` is a deprecated experiment and neither is a development or migration baseline.
 
 ## Toolchains
 | Area | Requirement | Dependency command |
@@ -31,6 +32,7 @@
 ## Key Conventions
 - The TS Agent is the only active code-generation path; its test layout mirrors `src/` under `paimeng-ai-code-agent/test/`.
 - Keep browser-to-Agent changes coordinated with the frontend SSE client in `paimeng-ai-code-frontend/src/utils/agentSse.ts`.
+- Keep the Java output roots and Agent `WORKSPACE_ROOT` aligned with `runtime/tmp/code_output`; root `docker-compose.yml` mounts `runtime/tmp/code_deploy`.
 - Keep secrets only in ignored `.env` files; use `paimeng-ai-code-agent/.env.example` and `paimeng-ai-code-rag/.env.example` as templates.
 - Do not commit `runtime/tmp/`, generated build outputs, or local infrastructure credentials.
 - `npm run lint` and `npm run format` in the frontend modify files; inspect the diff after running them.
@@ -46,6 +48,9 @@
 | Domain-document discovery convention | `docs/agents/domain.md` |
 | GitHub issue workflow | `docs/agents/issue-tracker.md` |
 | Local services and required environment variables | `docker-compose.yml` |
+| Docker and Nginx configuration | `infra/docker/` |
+| Database initialization and migrations | `infra/sql/` |
+| Deployment configuration and operational scripts | `ops/` |
 
 ## Commit Attribution
 - AI-assisted commits must end with `Assisted-by: <agent-name>/<model-id>`; do not guess an unknown model ID.
