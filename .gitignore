@@ -5,6 +5,8 @@ application-local.yml
 .env
 # Redis 转储（本地运行期产物，不提交）
 dump.rdb
+# 本地数据库卷备份（可能包含敏感数据，不提交）
+runtime/
 
 HELP.md
 target/
@@ -44,11 +46,4 @@ build/
 .trae/
 
 ## Claude Code ##
-.claude/cache/
-.claude/statsig/
-.claude/logs/
-# 部署产物目录：内容为运行期产物不入库，仅保留目录占位（本地 nginx 只读挂载，见 docker-compose.yml）
-runtime/tmp/*
-!runtime/tmp/code_deploy
-runtime/tmp/code_deploy/*
-!runtime/tmp/code_deploy/.gitkeep
+.claude/
