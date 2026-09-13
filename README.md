@@ -14,7 +14,7 @@
 
 浏览器通过 cookie 与 Java 业务接口通信，通过短时 JWT 和 fetch-SSE 直连 TS Agent。TS Agent 通过受保护的内部 API 回调 Java 完成记账、写入历史和触发构建。完整的服务拓扑、鉴权边界和数据分工以 [目标架构设计](docs/ts_agent/architecture.md) 为准。
 
-`paimeng-ai-code-microservice/` 是废弃的微服务重构尝试，不作为开发或迁移前提。旧 Java AI 生成链路和 Python Agent 中转链已退役，TS Agent 是唯一的生成主链路。
+`archive/paimeng-ai-code-microservice/` 是废弃的微服务重构尝试，不作为开发或迁移前提。旧 Java AI 生成链路和 Python Agent 中转链已退役，TS Agent 是唯一的生成主链路。
 
 ## 技术栈
 
@@ -32,10 +32,14 @@
 ├── paimeng-ai-code-agent/                # TS Agent
 ├── paimeng-ai-code-frontend/             # Vue 3 前端
 ├── paimeng-ai-code-rag/                  # Python RAG（P4）
-├── docs/ts_agent/                        # 架构、契约、设计与进度
-├── .agents/memories/                     # 跨会话工作记忆
-├── sql/                                  # 数据库初始化与迁移资料
-└── docker-compose.yml                    # 本地基础设施
+├── archive/                              # 已归档模块
+├── infra/                                # Docker 配置与数据库初始化资料
+├── ops/                                  # 部署配置与运维脚本
+├── assets/                               # 项目静态资源
+├── runtime/                              # 本地运行时产物（不提交）
+├── docs/                                 # 项目文档
+├── .agents/                              # Agent 治理文件
+└── docker-compose.yml                    # 本地基础设施入口
 ```
 
 ## 文档入口

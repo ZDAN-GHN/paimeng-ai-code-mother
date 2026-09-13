@@ -41,7 +41,7 @@
 
 **反例（问题）**：
 - ❌「在合适的位置加个 Service」——agent 可能放错包、或犹豫不动手。
-- ✅「新建 `src/main/java/com/zdan/paimengaicodemother/service/XxxService.java`；遵循阿里巴巴开发手册；提交须带 Co-Authored-By。」
+- ✅「新建 `paimeng-ai-code-backend/src/main/java/com/zdan/paimengaicodebackend/service/XxxService.java`；遵循阿里巴巴开发手册；提交须带 `Assisted-by`。」
 
 **判定**：关键路径缺失或写错 → 高；约束与实际项目不一致 → 高（引用失效类）。
 
@@ -69,20 +69,20 @@
 
 **反例（问题）**：
 - ❌「完成生成功能」——不是任务，是口号，无法拆分执行。
-- ✅「① 执行 `sql/create_table.sql` 追加生成记录表 DDL → ② 用 MyBatis Flex 生成器生成 Mapper（产出 `mapper/XxxMapper.java`）→ ③ 实现 Service + 单测（产出 `XxxServiceTest.java`，命令 `./mvnw test -Dtest=XxxServiceTest`）。」
+- ✅「① 执行 `infra/sql/create_table.sql` 追加生成记录表 DDL → ② 用 MyBatis Flex 生成器生成 Mapper（产出 `mapper/XxxMapper.java`）→ ③ 实现 Service + 单测（产出 `XxxServiceTest.java`，命令 `cd paimeng-ai-code-backend && ./mvnw test -Dtest=XxxServiceTest`）。」
 
 **判定**：无任务分解或任务含多件事 → 高；有分解但无顺序/产出物 → 中。
 
 ## 6. 验收标准
 
 **检查点**：
-- 是否可用**命令或 curl 客观验证**（如「`./mvnw test` 全绿」「返回 200 且 body 含 `code` 字段」）？
+- 是否可用**命令或 curl 客观验证**（如「`cd paimeng-ai-code-backend && ./mvnw test` 全绿」「返回 200 且 body 含 `code` 字段」）？
 - 是否覆盖**边界用例**（空输入、超长输入、异常分支、并发）？
 - 是否避免了「界面美观」「体验流畅」这类不可判定表述？
 
 **反例（问题）**：
 - ❌「确保代码质量，运行流畅」——不可判定，无法验收。
-- ✅「① `./mvnw test -Dtest=XxxServiceTest` 全绿；② `curl -X POST ...` 带合法 JSON 返回 200 且 `data.code` 非空；③ 空描述返回 400 及错误码 `PARAM_ERROR`；④ 超长输入（>5000 字）返回 413。」
+- ✅「① `cd paimeng-ai-code-backend && ./mvnw test -Dtest=XxxServiceTest` 全绿；② `curl -X POST ...` 带合法 JSON 返回 200 且 `data.code` 非空；③ 空描述返回 400 及错误码 `PARAM_ERROR`；④ 超长输入（>5000 字）返回 413。」」
 
 **判定**：验收全部不可判定 → 阻塞；主路径可验证但边界缺失 → 中。
 
@@ -103,11 +103,11 @@
 **检查点**：
 - 是否给出**确切文件路径/链接**（而非「看下项目结构」）？
 - 引用的路径是否**真实可解析**（与第 3 步现状核对）？
-- 参考资料是否覆盖 agent 开工前必须读的上下文（如 `AGENTS.md`、`CONTEXT.md`、`sql/create_table.sql`）？
+- 参考资料是否覆盖 agent 开工前必须读的上下文（如 `AGENTS.md`、`CONTEXT.md`、`infra/sql/create_table.sql`）？
 
 **反例（问题）**：
 - ❌「参考现有代码实现即可」——不可解析。
-- ✅「背景见 `CONTEXT.md`；表结构见 `sql/create_table.sql`；接口风格参考 `src/main/java/.../controller/AiGenerateController.java`。」
+- ✅「背景见 `CONTEXT.md`；表结构见 `infra/sql/create_table.sql`；接口风格参考 `paimeng-ai-code-backend/src/main/java/.../controller/AiGenerateController.java`。」
 
 **判定**：引用路径不存在或不可解析 → 阻塞；引用存在但只给目录不给文件 → 中。
 

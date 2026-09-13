@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # 在 Linux Mint 22.x / Ubuntu 24.04 上安装 Docker Engine + Compose 插件（Docker 官方 apt 源）
-# 用法：sudo bash scripts/install-docker.sh [--mirror]
+# 用法：sudo bash ops/scripts/install-docker.sh [--mirror]
 #   --mirror  使用阿里云镜像源（download.docker.com 访问慢时）
 set -euo pipefail
 
 if [[ $EUID -ne 0 ]]; then
-  echo "请用 sudo 运行：sudo bash scripts/install-docker.sh" >&2
+  echo "请用 sudo 运行：sudo bash ops/scripts/install-docker.sh" >&2
   exit 1
 fi
 

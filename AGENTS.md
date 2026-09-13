@@ -2,7 +2,7 @@
 
 ## Scope
 - Active services: Java backend in `paimeng-ai-code-backend/`, TS Agent in `paimeng-ai-code-agent/`, Vue frontend in `paimeng-ai-code-frontend/`, and P4 RAG work in `paimeng-ai-code-rag/`.
-- `paimeng-ai-code-microservice/` is a deprecated experiment; do not use it as a development or migration baseline.
+- `archive/paimeng-ai-code-microservice/` is a deprecated experiment; do not use it as a development or migration baseline.
 
 ## Toolchains
 | Area | Requirement | Dependency command |
@@ -32,7 +32,7 @@
 - The TS Agent is the only active code-generation path; its test layout mirrors `src/` under `paimeng-ai-code-agent/test/`.
 - Keep browser-to-Agent changes coordinated with the frontend SSE client in `paimeng-ai-code-frontend/src/utils/agentSse.ts`.
 - Keep secrets only in ignored `.env` files; use `paimeng-ai-code-agent/.env.example` and `paimeng-ai-code-rag/.env.example` as templates.
-- Do not commit `tmp/`, generated build outputs, or local infrastructure credentials.
+- Do not commit `runtime/tmp/`, generated build outputs, or local infrastructure credentials.
 - `npm run lint` and `npm run format` in the frontend modify files; inspect the diff after running them.
 - Do not start the RAG service or enable it in the main generation path before its P4 work is implemented.
 

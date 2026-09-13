@@ -25,7 +25,7 @@ public interface AppConstant {
      */
     String REPOSITORY_ROOT_DIR = Path.of(System.getProperty("user.dir"), "..").normalize().toString();
 
-    String TEMP_ROOT_DIR = Path.of(REPOSITORY_ROOT_DIR, "tmp").toString();
+    String TEMP_ROOT_DIR = Path.of(REPOSITORY_ROOT_DIR, "runtime", "tmp").toString();
 
     String CODE_OUTPUT_ROOT_DIR = Path.of(TEMP_ROOT_DIR, "code_output").toString();
 

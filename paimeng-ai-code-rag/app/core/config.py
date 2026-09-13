@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     # 内部调用令牌（与 Java 侧 python-agent.token 一致），缺失时所有内部接口返回 401
     python_agent_token: str = ""
 
-    # 工作区根目录：与 Java 侧 AppConstant.CODE_OUTPUT_ROOT_DIR（user.dir/tmp/code_output）为同一绝对路径
+    # 工作区根目录：与 Java 侧 AppConstant.CODE_OUTPUT_ROOT_DIR（仓库 runtime/tmp/code_output）为同一绝对路径
     workspace_root: Path = _REPO_ROOT / "tmp" / "code_output"
 
     # PostgreSQL DSN，仅用于 LangGraph checkpoint
