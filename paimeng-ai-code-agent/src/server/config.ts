@@ -76,8 +76,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Conf
     if (env.NODE_ENV === 'production') throw new Error('JWT_SECRET 必须配置')
     console.warn('[config] JWT_SECRET 未配置，使用不安全的开发默认值（勿用于生产）')
   }
-  const workspaceRootEnv = overrides.workspaceRoot ?? env.WORKSPACE_ROOT ?? '../tmp/code_output'
-  // 相对路径以服务目录为基准，默认对齐 Java 的 user.dir/tmp/code_output
+  const workspaceRootEnv = overrides.workspaceRoot ?? env.WORKSPACE_ROOT ?? '../runtime/tmp/code_output'
+  // 相对路径以服务目录为基准，默认对齐 Java 的 runtime/tmp/code_output
   const workspaceRoot = path.isAbsolute(workspaceRootEnv) ? workspaceRootEnv : path.resolve(agentRoot, workspaceRootEnv)
   const logLevel = overrides.logLevel ?? env.LOG_LEVEL ?? 'info'
   const javaInternalBaseUrl = overrides.javaInternalBaseUrl ?? env.JAVA_INTERNAL_BASE_URL ?? 'http://localhost:8123/api'

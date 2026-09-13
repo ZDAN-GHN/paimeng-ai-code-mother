@@ -8,11 +8,11 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "node scripts/run.mjs dev",
-    "build": "node scripts/run.mjs build",
-    "start": "node scripts/run.mjs start",
-    "type-check": "node scripts/run.mjs type-check",
-    "test": "node scripts/run.mjs test"
+    "dev": "npm run build && npm run start",
+    "build": "esbuild src/server/index.ts --bundle --platform=node --format=esm --sourcemap --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outfile=dist/app.bundle.mjs",
+    "start": "node --enable-source-maps dist/app.bundle.mjs",
+    "type-check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.44",

@@ -1,10 +1,5 @@
 ### CUSTOM ###
 application-local.yml
-tmp/*
-!tmp/code_deploy
-tmp/code_deploy/*
-!tmp/code_deploy/.gitkeep
-wsl-rt-env
 .agents/worktrees/
 # Docker compose 本地环境变量（含密码，不提交）
 .env
@@ -53,7 +48,7 @@ build/
 .claude/statsig/
 .claude/logs/
 # 部署产物目录：内容为运行期产物不入库，仅保留目录占位（本地 nginx 只读挂载，见 docker-compose.yml）
-tmp/*
-!tmp/code_deploy
-tmp/code_deploy/*
-!tmp/code_deploy/.gitkeep
+runtime/tmp/*
+!runtime/tmp/code_deploy
+runtime/tmp/code_deploy/*
+!runtime/tmp/code_deploy/.gitkeep

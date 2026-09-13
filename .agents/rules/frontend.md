@@ -1,6 +1,6 @@
 # 前端规则
 
-前端目录为 `paimeng-ai-code-mother-frontend/`，使用 Vue 3、Vue Router、Pinia、Ant Design Vue、Axios 和 Vite。页面放在 `src/pages/`，公共组件放在 `src/components/`，跨页面状态放在 `src/stores/`，格式化和校验放在 `src/utils/`。
+前端目录为 `paimeng-ai-code-frontend/`，使用 Vue 3、Vue Router、Pinia、Ant Design Vue、Axios 和 Vite。页面放在 `src/pages/`，公共组件放在 `src/components/`，跨页面状态放在 `src/stores/`，格式化和校验放在 `src/utils/`。
 
 请求统一沿用 `src/api/` 与现有 Axios 配置，保留登录 cookie、统一错误处理和后端响应包装。路由权限必须与页面入口和后端权限同时核对，管理员页面不能只靠隐藏菜单保护。
 
