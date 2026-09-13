@@ -7,8 +7,6 @@ import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
-import com.zdan.paimengaicodebackend.ai.codegen.route.AiCodeGenTypeRoutingService;
-import com.zdan.paimengaicodebackend.ai.codegen.route.AiCodeGenTypeRoutingServiceFactory;
 import com.zdan.paimengaicodebackend.ai.enums.CodeGenTypeEnum;
 import com.zdan.paimengaicodebackend.constant.AppConstant;
 import com.zdan.paimengaicodebackend.core.builder.BuilderExecutor;
@@ -49,16 +47,13 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private final UserService userService;
     private final ChatHistoryService chatHistoryService;
     private final ScreenshotService screenshotService;
-    private final AiCodeGenTypeRoutingServiceFactory aiCodeGenTypeRoutingServiceFactory;
 
     public AppServiceImpl(UserService userService,
                           ChatHistoryService chatHistoryService,
-                          ScreenshotService screenshotService,
-                          AiCodeGenTypeRoutingServiceFactory aiCodeGenTypeRoutingServiceFactory) {
+                          ScreenshotService screenshotService) {
         this.userService = userService;
         this.chatHistoryService = chatHistoryService;
         this.screenshotService = screenshotService;
-        this.aiCodeGenTypeRoutingServiceFactory = aiCodeGenTypeRoutingServiceFactory;
     }
 
     @Override
@@ -76,8 +71,11 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         app.setAppName(initPrompt.substring(0, Math.min(initPrompt.length(), 12)));
 
         // 使用 AI 智能选择代码生成类型（多例模式）
-        AiCodeGenTypeRoutingService aiCodeGenTypeRoutingService = aiCodeGenTypeRoutingServiceFactory.createAiCodeGenTypeRoutingService();
-        CodeGenTypeEnum selectedCodeGenType = aiCodeGenTypeRoutingService.routeCodeGenType(initPrompt);
+        // AiCodeGenTypeRoutingService aiCodeGenTypeRoutingService = aiCodeGenTypeRoutingServiceFactory.createAiCodeGenTypeRoutingService();
+        // CodeGenTypeEnum selectedCodeGenType = aiCodeGenTypeRoutingService.routeCodeGenType(initPrompt);
+
+        // 本地 HTML 链路验收期间固定单文件类型，避免路由模型选择其他生成形态。
+        CodeGenTypeEnum selectedCodeGenType = CodeGenTypeEnum.HTML;
         app.setCodeGenType(selectedCodeGenType.getValue());
 
         // 插入数据库
