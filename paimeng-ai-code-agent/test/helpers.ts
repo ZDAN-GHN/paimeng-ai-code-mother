@@ -96,12 +96,12 @@ export function buildTestApp(workspaceRoot: string = makeWorkspaceRoot(), overri
     workspaceRoot,
     logLevel: 'silent',
     javaInternalToken: '',
-    zhipuApiKey: '',
     deepCodingApiKey: '',
     modelRouter: '',
     modelFast: '',
     modelStandard: '',
     modelDeep: '',
+    modelQuality: '',
     ...overrides,
     agentRoutes: {
       // 默认注入全通过门禁替身（既有测试最小 review 语义）；#9 专项测试显式覆盖

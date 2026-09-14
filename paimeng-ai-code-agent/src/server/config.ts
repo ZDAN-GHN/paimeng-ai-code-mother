@@ -29,12 +29,11 @@ export interface AgentConfig {
   modelFast: string
   modelStandard: string
   modelDeep: string
+  modelQuality: string
   // 路由档模型 id（2026-09-08 四档选型新增；路由调用点为后续特性，本键先打通配置与 provider 映射）
   modelRouter: string
-  // 真实 LLM 渠道（src/llm/real.ts 固定分工）：智谱（路由/快速/质检）、DashScope Coding（标准/深度）
-  // 两渠道密钥须齐全（createRealLlm 缺一即抛 fail-fast）；全空 → isRealLlmConfigured=false → 离线回退假 LLM（测试即依赖此回退）
-  zhipuApiKey: string
-  zhipuBaseUrl: string
+  // 真实 LLM 渠道：Alibaba Coding Plan 的 DashScope Coding OpenAI 兼容端点。
+  // 密钥为空 → isRealLlmConfigured=false → 离线回退假 LLM。
   deepCodingApiKey: string
   deepCodingBaseUrl: string
 }
@@ -88,10 +87,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Conf
   const modelFast = overrides.modelFast ?? env.MODEL_FAST ?? ''
   const modelStandard = overrides.modelStandard ?? env.MODEL_STANDARD ?? ''
   const modelDeep = overrides.modelDeep ?? env.MODEL_DEEP ?? ''
+  const modelQuality = overrides.modelQuality ?? env.MODEL_QUALITY ?? ''
   const modelRouter = overrides.modelRouter ?? env.MODEL_ROUTER ?? ''
-  const zhipuApiKey = overrides.zhipuApiKey ?? env.ZHIPU_API_KEY ?? ''
-  const zhipuBaseUrl = overrides.zhipuBaseUrl ?? env.ZHIPU_BASE_URL ?? 'https://open.bigmodel.cn/api/paas/v4'
   const deepCodingApiKey = overrides.deepCodingApiKey ?? env.DASHSCOPE_CODING_API_KEY ?? ''
   const deepCodingBaseUrl = overrides.deepCodingBaseUrl ?? env.DASHSCOPE_CODING_BASE_URL ?? 'https://coding.dashscope.aliyuncs.com/v1'
-  return { port, jwtSecret: jwtSecret || 'dev-insecure-secret', workspaceRoot, logLevel, javaInternalBaseUrl, javaInternalToken, pexelsApiKey, dashscopeApiKey, imageModel, modelFast, modelStandard, modelDeep, modelRouter, zhipuApiKey, zhipuBaseUrl, deepCodingApiKey, deepCodingBaseUrl }
+  return { port, jwtSecret: jwtSecret || 'dev-insecure-secret', workspaceRoot, logLevel, javaInternalBaseUrl, javaInternalToken, pexelsApiKey, dashscopeApiKey, imageModel, modelFast, modelStandard, modelDeep, modelQuality, modelRouter, deepCodingApiKey, deepCodingBaseUrl }
 }

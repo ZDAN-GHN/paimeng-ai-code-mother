@@ -18,7 +18,7 @@ const REDACTED = '[REDACTED]'
 const MAX_TEXT = 120
 const MAX_COUNT = 50
 const EVENT_TYPES = new Set(['questions', 'wireframe', 'generation/proposed', 'approval/asked', 'awaiting_user', 'ai_response', 'ai_thinking', 'milestone', 'tool_request', 'tool_executed', 'done', 'error', 'aborted'])
-const CHANNELS = new Set(['scripted', 'zhipu', 'dashscope-coding'])
+const CHANNELS = new Set(['scripted', 'dashscope-coding'])
 const SENSITIVE_KEY = /^(?:authorization|cookie|password|secret|token|api[_-]?key|access[_-]?token|id[_-]?token|credential)$/i
 const SENSITIVE_ASSIGNMENT = /(?:authorization|cookie|password|secret|token|api[_-]?key|access[_-]?token|id[_-]?token)\s*[=:]\s*["']?[^\s,;&"']+/gi
 const BEARER = /\bBearer\s+[^\s,;&"']+/gi

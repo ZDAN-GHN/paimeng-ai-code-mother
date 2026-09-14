@@ -399,9 +399,9 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     try {
       await options.observer?.metadata(input.runId, {
         model: isRealLlmConfigured(config)
-          ? (input.intensity === 'fast' ? (config.modelFast || 'glm-4.7-flash') : input.intensity === 'deep' ? (config.modelDeep || 'qwen3.7-plus') : (config.modelStandard || 'qwen3.6-plus'))
+          ? (input.intensity === 'fast' ? (config.modelFast || 'qwen3-coder-next') : input.intensity === 'deep' ? (config.modelDeep || 'qwen3.7-plus') : (config.modelStandard || 'qwen3-coder-plus'))
           : `scripted-${input.intensity ?? 'standard'}`,
-        channel: isRealLlmConfigured(config) ? (input.intensity === 'standard' || input.intensity === 'deep' ? 'dashscope-coding' : 'zhipu') : 'scripted',
+        channel: isRealLlmConfigured(config) ? 'dashscope-coding' : 'scripted',
       })
       for await (const event of runGenerationWorkflow(input, {
         workspaceRoot: config.workspaceRoot,

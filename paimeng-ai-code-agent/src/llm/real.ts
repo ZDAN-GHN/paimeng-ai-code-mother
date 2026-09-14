@@ -13,16 +13,17 @@ import { customProvider } from 'ai'
 import type { AgentConfig } from '../server/config.js'
 
 // 四档缺省模型（.env 未配置 MODEL_* 时的内置选型）
-export const DEFAULT_MODEL_ROUTER = 'glm-4-flash-250414'
-export const DEFAULT_MODEL_FAST = 'glm-4.7-flash'
-export const DEFAULT_MODEL_STANDARD = 'qwen3.6-plus'
+export const DEFAULT_MODEL_ROUTER = 'qwen3.7-plus'
+export const DEFAULT_MODEL_FAST = 'qwen3-coder-next'
+export const DEFAULT_MODEL_STANDARD = 'qwen3-coder-plus'
 export const DEFAULT_MODEL_DEEP = 'qwen3.7-plus'
+export const DEFAULT_MODEL_QUALITY = 'qwen3.7-plus'
 
 // 两渠道密钥齐全 → 真实链路；全空 → 离线回退假 LLM（路由层据此判断）。
 // 「齐全」由 createRealLlm 强制（缺一即抛 fail-fast）：四档是产品功能，部分配置会让
 // 标准/深度档运行时才炸——启动失败优于带病运行。
 export function isRealLlmConfigured(config: AgentConfig): boolean {
-  return Boolean(config.zhipuApiKey || config.deepCodingApiKey)
+  return Boolean(config.deepCodingApiKey)
 }
 
 function safeJsonParse(text: string): Record<string, unknown> | null {
@@ -102,8 +103,7 @@ interface TierRouting {
 // 按配置构建真实 provider；渠道密钥不全直接抛错（fail-fast，避免带病启动后按档位随机失败）
 export function createRealLlm(config: AgentConfig) {
   const missing = [
-    config.zhipuApiKey ? null : 'ZHIPU_API_KEY（路由/快速/质检档）',
-    config.deepCodingApiKey ? null : 'DASHSCOPE_CODING_API_KEY（标准/深度档）',
+    config.deepCodingApiKey ? null : 'DASHSCOPE_CODING_API_KEY（所有真实 LLM 档位）',
   ].filter((item): item is string => item !== null)
   if (missing.length > 0) {
     throw new Error(`真实 LLM 渠道配置不完整，缺少：${missing.join('；')}`)
@@ -113,17 +113,9 @@ export function createRealLlm(config: AgentConfig) {
   const fastId = config.modelFast || DEFAULT_MODEL_FAST
   const standardId = config.modelStandard || DEFAULT_MODEL_STANDARD
   const deepId = config.modelDeep || DEFAULT_MODEL_DEEP
-  // 质检档复用快速档模型（同渠道同 id，thinking 关闭由渠道补丁统一覆盖）
-  const qualityId = fastId
+  const qualityId = config.modelQuality || DEFAULT_MODEL_QUALITY
 
   const channels: ChannelSpec[] = [
-    {
-      name: 'zhipu',
-      baseURL: config.zhipuBaseUrl,
-      apiKey: config.zhipuApiKey,
-      // 智谱快速/路由/质检三档关思考（reasoning 会计入 max_tokens，3000 上限不够思考+产出）
-      bodyPatch: (model) => (new Set([routerId, fastId, qualityId]).has(model) ? { thinking: { type: 'disabled' } } : undefined),
-    },
     {
       name: 'dashscope-coding',
       baseURL: config.deepCodingBaseUrl,
@@ -144,9 +136,9 @@ export function createRealLlm(config: AgentConfig) {
   )
 
   const tiers: TierRouting[] = [
-    { alias: 'scripted-router', channel: 'zhipu', modelId: routerId },
-    { alias: 'scripted-fast', channel: 'zhipu', modelId: fastId },
-    { alias: 'scripted-quality', channel: 'zhipu', modelId: qualityId },
+    { alias: 'scripted-router', channel: 'dashscope-coding', modelId: routerId },
+    { alias: 'scripted-fast', channel: 'dashscope-coding', modelId: fastId },
+    { alias: 'scripted-quality', channel: 'dashscope-coding', modelId: qualityId },
     { alias: 'scripted-standard', channel: 'dashscope-coding', modelId: standardId },
     { alias: 'scripted-deep', channel: 'dashscope-coding', modelId: deepId },
   ]

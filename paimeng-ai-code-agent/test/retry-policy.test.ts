@@ -24,9 +24,8 @@ function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     modelFast: '',
     modelStandard: '',
     modelDeep: '',
-    zhipuApiKey: 'zhipu-key',
-    zhipuBaseUrl: 'https://zhipu.invalid/api/paas/v4',
-    deepCodingApiKey: 'deep-key',
+    modelQuality: '',
+    deepCodingApiKey: 'coding-key',
     deepCodingBaseUrl: 'https://coding.invalid/v1',
     ...overrides,
   }

@@ -22,9 +22,8 @@ function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     modelFast: '',
     modelStandard: '',
     modelDeep: '',
-    zhipuApiKey: 'zhipu-key',
-    zhipuBaseUrl: 'https://zhipu.invalid/api/paas/v4',
-    deepCodingApiKey: 'deep-key',
+    modelQuality: '',
+    deepCodingApiKey: 'coding-key',
     deepCodingBaseUrl: 'https://coding.invalid/v1',
     ...overrides,
   }
@@ -77,19 +76,18 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('isRealLlmConfigured（两渠道全空回退 / 任一配置走真实）', () => {
-  it('两渠道全空 → false（离线回退假 LLM）', () => {
-    expect(isRealLlmConfigured(baseConfig({ zhipuApiKey: '', deepCodingApiKey: '' }))).toBe(false)
+describe('isRealLlmConfigured（DashScope key 缺失回退）', () => {
+  it('渠道 key 为空 → false（离线回退假 LLM）', () => {
+    expect(isRealLlmConfigured(baseConfig({ deepCodingApiKey: '' }))).toBe(false)
   })
 
-  it('任一渠道配置 → true（真实性由 createRealLlm fail-fast 校验）', () => {
-    expect(isRealLlmConfigured(baseConfig({ deepCodingApiKey: '' }))).toBe(true)
+  it('渠道 key 存在 → true', () => {
+    expect(isRealLlmConfigured(baseConfig())).toBe(true)
   })
 })
 
 describe('createRealLlm（fail-fast 与别名注册）', () => {
-  it('缺任一渠道 key → 抛错且提示缺哪个键', () => {
-    expect(() => createRealLlm(baseConfig({ zhipuApiKey: '' }))).toThrow(/ZHIPU_API_KEY/)
+  it('缺少 Coding Plan key → 抛出 fail-fast 错误', () => {
     expect(() => createRealLlm(baseConfig({ deepCodingApiKey: '' }))).toThrow(/DASHSCOPE_CODING_API_KEY/)
   })
 
@@ -103,20 +101,22 @@ describe('createRealLlm（fail-fast 与别名注册）', () => {
   })
 })
 
-describe('智谱 thinking 关闭补丁（快速/路由/质检注入，标准/深度不注入）', () => {
-  it('质检档（智谱渠道）请求体注入 thinking:{type:"disabled"}', async () => {
+describe('Alibaba Coding Plan 统一路由（所有档位不注入智谱专有 thinking 字段）', () => {
+  it('质检档独立使用 qwen3.7-plus，且请求体不含专有 thinking 字段', async () => {
     const { calls } = stubFetch()
     const { text } = await completeOnce('scripted-quality')
     expect(text).toBe('ok')
-    expect(calls[0]!.body.thinking).toEqual({ type: 'disabled' })
+    expect(calls[0]!.url).toBe('https://coding.invalid/v1/chat/completions')
+    expect(calls[0]!.body.model).toBe('qwen3.7-plus')
+    expect(calls[0]!.body.thinking).toBeUndefined()
   })
 
-  it('标准档使用 DashScope Coding 的 qwen3.6-plus 且请求体不含 thinking 字段', async () => {
+  it('标准档使用 DashScope Coding 的 qwen3-coder-plus，且请求体不含 thinking 字段', async () => {
     const { calls } = stubFetch()
     await completeOnce('scripted-standard')
-    expect(DEFAULT_MODEL_STANDARD).toBe('qwen3.6-plus')
+    expect(DEFAULT_MODEL_STANDARD).toBe('qwen3-coder-plus')
     expect(calls[0]!.url).toBe('https://coding.invalid/v1/chat/completions')
-    expect(calls[0]!.body.model).toBe('qwen3.6-plus')
+    expect(calls[0]!.body.model).toBe('qwen3-coder-plus')
     expect(calls[0]!.body.thinking).toBeUndefined()
   })
 
