@@ -108,6 +108,50 @@ function classifyFailureCode(error: unknown): FailureCode {
   return modelErrorNames.has(error.name) ? 'model-error' : 'unknown'
 }
 
+interface ProviderErrorLike {
+  statusCode?: unknown
+  url?: unknown
+  data?: unknown
+  responseHeaders?: unknown
+}
+
+function plainRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype
+    ? value as Record<string, unknown>
+    : undefined
+}
+
+function boundedValue(value: unknown): string | number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') return value.slice(0, 80)
+  return undefined
+}
+
+// Diagnostic metadata intentionally excludes error messages, request/response bodies, and query strings.
+export function summarizeProviderError(error: unknown): Record<string, string | number | undefined> {
+  if (!(error instanceof Error)) return { name: typeof error }
+  const source = error as Error & ProviderErrorLike
+  const data = plainRecord(source.data)
+  const upstream = plainRecord(data?.error)
+  const headers = plainRecord(source.responseHeaders)
+  let endpoint: string | undefined
+  if (typeof source.url === 'string') {
+    try {
+      const url = new URL(source.url)
+      endpoint = `${url.origin}${url.pathname}`
+    } catch {
+      endpoint = undefined
+    }
+  }
+  return {
+    name: error.name,
+    statusCode: typeof source.statusCode === 'number' && Number.isInteger(source.statusCode) ? source.statusCode : undefined,
+    providerCode: boundedValue(upstream?.code),
+    endpoint,
+    requestId: boundedValue(headers?.['x-request-id'] ?? headers?.['request-id']),
+  }
+}
+
 // 每次模型调用/关键决策点前检查中止信号（#10）：abort 可能落在模型调用间隙（工具执行后、下一轮调用前），
 // 显式检查保证中断立即生效，不被正常路径拖到 done 后才处理（对话中断的产品语义：中断即停）
 function throwIfAborted(abortSignal?: AbortSignal): void {
@@ -478,6 +522,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     }
     // 失败路径：统一收尾（catch 中 actor 可能已在终态，fail 内判断活跃态）
     const message = error instanceof Error ? error.message : '生成失败'
+    options.logger?.error({ runId: request.runId, providerError: summarizeProviderError(error) }, '生成工作流失败')
     yield* fail(message, classifyFailureCode(error))
   }
 }

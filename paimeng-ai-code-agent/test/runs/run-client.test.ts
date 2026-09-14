@@ -3,6 +3,7 @@ import {
   RunApiError,
   RunClient,
   RunConflictError,
+  observedRunId,
   type RunCreateRequest,
 } from '../../src/runs/runClient.js'
 
@@ -42,6 +43,27 @@ function makeMockFetch(handler: (call: CapturedCall) => Response | Promise<Respo
 function makeClient(fetchImpl: unknown, baseUrl = 'http://java:8123/api', token = 'svc-token'): RunClient {
   return new RunClient({ baseUrl, token, fetchImpl: fetchImpl as typeof fetch })
 }
+
+describe('RunClient evaluation observation', () => {
+  it('extracts the run id before nested action suffixes', async () => {
+    expect(observedRunId('/internal/runs/run-1')).toBe('run-1')
+    expect(observedRunId('/internal/agent/runs/run-2/complete')).toBe('run-2')
+    expect(observedRunId('/internal/agent/runs/run-3/credit/freeze')).toBe('run-3')
+  })
+
+  it('reports credit freeze under its actual run id', async () => {
+    const callbacks: Array<{ runId: string; path: string }> = []
+    const { fetchImpl } = makeMockFetch(() => jsonResponse({ code: 0, data: { runId: 'run-4' }, message: 'ok' }))
+    const client = new RunClient({
+      baseUrl: 'http://java.invalid/api', token: 'test', fetchImpl: fetchImpl as typeof fetch,
+      observer: { enabled: true, writable: true, event: async () => {}, metadata: async () => {}, close: async () => {}, callback: async (runId, summary) => { callbacks.push({ runId, path: summary.path }) } },
+    })
+
+    await client.freezeCredit('run-4', { intensity: 'fast' })
+    expect(callbacks).toEqual([{ runId: 'run-4', path: '/internal/agent/runs/run-4/credit/freeze' }])
+  })
+})
+
 
 describe('RunClient（generation_run 生命周期）', () => {
   it('createRun：POST /internal/runs，携带 Bearer 与 JSON 体，解析返回 Run', async () => {

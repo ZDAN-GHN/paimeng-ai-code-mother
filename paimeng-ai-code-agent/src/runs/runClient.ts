@@ -137,6 +137,11 @@ export interface RunClientOptions {
   observer?: ObservationSink
 }
 
+export function observedRunId(path: string): string | undefined {
+  const match = /^\/internal\/(?:agent\/)?runs\/([^/]+)/.exec(path)
+  return match ? decodeURIComponent(match[1]!) : undefined
+}
+
 export class RunClient {
   private readonly baseUrl: string
   private readonly token: string
@@ -210,10 +215,9 @@ export class RunClient {
     } catch {
       // 非 JSON 响应（如网关错误页）时退化为 status 文案
     }
-    if (this.observer?.enabled && /\/internal\/(?:runs|agent\/runs)\//.test(path)) {
-      const segments = path.split('/')
-      const runId = decodeURIComponent(segments.at(-1) === 'complete' ? segments.at(-2) ?? '' : segments.at(-1) ?? '')
-      await this.observer.callback(runId, { method, path, status: response.status, ok: response.ok })
+    const observedId = this.observer?.enabled ? observedRunId(path) : undefined
+    if (observedId) {
+      await this.observer!.callback(observedId, { method, path, status: response.status, ok: response.ok })
     }
     const message = payload?.message ?? `HTTP ${response.status}`
     if (response.status === 409) {
