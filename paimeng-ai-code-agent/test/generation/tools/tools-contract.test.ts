@@ -1,8 +1,3 @@
-
-
-
-
-
 import { describe, expect, it } from 'vitest'
 import { asSchema } from 'ai'
 import { FileTools } from '../../../src/generation/tools/fileTools.js'
@@ -14,11 +9,11 @@ const imageConfig: ImageConfig = { pexelsApiKey: '', dashscopeApiKey: '', imageM
 
 describe('buildTools 工具名绑定契约', () => {
   it('十工具名全集稳定：文件六件 + 图片四件，全部 camelCase（Java ToolManager 依赖）', () => {
-
     const root = makeWorkspaceRoot()
-    const names = Object.keys(buildTools({ files: new FileTools(root, root), images: new ImageTools(imageConfig) }))
+    const names = Object.keys(
+      buildTools({ files: new FileTools(root, root), images: new ImageTools(imageConfig) }),
+    )
     expect(names.sort()).toEqual([
-
       'deleteFile',
       'exit',
 
@@ -36,9 +31,11 @@ describe('buildTools 工具名绑定契约', () => {
 
 describe('buildTools zod 入参校验契约（#18）', () => {
   it('工具参数坏值在 SDK schema 校验层得到 typed 错误，不再运行时 undefined', async () => {
-
     const root = makeWorkspaceRoot()
-    const tools = buildTools({ files: new FileTools(root, root), images: new ImageTools(imageConfig) })
+    const tools = buildTools({
+      files: new FileTools(root, root),
+      images: new ImageTools(imageConfig),
+    })
 
     const schema = asSchema(tools.writeFile.inputSchema)
 
@@ -46,7 +43,6 @@ describe('buildTools zod 入参校验契约（#18）', () => {
     const bad = await schema.validate({ relativeFilePath: 'a.html' })
     expect(bad.success).toBe(false)
     if (!bad.success) {
-
       expect(bad.error.name).toBe('ZodError')
       expect(bad.error.message).toContain('content')
     }
@@ -56,7 +52,10 @@ describe('buildTools zod 入参校验契约（#18）', () => {
 
   it('zod schema 上送真实渠道的 JSON Schema 形状与旧手写 jsonSchema 等价', async () => {
     const root = makeWorkspaceRoot()
-    const tools = buildTools({ files: new FileTools(root, root), images: new ImageTools(imageConfig) })
+    const tools = buildTools({
+      files: new FileTools(root, root),
+      images: new ImageTools(imageConfig),
+    })
     const wire = await asSchema(tools.writeFile.inputSchema).jsonSchema
     expect(wire).toMatchObject({
       type: 'object',

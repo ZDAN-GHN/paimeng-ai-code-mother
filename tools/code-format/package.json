@@ -1,0 +1,16 @@
+{
+  "name": "paimeng-code-format",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Repository-local multi-language formatter",
+  "type": "module",
+  "scripts": {
+    "format": "node format.mjs",
+    "format:check": "node format.mjs --check"
+  },
+  "devDependencies": {
+    "@astral-sh/ruff-wasm-nodejs": "0.16.7",
+    "prettier": "3.5.3",
+    "prettier-plugin-java": "2.10.3"
+  }
+}

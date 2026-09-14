@@ -1,5 +1,3 @@
-
-
 from typing import TypedDict
 from uuid import uuid4
 
@@ -10,8 +8,6 @@ from app.core.state import get_checkpointer, has_checkpoint, thread_config
 
 
 class _CountState(TypedDict, total=False):
-
-
     count: int
 
 
@@ -21,7 +17,6 @@ def _unique_thread(prefix: str = "app") -> str:
 
 
 def _build_counter_graph():
-
 
     def increment(state: _CountState) -> _CountState:
         return {"count": (state.get("count") or 0) + 1}
@@ -45,13 +40,11 @@ def test_checkpoint_persists_and_restores():
     thread = _unique_thread()
     graph = _build_counter_graph()
 
-
     assert has_checkpoint(thread) is False
     result = graph.invoke({"count": 0}, config=thread_config(thread))
     assert result["count"] == 1
 
     assert has_checkpoint(thread) is True
-
 
     result2 = graph.invoke({}, config=thread_config(thread))
     assert result2["count"] == 2

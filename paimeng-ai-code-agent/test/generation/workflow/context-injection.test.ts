@@ -29,7 +29,12 @@ describe('codegen system context injection (#23)', () => {
     }
 
     for await (const _event of runGenerationWorkflow(
-      { runId: 'run-context-injection', appId: 1, message: '开始生成', workspacePath: workspaceRoot },
+      {
+        runId: 'run-context-injection',
+        appId: 1,
+        message: '开始生成',
+        workspacePath: workspaceRoot,
+      },
       {
         workspaceRoot,
         provider,
@@ -57,14 +62,22 @@ describe('codegen system context injection (#23)', () => {
     const events: AgentEvent[] = []
 
     for await (const event of runGenerationWorkflow(
-      { runId: 'run-multi-file-default-gates', appId: 1, message: '生成多文件页面', workspacePath: workspaceRoot, codeGenType: 'multi_file' },
+      {
+        runId: 'run-multi-file-default-gates',
+        appId: 1,
+        message: '生成多文件页面',
+        workspacePath: workspaceRoot,
+        codeGenType: 'multi_file',
+      },
       { workspaceRoot, provider },
     )) {
       events.push(event)
     }
 
     expect(events.at(-1)).toMatchObject({ type: 'error' })
-    expect(events.at(-1)).toMatchObject({ message: expect.stringContaining('至少需要 2 个项目文件') })
+    expect(events.at(-1)).toMatchObject({
+      message: expect.stringContaining('至少需要 2 个项目文件'),
+    })
     expect(provider.records.some((record) => record.modelId === 'scripted-quality')).toBe(true)
   })
 })

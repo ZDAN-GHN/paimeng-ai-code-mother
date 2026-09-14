@@ -3,22 +3,14 @@ package com.zdan.paimengaicodebackend.model.enums;
 import cn.hutool.core.util.ObjUtil;
 import lombok.Getter;
 
-
 @Getter
 public enum AgentCompleteStatusEnum {
-
-
     SUCCESS("成功", "success", "complete"),
-
-
     FAILED("失败", "failed", "failed"),
-
-
     ABORTED("用户中断", "aborted", "interrupted");
 
     private final String text;
     private final String value;
-
 
     private final String reason;
 
@@ -27,7 +19,6 @@ public enum AgentCompleteStatusEnum {
         this.value = value;
         this.reason = reason;
     }
-
 
     public static AgentCompleteStatusEnum getEnumByValue(String value) {
         if (ObjUtil.isEmpty(value)) {

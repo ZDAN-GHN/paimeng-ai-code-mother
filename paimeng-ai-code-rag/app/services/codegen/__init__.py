@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -11,7 +9,6 @@ from app.services.codegen.multi_file import MultiFileCodeGenService
 if TYPE_CHECKING:
     from app.tools.file_tools import FileTools
 
-
 _SERVICE_CLASSES: dict[str, type] = {
     "html": HtmlCodeGenService,
     "multi_file": MultiFileCodeGenService,
@@ -19,9 +16,9 @@ _SERVICE_CLASSES: dict[str, type] = {
 
 
 class CodeGenServiceFactory:
-
-
-    def create(self, code_gen_type: str, file_tools: "FileTools | None" = None) -> CodeGenService:
+    def create(
+        self, code_gen_type: str, file_tools: "FileTools | None" = None
+    ) -> CodeGenService:
 
         if code_gen_type == "vue_project":
             if file_tools is None:
@@ -36,12 +33,15 @@ class CodeGenServiceFactory:
 
 
 class CodeGenServiceExecutor:
-
-
     def __init__(self, factory: CodeGenServiceFactory | None = None) -> None:
         self._factory = factory or CodeGenServiceFactory()
 
-    def stream(self, code_gen_type: str, user_message: str, file_tools: "FileTools | None" = None):
+    def stream(
+        self,
+        code_gen_type: str,
+        user_message: str,
+        file_tools: "FileTools | None" = None,
+    ):
 
         service = self._factory.create(code_gen_type, file_tools)
         if code_gen_type == "vue_project":

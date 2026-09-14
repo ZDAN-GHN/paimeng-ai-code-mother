@@ -1,5 +1,3 @@
-
-
 import shutil
 import tempfile
 from pathlib import Path
@@ -38,7 +36,6 @@ def atomic_write_files(workspace_path: Path, files: dict[str, str]) -> Path:
         try:
             stage.rename(workspace_path)
         except OSError:
-
             if backup.exists() and not workspace_path.exists():
                 backup.rename(workspace_path)
             raise
@@ -47,9 +44,15 @@ def atomic_write_files(workspace_path: Path, files: dict[str, str]) -> Path:
     return workspace_path
 
 
-def write_generated_code(workspace_path: str, code_gen_type: str, output_text: str) -> Path:
+def write_generated_code(
+    workspace_path: str, code_gen_type: str, output_text: str
+) -> Path:
 
-    from app.services.codegen.parsing import parse_html_code, parse_multi_file_code, to_files
+    from app.services.codegen.parsing import (
+        parse_html_code,
+        parse_multi_file_code,
+        to_files,
+    )
 
     validated = validate_workspace_path(workspace_path)
     if code_gen_type == "html":

@@ -1,4 +1,3 @@
-
 import Fastify, { type FastifyInstance } from 'fastify'
 import { agentPlugin } from './authPlugin.js'
 import { loadConfig, type ConfigOverrides } from './config.js'
@@ -22,7 +21,6 @@ export function buildApp(overrides: AppOverrides = {}): FastifyInstance {
     logger: { level: config.logLevel },
   })
   buildHealthzRoutes(app)
-
   registerHttpErrorHandler(app)
 
   app.register(agentPlugin, { config, routeOptions: { ...overrides.agentRoutes, observer } })

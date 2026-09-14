@@ -1,8 +1,10 @@
-
-
 import pytest
 
-from app.workspace.manager import atomic_write_files, validate_workspace_path, write_generated_code
+from app.workspace.manager import (
+    atomic_write_files,
+    validate_workspace_path,
+    write_generated_code,
+)
 
 WORKSPACE_ROOT = "/tmp/paimeng-test-workspace"
 
@@ -32,21 +34,23 @@ def test_atomic_write_replaces_workspace():
 
     target = validate_workspace_path(f"{WORKSPACE_ROOT}/html_atomic_test")
     atomic_write_files(target, {"index.html": "<h1>old</h1>"})
-
-
     atomic_write_files(target, {"new.html": "<h1>new</h1>"})
     assert not (target / "index.html").exists()
     assert (target / "new.html").read_text(encoding="utf-8") == "<h1>new</h1>"
-
-
-    leftovers = [p.name for p in target.parent.iterdir() if p.name.startswith((".stage-", "html_atomic_test.bak"))]
+    leftovers = [
+        p.name
+        for p in target.parent.iterdir()
+        if p.name.startswith((".stage-", "html_atomic_test.bak"))
+    ]
     assert leftovers == []
 
 
 @pytest.mark.workspace
 def test_write_generated_code_html():
 
-    target = write_generated_code(f"{WORKSPACE_ROOT}/html_gen_test", "html", "说明\n```html\n<h1>hi</h1>\n```")
+    target = write_generated_code(
+        f"{WORKSPACE_ROOT}/html_gen_test", "html", "说明\n```html\n<h1>hi</h1>\n```"
+    )
     assert (target / "index.html").read_text(encoding="utf-8") == "<h1>hi</h1>"
 
 
@@ -54,7 +58,9 @@ def test_write_generated_code_html():
 def test_write_generated_code_multi_file():
 
     content = "```html\n<h1>a</h1>\n```\n```css\nbody{}\n```\n```javascript\nconsole.log(1)\n```"
-    target = write_generated_code(f"{WORKSPACE_ROOT}/mf_gen_test", "multi_file", content)
+    target = write_generated_code(
+        f"{WORKSPACE_ROOT}/mf_gen_test", "multi_file", content
+    )
     assert (target / "index.html").read_text(encoding="utf-8") == "<h1>a</h1>"
     assert (target / "style.css").read_text(encoding="utf-8") == "body{}"
     assert (target / "script.js").read_text(encoding="utf-8") == "console.log(1)"

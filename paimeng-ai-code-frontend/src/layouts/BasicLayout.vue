@@ -1,6 +1,5 @@
 <template>
   <a-layout id="basicLayout">
-
     <GlobalHeader class="header" />
 
     <a-layout-content class="content">

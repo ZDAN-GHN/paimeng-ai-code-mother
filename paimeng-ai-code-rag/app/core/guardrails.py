@@ -1,8 +1,5 @@
-
-
 import re
 from dataclasses import dataclass
-
 
 SENSITIVE_WORDS = (
     "忽略之前的指令",
@@ -16,23 +13,26 @@ SENSITIVE_WORDS = (
     "jailbreak",
 )
 
-
 INJECTION_PATTERNS = (
-    re.compile(r"ignore\s+(?:previous|above|all)\s+(?:instructions?|commands?|prompts?)", re.IGNORECASE),
-    re.compile(r"(?:forget|disregard)\s+(?:everything|all)\s+(?:above|before)", re.IGNORECASE),
-    re.compile(r"(?:pretend|act|behave)\s+(?:as|like)\s+(?:if|you\s+are)", re.IGNORECASE),
+    re.compile(
+        r"ignore\s+(?:previous|above|all)\s+(?:instructions?|commands?|prompts?)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:forget|disregard)\s+(?:everything|all)\s+(?:above|before)", re.IGNORECASE
+    ),
+    re.compile(
+        r"(?:pretend|act|behave)\s+(?:as|like)\s+(?:if|you\s+are)", re.IGNORECASE
+    ),
     re.compile(r"system\s*:\s*you\s+are", re.IGNORECASE),
     re.compile(r"new\s+(?:instructions?|commands?|prompts?)\s*:", re.IGNORECASE),
 )
-
 
 MAX_INPUT_LENGTH = 1000
 
 
 @dataclass(frozen=True)
 class GuardrailResult:
-
-
     is_allowed: bool
     reason: str = ""
 
@@ -48,10 +48,7 @@ class GuardrailResult:
 
 
 class PromptSafetyInputGuardrail:
-
-
     def validate(self, input_text: str) -> GuardrailResult:
-
 
         if len(input_text) > MAX_INPUT_LENGTH:
             return GuardrailResult.rejected("输入内容过长，不要超过 1000 字")

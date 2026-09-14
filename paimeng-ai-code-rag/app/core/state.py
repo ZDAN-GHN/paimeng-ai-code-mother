@@ -1,5 +1,3 @@
-
-
 from functools import lru_cache
 from typing import Any, TypedDict
 
@@ -10,8 +8,6 @@ from app.core.config import get_settings
 
 
 class AgentState(TypedDict, total=False):
-
-
     message: str
     code_gen_type: str
     workspace_path: str
@@ -23,7 +19,9 @@ class AgentState(TypedDict, total=False):
 def _pool() -> ConnectionPool:
 
     settings = get_settings()
-    return ConnectionPool(conninfo=settings.database_url, kwargs={"autocommit": True}, open=True)
+    return ConnectionPool(
+        conninfo=settings.database_url, kwargs={"autocommit": True}, open=True
+    )
 
 
 def get_checkpointer() -> PostgresSaver:

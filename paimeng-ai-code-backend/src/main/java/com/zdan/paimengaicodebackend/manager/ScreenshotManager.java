@@ -1,26 +1,21 @@
 package com.zdan.paimengaicodebackend.manager;
 
-import lombok.extern.slf4j.Slf4j;
-import org.openqa.selenium.WebDriver;
-import org.springframework.stereotype.Component;
+import static com.zdan.paimengaicodebackend.utils.WebScreenshotUtils.doScreenshot;
+import static com.zdan.paimengaicodebackend.utils.WebScreenshotUtils.initChromeDriver;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-
-
-import static com.zdan.paimengaicodebackend.utils.WebScreenshotUtils.doScreenshot;
-import static com.zdan.paimengaicodebackend.utils.WebScreenshotUtils.initChromeDriver;
-
+import lombok.extern.slf4j.Slf4j;
+import org.openqa.selenium.WebDriver;
+import org.springframework.stereotype.Component;
 
 @Slf4j
 @Component
 public class ScreenshotManager {
 
-
     private static final WebDriver WEB_DRIVER = initWebDriver();
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-
 
     private static WebDriver initWebDriver() {
         try {
@@ -33,7 +28,6 @@ public class ScreenshotManager {
 
     public CompletableFuture<String> takeScreenshot(String url) {
         return CompletableFuture.supplyAsync(() -> {
-
             if (WEB_DRIVER == null) {
                 log.warn("Chrome 浏览器不可用，跳过截图: {}", url);
                 return null;

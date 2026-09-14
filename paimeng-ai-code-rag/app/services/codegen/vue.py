@@ -1,5 +1,3 @@
-
-
 import json
 import uuid
 from collections.abc import Iterator
@@ -16,8 +14,6 @@ _SYSTEM_PROMPT = "codegen-vue-project-system-prompt.txt"
 
 
 class VueCodeGenService(CodeGenService):
-
-
     MAX_TOOL_CALLS = 50
 
     def __init__(self, file_tools: FileTools) -> None:
@@ -27,8 +23,6 @@ class VueCodeGenService(CodeGenService):
     def _tools(self) -> list[Any]:
 
         ft = self._file_tools
-
-
 
         @langchain_tool("writeFile")
         def write_file(relativeFilePath: str, content: str) -> str:
@@ -69,8 +63,10 @@ class VueCodeGenService(CodeGenService):
     def run(self, user_message: str) -> Iterator[dict[str, str]]:
 
         model = create_chat_model(reasoning=True).bind_tools(self._tools())
-        messages = [SystemMessage(load_prompt(_SYSTEM_PROMPT)), HumanMessage(user_message)]
-
+        messages = [
+            SystemMessage(load_prompt(_SYSTEM_PROMPT)),
+            HumanMessage(user_message),
+        ]
         exit_called = False
 
         for _ in range(self.MAX_TOOL_CALLS):
@@ -79,10 +75,14 @@ class VueCodeGenService(CodeGenService):
 
             tool_calls = getattr(response, "tool_calls", None) or []
             if not tool_calls:
-
                 if not exit_called:
                     exit_id = f"exit-{uuid.uuid4()}"
-                    yield {"type": "tool_request", "id": exit_id, "name": "exit", "arguments": "{}"}
+                    yield {
+                        "type": "tool_request",
+                        "id": exit_id,
+                        "name": "exit",
+                        "arguments": "{}",
+                    }
                     yield {
                         "type": "tool_executed",
                         "id": exit_id,
@@ -100,7 +100,12 @@ class VueCodeGenService(CodeGenService):
                 if name == "exit":
                     exit_called = True
                 arguments = json.dumps(tool_call.get("args", {}), ensure_ascii=False)
-                yield {"type": "tool_request", "id": tool_call["id"], "name": name, "arguments": arguments}
+                yield {
+                    "type": "tool_request",
+                    "id": tool_call["id"],
+                    "name": name,
+                    "arguments": arguments,
+                }
                 result = self._execute(name, tool_call.get("args", {}))
                 yield {
                     "type": "tool_executed",
@@ -119,7 +124,9 @@ class VueCodeGenService(CodeGenService):
         if tool_name == "readFile":
             return ft.read_file(args["relativeFilePath"])
         if tool_name == "modifyFile":
-            return ft.modify_file(args["relativeFilePath"], args["oldContent"], args["newContent"])
+            return ft.modify_file(
+                args["relativeFilePath"], args["oldContent"], args["newContent"]
+            )
         if tool_name == "deleteFile":
             return ft.delete_file(args["relativeFilePath"])
         if tool_name == "readDir":

@@ -1,16 +1,11 @@
-
-
-
-
-
-
-
-
 import { customProvider } from 'ai'
-import type { LanguageModelV2, LanguageModelV2CallOptions, LanguageModelV2StreamPart } from '@ai-sdk/provider'
+import type {
+  LanguageModelV2,
+  LanguageModelV2CallOptions,
+  LanguageModelV2StreamPart,
+} from '@ai-sdk/provider'
 
 export type LlmScript =
-
   | 'success'
   | 'error'
   | 'images'
@@ -20,7 +15,6 @@ export type LlmScript =
   | 'limit'
   | 'limit-length'
 
-
 export interface ScriptedCallRecord {
   modelId: string
   maxOutputTokens: number | undefined
@@ -28,18 +22,12 @@ export interface ScriptedCallRecord {
   system?: string
 }
 
-
-
-
 export class ScriptedModelError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'ModelInvocationError'
   }
 }
-
-
-
 
 export function buildPageContent(message: string): string {
   const title = message.trim() || 'generated page'
@@ -195,14 +183,14 @@ export function buildPageContent(message: string): string {
 `
 }
 
-
 const WRITE_FILE_TOOL_CALL_ID = 'write-file-1'
 const IMAGE_SEARCH_TOOL_CALL_IDS = ['image-search-1', 'image-search-2']
 
 const MULTI_FILE_CONTENTS: Array<{ relativeFilePath: string; content: string }> = [
   {
     relativeFilePath: 'index.html',
-    content: '<!DOCTYPE html>\n<html>\n<head><title>多文件页面</title><link rel="stylesheet" href="style.css"></head>\n<body>\n<section id="page-1"><div id="app">多文件应用</div></section>\n<script src="script.js"></script>\n</body>\n</html>',
+    content:
+      '<!DOCTYPE html>\n<html>\n<head><title>多文件页面</title><link rel="stylesheet" href="style.css"></head>\n<body>\n<section id="page-1"><div id="app">多文件应用</div></section>\n<script src="script.js"></script>\n</body>\n</html>',
   },
   {
     relativeFilePath: 'style.css',
@@ -210,12 +198,14 @@ const MULTI_FILE_CONTENTS: Array<{ relativeFilePath: string; content: string }> 
   },
   {
     relativeFilePath: 'script.js',
-    content: "const app = document.getElementById('app');\napp.addEventListener('click', () => alert('ok'));",
+    content:
+      "const app = document.getElementById('app');\napp.addEventListener('click', () => alert('ok'));",
   },
 ]
 
-
-function streamFromParts(parts: LanguageModelV2StreamPart[]): ReadableStream<LanguageModelV2StreamPart> {
+function streamFromParts(
+  parts: LanguageModelV2StreamPart[],
+): ReadableStream<LanguageModelV2StreamPart> {
   return new ReadableStream<LanguageModelV2StreamPart>({
     start(controller) {
       for (const part of parts) controller.enqueue(part)
@@ -223,7 +213,6 @@ function streamFromParts(parts: LanguageModelV2StreamPart[]): ReadableStream<Lan
     },
   })
 }
-
 
 function hasToolResult(options: LanguageModelV2CallOptions): boolean {
   return options.prompt.some((message) => message.role === 'tool')
@@ -243,13 +232,11 @@ function lastUserText(options: LanguageModelV2CallOptions): string {
   return ''
 }
 
-
 class ScriptedLanguageModel implements LanguageModelV2 {
   readonly specificationVersion = 'v2' as const
   readonly provider = 'scripted'
   readonly modelId: string
   readonly supportedUrls = {}
-
   constructor(
     private readonly script: LlmScript,
     modelId: string,
@@ -258,13 +245,13 @@ class ScriptedLanguageModel implements LanguageModelV2 {
     this.modelId = modelId
   }
 
-
   async doGenerate(options: LanguageModelV2CallOptions) {
     this.record(options)
 
-    const wrapUp = this.script === 'limit' || this.script === 'limit-length'
-      ? '\n已达本次生成硬上限，以上为已生成的页面内容。\n'
-      : '\n页面已写入 index.html\n'
+    const wrapUp =
+      this.script === 'limit' || this.script === 'limit-length'
+        ? '\n已达本次生成硬上限，以上为已生成的页面内容。\n'
+        : '\n页面已写入 index.html\n'
     return {
       content: [{ type: 'text' as const, text: buildPageContent(lastUserText(options)) + wrapUp }],
       finishReason: 'stop' as const,
@@ -285,15 +272,9 @@ class ScriptedLanguageModel implements LanguageModelV2 {
   async doStream(options: LanguageModelV2CallOptions) {
     this.record(options)
     if (this.script === 'error') {
-
       throw new ScriptedModelError('假 LLM 剧本故意失败')
     }
     if (this.script === 'limit' || this.script === 'limit-length') {
-
-
-
-
-
       if (!hasToolResult(options) || this.script === 'limit-length') {
         const parts: LanguageModelV2StreamPart[] = [
           { type: 'text-start', id: 'page' },
@@ -301,17 +282,27 @@ class ScriptedLanguageModel implements LanguageModelV2 {
           { type: 'text-end', id: 'page' },
         ]
         if (this.script === 'limit-length') {
-
-          parts.push({ type: 'finish', finishReason: 'length', usage: { inputTokens: 2, outputTokens: 2, totalTokens: 4 } })
+          parts.push({
+            type: 'finish',
+            finishReason: 'length',
+            usage: { inputTokens: 2, outputTokens: 2, totalTokens: 4 },
+          })
         } else {
           parts.push(
             {
               type: 'tool-call',
               toolCallId: `limit-${this.records.length}`,
               toolName: 'writeFile',
-              input: JSON.stringify({ relativeFilePath: 'index.html', content: buildPageContent(lastUserText(options)) }),
+              input: JSON.stringify({
+                relativeFilePath: 'index.html',
+                content: buildPageContent(lastUserText(options)),
+              }),
             },
-            { type: 'finish', finishReason: 'tool-calls', usage: { inputTokens: 2, outputTokens: 2, totalTokens: 4 } },
+            {
+              type: 'finish',
+              finishReason: 'tool-calls',
+              usage: { inputTokens: 2, outputTokens: 2, totalTokens: 4 },
+            },
           )
         }
         return { stream: streamFromParts(parts) }
@@ -325,15 +316,21 @@ class ScriptedLanguageModel implements LanguageModelV2 {
           type: 'tool-call',
           toolCallId: `limit-${this.records.length}`,
           toolName: 'writeFile',
-          input: JSON.stringify({ relativeFilePath: 'index.html', content: buildPageContent(lastUserText(options)) }),
+          input: JSON.stringify({
+            relativeFilePath: 'index.html',
+            content: buildPageContent(lastUserText(options)),
+          }),
         },
-        { type: 'finish', finishReason: 'tool-calls', usage: { inputTokens: 2, outputTokens: 2, totalTokens: 4 } },
+        {
+          type: 'finish',
+          finishReason: 'tool-calls',
+          usage: { inputTokens: 2, outputTokens: 2, totalTokens: 4 },
+        },
       ]
       return { stream: streamFromParts(parts) }
     }
     const content = buildPageContent(lastUserText(options))
     if (!hasToolResult(options)) {
-
       const parts: LanguageModelV2StreamPart[] = [
         { type: 'text-start', id: 'page' },
 
@@ -342,7 +339,6 @@ class ScriptedLanguageModel implements LanguageModelV2 {
         { type: 'text-end', id: 'page' },
       ]
       if (this.script === 'images') {
-
         for (const id of IMAGE_SEARCH_TOOL_CALL_IDS) {
           parts.push({
             type: 'tool-call',
@@ -352,7 +348,6 @@ class ScriptedLanguageModel implements LanguageModelV2 {
           })
         }
       } else if (this.script === 'multi-file') {
-
         for (const [index, file] of MULTI_FILE_CONTENTS.entries()) {
           parts.push({
             type: 'tool-call',
@@ -366,44 +361,43 @@ class ScriptedLanguageModel implements LanguageModelV2 {
           type: 'tool-call',
           toolCallId: WRITE_FILE_TOOL_CALL_ID,
           toolName: 'writeFile',
-
-
           input: JSON.stringify({ relativeFilePath: 'index.html', content }),
         })
       }
-      parts.push({ type: 'finish', finishReason: 'tool-calls', usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 } })
+      parts.push({
+        type: 'finish',
+        finishReason: 'tool-calls',
+        usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 },
+      })
       return { stream: streamFromParts(parts) }
     }
 
-    const tailText = this.script === 'images'
-      ? '\n图片资源已收集（配额内）\n'
-      : this.script === 'multi-file'
-        ? '\n多文件已写入工作区\n'
-        : '\n页面已写入 index.html\n'
+    const tailText =
+      this.script === 'images'
+        ? '\n图片资源已收集（配额内）\n'
+        : this.script === 'multi-file'
+          ? '\n多文件已写入工作区\n'
+          : '\n页面已写入 index.html\n'
     const parts: LanguageModelV2StreamPart[] = [
       { type: 'text-start', id: 'tail' },
       { type: 'text-delta', id: 'tail', delta: tailText },
       { type: 'text-end', id: 'tail' },
-      { type: 'finish', finishReason: 'stop', usage: { inputTokens: 3, outputTokens: 1, totalTokens: 4 } },
+      {
+        type: 'finish',
+        finishReason: 'stop',
+        usage: { inputTokens: 3, outputTokens: 1, totalTokens: 4 },
+      },
     ]
     return { stream: streamFromParts(parts) }
   }
 }
-
-
-
-
-
 
 class QualityLanguageModel implements LanguageModelV2 {
   readonly specificationVersion = 'v2' as const
   readonly provider = 'scripted'
   readonly modelId = 'scripted-quality'
   readonly supportedUrls = {}
-
-
   private calls = 0
-
   constructor(
     private readonly script: LlmScript,
     private readonly records: ScriptedCallRecord[],
@@ -429,7 +423,11 @@ class QualityLanguageModel implements LanguageModelV2 {
   }
 
   async doGenerate(options: LanguageModelV2CallOptions) {
-    this.records.push({ modelId: this.modelId, maxOutputTokens: options.maxOutputTokens, hasToolResult: hasToolResult(options) })
+    this.records.push({
+      modelId: this.modelId,
+      maxOutputTokens: options.maxOutputTokens,
+      hasToolResult: hasToolResult(options),
+    })
     const text = this.buildQualityJson()
     return {
       content: [{ type: 'text' as const, text }],
@@ -440,20 +438,25 @@ class QualityLanguageModel implements LanguageModelV2 {
   }
 
   async doStream(options: LanguageModelV2CallOptions) {
-
-    this.records.push({ modelId: this.modelId, maxOutputTokens: options.maxOutputTokens, hasToolResult: hasToolResult(options) })
+    this.records.push({
+      modelId: this.modelId,
+      maxOutputTokens: options.maxOutputTokens,
+      hasToolResult: hasToolResult(options),
+    })
     const text = this.buildQualityJson()
     const parts: LanguageModelV2StreamPart[] = [
       { type: 'text-start', id: 'quality' },
       { type: 'text-delta', id: 'quality', delta: text },
       { type: 'text-end', id: 'quality' },
-      { type: 'finish', finishReason: 'stop', usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 } },
+      {
+        type: 'finish',
+        finishReason: 'stop',
+        usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 },
+      },
     ]
     return { stream: streamFromParts(parts) }
   }
 }
-
-
 
 export function createScriptedLlm(script: LlmScript = 'success') {
   const records: ScriptedCallRecord[] = []
@@ -467,8 +470,5 @@ export function createScriptedLlm(script: LlmScript = 'success') {
   })
   return Object.assign(provider, { records })
 }
-
-
-
 
 export type LlmProvider = Pick<ReturnType<typeof customProvider>, 'languageModel'>

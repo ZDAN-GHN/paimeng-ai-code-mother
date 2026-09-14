@@ -29,7 +29,6 @@
 </template>
 
 <script setup lang="ts">
-
 import { reactive, watch } from 'vue'
 import { BulbOutlined } from '@ant-design/icons-vue'
 import type { InterviewAnswer, InterviewQuestion } from '@/utils/agentSse'
@@ -46,9 +45,7 @@ const emit = defineEmits<{
   submit: [answers: InterviewAnswer[]]
 }>()
 
-
 const selections = reactive<Record<string, string | undefined>>({})
-
 
 watch(
   () => props.questions,

@@ -1,31 +1,23 @@
-
-
-
-
-
-
 import { tool } from 'ai'
 import { z } from 'zod'
 import { FileTools } from './fileTools.js'
 import type { ImageTools } from './imageTools.js'
 
 export interface ToolContext {
-
   files: FileTools
-
   images: ImageTools
 }
 
 export function buildTools(context: ToolContext) {
   return {
-
     writeFile: tool({
       description: '把文件内容写入工作区指定路径（自动创建父目录；内容由模型在参数中给出）',
       inputSchema: z.object({
         relativeFilePath: z.string(),
         content: z.string(),
       }),
-      execute: async ({ relativeFilePath, content }) => context.files.writeFile(relativeFilePath, content),
+      execute: async ({ relativeFilePath, content }) =>
+        context.files.writeFile(relativeFilePath, content),
     }),
 
     readFile: tool({
@@ -43,7 +35,8 @@ export function buildTools(context: ToolContext) {
         oldContent: z.string(),
         newContent: z.string(),
       }),
-      execute: async ({ relativeFilePath, oldContent, newContent }) => context.files.modifyFile(relativeFilePath, oldContent, newContent),
+      execute: async ({ relativeFilePath, oldContent, newContent }) =>
+        context.files.modifyFile(relativeFilePath, oldContent, newContent),
     }),
 
     deleteFile: tool({
@@ -67,7 +60,6 @@ export function buildTools(context: ToolContext) {
       inputSchema: z.object({}),
       execute: async () => FileTools.exit(),
     }),
-
 
     searchContentImages: tool({
       description: '搜索内容相关的图片，用于网站内容展示（Pexels）',
@@ -99,7 +91,8 @@ export function buildTools(context: ToolContext) {
         mermaidCode: z.string(),
         description: z.string(),
       }),
-      execute: async ({ mermaidCode, description }) => context.images.generateArchitectureDiagram(mermaidCode, description),
+      execute: async ({ mermaidCode, description }) =>
+        context.images.generateArchitectureDiagram(mermaidCode, description),
     }),
   }
 }

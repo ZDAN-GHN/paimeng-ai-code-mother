@@ -1,5 +1,3 @@
-
-
 import shutil
 from pathlib import Path
 from uuid import uuid4
@@ -25,7 +23,9 @@ def test_write_file_creates_parent_dirs(tools):
 
     result = tools.write_file("src/components/Button.vue", "<template>hi</template>")
     assert result == "文件写入成功：src/components/Button.vue"
-    assert (tools._root / "src/components/Button.vue").read_text(encoding="utf-8") == "<template>hi</template>"
+    assert (tools._root / "src/components/Button.vue").read_text(
+        encoding="utf-8"
+    ) == "<template>hi</template>"
 
 
 @pytest.mark.tool

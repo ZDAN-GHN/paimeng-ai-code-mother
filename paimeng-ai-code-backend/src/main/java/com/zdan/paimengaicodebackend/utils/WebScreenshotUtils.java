@@ -9,6 +9,12 @@ import com.zdan.paimengaicodebackend.exception.BusinessException;
 import com.zdan.paimengaicodebackend.exception.ErrorCode;
 import io.github.bonigarcia.wdm.WebDriverManager;
 import jakarta.annotation.PreDestroy;
+import java.io.File;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.OutputType;
@@ -18,20 +24,10 @@ import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 
-import java.io.File;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
-import java.util.regex.Pattern;
-
-
 @Slf4j
 public class WebScreenshotUtils {
 
     private static final WebDriver WEB_DRIVER;
-
-
 
     static {
         final int DEFAULT_WIDTH = 1600;
@@ -45,7 +41,6 @@ public class WebScreenshotUtils {
         WEB_DRIVER = driver;
     }
 
-
     @PreDestroy
     public void destroy() {
         if (WEB_DRIVER != null) {
@@ -53,9 +48,7 @@ public class WebScreenshotUtils {
         }
     }
 
-
     public static void cleanupTempFiles() {
-
         final int MAX_LOOP = 4;
         boolean deleted = false;
         for (int i = 0; i < MAX_LOOP && !deleted; i++) {
@@ -67,21 +60,23 @@ public class WebScreenshotUtils {
         }
     }
 
-
     public static String saveWebPageScreenshot(String webUrl) {
-
         if (StrUtil.isBlank(webUrl)) {
             log.error("网页截图失败，url为空");
             return null;
         }
 
         try {
-            String rootPath = AppConstant.SCREENSHOT_ROOT_DIR + File.separator + UUID.randomUUID().toString().substring(0, 8);
+            String rootPath =
+                AppConstant.SCREENSHOT_ROOT_DIR +
+                File.separator +
+                UUID.randomUUID().toString().substring(0, 8);
             FileUtil.mkdir(rootPath);
 
             final String IMAGE_SUFFIX = ".png";
 
-            String imageSavePath = rootPath + File.separator + RandomUtil.randomNumbers(5) + IMAGE_SUFFIX;
+            String imageSavePath =
+                rootPath + File.separator + RandomUtil.randomNumbers(5) + IMAGE_SUFFIX;
 
             WEB_DRIVER.get(webUrl);
             return doScreenshot(WEB_DRIVER, imageSavePath, rootPath);
@@ -92,17 +87,20 @@ public class WebScreenshotUtils {
     }
 
     public static String doScreenshot(WebDriver webDriver) {
-        String rootPath = AppConstant.SCREENSHOT_ROOT_DIR + File.separator + UUID.randomUUID().toString().substring(0, 8);
+        String rootPath =
+            AppConstant.SCREENSHOT_ROOT_DIR +
+            File.separator +
+            UUID.randomUUID().toString().substring(0, 8);
         FileUtil.mkdir(rootPath);
 
         final String IMAGE_SUFFIX = ".png";
 
-        String imageSavePath = rootPath + File.separator + RandomUtil.randomNumbers(5) + IMAGE_SUFFIX;
+        String imageSavePath =
+            rootPath + File.separator + RandomUtil.randomNumbers(5) + IMAGE_SUFFIX;
         return doScreenshot(webDriver, imageSavePath, rootPath);
     }
 
     public static String doScreenshot(WebDriver webDriver, String imageSavePath, String rootPath) {
-
         waitForPageLoad(webDriver);
 
         byte[] screenshotBytes = ((TakesScreenshot) webDriver).getScreenshotAs(OutputType.BYTES);
@@ -111,7 +109,8 @@ public class WebScreenshotUtils {
         log.info("原始截图保存成功：{}", imageSavePath);
 
         final String COMPRESS_SUFFIX = "_compressed.jpg";
-        String compressedImagePath = rootPath + File.separator + RandomUtil.randomNumbers(5) + COMPRESS_SUFFIX;
+        String compressedImagePath =
+            rootPath + File.separator + RandomUtil.randomNumbers(5) + COMPRESS_SUFFIX;
         compressImage(imageSavePath, compressedImagePath);
         log.info("压缩图片保存成功：{}", compressedImagePath);
 
@@ -125,10 +124,9 @@ public class WebScreenshotUtils {
         return initChromeDriver(defaultWidth, defaultHeight);
     }
 
-
     private static boolean isChromeAvailable() {
-
-        List<String> candidates = new ArrayList<>(List.of(
+        List<String> candidates = new ArrayList<>(
+            List.of(
                 "/usr/bin/google-chrome",
                 "/usr/bin/google-chrome-stable",
                 "/usr/bin/chromium",
@@ -136,7 +134,8 @@ public class WebScreenshotUtils {
                 "/opt/google/chrome/chrome",
                 "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
                 "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
-        ));
+            )
+        );
 
         String pathEnv = System.getenv("PATH");
         if (StrUtil.isNotBlank(pathEnv)) {
@@ -157,10 +156,8 @@ public class WebScreenshotUtils {
         return false;
     }
 
-
     public static WebDriver initChromeDriver(int width, int height) {
         try {
-
             if (!isChromeAvailable()) {
                 log.warn("未检测到 Chrome 浏览器，跳过驱动初始化");
                 throw new BusinessException(ErrorCode.SYSTEM_ERROR, "初始化 Chrome 浏览器失败");
@@ -182,7 +179,9 @@ public class WebScreenshotUtils {
 
             options.addArguments("--disable-extensions");
 
-            options.addArguments("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36");
+            options.addArguments(
+                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            );
 
             WebDriver driver = new ChromeDriver(options);
 
@@ -196,7 +195,6 @@ public class WebScreenshotUtils {
         }
     }
 
-
     private static void saveImage(byte[] imageBytes, String imagePath) {
         try {
             FileUtil.writeBytes(imageBytes, imagePath);
@@ -206,15 +204,13 @@ public class WebScreenshotUtils {
         }
     }
 
-
     private static void compressImage(String originImagePath, String compressedImagePath) {
-
         final float COMPRESSION_QUALITY = 0.3f;
         try {
             ImgUtil.compress(
-                    FileUtil.file(originImagePath),
-                    FileUtil.file(compressedImagePath),
-                    COMPRESSION_QUALITY
+                FileUtil.file(originImagePath),
+                FileUtil.file(compressedImagePath),
+                COMPRESSION_QUALITY
             );
         } catch (Exception e) {
             log.error("压缩图片失败：{} -> {}", originImagePath, compressedImagePath, e);
@@ -222,15 +218,14 @@ public class WebScreenshotUtils {
         }
     }
 
-
     private static void waitForPageLoad(WebDriver webDriver) {
         try {
-
             WebDriverWait wait = new WebDriverWait(webDriver, Duration.ofSeconds(10));
 
-            wait.until(driver -> ((JavascriptExecutor) driver)
-                    .executeScript("return document.readyState").
-                    equals("complete")
+            wait.until(driver ->
+                ((JavascriptExecutor) driver)
+                    .executeScript("return document.readyState")
+                    .equals("complete")
             );
 
             Thread.sleep(2000);

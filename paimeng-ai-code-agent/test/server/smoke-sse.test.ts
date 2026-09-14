@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { makeToken, makeWorkspaceRoot, buildTestApp } from '../helpers.js'
 
-
 type Frame = { event: string; data: Record<string, unknown> }
 
 function parseFrames(body: string): Frame[] {
@@ -28,22 +27,27 @@ describe('冒烟 SSE（GET /agent/smoke/sse）', () => {
 
   it('合法令牌 → 200 且 content-type 为 text/event-stream', async () => {
     const token = await makeToken()
-    const res = await app.inject({ method: 'GET', url: '/agent/smoke/sse', headers: { authorization: `Bearer ${token}` } })
+    const res = await app.inject({
+      method: 'GET',
+      url: '/agent/smoke/sse',
+      headers: { authorization: `Bearer ${token}` },
+    })
     expect(res.statusCode).toBe(200)
     expect(res.headers['content-type']).toContain('text/event-stream')
   })
 
   it('按新 SSE 格式输出脚本化事件：顺序约束满足', async () => {
     const token = await makeToken()
-    const res = await app.inject({ method: 'GET', url: '/agent/smoke/sse', headers: { authorization: `Bearer ${token}` } })
+    const res = await app.inject({
+      method: 'GET',
+      url: '/agent/smoke/sse',
+      headers: { authorization: `Bearer ${token}` },
+    })
     const body = res.body
-
 
     expect(body.endsWith('\n\n')).toBe(true)
     const frames = parseFrames(body)
     expect(frames).toHaveLength(7)
-
-
     expect(frames.map((f) => f.event)).toEqual([
       'milestone',
       'ai_thinking',
@@ -54,17 +58,13 @@ describe('冒烟 SSE（GET /agent/smoke/sse）', () => {
       'done',
     ])
 
-
     const requestIdx = frames.findIndex((f) => f.event === 'tool_request')
     const executedIdx = frames.findIndex((f) => f.event === 'tool_executed')
     expect(requestIdx).toBeLessThan(executedIdx)
     expect(frames[requestIdx]!.data.id).toBe(frames[executedIdx]!.data.id)
-
-
     for (const frame of frames) {
       expect(frame.data.type).toBe(frame.event)
     }
-
 
     expect(frames.at(-1)!.event).toBe('done')
     expect(frames.filter((f) => f.event === 'done')).toHaveLength(1)

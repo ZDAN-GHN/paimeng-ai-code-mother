@@ -1,7 +1,6 @@
 <template>
   <a-modal v-model:open="visible" title="应用详情" :footer="null" width="500px">
     <div class="app-detail-content">
-
       <div class="app-basic-info">
         <div class="info-item">
           <span class="info-label">创建者：</span>
@@ -19,7 +18,6 @@
           <span v-else>未知类型</span>
         </div>
       </div>
-
 
       <div v-if="showActions" class="app-actions">
         <a-space>
@@ -70,14 +68,14 @@ interface Emits {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  showActions: false
+  showActions: false,
 })
 
 const emit = defineEmits<Emits>()
 
 const visible = computed({
   get: () => props.open,
-  set: (value) => emit('update:open', value)
+  set: (value) => emit('update:open', value),
 })
 
 const handleEdit = () => {

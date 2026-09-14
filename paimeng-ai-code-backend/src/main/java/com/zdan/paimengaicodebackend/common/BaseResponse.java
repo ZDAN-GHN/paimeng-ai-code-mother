@@ -1,10 +1,8 @@
 package com.zdan.paimengaicodebackend.common;
 
 import com.zdan.paimengaicodebackend.exception.ErrorCode;
-import lombok.Data;
-
 import java.io.Serializable;
-
+import lombok.Data;
 
 @Data
 public class BaseResponse<T> implements Serializable {
@@ -15,9 +13,7 @@ public class BaseResponse<T> implements Serializable {
 
     private String message;
 
-
-    private BaseResponse() {
-    }
+    private BaseResponse() {}
 
     public BaseResponse(int code, T data, String message) {
         this.code = code;

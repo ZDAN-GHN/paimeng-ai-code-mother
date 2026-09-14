@@ -1,5 +1,3 @@
-
-
 import httpx
 import pytest
 
@@ -8,8 +6,6 @@ from app.core.config import get_settings
 
 
 class _FakeResponse:
-
-
     def __init__(self, ok: bool) -> None:
         self._ok = ok
 
@@ -19,8 +15,6 @@ class _FakeResponse:
 
 
 class _RecordingClient:
-
-
     def __init__(self, ok: bool = True) -> None:
         self._ok = ok
         self.calls = []
@@ -35,7 +29,9 @@ class _RecordingClient:
 
 def test_build_callback_url(monkeypatch):
 
-    assert build_callback_url() == "http://localhost:8123/api/app/chat/gen/code/callback"
+    assert (
+        build_callback_url() == "http://localhost:8123/api/app/chat/gen/code/callback"
+    )
 
 
 def test_send_callback_success():

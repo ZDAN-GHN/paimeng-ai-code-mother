@@ -4,9 +4,7 @@
       <LayoutOutlined class="wireframe-icon" />
       <span>线框已生成（{{ pageCount }} 页，免费）</span>
     </div>
-    <p class="wireframe-hint">
-      线框确认后将锁定为代码生成的布局契约与视觉基准。请预览后选择：
-    </p>
+    <p class="wireframe-hint">线框确认后将锁定为代码生成的布局契约与视觉基准。请预览后选择：</p>
     <div class="wireframe-actions">
       <a-button type="primary" :loading="loading" :disabled="disabled" @click="emit('confirm')">
         确认线框，开始生成
@@ -18,7 +16,6 @@
 </template>
 
 <script setup lang="ts">
-
 import { LayoutOutlined } from '@ant-design/icons-vue'
 
 defineProps<{

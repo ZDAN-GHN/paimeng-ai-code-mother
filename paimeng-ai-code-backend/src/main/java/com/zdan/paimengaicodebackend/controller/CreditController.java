@@ -15,7 +15,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-
 @RestController
 @RequestMapping("/credit")
 public class CreditController {
@@ -28,14 +27,12 @@ public class CreditController {
         this.userService = userService;
     }
 
-
     @PostMapping("/recharge")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> recharge(@RequestBody CreditRechargeRequest request) {
         creditService.recharge(request.getUserId(), request.getCredits());
         return ResultUtils.success(true);
     }
-
 
     @GetMapping("/balance")
     public BaseResponse<Integer> getBalance(HttpServletRequest request) {

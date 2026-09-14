@@ -1,5 +1,3 @@
-
-
 from typing import Any, Callable, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -12,10 +10,7 @@ from app.services.quality import check_code_quality, read_and_concatenate_code_f
 from app.tools.file_tools import FileTools
 from app.workspace.manager import validate_workspace_path, write_generated_code
 
-
 MAX_QUALITY_RETRIES = 2
-
-
 _IMAGE_CATEGORY_TEXT = {
     "CONTENT": "内容图片",
     "ILLUSTRATION": "插画图片",
@@ -25,8 +20,6 @@ _IMAGE_CATEGORY_TEXT = {
 
 
 class CodeGenState(TypedDict, total=False):
-
-
     original_prompt: str
     enhanced_prompt: str
     code_gen_type: str
@@ -40,8 +33,6 @@ class CodeGenState(TypedDict, total=False):
 
 
 class CodeGenWorkflow:
-
-
     def __init__(
         self,
         *,
@@ -62,8 +53,6 @@ class CodeGenWorkflow:
         self._router = router
         self._max_quality_retries = max_quality_retries
 
-
-
     def _guardrail_node(self, state: CodeGenState) -> dict[str, Any]:
 
         result = self._guardrail.validate(state.get("original_prompt", ""))
@@ -81,7 +70,11 @@ class CodeGenWorkflow:
             for task in plan.illustration_tasks:
                 resources.extend(self._image_tools.search_illustrations(task.query))
             for task in plan.diagram_tasks:
-                resources.extend(self._image_tools.generate_architecture_diagram(task.mermaid_code, task.description))
+                resources.extend(
+                    self._image_tools.generate_architecture_diagram(
+                        task.mermaid_code, task.description
+                    )
+                )
             for task in plan.logo_tasks:
                 resources.extend(self._image_tools.generate_logos(task.description))
         except Exception:  # noqa: BLE001
@@ -99,8 +92,12 @@ class CodeGenWorkflow:
                 "请在生成网站使用以下图片资源，将这些图片合理地嵌入到网站的相应位置中。",
             ]
             for resource in resources:
-                category = _IMAGE_CATEGORY_TEXT.get(resource.get("category", ""), resource.get("category", ""))
-                lines.append(f"- {category}：{resource.get('description', '')}（{resource.get('url', '')}）")
+                category = _IMAGE_CATEGORY_TEXT.get(
+                    resource.get("category", ""), resource.get("category", "")
+                )
+                lines.append(
+                    f"- {category}：{resource.get('description', '')}（{resource.get('url', '')}）"
+                )
             enhanced = f"{enhanced}\n" + "\n".join(lines)
         return {"enhanced_prompt": enhanced}
 
@@ -112,10 +109,14 @@ class CodeGenWorkflow:
 
         code_gen_type = state["code_gen_type"]
         workspace = validate_workspace_path(state["workspace_path"])
-        file_tools = FileTools(str(workspace)) if code_gen_type == "vue_project" else None
+        file_tools = (
+            FileTools(str(workspace)) if code_gen_type == "vue_project" else None
+        )
         text_parts: list[str] = []
         events: list[dict[str, Any]] = []
-        for item in self._executor.stream(code_gen_type, state["enhanced_prompt"], file_tools):
+        for item in self._executor.stream(
+            code_gen_type, state["enhanced_prompt"], file_tools
+        ):
             if isinstance(item, dict):
                 events.append(item)
             else:
@@ -133,10 +134,10 @@ class CodeGenWorkflow:
 
         code = read_and_concatenate_code_files(state["workspace_path"])
         result = self._quality_check(code) if code.strip() else {"is_valid": False}
-        quality_result = result if isinstance(result, dict) else result.model_dump(mode="json")
+        quality_result = (
+            result if isinstance(result, dict) else result.model_dump(mode="json")
+        )
         return {"quality_result": quality_result}
-
-
 
     def _route_after_guardrail(self, state: CodeGenState) -> str:
 
@@ -146,11 +147,12 @@ class CodeGenWorkflow:
 
         quality_result = state.get("quality_result") or {}
         attempts = state.get("quality_attempts", 0)
-        if not quality_result.get("is_valid", True) and attempts <= self._max_quality_retries:
+        if (
+            not quality_result.get("is_valid", True)
+            and attempts <= self._max_quality_retries
+        ):
             return "retry"
         return "end"
-
-
 
     def build(self):
 

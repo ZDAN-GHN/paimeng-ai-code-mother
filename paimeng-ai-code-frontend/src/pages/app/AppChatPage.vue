@@ -1,6 +1,5 @@
 <template>
   <div id="appChatPage">
-
     <div class="header-bar">
       <div class="header-left">
         <h1 class="app-name">{{ appInfo?.appName || '网站生成器' }}</h1>
@@ -40,13 +39,9 @@
       </div>
     </div>
 
-
     <div class="main-content">
-
       <div class="chat-section">
-
         <div class="messages-container" ref="messagesContainer">
-
           <div v-if="hasMoreHistory" class="load-more-container">
             <a-button type="link" @click="loadMoreHistory" :loading="loadingHistory" size="small">
               加载更多历史消息
@@ -60,10 +55,7 @@
               </div>
             </div>
 
-            <div
-              v-else-if="message.type === 'interview'"
-              class="ai-message"
-            >
+            <div v-else-if="message.type === 'interview'" class="ai-message">
               <div class="message-avatar">
                 <a-avatar :src="aiAvatar" />
               </div>
@@ -99,7 +91,6 @@
                 <a-avatar :src="aiAvatar" />
               </div>
               <div class="message-content">
-
                 <a-collapse v-if="message.thinking" ghost size="small" class="thinking-collapse">
                   <a-collapse-panel key="thinking" header="🤔 思考过程">
                     <div class="thinking-text">{{ message.thinking }}</div>
@@ -118,10 +109,15 @@
 
                 <ul v-if="message.toolSteps?.length" class="tool-steps">
                   <li v-for="step in message.toolSteps" :key="step.id" class="tool-step">
-                    <CheckCircleOutlined v-if="step.status === 'executed'" class="tool-step-icon executed" />
+                    <CheckCircleOutlined
+                      v-if="step.status === 'executed'"
+                      class="tool-step-icon executed"
+                    />
                     <LoadingOutlined v-else class="tool-step-icon running" />
                     <span class="tool-step-name">{{ formatToolName(step.name) }}</span>
-                    <span v-if="toolTarget(step)" class="tool-step-target">{{ toolTarget(step) }}</span>
+                    <span v-if="toolTarget(step)" class="tool-step-target">{{
+                      toolTarget(step)
+                    }}</span>
                   </li>
                 </ul>
                 <MarkdownRenderer v-if="message.content" :content="message.content" />
@@ -133,7 +129,6 @@
             </div>
           </div>
         </div>
-
 
         <a-alert
           v-if="selectedElementInfo"
@@ -172,7 +167,6 @@
           </template>
         </a-alert>
 
-
         <div class="input-container">
           <div class="input-wrapper">
             <a-tooltip v-if="!isOwner" title="无法在别人的作品下对话哦~" placement="top">
@@ -195,7 +189,6 @@
               :disabled="journeyLocked || isGenerating"
             />
             <div class="input-actions">
-
               <IntensitySelector
                 v-model="intensity"
                 :code-gen-type="appInfo?.codeGenType"
@@ -208,12 +201,7 @@
                 </template>
                 停止
               </a-button>
-              <a-button
-                v-else
-                type="primary"
-                @click="sendMessage"
-                :disabled="!isOwner"
-              >
+              <a-button v-else type="primary" @click="sendMessage" :disabled="!isOwner">
                 <template #icon>
                   <SendOutlined />
                 </template>
@@ -273,7 +261,6 @@
       </div>
     </div>
 
-
     <AppDetailModal
       v-model:open="appDetailVisible"
       :app="appInfo"
@@ -281,7 +268,6 @@
       @edit="editApp"
       @delete="deleteApp"
     />
-
 
     <DeploySuccessModal
       v-model:open="deployModalVisible"
@@ -347,12 +333,9 @@ const route = useRoute()
 const router = useRouter()
 const loginUserStore = useLoginUserStore()
 
-
 const appInfo = ref<API.AppVO>()
 
 const appId = ref<string>()
-
-
 
 interface ToolStep {
   id: string
@@ -360,7 +343,6 @@ interface ToolStep {
   arguments?: string
   status: 'request' | 'executed'
 }
-
 
 interface BaseMessage {
   content: string
@@ -374,11 +356,8 @@ interface UserMessage extends BaseMessage {
 
 interface AiMessage extends BaseMessage {
   type: 'ai'
-
   thinking?: string
-
   milestones?: string[]
-
   toolSteps?: ToolStep[]
 }
 
@@ -397,7 +376,6 @@ interface WireframeCardMessage extends BaseMessage {
 }
 
 type Message = UserMessage | AiMessage | InterviewCardMessage | WireframeCardMessage
-
 
 type JourneyPhase = 'idle' | 'interviewing' | 'wireframe_pending' | 'wireframe_confirmed'
 
@@ -426,24 +404,19 @@ const messagesContainer = ref<HTMLElement>()
 
 const streamAbortController = ref<AbortController | null>(null)
 
-
 const loadingHistory = ref(false)
 const hasMoreHistory = ref(false)
 const lastCreateTime = ref<string>()
 const historyLoaded = ref(false)
 
-
 const previewUrl = ref('')
 const previewReady = ref(false)
-
 
 const deploying = ref(false)
 const deployModalVisible = ref(false)
 const deployUrl = ref('')
 
-
 const downloading = ref(false)
-
 
 const isEditMode = ref(false)
 const selectedElementInfo = ref<ElementInfo | null>(null)
@@ -453,7 +426,6 @@ const visualEditor = new VisualEditor({
   },
 })
 
-
 const isOwner = computed(() => {
   return appInfo.value?.userId === loginUserStore.loginUser.id
 })
@@ -462,14 +434,11 @@ const isAdmin = computed(() => {
   return loginUserStore.loginUser.userRole === 'admin'
 })
 
-
 const appDetailVisible = ref(false)
-
 
 const showAppDetail = () => {
   appDetailVisible.value = true
 }
-
 
 const loadChatHistory = async (isLoadMore = false) => {
   if (!appId.value || loadingHistory.value) return
@@ -487,7 +456,6 @@ const loadChatHistory = async (isLoadMore = false) => {
     if (res.data.code === 0 && res.data.data) {
       const chatHistories = res.data.data.records || []
       if (chatHistories.length > 0) {
-
         const historyMessages: Message[] = chatHistories
           .map((chat) => ({
             type: (chat.messageType === 'user' ? 'user' : 'ai') as 'user' | 'ai',
@@ -496,10 +464,8 @@ const loadChatHistory = async (isLoadMore = false) => {
           }))
           .reverse()
         if (isLoadMore) {
-
           messages.value.unshift(...historyMessages)
         } else {
-
           messages.value = historyMessages
         }
 
@@ -519,11 +485,9 @@ const loadChatHistory = async (isLoadMore = false) => {
   }
 }
 
-
 const loadMoreHistory = async () => {
   await loadChatHistory(true)
 }
-
 
 const fetchAppInfo = async () => {
   const id = route.params.id as string
@@ -540,13 +504,11 @@ const fetchAppInfo = async () => {
     if (res.data.code === 0 && res.data.data) {
       appInfo.value = res.data.data
 
-
       await loadChatHistory()
 
       if (messages.value.length >= 2) {
         updatePreview()
       }
-
 
       if (
         appInfo.value.initPrompt &&
@@ -567,9 +529,7 @@ const fetchAppInfo = async () => {
   }
 }
 
-
 const sendInitialMessage = async (prompt: string) => {
-
   messages.value.push({
     type: 'user',
     content: prompt,
@@ -579,7 +539,6 @@ const sendInitialMessage = async (prompt: string) => {
   await startJourney(prompt)
 }
 
-
 const ensureAgentToken = async () => {
   if (!appId.value) throw new Error('应用ID不存在')
   const tokenRes = await getAgentToken(appId.value)
@@ -588,7 +547,6 @@ const ensureAgentToken = async () => {
   }
   return tokenRes.data.data
 }
-
 
 const loadCreditBalance = async () => {
   try {
@@ -600,7 +558,6 @@ const loadCreditBalance = async () => {
     console.error('获取积分余额失败：', error)
   }
 }
-
 
 const sendMessage = async () => {
   if (isGenerating.value) {
@@ -636,23 +593,19 @@ const sendMessage = async () => {
     }
   }
 
-
   messages.value.push({
     type: 'user',
     content: finalMessage,
   })
   await nextTick()
   scrollToBottom()
-
   if (journeyPhase.value === 'wireframe_confirmed') {
-
     await startGeneration(finalMessage || journeyMessage.value)
     return
   }
 
   await startJourney(finalMessage)
 }
-
 
 const makeInterviewCard = (questions: InterviewQuestion[], round: number): Message => ({
   type: 'interview',
@@ -661,7 +614,6 @@ const makeInterviewCard = (questions: InterviewQuestion[], round: number): Messa
   round,
   answered: false,
 })
-
 
 const requestInterviewRound = async (options?: {
   message?: string
@@ -682,7 +634,6 @@ const requestInterviewRound = async (options?: {
   return { aiMessageIndex, result }
 }
 
-
 const startJourney = async (userMessage: string) => {
   if (!appId.value) return
   try {
@@ -691,7 +642,6 @@ const startJourney = async (userMessage: string) => {
     journeyPhase.value = 'interviewing'
     const { aiMessageIndex, result } = await requestInterviewRound({ message: userMessage })
     if (result.complete) {
-
       journeySummary.value = result.summary
       await generateWireframe(aiMessageIndex)
       return
@@ -703,14 +653,12 @@ const startJourney = async (userMessage: string) => {
   }
 }
 
-
 const onInterviewSubmit = async (answers: InterviewAnswer[], messageIndex: number) => {
   if (!appId.value) return
   ;(messages.value[messageIndex] as InterviewCardMessage).answered = true
   try {
     const { aiMessageIndex, result } = await requestInterviewRound({ answers })
     if (!result.complete) {
-
       messages.value[aiMessageIndex] = makeInterviewCard(result.questions ?? [], result.round)
       return
     }
@@ -722,18 +670,15 @@ const onInterviewSubmit = async (answers: InterviewAnswer[], messageIndex: numbe
     }
     await generateWireframe()
   } catch (error) {
-
     journeyPhase.value = 'idle'
     handleJourneyError(error, messages.value.length - 1)
   }
 }
 
-
 const summarizeInterview = (summary?: InterviewSummary) => {
   if (!summary) return '需求访谈完成'
   return `受众 ${summary.audience}｜风格 ${summary.style}｜页面 ${(summary.pages ?? []).length} 个`
 }
-
 
 const generateWireframe = async (messageIndex?: number) => {
   if (!appId.value) return
@@ -765,18 +710,15 @@ const generateWireframe = async (messageIndex?: number) => {
     wireframePreviewUrl.value = url
     scrollToBottom()
   } catch (error) {
-
     journeyPhase.value = 'idle'
     handleJourneyError(error, aiMessageIndex)
   }
 }
 
-
 const buildWireframeUrl = (relativeUrl: string) => {
   const codeGenType = appInfo.value?.codeGenType || CodeGenTypeEnum.HTML
   return `${STATIC_BASE_URL}/${codeGenType}_${appId.value}/${relativeUrl}?t=${Date.now()}`
 }
-
 
 const onWireframeConfirm = async (messageIndex: number) => {
   if (!appId.value) return
@@ -798,12 +740,10 @@ const onWireframeConfirm = async (messageIndex: number) => {
   }
 }
 
-
 const onWireframeRegenerate = async (messageIndex: number) => {
   ;(messages.value[messageIndex] as WireframeCardMessage).settled = true
   await generateWireframe()
 }
-
 
 const onWireframeReinterview = async (messageIndex: number) => {
   if (!appId.value) return
@@ -819,19 +759,16 @@ const onWireframeReinterview = async (messageIndex: number) => {
   }
 }
 
-
 const redirectToLogin = () => {
   setTimeout(() => {
     window.location.href = `/user/login?redirect=${window.location.href}`
   }, 1000)
 }
 
-
 const JOURNEY_ERROR_HINTS: Record<number, string> = {
   429: '今日线框生成次数已用完，请明天再试',
   409: '当前有进行中的任务，请稍后再试',
 }
-
 
 const handleJourneyError = (error: unknown, messageIndex: number) => {
   console.error('需求工程流程失败：', error)
@@ -864,7 +801,6 @@ const handleJourneyError = (error: unknown, messageIndex: number) => {
   message.error('操作失败，请重试')
 }
 
-
 const startGeneration = async (userMessage: string) => {
   isGenerating.value = true
   const aiMessageIndex = messages.value.length
@@ -874,13 +810,10 @@ const startGeneration = async (userMessage: string) => {
   await generateCode(userMessage, aiMessageIndex)
 }
 
-
-
 const generateCode = async (userMessage: string, aiMessageIndex: number) => {
   if (!appId.value) return
   streamAbortController.value = new AbortController()
   try {
-
     const { token, workspacePath } = await ensureAgentToken()
 
     const terminal = await streamAgentEvents(
@@ -896,19 +829,16 @@ const generateCode = async (userMessage: string, aiMessageIndex: number) => {
       (event) => handleAgentEvent(event, aiMessageIndex),
     )
 
-
     isGenerating.value = false
     journeyPhase.value = 'idle'
     if (terminal?.type === 'done') {
       await fetchAppInfo()
       updatePreview()
     } else if (!terminal) {
-
       handleError(new Error('连接中断'), aiMessageIndex)
     }
   } catch (error) {
     if (error instanceof AgentStreamHttpError && error.status === 401) {
-
       console.error('Agent 令牌无效或已过期：', error)
       messages.value[aiMessageIndex].content = '登录已过期，请重新登录后继续生成。'
       messages.value[aiMessageIndex].loading = false
@@ -919,8 +849,10 @@ const generateCode = async (userMessage: string, aiMessageIndex: number) => {
       return
     }
 
-
-    if (error instanceof AgentStreamHttpError && (error.status === 402 || error.status === 409 || error.status === 503)) {
+    if (
+      error instanceof AgentStreamHttpError &&
+      (error.status === 402 || error.status === 409 || error.status === 503)
+    ) {
       const FALLBACK_HINTS: Record<number, string> = {
         402: '积分余额不足，请充值后再试',
         409: '需求尚未确认，请先完成访谈并确认线框后重新生成',
@@ -934,8 +866,6 @@ const generateCode = async (userMessage: string, aiMessageIndex: number) => {
       return
     }
     if ((error as { name?: string })?.name === 'AbortError') {
-
-
       messages.value[aiMessageIndex].content =
         '⏹ 生成已中断。已写入的文件将保留，积分按生成进度折算退回。'
       messages.value[aiMessageIndex].loading = false
@@ -948,7 +878,6 @@ const generateCode = async (userMessage: string, aiMessageIndex: number) => {
   } finally {
     streamAbortController.value = null
 
-
     wireframePreviewUrl.value = ''
     await loadCreditBalance()
     setTimeout(() => {
@@ -957,18 +886,15 @@ const generateCode = async (userMessage: string, aiMessageIndex: number) => {
   }
 }
 
-
 const stopGeneration = () => {
   streamAbortController.value?.abort()
 }
-
 
 const handleAgentEvent = (event: AgentStreamEvent, aiMessageIndex: number) => {
   const msg = messages.value[aiMessageIndex] as AiMessage
   if (!msg) return
   switch (event.type) {
     case 'ai_thinking':
-
       msg.thinking = (msg.thinking ?? '') + (event.text ?? '')
       msg.loading = false
       break
@@ -990,7 +916,6 @@ const handleAgentEvent = (event: AgentStreamEvent, aiMessageIndex: number) => {
     case 'tool_executed':
       msg.toolSteps = msg.toolSteps ?? []
       {
-
         const existing = event.id ? msg.toolSteps.find((step) => step.id === event.id) : undefined
         if (existing) {
           existing.status = 'executed'
@@ -1018,12 +943,10 @@ const handleAgentEvent = (event: AgentStreamEvent, aiMessageIndex: number) => {
       void loadCreditBalance()
       break
     case 'done':
-
       break
   }
   scrollToBottom()
 }
-
 
 const TOOL_NAME_LABELS: Record<string, string> = {
   writeFile: '写入文件',
@@ -1037,7 +960,6 @@ const formatToolName = (name: string) => {
   return TOOL_NAME_LABELS[name] ?? name
 }
 
-
 const toolTarget = (step: ToolStep) => {
   if (!step.arguments) return ''
   try {
@@ -1048,7 +970,6 @@ const toolTarget = (step: ToolStep) => {
   }
 }
 
-
 const handleError = (error: unknown, aiMessageIndex: number) => {
   console.error('生成代码失败：', error)
   messages.value[aiMessageIndex].content = '抱歉，生成过程中出现了错误，请重试。'
@@ -1056,7 +977,6 @@ const handleError = (error: unknown, aiMessageIndex: number) => {
   message.error('生成失败，请重试')
   isGenerating.value = false
 }
-
 
 const updatePreview = () => {
   if (appId.value) {
@@ -1067,13 +987,11 @@ const updatePreview = () => {
   }
 }
 
-
 const scrollToBottom = () => {
   if (messagesContainer.value) {
     messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
   }
 }
-
 
 const downloadCode = async () => {
   if (!appId.value) {
@@ -1082,7 +1000,6 @@ const downloadCode = async () => {
   }
   downloading.value = true
   try {
-
     const baseURL = request.defaults.baseURL || ''
     const url = `${baseURL}/app/download/${appId.value}`
     const response = await fetch(url, {
@@ -1113,7 +1030,6 @@ const downloadCode = async () => {
   }
 }
 
-
 const deployApp = async () => {
   if (!appId.value) {
     message.error('应用ID不存在')
@@ -1141,20 +1057,17 @@ const deployApp = async () => {
   }
 }
 
-
 const openInNewTab = () => {
   if (previewUrl.value) {
     window.open(previewUrl.value, '_blank')
   }
 }
 
-
 const openDeployedSite = () => {
   if (deployUrl.value) {
     window.open(deployUrl.value, '_blank')
   }
 }
-
 
 const onIframeLoad = () => {
   previewReady.value = true
@@ -1165,13 +1078,11 @@ const onIframeLoad = () => {
   }
 }
 
-
 const editApp = () => {
   if (appInfo.value?.id) {
     router.push(`/app/edit/${appInfo.value.id}`)
   }
 }
-
 
 const deleteApp = async () => {
   if (!appInfo.value?.id) return
@@ -1191,9 +1102,7 @@ const deleteApp = async () => {
   }
 }
 
-
 const toggleEditMode = () => {
-
   const iframe = document.querySelector('.preview-iframe') as HTMLIFrameElement
   if (!iframe) {
     message.warning('请等待页面加载完成')
@@ -1229,20 +1138,16 @@ const getInputPlaceholder = () => {
   return '请描述你想生成的网站，越详细效果越好哦'
 }
 
-
 onMounted(() => {
   fetchAppInfo()
   loadCreditBalance()
-
 
   window.addEventListener('message', (event) => {
     visualEditor.handleIframeMessage(event)
   })
 })
 
-
 onUnmounted(() => {
-
   streamAbortController.value?.abort()
 })
 </script>
@@ -1255,7 +1160,6 @@ onUnmounted(() => {
   padding: 16px;
   background: #fdfdfd;
 }
-
 
 .header-bar {
   display: flex;
@@ -1286,7 +1190,6 @@ onUnmounted(() => {
   gap: 12px;
 }
 
-
 .main-content {
   flex: 1;
   display: flex;
@@ -1294,7 +1197,6 @@ onUnmounted(() => {
   padding: 8px;
   overflow: hidden;
 }
-
 
 .chat-section {
   flex: 2;
@@ -1361,7 +1263,6 @@ onUnmounted(() => {
   color: #666;
 }
 
-
 .thinking-collapse {
   margin-bottom: 8px;
   background: #fafafa;
@@ -1382,14 +1283,12 @@ onUnmounted(() => {
   word-break: break-word;
 }
 
-
 .milestone-bar {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   margin-bottom: 8px;
 }
-
 
 .tool-steps {
   list-style: none;
@@ -1419,13 +1318,11 @@ onUnmounted(() => {
   color: #999;
 }
 
-
 .load-more-container {
   text-align: center;
   padding: 8px 0;
   margin-bottom: 16px;
 }
-
 
 .input-container {
   padding: 16px;
@@ -1445,7 +1342,6 @@ onUnmounted(() => {
   bottom: 8px;
   right: 8px;
 }
-
 
 .preview-section {
   flex: 3;
@@ -1509,7 +1405,6 @@ onUnmounted(() => {
   margin-top: 16px;
 }
 
-
 .wireframe-preview {
   display: flex;
   flex-direction: column;
@@ -1542,7 +1437,6 @@ onUnmounted(() => {
   margin: 0 16px;
 }
 
-
 @media (max-width: 1024px) {
   .main-content {
     flex-direction: column;
@@ -1572,7 +1466,6 @@ onUnmounted(() => {
   .message-content {
     max-width: 85%;
   }
-
 
   .selected-element-alert {
     margin: 0 16px;
@@ -1625,7 +1518,6 @@ onUnmounted(() => {
     color: #d73a49;
     border: 1px solid #e1e4e8;
   }
-
 
   .edit-mode-active {
     background-color: #52c41a !important;

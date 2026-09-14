@@ -1,8 +1,4 @@
-
-
-
 const MAX_INPUT_LENGTH = 1000
-
 
 const SENSITIVE_WORDS = [
   '忽略之前的指令',
@@ -15,7 +11,6 @@ const SENSITIVE_WORDS = [
   '越狱',
   'jailbreak',
 ]
-
 
 const INJECTION_PATTERNS = [
   /ignore\s+(?:previous|above|all)\s+(?:instructions?|commands?|prompts?)/i,
@@ -39,7 +34,6 @@ function rejected(reason: string): GuardrailResult {
 }
 
 export function validatePrompt(input: string): GuardrailResult {
-
   if (input.length > MAX_INPUT_LENGTH) {
     return rejected('输入内容过长，不要超过 1000 字')
   }

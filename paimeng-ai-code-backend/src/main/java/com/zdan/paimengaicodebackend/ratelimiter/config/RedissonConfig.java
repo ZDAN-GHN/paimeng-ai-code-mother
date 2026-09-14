@@ -8,7 +8,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-
 @Configuration
 public class RedissonConfig {
 
@@ -29,16 +28,17 @@ public class RedissonConfig {
         Config config = new Config();
         String address = "redis://" + redisHost + ":" + redisPort;
 
-        SingleServerConfig singleServerConfig = config.useSingleServer()
-                .setAddress(address)
-                .setDatabase(redisDatabase)
-                .setConnectionMinimumIdleSize(1)
-                .setConnectionPoolSize(10)
-                .setIdleConnectionTimeout(30000)
-                .setConnectTimeout(5000)
-                .setTimeout(3000)
-                .setRetryAttempts(3)
-                .setRetryInterval(1500);
+        SingleServerConfig singleServerConfig = config
+            .useSingleServer()
+            .setAddress(address)
+            .setDatabase(redisDatabase)
+            .setConnectionMinimumIdleSize(1)
+            .setConnectionPoolSize(10)
+            .setIdleConnectionTimeout(30000)
+            .setConnectTimeout(5000)
+            .setTimeout(3000)
+            .setRetryAttempts(3)
+            .setRetryInterval(1500);
 
         if (redisPassword != null && !redisPassword.isEmpty()) {
             singleServerConfig.setPassword(redisPassword);

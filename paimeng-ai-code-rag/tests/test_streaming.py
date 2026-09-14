@@ -1,5 +1,3 @@
-
-
 import asyncio
 import json
 from pathlib import Path
@@ -32,7 +30,11 @@ class _FakeGuardrail:
         self._allowed = allowed
 
     def validate(self, text):
-        return GuardrailResult.allowed() if self._allowed else GuardrailResult.rejected("拒绝：含敏感词")
+        return (
+            GuardrailResult.allowed()
+            if self._allowed
+            else GuardrailResult.rejected("拒绝：含敏感词")
+        )
 
 
 class _FakeExecutor:
@@ -47,8 +49,6 @@ class _FakeExecutor:
 
 
 class _RecordingCallback:
-
-
     def __init__(self) -> None:
         self.calls = []
 
@@ -58,7 +58,6 @@ class _RecordingCallback:
 
 
 def _collect(request, executor, guardrail=None, callback=None) -> str:
-
 
     async def _run() -> str:
         parts = [
@@ -81,12 +80,16 @@ def test_html_stream_yields_text_and_writes_workspace():
     out = _collect(req, _FakeExecutor(items=["```html\n", "<h1>hi</h1>\n", "```"]))
     assert "data: ```html" in out
     assert "data: <h1>hi</h1>" in out
-    assert (Path(WORKSPACE_ROOT) / "stream_html" / "index.html").read_text(encoding="utf-8") == "<h1>hi</h1>"
+    assert (Path(WORKSPACE_ROOT) / "stream_html" / "index.html").read_text(
+        encoding="utf-8"
+    ) == "<h1>hi</h1>"
 
 
 def test_multi_file_stream_writes_three_files():
 
-    req = _request(codeGenType="multi_file", workspacePath=f"{WORKSPACE_ROOT}/stream_mf")
+    req = _request(
+        codeGenType="multi_file", workspacePath=f"{WORKSPACE_ROOT}/stream_mf"
+    )
     content = "```html\n<h1>a</h1>\n```\n```css\nbody{}\n```\n```javascript\nconsole.log(1)\n```"
     out = _collect(req, _FakeExecutor(items=[content]))
     ws = Path(WORKSPACE_ROOT) / "stream_mf"
@@ -100,12 +103,27 @@ def test_vue_stream_emits_structured_events():
     req = _request(codeGenType="vue_project")
     events = [
         {"type": "ai_thinking", "text": "分析中"},
-        {"type": "tool_request", "id": "t1", "name": "write_file", "arguments": '{"path":"a.js"}'},
-        {"type": "tool_executed", "id": "t1", "name": "write_file", "arguments": '{"path":"a.js"}', "result": "ok"},
+        {
+            "type": "tool_request",
+            "id": "t1",
+            "name": "write_file",
+            "arguments": '{"path":"a.js"}',
+        },
+        {
+            "type": "tool_executed",
+            "id": "t1",
+            "name": "write_file",
+            "arguments": '{"path":"a.js"}',
+            "result": "ok",
+        },
         {"type": "ai_response", "data": "完成"},
     ]
     out = _collect(req, _FakeExecutor(items=events))
-    parsed = [json.loads(line.split("data: ", 1)[1]) for line in out.splitlines() if line.startswith("data: ")]
+    parsed = [
+        json.loads(line.split("data: ", 1)[1])
+        for line in out.splitlines()
+        if line.startswith("data: ")
+    ]
     assert parsed[0] == {"type": "ai_thinking", "text": "分析中"}
     assert parsed[1] == {
         "type": "tool_request",
@@ -126,7 +144,11 @@ def test_vue_stream_emits_structured_events():
 def test_guardrail_rejection_emits_error_event():
 
     req = _request()
-    out = _collect(req, _FakeExecutor(items=["should not appear"]), guardrail=_FakeGuardrail(allowed=False))
+    out = _collect(
+        req,
+        _FakeExecutor(items=["should not appear"]),
+        guardrail=_FakeGuardrail(allowed=False),
+    )
     assert "event: error" in out
     assert "should not appear" not in out
     assert "拒绝：含敏感词" in out
@@ -167,6 +189,11 @@ def test_failed_callback_on_guardrail_rejection():
 
     req = _request()
     cb = _RecordingCallback()
-    _collect(req, _FakeExecutor(items=["x"]), guardrail=_FakeGuardrail(allowed=False), callback=cb)
+    _collect(
+        req,
+        _FakeExecutor(items=["x"]),
+        guardrail=_FakeGuardrail(allowed=False),
+        callback=cb,
+    )
     assert len(cb.calls) == 1
     assert cb.calls[0][1] == "failed"

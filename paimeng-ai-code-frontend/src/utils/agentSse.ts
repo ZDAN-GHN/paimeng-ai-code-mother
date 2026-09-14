@@ -1,7 +1,4 @@
-
-
 import { AGENT_BASE_URL } from '@/config/env'
-
 
 export type AgentEventType =
   | 'ai_response'
@@ -12,29 +9,20 @@ export type AgentEventType =
   | 'done'
   | 'error'
 
-
 export interface AgentStreamEvent {
   type: AgentEventType
-
   text?: string
-
   data?: string
-
   id?: string
   name?: string
   arguments?: string
-
   result?: string
-
   title?: string
   detail?: string
-
   message?: string
 }
 
-
 export type Intensity = 'fast' | 'standard' | 'deep'
-
 
 export interface AgentStreamParams {
   token: string
@@ -42,16 +30,10 @@ export interface AgentStreamParams {
   appId: string
   message: string
   workspacePath: string
-
   intensity?: Intensity
-
   history?: Array<{ role: 'user' | 'assistant'; content: string }>
-
   signal?: AbortSignal
 }
-
-
-
 
 export interface InterviewQuestion {
   key: string
@@ -59,7 +41,6 @@ export interface InterviewQuestion {
   question: string
   options: Array<{ id: string; text: string }>
 }
-
 
 export interface InterviewSummary {
   message: string
@@ -70,7 +51,6 @@ export interface InterviewSummary {
   interaction: string
 }
 
-
 export interface InterviewResult {
   runId: string
   round: number
@@ -79,13 +59,11 @@ export interface InterviewResult {
   summary?: InterviewSummary
 }
 
-
 export interface InterviewAnswer {
   key: string
   optionId?: string
   text?: string
 }
-
 
 export interface WireframeResult {
   runId: string
@@ -98,17 +76,13 @@ export interface WireframeResult {
   }
 }
 
-
 export class AgentStreamHttpError extends Error {
   status: number
-
   constructor(status: number, message: string) {
     super(message)
     this.status = status
   }
 }
-
-
 
 async function readServerErrorMessage(response: Response): Promise<string | null> {
   try {
@@ -119,15 +93,12 @@ async function readServerErrorMessage(response: Response): Promise<string | null
   }
 }
 
-
 export function createRunId(): string {
-
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return `run-${crypto.randomUUID()}`
   }
   return `run-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
-
 
 function parseFrame(frame: string): AgentStreamEvent | null {
   let eventName = 'message'
@@ -145,7 +116,6 @@ function parseFrame(frame: string): AgentStreamEvent | null {
     if (field === 'event') {
       eventName = value
     } else if (field === 'data') {
-
       dataLines.push(value)
     }
   }
@@ -162,14 +132,11 @@ function parseFrame(frame: string): AgentStreamEvent | null {
   return null
 }
 
-
 interface AgentJsonParams {
   token: string
   runId: string
   appId: string
 }
-
-
 
 async function postAgentJson<T>(
   params: AgentJsonParams,
@@ -186,11 +153,13 @@ async function postAgentJson<T>(
   })
   if (!response.ok) {
     const serverMessage = await readServerErrorMessage(response)
-    throw new AgentStreamHttpError(response.status, serverMessage ?? `Agent 请求失败: ${response.status}`)
+    throw new AgentStreamHttpError(
+      response.status,
+      serverMessage ?? `Agent 请求失败: ${response.status}`,
+    )
   }
   return response.json() as Promise<T>
 }
-
 
 export async function requestInterview(
   params: AgentJsonParams & { message?: string; answers?: InterviewAnswer[] },
@@ -201,7 +170,6 @@ export async function requestInterview(
   })
 }
 
-
 export async function requestWireframe(
   params: AgentJsonParams & { workspacePath: string },
 ): Promise<WireframeResult> {
@@ -210,11 +178,9 @@ export async function requestWireframe(
   })
 }
 
-
 export async function confirmWireframe(params: AgentJsonParams): Promise<WireframeResult> {
   return postAgentJson<WireframeResult>(params, '/wireframe/confirm', {})
 }
-
 
 export async function streamAgentEvents(
   params: AgentStreamParams,
@@ -237,10 +203,12 @@ export async function streamAgentEvents(
     signal: params.signal,
   })
 
-
   if (!response.ok || !response.body) {
     const serverMessage = await readServerErrorMessage(response)
-    throw new AgentStreamHttpError(response.status, serverMessage ?? `Agent 流请求失败: ${response.status}`)
+    throw new AgentStreamHttpError(
+      response.status,
+      serverMessage ?? `Agent 流请求失败: ${response.status}`,
+    )
   }
   const reader = response.body.getReader()
   const decoder = new TextDecoder('utf-8')
@@ -259,12 +227,10 @@ export async function streamAgentEvents(
         const event = parseFrame(frame)
         if (!event) continue
         onEvent(event)
-
         if (event.type === 'done' || event.type === 'error') return event
       }
     }
   } finally {
-
     await reader.cancel().catch(() => undefined)
     reader.releaseLock()
   }

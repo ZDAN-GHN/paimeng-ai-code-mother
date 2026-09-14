@@ -26,15 +26,13 @@ import com.zdan.paimengaicodebackend.service.AppService;
 import com.zdan.paimengaicodebackend.service.ChatHistoryService;
 import com.zdan.paimengaicodebackend.service.ScreenshotService;
 import com.zdan.paimengaicodebackend.service.UserService;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-
 import java.io.File;
 import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
-
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
 
 @Slf4j
 @Service
@@ -44,9 +42,11 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
     private final ChatHistoryService chatHistoryService;
     private final ScreenshotService screenshotService;
 
-    public AppServiceImpl(UserService userService,
-                          ChatHistoryService chatHistoryService,
-                          ScreenshotService screenshotService) {
+    public AppServiceImpl(
+        UserService userService,
+        ChatHistoryService chatHistoryService,
+        ScreenshotService screenshotService
+    ) {
         this.userService = userService;
         this.chatHistoryService = chatHistoryService;
         this.screenshotService = screenshotService;
@@ -54,26 +54,21 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
     @Override
     public Long createApp(AppAddRequest appAddRequest, User loginUser) {
-
         String initPrompt = appAddRequest.getInitPrompt();
-        ThrowUtils.throwIf(StrUtil.isBlank(initPrompt), ErrorCode.PARAMS_ERROR, "初始化prompt不能为空");
-
+        ThrowUtils.throwIf(
+            StrUtil.isBlank(initPrompt),
+            ErrorCode.PARAMS_ERROR,
+            "初始化prompt不能为空"
+        );
 
         App app = new App();
         BeanUtil.copyProperties(appAddRequest, app);
         app.setUserId(loginUser.getId());
 
-
         app.setAppName(initPrompt.substring(0, Math.min(initPrompt.length(), 12)));
-
-
-
-
-
 
         CodeGenTypeEnum selectedCodeGenType = CodeGenTypeEnum.HTML;
         app.setCodeGenType(selectedCodeGenType.getValue());
-
 
         boolean result = this.save(app);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
@@ -107,11 +102,11 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
     @Override
     public String deployApp(Long appId, User loginUser) {
-
         validateParam(appId, loginUser);
 
-        App app = Optional.ofNullable(this.getById(appId))
-                .orElseThrow(() -> new BusinessException(ErrorCode.PARAMS_ERROR, "应用不存在"));
+        App app = Optional.ofNullable(this.getById(appId)).orElseThrow(() ->
+            new BusinessException(ErrorCode.PARAMS_ERROR, "应用不存在")
+        );
         if (!app.getUserId().equals(loginUser.getId())) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "无权限部署应用");
         }
@@ -119,7 +114,6 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         String deployKey = app.getDeployKey();
 
         if (StrUtil.isBlank(deployKey)) {
-
             deployKey = RandomUtil.randomString(6);
         }
 
@@ -133,10 +127,8 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         }
 
         sourceDir = BuilderExecutor.doBuild(
-                Objects.requireNonNull(
-                        CodeGenTypeEnum.getEnumByValue(codeGenType)
-                ),
-                sourceDirPath
+            Objects.requireNonNull(CodeGenTypeEnum.getEnumByValue(codeGenType)),
+            sourceDirPath
         );
 
         String deployDirPath = AppConstant.CODE_DEPLOY_ROOT_DIR + File.separator + deployKey;
@@ -170,11 +162,9 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         });
     }
 
-
     private void validateParam(Long appId, User loginUser) {
         validateParam(appId, "override", loginUser);
     }
-
 
     private void validateParam(Long appId, String message, User loginUser) {
         if (appId == null || StrUtil.isBlank(message) || loginUser == null) {
@@ -185,7 +175,11 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用 id 值不合法");
         }
         if (loginUser.getId() == null || loginUser.getId() <= 0) {
-            log.error("error user, the given user's id is illegal, loginUser: {}, userId: {}", loginUser, loginUser.getId());
+            log.error(
+                "error user, the given user's id is illegal, loginUser: {}, userId: {}",
+                loginUser,
+                loginUser.getId()
+            );
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户 id 值不合法");
         }
     }
@@ -213,19 +207,22 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             return new ArrayList<>();
         }
 
-        Set<Long> userIds = appList.stream()
-                .map(App::getUserId)
-                .collect(Collectors.toSet());
+        Set<Long> userIds = appList.stream().map(App::getUserId).collect(Collectors.toSet());
 
-        Map<Long, UserVO> userVOMap = userService.listByIds(userIds).stream()
-                .collect(Collectors.toMap(User::getId, userService::getUserVO));
+        Map<Long, UserVO> userVOMap = userService
+            .listByIds(userIds)
+            .stream()
+            .collect(Collectors.toMap(User::getId, userService::getUserVO));
 
-        return appList.stream().map(app -> {
-            AppVO appVO = getAppVO(app);
-            UserVO userVO = userVOMap.get(app.getUserId());
-            appVO.setUser(userVO);
-            return appVO;
-        }).collect(Collectors.toList());
+        return appList
+            .stream()
+            .map(app -> {
+                AppVO appVO = getAppVO(app);
+                UserVO userVO = userVOMap.get(app.getUserId());
+                appVO.setUser(userVO);
+                return appVO;
+            })
+            .collect(Collectors.toList());
     }
 
     @Override
@@ -246,14 +243,14 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         String sortOrder = appQueryRequest.getSortOrder();
 
         return QueryWrapper.create()
-                .eq("id", id)
-                .like("appName", appName)
-                .like("cover", cover)
-                .like("initPrompt", initPrompt)
-                .eq("codeGenType", codeGenType)
-                .eq("deployKey", deployKey)
-                .eq("priority", priority)
-                .eq("userId", userId)
-                .orderBy(sortField, "ascend".equals(sortOrder));
+            .eq("id", id)
+            .like("appName", appName)
+            .like("cover", cover)
+            .like("initPrompt", initPrompt)
+            .eq("codeGenType", codeGenType)
+            .eq("deployKey", deployKey)
+            .eq("priority", priority)
+            .eq("userId", userId)
+            .orderBy(sortField, "ascend".equals(sortOrder));
     }
 }

@@ -1,6 +1,3 @@
-
-
-
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -17,16 +14,21 @@ type Frame = { event: string; data: Record<string, unknown> }
 type RunCall = { url: string; body: Record<string, unknown> }
 
 function frames(body: string): Frame[] {
-  return body.split('\n\n').filter(Boolean).map((raw) => {
-    const lines = raw.split('\n')
-    const event = lines.find((line) => line.startsWith('event: '))!.slice(7)
-    const data = JSON.parse(lines.find((line) => line.startsWith('data: '))!.slice(6)) as Record<string, unknown>
-    return { event, data }
-  })
+  return body
+    .split('\n\n')
+    .filter(Boolean)
+    .map((raw) => {
+      const lines = raw.split('\n')
+      const event = lines.find((line) => line.startsWith('event: '))!.slice(7)
+      const data = JSON.parse(lines.find((line) => line.startsWith('data: '))!.slice(6)) as Record<
+        string,
+        unknown
+      >
+      return { event, data }
+    })
 }
 
 const types = (list: Frame[]) => list.map((frame) => frame.event)
-
 
 function fakeRunClient(calls: RunCall[], gateContext: Record<string, unknown> = {}): RunClient {
   return new RunClient({
@@ -34,13 +36,14 @@ function fakeRunClient(calls: RunCall[], gateContext: Record<string, unknown> = 
     token: 'test',
     fetchImpl: vi.fn(async (url, init) => {
       const method = init?.method ?? 'GET'
-      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {}
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {}
       calls.push({ url: String(url), body })
       const run: Run = {
         runId: String(url).split('/').at(-1) ?? 'run',
         appId: 1,
         userId: 1,
-        phase: method === 'GET' ? 'wireframe_confirmed' : (body.phase as Run['phase']) ?? 'interview',
+        phase:
+          method === 'GET' ? 'wireframe_confirmed' : ((body.phase as Run['phase']) ?? 'interview'),
         context: method === 'GET' ? JSON.stringify(gateContext) : null,
         milestones: null,
         tokenUsage: null,
@@ -55,7 +58,6 @@ function fakeRunClient(calls: RunCall[], gateContext: Record<string, unknown> = 
   })
 }
 
-
 function makeRetryOnceGates(): ReviewGateSet {
   let calls = 0
   return {
@@ -68,12 +70,14 @@ function makeRetryOnceGates(): ReviewGateSet {
       },
     },
     build: { name: 'build', verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
-    visualDiff: { name: 'visual-diff', verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
+    visualDiff: {
+      name: 'visual-diff',
+      verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }),
+    },
   }
 }
 
 describe('Issue #9：质检失败有界重试', () => {
-
   it('quality-fail-then-pass 剧本：第 1 次质检失败触发重试，重试后通过 → done', async () => {
     const { runGenerationWorkflow } = await import('../../src/generation/workflow/index.js')
     const { LlmQualityScorer } = await import('../../src/generation/review/index.js')
@@ -83,7 +87,10 @@ describe('Issue #9：质检失败有界重试', () => {
     const gates: ReviewGateSet = {
       quality: new LlmQualityScorer(provider),
       build: { name: 'build', verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
-      visualDiff: { name: 'visual-diff', verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
+      visualDiff: {
+        name: 'visual-diff',
+        verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }),
+      },
     }
     const events: Frame[] = []
 
@@ -95,13 +102,14 @@ describe('Issue #9：质检失败有界重试', () => {
     }
     const eventTypes = events.map((e) => e.event)
     expect(eventTypes.at(-1)).toBe('done')
-    const milestoneTitles = events.filter((e) => e.event === 'milestone').map((e) => String((e.data as { title: string }).title))
+    const milestoneTitles = events
+      .filter((e) => e.event === 'milestone')
+      .map((e) => String((e.data as { title: string }).title))
 
     expect(milestoneTitles).toContain('根据质检意见重新生成')
     expect(milestoneTitles).toContain('复查生成结果')
     expect(milestoneTitles).toContain('生成完成')
   })
-
 
   it('quality-fail-always 剧本：每次质检失败 → 有界重试耗尽 → failed 终态', async () => {
     const { runGenerationWorkflow } = await import('../../src/generation/workflow/index.js')
@@ -111,7 +119,10 @@ describe('Issue #9：质检失败有界重试', () => {
     const gates: ReviewGateSet = {
       quality: new LlmQualityScorer(provider),
       build: { name: 'build', verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
-      visualDiff: { name: 'visual-diff', verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
+      visualDiff: {
+        name: 'visual-diff',
+        verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }),
+      },
     }
     const events: Frame[] = []
 
@@ -148,7 +159,9 @@ describe('Issue #9：质检失败有界重试', () => {
     const eventTypes = types(result)
 
     expect(eventTypes.at(-1)).toBe('done')
-    const milestoneTitles = result.filter((f) => f.event === 'milestone').map((f) => String(f.data.title))
+    const milestoneTitles = result
+      .filter((f) => f.event === 'milestone')
+      .map((f) => String(f.data.title))
     expect(milestoneTitles).toContain('根据质检意见重新生成')
     expect(milestoneTitles).toContain('复查生成结果')
 
@@ -161,13 +174,25 @@ describe('Issue #9：质检失败有界重试', () => {
     const token = await makeToken()
     const alwaysFail: ReviewGateSet = {
       quality: {
-        score: async () => ({ isValid: false, grade: 40, errors: ['永远失败'], suggestions: ['x'] }),
+        score: async () => ({
+          isValid: false,
+          grade: 40,
+          errors: ['永远失败'],
+          suggestions: ['x'],
+        }),
       },
       build: { name: 'build', verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
-      visualDiff: { name: 'visual-diff', verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
+      visualDiff: {
+        name: 'visual-diff',
+        verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }),
+      },
     }
     const app = buildTestApp(root, {
-      agentRoutes: { runClient: fakeRunClient([], {}), reviewGates: alwaysFail, provider: createScriptedLlm('success') },
+      agentRoutes: {
+        runClient: fakeRunClient([], {}),
+        reviewGates: alwaysFail,
+        provider: createScriptedLlm('success'),
+      },
     })
     const response = await app.inject({
       method: 'POST',
@@ -194,10 +219,17 @@ describe('Issue #9：质检失败有界重试', () => {
         },
       },
       build: { name: 'build', verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
-      visualDiff: { name: 'visual-diff', verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }) },
+      visualDiff: {
+        name: 'visual-diff',
+        verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }),
+      },
     }
     const app = buildTestApp(root, {
-      agentRoutes: { runClient: fakeRunClient([], {}), reviewGates: alwaysFail, provider: createScriptedLlm('success') },
+      agentRoutes: {
+        runClient: fakeRunClient([], {}),
+        reviewGates: alwaysFail,
+        provider: createScriptedLlm('success'),
+      },
     })
     await app.inject({
       method: 'POST',
@@ -222,24 +254,35 @@ describe('Issue #9：硬上限优雅收尾（绝不硬杀）', () => {
       method: 'POST',
       url: '/agent/stream',
       headers: { authorization: `Bearer ${token}` },
-
-      payload: { runId: 'run-limit', appId: 1, message: 'hello', workspacePath: root, intensity: 'fast' },
+      payload: {
+        runId: 'run-limit',
+        appId: 1,
+        message: 'hello',
+        workspacePath: root,
+        intensity: 'fast',
+      },
     })
     const result = frames(response.body)
     const eventTypes = types(result)
 
     expect(eventTypes.at(-1)).toBe('done')
-    const responseText = result.filter((f) => f.event === 'ai_response').map((f) => String(f.data.data)).join('')
+    const responseText = result
+      .filter((f) => f.event === 'ai_response')
+      .map((f) => String(f.data.data))
+      .join('')
     expect(responseText).toContain('已达本次生成硬上限')
     expect(eventTypes).toContain('tool_request')
-
     expect(result.some((f) => f.event === 'error')).toBe(false)
 
-    const phases = calls.map((call) => call.body.phase).filter((phase): phase is string => Boolean(phase))
+    const phases = calls
+      .map((call) => call.body.phase)
+      .filter((phase): phase is string => Boolean(phase))
     expect(phases).toContain('coding')
     expect(phases).toContain('review')
     expect(phases).toContain('done')
-    const milestoneTitles = result.filter((f) => f.event === 'milestone').map((f) => String(f.data.title))
+    const milestoneTitles = result
+      .filter((f) => f.event === 'milestone')
+      .map((f) => String(f.data.title))
     expect(milestoneTitles).toContain('生成完成')
   })
 
@@ -248,22 +291,36 @@ describe('Issue #9：硬上限优雅收尾（绝不硬杀）', () => {
     const calls: RunCall[] = []
     const token = await makeToken()
     const app = buildTestApp(root, {
-      agentRoutes: { runClient: fakeRunClient(calls, {}), provider: createScriptedLlm('limit-length') },
+      agentRoutes: {
+        runClient: fakeRunClient(calls, {}),
+        provider: createScriptedLlm('limit-length'),
+      },
     })
     const response = await app.inject({
       method: 'POST',
       url: '/agent/stream',
       headers: { authorization: `Bearer ${token}` },
-      payload: { runId: 'run-limit-length', appId: 1, message: 'hello', workspacePath: root, intensity: 'fast' },
+      payload: {
+        runId: 'run-limit-length',
+        appId: 1,
+        message: 'hello',
+        workspacePath: root,
+        intensity: 'fast',
+      },
     })
     const result = frames(response.body)
     const eventTypes = types(result)
 
     expect(eventTypes.at(-1)).toBe('done')
-    const responseText = result.filter((f) => f.event === 'ai_response').map((f) => String(f.data.data)).join('')
+    const responseText = result
+      .filter((f) => f.event === 'ai_response')
+      .map((f) => String(f.data.data))
+      .join('')
     expect(responseText).toContain('已达本次生成硬上限')
     expect(result.some((f) => f.event === 'error')).toBe(false)
-    const phases = calls.map((call) => call.body.phase).filter((phase): phase is string => Boolean(phase))
+    const phases = calls
+      .map((call) => call.body.phase)
+      .filter((phase): phase is string => Boolean(phase))
     expect(phases).toContain('coding')
     expect(phases).toContain('review')
     expect(phases).toContain('done')
@@ -271,11 +328,7 @@ describe('Issue #9：硬上限优雅收尾（绝不硬杀）', () => {
 })
 
 describe('Issue #9：三档推理强度路由与上限', () => {
-
-
-
   it('fast/standard/deep 请求各自解析到对应档位配置（模型 id + 上限随档位变化）', async () => {
-
     const { INTENSITY_TIERS, resolveIntensity } = await import('../../src/generation/intensity.js')
     const fast = resolveIntensity('fast')
     const standard = resolveIntensity('standard')
@@ -296,7 +349,12 @@ describe('Issue #9：三档推理强度路由与上限', () => {
       const provider = createScriptedLlm('success')
       for await (const _ev of runGenerationWorkflow(
         { runId: 'r', appId: 1, message: 'hello', workspacePath: root, intensity },
-        { provider, workspaceRoot: root, wireframePath: undefined, reviewGates: makePassingReviewGates() },
+        {
+          provider,
+          workspaceRoot: root,
+          wireframePath: undefined,
+          reviewGates: makePassingReviewGates(),
+        },
       )) {
       }
 
@@ -318,12 +376,22 @@ describe('Issue #9：三档推理强度路由与上限', () => {
       for (const intensity of ['fast', 'standard', 'deep'] as const) {
         const provider = createScriptedLlm('success')
         for await (const _event of runGenerationWorkflow(
-          { runId: `${codeGenType}-${intensity}`, appId: 1, message: 'hello', workspacePath: root, codeGenType, intensity },
+          {
+            runId: `${codeGenType}-${intensity}`,
+            appId: 1,
+            message: 'hello',
+            workspacePath: root,
+            codeGenType,
+            intensity,
+          },
           { provider, workspaceRoot: root, reviewGates: makePassingReviewGates() },
         )) {
         }
         const call = provider.records.find((record) => record.modelId === `scripted-${intensity}`)
-        const expected = resolveBudgetLimits(resolveIntensity(intensity).limits, resolveStackProfile(codeGenType).budgetScale)
+        const expected = resolveBudgetLimits(
+          resolveIntensity(intensity).limits,
+          resolveStackProfile(codeGenType).budgetScale,
+        )
         expect(call?.maxOutputTokens).toBe(expected.maxOutputTokens)
         expect(resolveStackProfile(codeGenType).budgetScale).toEqual(scales[codeGenType])
       }
@@ -368,7 +436,11 @@ describe('Issue #9：token 计量按 run 落库', () => {
 
     const tokenUpdate = calls.find((c) => c.body.tokenUsage != null)
     expect(tokenUpdate).toBeTruthy()
-    const usage = JSON.parse(String(tokenUpdate!.body.tokenUsage)) as { inputTokens: number; outputTokens: number; totalTokens: number }
+    const usage = JSON.parse(String(tokenUpdate!.body.tokenUsage)) as {
+      inputTokens: number
+      outputTokens: number
+      totalTokens: number
+    }
     expect(usage.inputTokens).toBeGreaterThan(0)
     expect(usage.outputTokens).toBeGreaterThan(0)
     expect(usage.totalTokens).toBeGreaterThan(0)
@@ -393,14 +465,19 @@ describe('Issue #9：token 计量按 run 落库', () => {
 })
 
 describe('Issue #9：视觉 diff 以已确认线框为基准', () => {
-
   it('workflow 从 run.context.wireframe.relativeUrl 解析线框绝对路径作为视觉 diff 基准', async () => {
     const root = makeWorkspaceRoot()
 
     const wireframeDir = path.join(root, 'wireframe')
     mkdirSync(wireframeDir, { recursive: true })
-    writeFileSync(path.join(wireframeDir, 'wireframe.html'), '<html><body><section id="page-0"></section></body></html>', 'utf8')
-    const context = { wireframe: { relativeUrl: 'wireframe/wireframe.html', pageCount: 1, confirmed: true } }
+    writeFileSync(
+      path.join(wireframeDir, 'wireframe.html'),
+      '<html><body><section id="page-0"></section></body></html>',
+      'utf8',
+    )
+    const context = {
+      wireframe: { relativeUrl: 'wireframe/wireframe.html', pageCount: 1, confirmed: true },
+    }
 
     let receivedWireframePath: string | undefined
     const recordingVisualDiff: VisualDiffVerifier = {
@@ -422,7 +499,11 @@ describe('Issue #9：视觉 diff 以已确认线框为基准', () => {
 
     const token = await makeToken()
     const app = buildTestApp(root, {
-      agentRoutes: { runClient: fakeRunClient([], context), reviewGates: gates, provider: createScriptedLlm('success') },
+      agentRoutes: {
+        runClient: fakeRunClient([], context),
+        reviewGates: gates,
+        provider: createScriptedLlm('success'),
+      },
     })
     await app.inject({
       method: 'POST',
@@ -431,7 +512,9 @@ describe('Issue #9：视觉 diff 以已确认线框为基准', () => {
       payload: { runId: 'run-vd', appId: 1, message: 'hello', workspacePath: root },
     })
 
-    expect(receivedWireframePath).toBe(validateWorkspacePath(path.join(root, 'wireframe', 'wireframe.html'), root))
+    expect(receivedWireframePath).toBe(
+      validateWorkspacePath(path.join(root, 'wireframe', 'wireframe.html'), root),
+    )
     expect(receivedWireframePath).toContain('wireframe')
   })
 
@@ -439,17 +522,34 @@ describe('Issue #9：视觉 diff 以已确认线框为基准', () => {
     const root = makeWorkspaceRoot()
     const wireframeDir = path.join(root, 'wireframe')
     mkdirSync(wireframeDir, { recursive: true })
-    writeFileSync(path.join(wireframeDir, 'wireframe.html'), '<html><body><section id="page-0"></section></body></html>', 'utf8')
+    writeFileSync(
+      path.join(wireframeDir, 'wireframe.html'),
+      '<html><body><section id="page-0"></section></body></html>',
+      'utf8',
+    )
 
-    const context = { wireframe: { relativeUrl: 'wireframe/wireframe.html', pageCount: 1, confirmed: true } }
+    const context = {
+      wireframe: { relativeUrl: 'wireframe/wireframe.html', pageCount: 1, confirmed: true },
+    }
     const gates: ReviewGateSet = {
       quality: { score: async () => ({ isValid: true, grade: 100, errors: [], suggestions: [] }) },
       build: { name: 'build', verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
-      visualDiff: { name: 'visual-diff', verify: async () => ({ name: 'visual-diff', passed: false, detail: '生成页缺少线框页面区段 page-0' }) },
+      visualDiff: {
+        name: 'visual-diff',
+        verify: async () => ({
+          name: 'visual-diff',
+          passed: false,
+          detail: '生成页缺少线框页面区段 page-0',
+        }),
+      },
     }
     const token = await makeToken()
     const app = buildTestApp(root, {
-      agentRoutes: { runClient: fakeRunClient([], context), reviewGates: gates, provider: createScriptedLlm('success') },
+      agentRoutes: {
+        runClient: fakeRunClient([], context),
+        reviewGates: gates,
+        provider: createScriptedLlm('success'),
+      },
     })
     const response = await app.inject({
       method: 'POST',

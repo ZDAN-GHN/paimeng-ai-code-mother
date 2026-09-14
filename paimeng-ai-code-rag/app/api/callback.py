@@ -1,5 +1,3 @@
-
-
 import logging
 from typing import Any, Literal
 
@@ -9,10 +7,7 @@ from app.core.config import get_settings
 from app.models.schemas import AgentRequest, CallbackRequest
 
 logger = logging.getLogger(__name__)
-
-
 CALLBACK_PATH = "/api/app/chat/gen/code/callback"
-
 CallbackStatus = Literal["success", "failed"]
 
 

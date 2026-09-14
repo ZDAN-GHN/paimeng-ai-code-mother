@@ -50,7 +50,6 @@ const formState = reactive<API.UserRegisterRequest>({
   checkPassword: '',
 })
 
-
 const validateCheckPassword = (rule: unknown, value: string, callback: (error?: Error) => void) => {
   if (value && value !== formState.userPassword) {
     callback(new Error('两次输入密码不一致'))
@@ -58,7 +57,6 @@ const validateCheckPassword = (rule: unknown, value: string, callback: (error?: 
     callback()
   }
 }
-
 
 const handleSubmit = async (values: API.UserRegisterRequest) => {
   const res = await userRegister(values)

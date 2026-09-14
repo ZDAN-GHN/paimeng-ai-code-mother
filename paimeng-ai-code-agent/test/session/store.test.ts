@@ -2,8 +2,6 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createSessionPool } from '../../src/session/pg.js'
 import { PgSessionStore } from '../../src/session/store.js'
 
-
-
 type QueryResult = { rowCount: number; rows: any[] }
 type QueryCall = { sql: string; params: unknown[] | undefined }
 
@@ -12,8 +10,12 @@ function fakeClient(existingRows: any[]): { client: any; queries: string[] } {
   const client = {
     query: vi.fn(async (sql: string): Promise<QueryResult> => {
       queries.push(sql)
-      if (sql.includes('FROM session_event')) return { rowCount: existingRows.length, rows: existingRows }
-      if (sql === 'SELECT COALESCE(MAX(seq), 0)::text AS max_seq FROM session_event WHERE app_id = $1') return { rowCount: 1, rows: [{ max_seq: '0' }] }
+      if (sql.includes('FROM session_event'))
+        return { rowCount: existingRows.length, rows: existingRows }
+      if (
+        sql === 'SELECT COALESCE(MAX(seq), 0)::text AS max_seq FROM session_event WHERE app_id = $1'
+      )
+        return { rowCount: 1, rows: [{ max_seq: '0' }] }
       return { rowCount: 0, rows: [] }
     }),
     release: vi.fn(),
@@ -23,20 +25,38 @@ function fakeClient(existingRows: any[]): { client: any; queries: string[] } {
 
 function eventRow(overrides: Record<string, unknown> = {}): any {
   return {
-    id: '1', app_id: 'app', user_id: 'user', run_id: null, seq: '1', turn_id: 'turn', batch_seq: 1,
-    event_index: 0, kind: 'user/message', version: 1, ignorable: false, source: 'human',
-    payload: { text: 'hello', nested: { b: 2, a: 1 } }, created_at: '2026-01-01T00:00:00.000Z', ...overrides,
+    id: '1',
+    app_id: 'app',
+    user_id: 'user',
+    run_id: null,
+    seq: '1',
+    turn_id: 'turn',
+    batch_seq: 1,
+    event_index: 0,
+    kind: 'user/message',
+    version: 1,
+    ignorable: false,
+    source: 'human',
+    payload: { text: 'hello', nested: { b: 2, a: 1 } },
+    created_at: '2026-01-01T00:00:00.000Z',
+    ...overrides,
   }
 }
 
-function approvalClient(input: { decisionRows: any[]; askedRows: any[]; consumedRows?: any[] }): { client: any; calls: QueryCall[] } {
+function approvalClient(input: { decisionRows: any[]; askedRows: any[]; consumedRows?: any[] }): {
+  client: any
+  calls: QueryCall[]
+} {
   const calls: QueryCall[] = []
   const client = {
     query: vi.fn(async (sql: string, params?: unknown[]): Promise<QueryResult> => {
       calls.push({ sql, params })
-      if (sql.includes("kind = 'approval/decided'")) return { rowCount: input.decisionRows.length, rows: input.decisionRows }
-      if (sql.includes("kind = 'approval/asked'")) return { rowCount: input.askedRows.length, rows: input.askedRows }
-      if (sql.includes("kind = 'approval/consumed'")) return { rowCount: input.consumedRows?.length ?? 0, rows: input.consumedRows ?? [] }
+      if (sql.includes("kind = 'approval/decided'"))
+        return { rowCount: input.decisionRows.length, rows: input.decisionRows }
+      if (sql.includes("kind = 'approval/asked'"))
+        return { rowCount: input.askedRows.length, rows: input.askedRows }
+      if (sql.includes("kind = 'approval/consumed'"))
+        return { rowCount: input.consumedRows?.length ?? 0, rows: input.consumedRows ?? [] }
       return { rowCount: 0, rows: [] }
     }),
     release: vi.fn(),
@@ -48,19 +68,43 @@ describe('PgSessionStore deterministic boundaries', () => {
   it('rejects same batch replay when event content differs', async () => {
     const { client } = fakeClient([eventRow()])
     const store = new PgSessionStore({ connect: vi.fn(async () => client) } as any)
-    await expect(store.appendBatch({
-      appId: 'app', userId: 'user', turnId: 'turn', batchSeq: 1,
-      events: [{ kind: 'user/message', source: 'human', payload: { nested: { a: 1, b: 2 }, text: 'changed' } }],
-    })).rejects.toThrow('批次重放事件内容不一致')
+    await expect(
+      store.appendBatch({
+        appId: 'app',
+        userId: 'user',
+        turnId: 'turn',
+        batchSeq: 1,
+        events: [
+          {
+            kind: 'user/message',
+            source: 'human',
+            payload: { nested: { a: 1, b: 2 }, text: 'changed' },
+          },
+        ],
+      }),
+    ).rejects.toThrow('批次重放事件内容不一致')
   })
 
   it('consumes only an earlier matching generation request inside the locked transaction', async () => {
-    const { client, calls } = approvalClient({ decisionRows: [{ seq: '2', decision: 'allowed' }], askedRows: [{ seq: '1' }] })
+    const { client, calls } = approvalClient({
+      decisionRows: [{ seq: '2', decision: 'allowed' }],
+      askedRows: [{ seq: '1' }],
+    })
     const store = new PgSessionStore({ connect: vi.fn(async () => client) } as any)
-    await expect(store.consumeHumanApproval({ appId: 'app', userId: 'user', turnId: 'consume', approvalId: 'ap-1' })).resolves.toEqual({ ok: true })
+    await expect(
+      store.consumeHumanApproval({
+        appId: 'app',
+        userId: 'user',
+        turnId: 'consume',
+        approvalId: 'ap-1',
+      }),
+    ).resolves.toEqual({ ok: true })
     expect(calls).toHaveLength(7)
     expect(calls[0]?.sql).toBe('BEGIN')
-    expect(calls[1]).toMatchObject({ sql: expect.stringContaining('pg_advisory_xact_lock'), params: ['app'] })
+    expect(calls[1]).toMatchObject({
+      sql: expect.stringContaining('pg_advisory_xact_lock'),
+      params: ['app'],
+    })
     expect(calls[2]).toMatchObject({ params: ['app', 'ap-1'] })
     expect(calls[2]?.sql).toContain("kind = 'approval/decided' AND source = 'human'")
     expect(calls[3]).toMatchObject({ params: ['app', 'ap-1', '2'] })
@@ -69,41 +113,78 @@ describe('PgSessionStore deterministic boundaries', () => {
     expect(calls[4]).toMatchObject({ params: ['app', 'ap-1', '2'] })
     expect(calls[4]?.sql).toContain("kind = 'approval/consumed'")
     expect(calls[4]?.sql).toContain('seq > $3')
-    expect(calls[5]).toMatchObject({ params: ['app', 'user', 'consume', JSON.stringify({ approvalId: 'ap-1' })] })
+    expect(calls[5]).toMatchObject({
+      params: ['app', 'user', 'consume', JSON.stringify({ approvalId: 'ap-1' })],
+    })
     expect(calls[5]?.sql).toContain("'approval/consumed'")
     expect(calls[6]?.sql).toBe('COMMIT')
   })
 
   it('rolls back rejected or consumed decisions without appending', async () => {
     for (const input of [
-      { decisionRows: [{ seq: '2', decision: 'rejected' }], askedRows: [], consumedRows: [], reason: '未找到人类批准' },
-      { decisionRows: [{ seq: '2', decision: 'allowed' }], askedRows: [{ seq: '1' }], consumedRows: [{ seq: '3' }], reason: '审批已消费' },
+      {
+        decisionRows: [{ seq: '2', decision: 'rejected' }],
+        askedRows: [],
+        consumedRows: [],
+        reason: '未找到人类批准',
+      },
+      {
+        decisionRows: [{ seq: '2', decision: 'allowed' }],
+        askedRows: [{ seq: '1' }],
+        consumedRows: [{ seq: '3' }],
+        reason: '审批已消费',
+      },
     ]) {
       const { client, calls } = approvalClient(input)
       const store = new PgSessionStore({ connect: vi.fn(async () => client) } as any)
-      await expect(store.consumeHumanApproval({ appId: 'app', userId: 'user', turnId: 'consume', approvalId: 'ap-1' })).resolves.toEqual({ ok: false, reason: input.reason })
+      await expect(
+        store.consumeHumanApproval({
+          appId: 'app',
+          userId: 'user',
+          turnId: 'consume',
+          approvalId: 'ap-1',
+        }),
+      ).resolves.toEqual({ ok: false, reason: input.reason })
       expect(calls.some((call) => call.sql.startsWith('INSERT INTO'))).toBe(false)
       expect(calls.at(-1)?.sql).toBe('ROLLBACK')
     }
   })
 
   it('rolls back without insert when no earlier asked event exists', async () => {
-    const { client, calls } = approvalClient({ decisionRows: [{ seq: '2', decision: 'allowed' }], askedRows: [] })
+    const { client, calls } = approvalClient({
+      decisionRows: [{ seq: '2', decision: 'allowed' }],
+      askedRows: [],
+    })
     const store = new PgSessionStore({ connect: vi.fn(async () => client) } as any)
-    await expect(store.consumeHumanApproval({ appId: 'app', userId: 'user', turnId: 'consume', approvalId: 'ap-1' })).resolves.toEqual({ ok: false, reason: '未找到审批请求' })
+    await expect(
+      store.consumeHumanApproval({
+        appId: 'app',
+        userId: 'user',
+        turnId: 'consume',
+        approvalId: 'ap-1',
+      }),
+    ).resolves.toEqual({ ok: false, reason: '未找到审批请求' })
     expect(calls.some((call) => call.sql === 'COMMIT')).toBe(false)
     expect(calls.some((call) => call.sql.startsWith('INSERT INTO'))).toBe(false)
     expect(calls.at(-1)?.sql).toBe('ROLLBACK')
   })
   it('advances replay cursor past ignorable unknown rows', async () => {
-    const pool = { query: vi.fn(async () => ({
-      rows: [eventRow({ seq: '7', kind: 'future/event', ignorable: true }), eventRow({ seq: '8', kind: 'future/other', ignorable: true })],
-    })) }
+    const pool = {
+      query: vi.fn(async () => ({
+        rows: [
+          eventRow({ seq: '7', kind: 'future/event', ignorable: true }),
+          eventRow({ seq: '8', kind: 'future/other', ignorable: true }),
+        ],
+      })),
+    }
     const store = new PgSessionStore(pool as any)
-    await expect(store.replay({ appId: 'app', afterSeq: 6, limit: 2 })).resolves.toEqual({ events: [], lastSeq: 8, hasMore: false })
+    await expect(store.replay({ appId: 'app', afterSeq: 6, limit: 2 })).resolves.toEqual({
+      events: [],
+      lastSeq: 8,
+      hasMore: false,
+    })
   })
 })
-
 
 const enabled = Boolean(process.env.PGHOST && process.env.PGDATABASE && process.env.PGUSER)
 
@@ -118,11 +199,14 @@ describe.skipIf(!enabled)('PgSessionStore integration', () => {
     await pool.query('DELETE FROM session_event WHERE app_id = $1', [appId])
   })
   afterAll(async () => pool.end())
-
   it('appends batches contiguously and replays same-batch events idempotently', async () => {
     const turnId = `turn-${turn++}`
     const events = [
-      { kind: 'session/turn-start' as const, source: 'human' as const, payload: { turnId, action: 'chat' } },
+      {
+        kind: 'session/turn-start' as const,
+        source: 'human' as const,
+        payload: { turnId, action: 'chat' },
+      },
       { kind: 'user/message' as const, source: 'human' as const, payload: { text: 'hello' } },
     ]
     const first = await store.appendBatch({ appId, userId, turnId, batchSeq: 1, events })
@@ -135,31 +219,76 @@ describe.skipIf(!enabled)('PgSessionStore integration', () => {
   it('rejects model approval and accepts unconsumed human approval only', async () => {
     const turnId = `turn-${turn++}`
     await store.appendBatch({
-      appId, userId, turnId, batchSeq: 1,
-      events: [{ kind: 'approval/decided', source: 'model', payload: { approvalId: 'ap-model', decision: 'allowed' } }],
+      appId,
+      userId,
+      turnId,
+      batchSeq: 1,
+      events: [
+        {
+          kind: 'approval/decided',
+          source: 'model',
+          payload: { approvalId: 'ap-model', decision: 'allowed' },
+        },
+      ],
     })
-    expect(await store.assertHumanApproved({ appId, approvalId: 'ap-model' })).toEqual({ ok: false, reason: '未找到人类批准' })
-    await store.appendBatch({
-      appId, userId, turnId: `turn-${turn++}`, batchSeq: 1,
-      events: [{ kind: 'approval/asked', source: 'system', payload: { approvalId: 'ap-1', action: 'start_generation' } }],
+    expect(await store.assertHumanApproved({ appId, approvalId: 'ap-model' })).toEqual({
+      ok: false,
+      reason: '未找到人类批准',
     })
     await store.appendBatch({
-      appId, userId, turnId: `turn-${turn++}`, batchSeq: 1,
-      events: [{ kind: 'approval/decided', source: 'human', payload: { approvalId: 'ap-1', decision: 'allowed' } }],
+      appId,
+      userId,
+      turnId: `turn-${turn++}`,
+      batchSeq: 1,
+      events: [
+        {
+          kind: 'approval/asked',
+          source: 'system',
+          payload: { approvalId: 'ap-1', action: 'start_generation' },
+        },
+      ],
+    })
+    await store.appendBatch({
+      appId,
+      userId,
+      turnId: `turn-${turn++}`,
+      batchSeq: 1,
+      events: [
+        {
+          kind: 'approval/decided',
+          source: 'human',
+          payload: { approvalId: 'ap-1', decision: 'allowed' },
+        },
+      ],
     })
     expect(await store.assertHumanApproved({ appId, approvalId: 'ap-1' })).toEqual({ ok: true })
     await store.appendBatch({
-      appId, userId, turnId: `turn-${turn++}`, batchSeq: 1,
+      appId,
+      userId,
+      turnId: `turn-${turn++}`,
+      batchSeq: 1,
       events: [{ kind: 'approval/consumed', source: 'system', payload: { approvalId: 'ap-1' } }],
     })
-    expect(await store.assertHumanApproved({ appId, approvalId: 'ap-1' })).toEqual({ ok: false, reason: '审批已消费' })
+    expect(await store.assertHumanApproved({ appId, approvalId: 'ap-1' })).toEqual({
+      ok: false,
+      reason: '审批已消费',
+    })
   })
 
   it('allocates contiguous sequences for concurrent batches', async () => {
-    const results = await Promise.all(Array.from({ length: 4 }, (_, index) => store.appendBatch({
-      appId, userId, turnId: `turn-${turn++}`, batchSeq: 1,
-      events: [{ kind: 'user/message', source: 'human', payload: { text: `concurrent-${index}` } }],
-    })))
+    const results = await Promise.all(
+      Array.from({ length: 4 }, (_, index) =>
+        store.appendBatch({
+          appId,
+          userId,
+          turnId: `turn-${turn++}`,
+          batchSeq: 1,
+          events: [
+            { kind: 'user/message', source: 'human', payload: { text: `concurrent-${index}` } },
+          ],
+        }),
+      ),
+    )
     expect(new Set(results.map((result) => result.seqFrom)).size).toBe(4)
     expect(results.map((result) => result.seqFrom).sort((a, b) => a - b)).toEqual([7, 8, 9, 10])
   })

@@ -1,10 +1,5 @@
-import {
-  isSessionEventKind,
-  UnknownEventKindError,
-  type SessionEventRecord,
-} from './events.js'
+import { isSessionEventKind, UnknownEventKindError, type SessionEventRecord } from './events.js'
 import type { SessionStore } from './store.js'
-
 
 type ReplayEvent = Omit<SessionEventRecord, 'kind'> & { kind: string }
 
@@ -38,7 +33,9 @@ function payloadText(event: ReplayEvent): string | undefined {
   return typeof text === 'string' && text.length > 0 ? text : undefined
 }
 
-function validateKnownEvent(event: ReplayEvent): event is ReplayEvent & { kind: SessionEventRecord['kind'] } {
+function validateKnownEvent(
+  event: ReplayEvent,
+): event is ReplayEvent & { kind: SessionEventRecord['kind'] } {
   if (!isSessionEventKind(event.kind) && !event.ignorable) {
     throw new UnknownEventKindError(event.kind)
   }
@@ -58,7 +55,6 @@ function summarize(messages: SessionHistoryMessage[], limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit)}…`
 }
 
-
 export function rebuildSessionContext(
   events: readonly ReplayEvent[],
   options: SessionContextOptions,
@@ -66,7 +62,8 @@ export function rebuildSessionContext(
   const recentTurns = options.recentTurns ?? DEFAULT_RECENT_TURNS
   const summaryCharLimit = options.summaryCharLimit ?? DEFAULT_SUMMARY_CHAR_LIMIT
   if (!Number.isInteger(recentTurns) || recentTurns < 1) throw new Error('recentTurns 必须为正整数')
-  if (!Number.isInteger(summaryCharLimit) || summaryCharLimit < 1) throw new Error('summaryCharLimit 必须为正整数')
+  if (!Number.isInteger(summaryCharLimit) || summaryCharLimit < 1)
+    throw new Error('summaryCharLimit 必须为正整数')
 
   const messages: SessionHistoryMessage[] = []
   let lastSeq = 0
@@ -80,7 +77,11 @@ export function rebuildSessionContext(
     if (event.kind !== 'user/message' && event.kind !== 'model/message') continue
     const content = payloadText(event)
     if (!content) continue
-    messages.push({ role: event.kind === 'user/message' ? 'user' : 'assistant', content, turnId: event.turnId })
+    messages.push({
+      role: event.kind === 'user/message' ? 'user' : 'assistant',
+      content,
+      turnId: event.turnId,
+    })
   }
 
   const turnIds = groupTurnIds(messages)
@@ -105,7 +106,6 @@ export function rebuildSessionContext(
     foldedCount: foldedTurnCount,
   }
 }
-
 
 export async function loadSessionContext(
   store: SessionStore,

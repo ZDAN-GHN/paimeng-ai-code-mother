@@ -1,4 +1,3 @@
-
 import type { FastifyInstance } from 'fastify'
 import type { AgentConfig } from './config.js'
 import { buildAgentRoutes, type AgentRouteOptions } from './agentRoutes.js'
@@ -7,15 +6,15 @@ import { verifyAgentJwt, type AgentJwtPayload } from './jwt.js'
 
 declare module 'fastify' {
   interface FastifyRequest {
-
     user?: AgentJwtPayload
   }
 }
 
-export async function agentPlugin(fastify: FastifyInstance, opts: { config: AgentConfig; routeOptions?: AgentRouteOptions }): Promise<void> {
+export async function agentPlugin(
+  fastify: FastifyInstance,
+  opts: { config: AgentConfig; routeOptions?: AgentRouteOptions },
+): Promise<void> {
   const { config } = opts
-
-
 
   fastify.addHook('onRequest', async (request) => {
     const header = request.headers.authorization ?? ''

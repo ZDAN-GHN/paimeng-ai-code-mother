@@ -8,27 +8,18 @@ import com.zdan.paimengaicodebackend.model.dto.chathistory.ChatHistoryQueryReque
 import com.zdan.paimengaicodebackend.model.entity.App;
 import com.zdan.paimengaicodebackend.model.entity.User;
 import com.zdan.paimengaicodebackend.model.vo.AppVO;
-
 import java.util.List;
 
-
 public interface AppService extends IService<App> {
-
-
     Long createApp(AppAddRequest appAddRequest, User loginUser);
-
 
     String deployApp(Long appId, User loginUser);
 
-
     void generateAppScreenshotAsync(Long appId, String appDeployUrl);
-
 
     AppVO getAppVO(App app);
 
-
     List<AppVO> getAppVOList(List<App> appList);
-
 
     QueryWrapper getQueryWrapper(AppQueryRequest appQueryRequest);
 }

@@ -1,5 +1,3 @@
-
-
 import pytest
 
 from app.api.sse import encode_stream_message, format_data, format_event

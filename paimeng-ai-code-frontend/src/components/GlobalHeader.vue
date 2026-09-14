@@ -1,7 +1,6 @@
 <template>
   <a-layout-header class="header">
     <a-row :wrap="false">
-
       <a-col flex="200px">
         <RouterLink to="/">
           <div class="header-left">
@@ -64,7 +63,6 @@ router.afterEach((to) => {
   selectedKeys.value = [to.path]
 })
 
-
 const originItems = [
   {
     key: '/',
@@ -86,7 +84,6 @@ const originItems = [
 
 const loginUser = computed(() => loginUserStore.loginUser)
 
-
 const filterMenus = (menus = [] as MenuProps['items']) => {
   return menus?.filter((menu) => {
     const menuKey = menu?.key as string
@@ -100,9 +97,7 @@ const filterMenus = (menus = [] as MenuProps['items']) => {
   })
 }
 
-
 const menuItems = computed<MenuProps['items']>(() => filterMenus(originItems))
-
 
 const handleMenuClick: MenuProps['onClick'] = (e) => {
   const key = e.key as string
@@ -112,7 +107,6 @@ const handleMenuClick: MenuProps['onClick'] = (e) => {
     router.push(key)
   }
 }
-
 
 const doLogout = async () => {
   const res = await userLogout()

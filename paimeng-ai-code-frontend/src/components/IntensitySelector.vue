@@ -28,12 +28,9 @@
 </template>
 
 <script setup lang="ts">
-
-
 import { computed, ref } from 'vue'
 
 type Intensity = 'fast' | 'standard' | 'deep'
-
 
 const TIER_MULTIPLIERS: Record<Intensity, number> = {
   fast: 0.5,
@@ -41,13 +38,11 @@ const TIER_MULTIPLIERS: Record<Intensity, number> = {
   deep: 2,
 }
 
-
 const TYPE_MULTIPLIERS: Record<string, number> = {
   html: 1,
   multi_file: 2,
   vue_project: 3,
 }
-
 
 const BASE_PRICE = 100
 
@@ -58,19 +53,27 @@ const props = defineProps<{
 
 const intensity = defineModel<Intensity>({ default: 'standard' })
 
-
-const tierOptions: Array<{ value: Intensity; name: string; multiplierLabel: string; desc: string }> = [
+const tierOptions: Array<{
+  value: Intensity
+  name: string
+  multiplierLabel: string
+  desc: string
+}> = [
   { value: 'fast', name: '快速', multiplierLabel: '×1', desc: '最少轮次快速出稿，适合简单页面' },
   { value: 'standard', name: '标准', multiplierLabel: '×1', desc: '轮次与工具调用均衡，默认档位' },
-  { value: 'deep', name: '深度', multiplierLabel: '×2', desc: '更多轮次与图片配额打磨细节，耗时更长' },
+  {
+    value: 'deep',
+    name: '深度',
+    multiplierLabel: '×2',
+    desc: '更多轮次与图片配额打磨细节，耗时更长',
+  },
 ]
 
 const open = ref(false)
 
 const currentOption = computed(
-  () => tierOptions.find((option) => option.value === intensity.value) ?? tierOptions[1]
+  () => tierOptions.find((option) => option.value === intensity.value) ?? tierOptions[1],
 )
-
 
 const creditOf = (value: Intensity) => {
   const typeMultiplier = TYPE_MULTIPLIERS[props.codeGenType ?? 'html'] ?? 1
@@ -78,7 +81,6 @@ const creditOf = (value: Intensity) => {
 }
 
 const estimatedCredit = computed(() => creditOf(intensity.value))
-
 
 const select = (value: Intensity) => {
   intensity.value = value

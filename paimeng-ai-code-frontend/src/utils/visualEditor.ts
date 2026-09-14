@@ -1,4 +1,3 @@
-
 export interface ElementInfo {
   tagName: string
   id: string
@@ -23,16 +22,13 @@ export class VisualEditor {
   private iframe: HTMLIFrameElement | null = null
   private isEditMode = false
   private options: VisualEditorOptions
-
   constructor(options: VisualEditorOptions = {}) {
     this.options = options
   }
 
-
   init(iframe: HTMLIFrameElement) {
     this.iframe = iframe
   }
-
 
   enableEditMode() {
     if (!this.iframe) {
@@ -43,7 +39,6 @@ export class VisualEditor {
       this.injectEditScript()
     }, 300)
   }
-
 
   disableEditMode() {
     this.isEditMode = false
@@ -57,7 +52,6 @@ export class VisualEditor {
     })
   }
 
-
   toggleEditMode() {
     if (this.isEditMode) {
       this.disableEditMode()
@@ -67,7 +61,6 @@ export class VisualEditor {
     return this.isEditMode
   }
 
-
   syncState() {
     if (!this.isEditMode) {
       this.sendMessageToIframe({
@@ -76,13 +69,11 @@ export class VisualEditor {
     }
   }
 
-
   clearSelection() {
     this.sendMessageToIframe({
       type: 'CLEAR_SELECTION',
     })
   }
-
 
   onIframeLoad() {
     if (this.isEditMode) {
@@ -90,13 +81,11 @@ export class VisualEditor {
         this.injectEditScript()
       }, 500)
     } else {
-
       setTimeout(() => {
         this.syncState()
       }, 500)
     }
   }
-
 
   handleIframeMessage(event: MessageEvent) {
     const { type, data } = event.data
@@ -114,13 +103,11 @@ export class VisualEditor {
     }
   }
 
-
   private sendMessageToIframe(message: Record<string, unknown>) {
     if (this.iframe?.contentWindow) {
       this.iframe.contentWindow.postMessage(message, '*')
     }
   }
-
 
   private injectEditScript() {
     if (!this.iframe) return
@@ -128,7 +115,6 @@ export class VisualEditor {
     const waitForIframeLoad = () => {
       try {
         if (this.iframe!.contentWindow && this.iframe!.contentDocument) {
-
           if (this.iframe!.contentDocument.getElementById('visual-edit-script')) {
             this.sendMessageToIframe({
               type: 'TOGGLE_EDIT_MODE',
@@ -145,13 +131,11 @@ export class VisualEditor {
         } else {
           setTimeout(waitForIframeLoad, 100)
         }
-      } catch {
-      }
+      } catch {}
     }
 
     waitForIframeLoad()
   }
-
 
   private generateEditScript() {
     return `
@@ -277,7 +261,6 @@ export class VisualEditor {
              if (target === currentHoverElement || target === currentSelectedElement) return;
              if (target === document.body || target === document.documentElement) return;
              if (target.tagName === 'SCRIPT' || target.tagName === 'STYLE') return;
-
              clearHoverEffect();
              target.classList.add('edit-hover');
              currentHoverElement = target;
@@ -301,7 +284,6 @@ export class VisualEditor {
              const target = event.target;
              if (target === document.body || target === document.documentElement) return;
              if (target.tagName === 'SCRIPT' || target.tagName === 'STYLE') return;
-
              clearSelectedEffect();
              clearHoverEffect();
 

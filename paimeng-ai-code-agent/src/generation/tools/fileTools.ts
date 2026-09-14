@@ -1,48 +1,52 @@
-
-
-
-
 import path from 'node:path'
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { validateWorkspacePath } from '../workspace.js'
-
-
-
 
 export type FileToolResult =
   | { ok: true; content: string }
   | { ok: true; message: string }
   | { ok: false; error: string }
 
-
 export const IGNORED_NAMES = new Set([
-  'node_modules', '.git', 'dist', 'build', '.DS_Store',
-  '.env', 'target', '.mvn', '.idea', '.vscode', 'coverage',
+  'node_modules',
+  '.git',
+  'dist',
+  'build',
+  '.DS_Store',
+  '.env',
+  'target',
+  '.mvn',
+  '.idea',
+  '.vscode',
+  'coverage',
 ])
-
 
 export const IGNORED_EXTENSIONS = ['.log', '.tmp', '.cache', '.lock']
 
-
 export const IMPORTANT_FILES = new Set([
-  'package.json', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
-  'vite.config.js', 'vite.config.ts', 'vue.config.js',
-  'tsconfig.json', 'tsconfig.app.json', 'tsconfig.node.json',
-  'index.html', 'main.js', 'main.ts', 'app.vue', '.gitignore', 'readme.md',
+  'package.json',
+  'package-lock.json',
+  'yarn.lock',
+  'pnpm-lock.yaml',
+  'vite.config.js',
+  'vite.config.ts',
+  'vue.config.js',
+  'tsconfig.json',
+  'tsconfig.app.json',
+  'tsconfig.node.json',
+  'index.html',
+  'main.js',
+  'main.ts',
+  'app.vue',
+  '.gitignore',
+  'readme.md',
 ])
-
 
 export class FilePathError extends Error {}
 
 export class FileTools {
-
   private readonly root: string
-
-
-
-
   private readonly writtenFiles = new Set<string>()
-
 
   get filesWritten(): number {
     return this.writtenFiles.size
@@ -51,7 +55,6 @@ export class FileTools {
   constructor(workspacePath: string, workspaceRoot: string) {
     this.root = validateWorkspacePath(workspacePath, workspaceRoot)
   }
-
 
   private resolve(relativePath: string): string {
     if (!relativePath) {
@@ -63,7 +66,6 @@ export class FileTools {
     }
     return candidate
   }
-
 
   private async readExistingFile(target: string): Promise<string | null> {
     try {
@@ -92,7 +94,11 @@ export class FileTools {
       : { ok: true, content }
   }
 
-  async modifyFile(relativeFilePath: string, oldContent: string, newContent: string): Promise<FileToolResult> {
+  async modifyFile(
+    relativeFilePath: string,
+    oldContent: string,
+    newContent: string,
+  ): Promise<FileToolResult> {
     const target = this.resolve(relativeFilePath)
     const originalContent = await this.readExistingFile(target)
     if (originalContent === null) {
@@ -117,7 +123,6 @@ export class FileTools {
     try {
       info = await stat(target)
     } catch {
-
       return { ok: true, message: `文件不存在，无需删除 - ${relativeFilePath}` }
     }
     if (!info.isFile()) {
@@ -132,7 +137,6 @@ export class FileTools {
     return { ok: true, message: `文件删除成功: ${relativeFilePath}` }
   }
 
-
   async readDir(relativeDirPath?: string): Promise<FileToolResult> {
     const root = relativeDirPath ? this.resolve(relativeDirPath) : this.root
     let info
@@ -146,7 +150,7 @@ export class FileTools {
     }
     const files: { rel: string; depth: number }[] = []
     await this.walk(root, root, files)
-    files.sort((a, b) => (a.depth - b.depth) || a.rel.localeCompare(b.rel))
+    files.sort((a, b) => a.depth - b.depth || a.rel.localeCompare(b.rel))
     const lines = ['项目目录结构:']
     for (const file of files) {
       lines.push('  '.repeat(file.depth) + path.basename(file.rel))
@@ -154,8 +158,11 @@ export class FileTools {
     return { ok: true, content: lines.join('\n') }
   }
 
-
-  private async walk(dir: string, base: string, out: { rel: string; depth: number }[]): Promise<void> {
+  private async walk(
+    dir: string,
+    base: string,
+    out: { rel: string; depth: number }[],
+  ): Promise<void> {
     let entries
     try {
       entries = await readdir(dir, { withFileTypes: true })

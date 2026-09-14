@@ -1,23 +1,18 @@
-
 import { existsSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 
-
 export class WorkspacePathError extends Error {}
-
 
 function realpathShallow(target: string): string {
   if (existsSync(target)) {
     try {
       return realpathSync(target)
-    } catch {
-    }
+    } catch {}
   }
   const parent = path.dirname(target)
   if (parent === target) return target
   return path.join(realpathShallow(parent), path.basename(target))
 }
-
 
 export function validateWorkspacePath(workspacePath: string, workspaceRoot: string): string {
   if (!workspacePath || !path.isAbsolute(workspacePath)) {

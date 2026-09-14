@@ -15,7 +15,6 @@ import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
-
 @Component
 @Aspect
 public class AuthInterceptor {
@@ -26,9 +25,9 @@ public class AuthInterceptor {
         this.userService = userService;
     }
 
-
     @Around("@annotation(authCheck)")
-    public Object doInterceptor(ProceedingJoinPoint joinPoint, AuthCheck authCheck) throws Throwable {
+    public Object doInterceptor(ProceedingJoinPoint joinPoint, AuthCheck authCheck)
+        throws Throwable {
         String mustRole = authCheck.mustRole();
         RequestAttributes requestAttributes = RequestContextHolder.currentRequestAttributes();
         HttpServletRequest request = ((ServletRequestAttributes) requestAttributes).getRequest();
@@ -39,7 +38,6 @@ public class AuthInterceptor {
         if (mustRoleEnum == null) {
             return joinPoint.proceed();
         }
-
 
         UserRoleEnum userRoleEnum = UserRoleEnum.getEnumByValue(loginUser.getUserRole());
 

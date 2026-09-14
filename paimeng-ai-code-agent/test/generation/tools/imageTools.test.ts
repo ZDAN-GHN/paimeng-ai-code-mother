@@ -1,6 +1,3 @@
-
-
-
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_IMAGE_QUOTA,
@@ -13,24 +10,28 @@ import {
 } from '../../../src/generation/tools/imageTools.js'
 import { DEFAULT_IMAGE_MODEL } from '../../../src/server/config.js'
 
-
 const config: ImageConfig = {
   pexelsApiKey: 'pexels-key',
   dashscopeApiKey: 'dashscope-key',
   imageModel: DEFAULT_IMAGE_MODEL,
 }
 
-
 function fakeHttp(jsonData: unknown, ok = true): HttpResponse {
   return { ok, json: () => Promise.resolve(jsonData) }
 }
-
 
 function imagesOf(result: ImageToolResult): unknown[] {
   return result.ok ? result.images : []
 }
 
-function makeTools(overrides: { http?: HttpClient; renderer?: (code: string, file: string) => Promise<void>; quota?: number; config?: ImageConfig } = {}): ImageTools {
+function makeTools(
+  overrides: {
+    http?: HttpClient
+    renderer?: (code: string, file: string) => Promise<void>
+    quota?: number
+    config?: ImageConfig
+  } = {},
+): ImageTools {
   return new ImageTools(overrides.config ?? config, {
     http: overrides.http ?? {
       get: () => Promise.resolve(fakeHttp({})),
@@ -68,7 +69,8 @@ describe('ImageTools 图片四工具（语义对齐旧实现）', () => {
   it('DashScope Logo 生成解析 results 地址', async () => {
     const http: HttpClient = {
       get: () => Promise.resolve(fakeHttp({})),
-      post: () => Promise.resolve(fakeHttp({ output: { results: [{ url: 'http://x/logo.png' }] } })),
+      post: () =>
+        Promise.resolve(fakeHttp({ output: { results: [{ url: 'http://x/logo.png' }] } })),
     }
     const tools = makeTools({ http })
     const result = await tools.generateLogos('科技公司 Logo')
@@ -77,7 +79,11 @@ describe('ImageTools 图片四工具（语义对齐旧实现）', () => {
   })
 
   it('mmdc 渲染失败时返回空列表且不消耗配额（输出硬上限：失败返还）', async () => {
-    const tools = makeTools({ renderer: async () => { throw new Error('no mmdc') } })
+    const tools = makeTools({
+      renderer: async () => {
+        throw new Error('no mmdc')
+      },
+    })
     const result = await tools.generateArchitectureDiagram('graph TD;A-->B', '架构')
     expect(result).toEqual({ ok: true, images: [] })
     expect(tools.remainingQuota).toBe(DEFAULT_IMAGE_QUOTA)
@@ -86,7 +92,9 @@ describe('ImageTools 图片四工具（语义对齐旧实现）', () => {
   it('Mermaid 代码为空时不调用渲染器且不消耗配额', async () => {
     let called = false
     const tools = makeTools({
-      renderer: async () => { called = true },
+      renderer: async () => {
+        called = true
+      },
     })
     const result = await tools.generateArchitectureDiagram('', '架构')
     expect(result).toEqual({ ok: true, images: [] })
@@ -118,18 +126,20 @@ describe('ImageTools 图片四工具（语义对齐旧实现）', () => {
       get: () =>
         Promise.resolve(
           fakeHttp({
-            photos: Array.from({ length: 12 }, (_, i) => ({ alt: `p${i}`, src: { medium: `http://x/${i}.jpg` } })),
+            photos: Array.from({ length: 12 }, (_, i) => ({
+              alt: `p${i}`,
+              src: { medium: `http://x/${i}.jpg` },
+            })),
           }),
         ),
-      post: () => Promise.resolve(fakeHttp({ output: { results: [{ url: 'http://x/logo.png' }] } })),
+      post: () =>
+        Promise.resolve(fakeHttp({ output: { results: [{ url: 'http://x/logo.png' }] } })),
     }
     const tools = makeTools({ http })
-
 
     const first = await tools.searchContentImages('猫')
     expect(imagesOf(first)).toHaveLength(DEFAULT_IMAGE_QUOTA)
     expect(tools.remainingQuota).toBe(0)
-
 
     const rejected = await tools.searchContentImages('狗')
     expect(rejected.ok).toBe(false)

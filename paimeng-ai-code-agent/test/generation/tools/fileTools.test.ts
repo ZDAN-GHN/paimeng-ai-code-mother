@@ -1,18 +1,18 @@
-
-
-
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { FileTools, FilePathError, IGNORED_NAMES, type FileToolResult } from '../../../src/generation/tools/fileTools.js'
+import {
+  FileTools,
+  FilePathError,
+  IGNORED_NAMES,
+  type FileToolResult,
+} from '../../../src/generation/tools/fileTools.js'
 import { validateWorkspacePath } from '../../../src/generation/workspace.js'
-
 
 function contentOf(result: FileToolResult): string {
   return 'content' in result ? result.content : ''
 }
-
 
 function makeTools(): { tools: FileTools; root: string } {
   const workspaceRoot = mkdtempSync(path.join(tmpdir(), 'paimeng-filetools-'))
@@ -28,7 +28,9 @@ describe('FileTools 文件类工具（语义对齐旧实现）', () => {
     const result = await tools.writeFile('src/components/Button.vue', '<template>hi</template>')
     expect(result).toEqual({ ok: true, message: '文件写入成功：src/components/Button.vue' })
     const { readFile } = await import('node:fs/promises')
-    expect(await readFile(path.join(root, 'src/components/Button.vue'), 'utf8')).toBe('<template>hi</template>')
+    expect(await readFile(path.join(root, 'src/components/Button.vue'), 'utf8')).toBe(
+      '<template>hi</template>',
+    )
   })
 
   it('已写文件计数：writeFile/modifyFile 落盘计数，同文件去重，删除减计数（#10 落盘文件数语义）', async () => {
@@ -71,7 +73,10 @@ describe('FileTools 文件类工具（语义对齐旧实现）', () => {
 
   it('读不存在的文件返回 ok:false 与明确错误', async () => {
     const { tools } = makeTools()
-    expect(await tools.readFile('missing.txt')).toEqual({ ok: false, error: expect.stringContaining('文件不存在或不是文件') })
+    expect(await tools.readFile('missing.txt')).toEqual({
+      ok: false,
+      error: expect.stringContaining('文件不存在或不是文件'),
+    })
   })
 
   it('修改文件用新内容替换旧内容', async () => {
@@ -93,8 +98,14 @@ describe('FileTools 文件类工具（语义对齐旧实现）', () => {
   it('删除普通文件成功', async () => {
     const { tools } = makeTools()
     await tools.writeFile('tmp.txt', 'x')
-    expect(await tools.deleteFile('tmp.txt')).toEqual({ ok: true, message: '文件删除成功: tmp.txt' })
-    expect(await tools.readFile('tmp.txt')).toEqual({ ok: false, error: expect.stringContaining('文件不存在或不是文件') })
+    expect(await tools.deleteFile('tmp.txt')).toEqual({
+      ok: true,
+      message: '文件删除成功: tmp.txt',
+    })
+    expect(await tools.readFile('tmp.txt')).toEqual({
+      ok: false,
+      error: expect.stringContaining('文件不存在或不是文件'),
+    })
   })
 
   it('重要文件（如 package.json）不允许删除', async () => {
@@ -127,7 +138,10 @@ describe('FileTools 文件类工具（语义对齐旧实现）', () => {
 
   it('目录不存在时返回 ok:false 与明确错误', async () => {
     const { tools } = makeTools()
-    expect(await tools.readDir('missing-dir')).toEqual({ ok: false, error: expect.stringContaining('目录不存在或不是目录') })
+    expect(await tools.readDir('missing-dir')).toEqual({
+      ok: false,
+      error: expect.stringContaining('目录不存在或不是目录'),
+    })
   })
 
   it('相对路径带 .. 越界被拒绝', async () => {

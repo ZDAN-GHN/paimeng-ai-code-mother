@@ -2,9 +2,7 @@ import { useLoginUserStore } from '@/stores/loginUser'
 import { message } from 'ant-design-vue'
 import router from '@/router'
 
-
 let firstFetchLoginUser = true
-
 
 router.beforeEach(async (to, from, next) => {
   const loginUserStore = useLoginUserStore()

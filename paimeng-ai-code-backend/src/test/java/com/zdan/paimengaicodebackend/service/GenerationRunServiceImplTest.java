@@ -1,5 +1,9 @@
 package com.zdan.paimengaicodebackend.service;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
 import com.zdan.paimengaicodebackend.ai.agent.AgentProperties;
 import com.zdan.paimengaicodebackend.exception.BusinessException;
 import com.zdan.paimengaicodebackend.exception.ConcurrentRunException;
@@ -17,12 +21,6 @@ import com.zdan.paimengaicodebackend.model.enums.CreditLedgerStatusEnum;
 import com.zdan.paimengaicodebackend.model.vo.CreditFreezeVO;
 import com.zdan.paimengaicodebackend.model.vo.RunVO;
 import com.zdan.paimengaicodebackend.service.impl.GenerationRunServiceImpl;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.redisson.api.RRateLimiter;
-import org.redisson.api.RedissonClient;
-import org.springframework.test.util.ReflectionTestUtils;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -31,11 +29,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
-
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.redisson.api.RRateLimiter;
+import org.redisson.api.RedissonClient;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class GenerationRunServiceImplTest {
 
@@ -56,7 +54,13 @@ class GenerationRunServiceImplTest {
         redissonClient = mock(RedissonClient.class);
         rateLimiter = mock(RRateLimiter.class);
         when(redissonClient.getRateLimiter(anyString())).thenReturn(rateLimiter);
-        service = new GenerationRunServiceImpl(appService, chatHistoryService, redissonClient, new AgentProperties(), creditService);
+        service = new GenerationRunServiceImpl(
+            appService,
+            chatHistoryService,
+            redissonClient,
+            new AgentProperties(),
+            creditService
+        );
         ReflectionTestUtils.setField(service, "mapper", mapper);
     }
 
@@ -78,7 +82,6 @@ class GenerationRunServiceImplTest {
         return run;
     }
 
-
     @Test
     void createRunInsertsNewRun() {
         when(mapper.selectOneById("run-new")).thenReturn(null);
@@ -94,7 +97,6 @@ class GenerationRunServiceImplTest {
         verify(mapper, times(1)).insert(any(GenerationRun.class), anyBoolean());
     }
 
-
     @Test
     void createRunIdempotentReturnsExisting() {
         when(mapper.selectOneById("run-dup")).thenReturn(run("run-dup", 1L, "coding"));
@@ -106,18 +108,17 @@ class GenerationRunServiceImplTest {
         verify(mapper, never()).insert(any(GenerationRun.class));
     }
 
-
     @Test
     void createRunRejectsConcurrentActiveRun() {
         when(mapper.selectOneById("run-2")).thenReturn(null);
         when(mapper.selectListByQuery(any())).thenReturn(List.of(run("run-1", 1L, "coding")));
 
-        ConcurrentRunException ex = assertThrows(ConcurrentRunException.class,
-                () -> service.createRun(createRequest("run-2", 1L, "interview")));
+        ConcurrentRunException ex = assertThrows(ConcurrentRunException.class, () ->
+            service.createRun(createRequest("run-2", 1L, "interview"))
+        );
         assertEquals("当前有进行中的任务", ex.getMessage());
         verify(mapper, never()).insert(any(GenerationRun.class));
     }
-
 
     @Test
     void createRunAllowsAfterTerminalRun() {
@@ -131,23 +132,23 @@ class GenerationRunServiceImplTest {
         verify(mapper, times(1)).insert(any(GenerationRun.class), anyBoolean());
     }
 
-
     @Test
     void createRunRejectsInvalidPhase() {
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> service.createRun(createRequest("run-x", 1L, "not-a-phase")));
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+            service.createRun(createRequest("run-x", 1L, "not-a-phase"))
+        );
         assertEquals("phase 非法", ex.getMessage());
     }
-
 
     @Test
     void createRunRejectsInvalidJsonContext() {
         RunCreateRequest request = createRequest("run-x", 1L, "interview");
         request.setContext("not json");
-        BusinessException ex = assertThrows(BusinessException.class, () -> service.createRun(request));
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+            service.createRun(request)
+        );
         assertEquals("context 必须是合法 JSON", ex.getMessage());
     }
-
 
     @Test
     void updateRunIdempotentSkipsWhenUnchanged() {
@@ -160,7 +161,6 @@ class GenerationRunServiceImplTest {
         assertEquals("coding", vo.getPhase());
         verify(mapper, never()).update(any(GenerationRun.class));
     }
-
 
     @Test
     void updateRunAppliesChangesAndSetsFinishedTimeOnTerminal() {
@@ -176,18 +176,20 @@ class GenerationRunServiceImplTest {
 
         assertEquals("done", vo.getPhase());
         assertNotNull(vo.getFinishedTime());
-        verify(mapper, times(1)).update(argThat(run -> run.getFinishedTime() != null), anyBoolean());
+        verify(mapper, times(1)).update(
+            argThat(run -> run.getFinishedTime() != null),
+            anyBoolean()
+        );
     }
-
 
     @Test
     void updateRunNotFoundThrows() {
         when(mapper.selectOneById("nope")).thenReturn(null);
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> service.updateRun("nope", new RunUpdateRequest()));
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+            service.updateRun("nope", new RunUpdateRequest())
+        );
         assertEquals("运行不存在", ex.getMessage());
     }
-
 
     @Test
     void getLatestNonTerminalRunReturnsNullWhenNone() {
@@ -195,19 +197,18 @@ class GenerationRunServiceImplTest {
         assertNull(service.getLatestNonTerminalRun(1L, null));
     }
 
-
     @Test
     void getLatestNonTerminalRunReturnsRun() {
-        when(mapper.selectListByQuery(any())).thenReturn(List.of(run("run-1", 1L, "wireframe_pending")));
+        when(mapper.selectListByQuery(any())).thenReturn(
+            List.of(run("run-1", 1L, "wireframe_pending"))
+        );
         RunVO vo = service.getLatestNonTerminalRun(1L, null);
         assertNotNull(vo);
         assertEquals("run-1", vo.getRunId());
     }
 
-
     @Test
     void createRunConcurrentUnderThreadsExactlyOneSucceeds() throws Exception {
-
         AtomicReference<List<GenerationRun>> activeRuns = new AtomicReference<>(new ArrayList<>());
         when(mapper.selectOneById(anyString())).thenAnswer(inv -> {
             String runId = inv.getArgument(0);
@@ -252,12 +253,15 @@ class GenerationRunServiceImplTest {
         start.countDown();
         pool.shutdown();
         assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS));
-
         assertEquals(1, success.get(), "恰有一个 run 创建成功");
         assertEquals(threads - 1, conflict.get(), "其余被并发拒绝");
     }
 
-    private AgentCompleteRequest completeRequest(String runId, String status, String workspacePath) {
+    private AgentCompleteRequest completeRequest(
+        String runId,
+        String status,
+        String workspacePath
+    ) {
         AgentCompleteRequest request = new AgentCompleteRequest();
         request.setAppId(1L);
         request.setUserId(1L);
@@ -273,7 +277,6 @@ class GenerationRunServiceImplTest {
         return message;
     }
 
-
     @Test
     void completeRunSuccessWritesHistoryAndBuilds() {
         App app = new App();
@@ -285,9 +288,13 @@ class GenerationRunServiceImplTest {
         request.setMessages(List.of(message("user", "hello"), message("ai", "<html>page</html>")));
         service.completeRun("run-1", request);
 
-        verify(chatHistoryService, times(2)).addChatMessage(eq(1L), anyString(), anyString(), any(User.class));
+        verify(chatHistoryService, times(2)).addChatMessage(
+            eq(1L),
+            anyString(),
+            anyString(),
+            any(User.class)
+        );
     }
-
 
     @Test
     void completeRunFailedWritesErrorHistory() {
@@ -300,10 +307,13 @@ class GenerationRunServiceImplTest {
         request.setErrorCode("model-error");
         service.completeRun("run-1", request);
 
-        verify(chatHistoryService, times(1))
-                .addChatMessage(eq(1L), eq("生成失败[model-error]:boom"), eq("ai"), any(User.class));
+        verify(chatHistoryService, times(1)).addChatMessage(
+            eq(1L),
+            eq("生成失败[model-error]:boom"),
+            eq("ai"),
+            any(User.class)
+        );
     }
-
 
     @Test
     void completeRunNormalizesUnknownFailureCode() {
@@ -316,9 +326,13 @@ class GenerationRunServiceImplTest {
         request.setErrorCode("future-code");
         service.completeRun("run-1", request);
 
-        verify(chatHistoryService).addChatMessage(eq(1L), eq("生成失败[unknown]:boom"), eq("ai"), any(User.class));
+        verify(chatHistoryService).addChatMessage(
+            eq(1L),
+            eq("生成失败[unknown]:boom"),
+            eq("ai"),
+            any(User.class)
+        );
     }
-
 
     @Test
     void completeRunIdempotentSkipsRepeat() {
@@ -332,34 +346,38 @@ class GenerationRunServiceImplTest {
         service.completeRun("run-1", request);
         service.completeRun("run-1", request);
 
-        verify(chatHistoryService, times(1)).addChatMessage(anyLong(), anyString(), anyString(), any(User.class));
+        verify(chatHistoryService, times(1)).addChatMessage(
+            anyLong(),
+            anyString(),
+            anyString(),
+            any(User.class)
+        );
     }
-
 
     @Test
     void completeRunRejectsInvalidStatus() {
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> service.completeRun("run-1", completeRequest("run-1", "unknown", "/tmp/ws")));
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+            service.completeRun("run-1", completeRequest("run-1", "unknown", "/tmp/ws"))
+        );
         assertEquals("status 仅接受 success/failed/aborted", ex.getMessage());
     }
 
-
     @Test
     void completeRunRejectsMissingWorkspaceOnSuccess() {
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> service.completeRun("run-1", completeRequest("run-1", "success", null)));
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+            service.completeRun("run-1", completeRequest("run-1", "success", null))
+        );
         assertEquals("workspacePath 不能为空", ex.getMessage());
     }
-
 
     @Test
     void completeRunRejectsMissingApp() {
         when(appService.getById(1L)).thenReturn(null);
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> service.completeRun("run-1", completeRequest("run-1", "success", "/tmp/ws")));
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+            service.completeRun("run-1", completeRequest("run-1", "success", "/tmp/ws"))
+        );
         assertEquals("应用不存在", ex.getMessage());
     }
-
 
     @Test
     void acquireWireframeQuotaSucceeds() {
@@ -369,30 +387,27 @@ class GenerationRunServiceImplTest {
         verify(rateLimiter).trySetRate(any(), eq(10L), any());
     }
 
-
     @Test
     void acquireWireframeQuotaExceededThrows() {
         when(rateLimiter.tryAcquire(1)).thenReturn(false);
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> service.acquireWireframeDailyQuota(1L));
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+            service.acquireWireframeDailyQuota(1L)
+        );
         assertEquals("今日线框生成次数已用完，请明天再试", ex.getMessage());
     }
 
-
     @Test
     void acquireWireframeQuotaRejectsInvalidUserId() {
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> service.acquireWireframeDailyQuota(null));
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+            service.acquireWireframeDailyQuota(null)
+        );
         assertEquals("userId 不能为空", ex.getMessage());
         verify(redissonClient, never()).getRateLimiter(anyString());
     }
 
-
-
     private GenerationRun terminalRunEntity(String runId, String phase) {
         return run(runId, 1L, phase);
     }
-
 
     @Test
     void completeRunSuccessSettlesCreditAndMarksDone() {
@@ -408,11 +423,11 @@ class GenerationRunServiceImplTest {
 
         verify(creditService).settleRun("run-1");
         verify(creditService, never()).refundRun(anyString(), any(), any(), any());
-
-        verify(mapper).update(argThat(r -> "done".equals(r.getPhase())
-                && "run-1".equals(r.getRunId())), anyBoolean());
+        verify(mapper).update(
+            argThat(r -> "done".equals(r.getPhase()) && "run-1".equals(r.getRunId())),
+            anyBoolean()
+        );
     }
-
 
     @Test
     void completeRunFailedRefundsAndMarksFailed() {
@@ -425,13 +440,23 @@ class GenerationRunServiceImplTest {
         request.setErrorMessage("boom");
         service.completeRun("run-1", request);
 
-        verify(creditService).refundRun(eq("run-1"), eq(AgentCompleteStatusEnum.FAILED), isNull(), any());
-        verify(chatHistoryService, times(1))
-                .addChatMessage(eq(1L), eq("生成失败[unknown]:boom"), eq("ai"), any(User.class));
-        verify(mapper).update(argThat(r -> "failed".equals(r.getPhase())
-                && "run-1".equals(r.getRunId())), anyBoolean());
+        verify(creditService).refundRun(
+            eq("run-1"),
+            eq(AgentCompleteStatusEnum.FAILED),
+            isNull(),
+            any()
+        );
+        verify(chatHistoryService, times(1)).addChatMessage(
+            eq(1L),
+            eq("生成失败[unknown]:boom"),
+            eq("ai"),
+            any(User.class)
+        );
+        verify(mapper).update(
+            argThat(r -> "failed".equals(r.getPhase()) && "run-1".equals(r.getRunId())),
+            anyBoolean()
+        );
     }
-
 
     @Test
     void completeRunAbortedMarksHistoryAndRefundsPartial() {
@@ -445,16 +470,24 @@ class GenerationRunServiceImplTest {
         request.setMessages(List.of(message("user", "hello"), message("ai", "已保留 2 个文件")));
         service.completeRun("run-1", request);
 
-
-        verify(chatHistoryService).addChatMessage(eq(1L), eq("[用户中断] 已保留 2 个文件"), eq("ai"), any(User.class));
-
-        verify(creditService).refundRun(eq("run-1"), eq(AgentCompleteStatusEnum.ABORTED), eq(2), isNull());
+        verify(chatHistoryService).addChatMessage(
+            eq(1L),
+            eq("[用户中断] 已保留 2 个文件"),
+            eq("ai"),
+            any(User.class)
+        );
+        verify(creditService).refundRun(
+            eq("run-1"),
+            eq(AgentCompleteStatusEnum.ABORTED),
+            eq(2),
+            isNull()
+        );
         verify(creditService, never()).settleRun(anyString());
-
-        verify(mapper).update(argThat(r -> "aborted".equals(r.getPhase())
-                && "run-1".equals(r.getRunId())), anyBoolean());
+        verify(mapper).update(
+            argThat(r -> "aborted".equals(r.getPhase()) && "run-1".equals(r.getRunId())),
+            anyBoolean()
+        );
     }
-
 
     @Test
     void completeRunAbortedNoFileRefundsFull() {
@@ -467,18 +500,20 @@ class GenerationRunServiceImplTest {
         request.setFilesWritten(0);
         service.completeRun("run-1", request);
 
-        verify(creditService).refundRun(eq("run-1"), eq(AgentCompleteStatusEnum.ABORTED), eq(0), any());
+        verify(creditService).refundRun(
+            eq("run-1"),
+            eq(AgentCompleteStatusEnum.ABORTED),
+            eq(0),
+            any()
+        );
         verify(creditService, never()).settleRun(anyString());
     }
-
-
 
     private CreditFreezeRequest freezeRequest(String intensity) {
         CreditFreezeRequest request = new CreditFreezeRequest();
         request.setIntensity(intensity);
         return request;
     }
-
 
     @Test
     void freezeCreditSucceedsAndLinksLedgerRef() {
@@ -492,9 +527,11 @@ class GenerationRunServiceImplTest {
         CreditFreezeVO result = service.freezeCredit("run-1", freezeRequest("standard"));
 
         assertEquals(9L, result.getLedgerId());
-        verify(mapper).update(argThat(r -> "run-1".equals(r.getRunId()) && "9".equals(r.getCreditLedgerRef())), anyBoolean());
+        verify(mapper).update(
+            argThat(r -> "run-1".equals(r.getRunId()) && "9".equals(r.getCreditLedgerRef())),
+            anyBoolean()
+        );
     }
-
 
     @Test
     void freezeCreditIdempotentReturnsExisting() {
@@ -516,25 +553,24 @@ class GenerationRunServiceImplTest {
         verify(creditService, never()).freeze(anyString(), any(), any(), any());
     }
 
-
     @Test
     void freezeCreditRejectsNonConfirmedPhase() {
         when(mapper.selectOneById("run-1")).thenReturn(run("run-1", 1L, "wireframe_pending"));
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> service.freezeCredit("run-1", freezeRequest("standard")));
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+            service.freezeCredit("run-1", freezeRequest("standard"))
+        );
         assertEquals("当前阶段（wireframe_pending）不能冻结积分，请先确认线框", ex.getMessage());
         verify(creditService, never()).freeze(anyString(), any(), any(), any());
     }
 
-
     @Test
     void freezeCreditRejectsMissingRun() {
         when(mapper.selectOneById("run-1")).thenReturn(null);
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> service.freezeCredit("run-1", freezeRequest("standard")));
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+            service.freezeCredit("run-1", freezeRequest("standard"))
+        );
         assertEquals("运行不存在", ex.getMessage());
     }
-
 
     @Test
     void completeRunAbortedPassesMilestoneCount() {
@@ -549,9 +585,13 @@ class GenerationRunServiceImplTest {
         request.setFilesWritten(1);
         service.completeRun("run-1", request);
 
-        verify(creditService).refundRun(eq("run-1"), eq(AgentCompleteStatusEnum.ABORTED), eq(1), eq(2));
+        verify(creditService).refundRun(
+            eq("run-1"),
+            eq(AgentCompleteStatusEnum.ABORTED),
+            eq(1),
+            eq(2)
+        );
     }
-
 
     @Test
     void completeRunFailedWithEmptyAiMessage_skipsEmptyAndStillRefunds() {
@@ -565,14 +605,31 @@ class GenerationRunServiceImplTest {
         request.setMessages(List.of(message("user", "hello"), message("ai", "")));
         service.completeRun("run-1", request);
 
-
-        verify(chatHistoryService, times(1)).addChatMessage(eq(1L), eq("hello"), eq("user"), any(User.class));
-        verify(chatHistoryService, times(1)).addChatMessage(eq(1L), eq("生成失败[unknown]:boom"), eq("ai"), any(User.class));
-        verify(chatHistoryService, times(2)).addChatMessage(anyLong(), anyString(), anyString(), any(User.class));
-
-        verify(creditService).refundRun(eq("run-1"), eq(AgentCompleteStatusEnum.FAILED), isNull(), any());
+        verify(chatHistoryService, times(1)).addChatMessage(
+            eq(1L),
+            eq("hello"),
+            eq("user"),
+            any(User.class)
+        );
+        verify(chatHistoryService, times(1)).addChatMessage(
+            eq(1L),
+            eq("生成失败[unknown]:boom"),
+            eq("ai"),
+            any(User.class)
+        );
+        verify(chatHistoryService, times(2)).addChatMessage(
+            anyLong(),
+            anyString(),
+            anyString(),
+            any(User.class)
+        );
+        verify(creditService).refundRun(
+            eq("run-1"),
+            eq(AgentCompleteStatusEnum.FAILED),
+            isNull(),
+            any()
+        );
     }
-
 
     @Test
     void completeRunLateSuccessAfterAborted_rejected() {
@@ -585,40 +642,48 @@ class GenerationRunServiceImplTest {
         request.setMessages(List.of(message("ai", "<html>page</html>")));
         service.completeRun("run-1", request);
 
-        verify(chatHistoryService, never()).addChatMessage(anyLong(), anyString(), anyString(), any(User.class));
+        verify(chatHistoryService, never()).addChatMessage(
+            anyLong(),
+            anyString(),
+            anyString(),
+            any(User.class)
+        );
         verify(creditService, never()).settleRun(anyString());
         verify(creditService, never()).refundRun(anyString(), any(), any(), any());
-
         verify(mapper, never()).update(any(GenerationRun.class), anyBoolean());
     }
-
 
     @Test
     void completeRunLedgerAlreadyTerminal_skipsLateCallback() {
         CreditLedger settled = CreditLedger.builder()
-                .id(9L)
-                .runId("run-1")
-                .status(CreditLedgerStatusEnum.SETTLED.getValue())
-                .build();
+            .id(9L)
+            .runId("run-1")
+            .status(CreditLedgerStatusEnum.SETTLED.getValue())
+            .build();
         when(creditService.getByRunId("run-1")).thenReturn(settled);
 
         AgentCompleteRequest request = completeRequest("run-1", "success", "/tmp/ws/html_1");
         request.setMessages(List.of(message("ai", "<html>page</html>")));
         service.completeRun("run-1", request);
 
-        verify(chatHistoryService, never()).addChatMessage(anyLong(), anyString(), anyString(), any(User.class));
+        verify(chatHistoryService, never()).addChatMessage(
+            anyLong(),
+            anyString(),
+            anyString(),
+            any(User.class)
+        );
         verify(creditService, never()).settleRun(anyString());
         verify(creditService, never()).refundRun(anyString(), any(), any(), any());
     }
 
     private CreditLedger frozenLedgerEntity() {
         return CreditLedger.builder()
-                .id(9L)
-                .runId("run-1")
-                .userId(1L)
-                .appId(1L)
-                .status(CreditLedgerStatusEnum.FROZEN.getValue())
-                .frozenAmount(100)
-                .build();
+            .id(9L)
+            .runId("run-1")
+            .userId(1L)
+            .appId(1L)
+            .status(CreditLedgerStatusEnum.FROZEN.getValue())
+            .frozenAmount(100)
+            .build();
     }
 }

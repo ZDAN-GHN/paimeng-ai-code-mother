@@ -1,5 +1,3 @@
-
-
 import json
 import logging
 from collections.abc import AsyncIterator, Callable
@@ -31,7 +29,9 @@ def _normalize_vue_event(item: dict) -> StreamMessage:
         return AiThinkingMessage(text=str(item.get("text", "")))
     if event_type == "tool_request":
         return ToolRequestMessage(
-            id=str(item["id"]), name=str(item["name"]), arguments=str(item.get("arguments", ""))
+            id=str(item["id"]),
+            name=str(item["name"]),
+            arguments=str(item.get("arguments", "")),
         )
     if event_type == "tool_executed":
         return ToolExecutedMessage(
@@ -58,8 +58,6 @@ async def stream_events(
 
     callback = callback or send_request_callback
     guardrail = guardrail or PromptSafetyInputGuardrail()
-
-
     guardrail_result = guardrail.validate(request.message)
     if not guardrail_result.is_allowed:
         yield _error_event(guardrail_result.reason)
@@ -68,30 +66,25 @@ async def stream_events(
 
     executor = executor or CodeGenServiceExecutor()
     code_gen_type = request.codeGenType
-
     file_tools = (
         FileTools(str(validate_workspace_path(request.workspacePath)))
         if code_gen_type == "vue_project"
         else None
     )
     text_parts: list[str] = []
-
     try:
         for item in executor.stream(code_gen_type, request.message, file_tools):
             if code_gen_type == "vue_project":
-
                 yield encode_stream_message(_normalize_vue_event(item))
             else:
-
                 text = str(item)
                 yield format_data(text)
                 text_parts.append(text)
 
-
         if code_gen_type in ("html", "multi_file") and text_parts:
-            write_generated_code(request.workspacePath, code_gen_type, "".join(text_parts))
-
-
+            write_generated_code(
+                request.workspacePath, code_gen_type, "".join(text_parts)
+            )
         _fire_callback(callback, request, "success")
     except Exception as exc:  # noqa: BLE001
         logger.exception("代码生成失败: %s", exc)

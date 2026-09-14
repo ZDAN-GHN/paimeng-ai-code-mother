@@ -1,5 +1,3 @@
-
-
 import re
 from dataclasses import dataclass, field
 
@@ -10,16 +8,12 @@ JS_PATTERN = re.compile(r"```(?:js|javascript)\s*\n([\s\S]*?)```", re.IGNORECASE
 
 @dataclass
 class HtmlCodeResult:
-
-
     html_code: str = ""
     description: str = ""
 
 
 @dataclass
 class MultiFileCodeResult:
-
-
     html_code: str = ""
     css_code: str = ""
     js_code: str = ""

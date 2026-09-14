@@ -2,6 +2,7 @@ package com.zdan.paimengaicodebackend.controller;
 
 import com.zdan.paimengaicodebackend.constant.AppConstant;
 import jakarta.servlet.http.HttpServletRequest;
+import java.io.File;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
@@ -13,26 +14,22 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.HandlerMapping;
 
-import java.io.File;
-
-
 @RestController
 @RequestMapping("/static")
 public class StaticResourceController {
 
-
     private static final String PREVIEW_ROOT_DIR = AppConstant.CODE_OUTPUT_ROOT_DIR;
-
 
     @GetMapping("/{deployKey}/**")
     public ResponseEntity<Resource> serveStaticResource(
-            @PathVariable String deployKey,
-            HttpServletRequest request) {
+        @PathVariable String deployKey,
+        HttpServletRequest request
+    ) {
         try {
-
-            String resourcePath = (String) request.getAttribute(HandlerMapping.PATH_WITHIN_HANDLER_MAPPING_ATTRIBUTE);
+            String resourcePath = (String) request.getAttribute(
+                HandlerMapping.PATH_WITHIN_HANDLER_MAPPING_ATTRIBUTE
+            );
             resourcePath = resourcePath.substring(("/static/" + deployKey).length());
-
             if (resourcePath.isEmpty()) {
                 HttpHeaders headers = new HttpHeaders();
                 headers.add("Location", request.getRequestURI() + "/");
@@ -52,14 +49,12 @@ public class StaticResourceController {
 
             Resource resource = new FileSystemResource(file);
             return ResponseEntity.ok()
-                    .header("Content-Type", getContentTypeWithCharset(filePath))
-                    .body(resource);
-
+                .header("Content-Type", getContentTypeWithCharset(filePath))
+                .body(resource);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
-
 
     private String getContentTypeWithCharset(String filePath) {
         if (filePath.endsWith(".html")) return "text/html; charset=UTF-8";

@@ -1,9 +1,17 @@
 package com.zdan.paimengaicodebackend.controller;
 
-import cn.hutool.jwt.JWT;
-import cn.hutool.jwt.JWTUtil;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
+import cn.hutool.jwt.JWT;
+import cn.hutool.jwt.JWTUtil;
 import com.zdan.paimengaicodebackend.ai.agent.AgentJwtProperties;
 import com.zdan.paimengaicodebackend.ai.agent.AgentJwtService;
 import com.zdan.paimengaicodebackend.ai.agent.AgentProperties;
@@ -15,22 +23,12 @@ import com.zdan.paimengaicodebackend.model.entity.User;
 import com.zdan.paimengaicodebackend.service.AppService;
 import com.zdan.paimengaicodebackend.service.ProjectDownloadService;
 import com.zdan.paimengaicodebackend.service.UserService;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-
-import java.nio.charset.StandardCharsets;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-
 
 class AppControllerAgentTokenTest {
 
@@ -52,15 +50,19 @@ class AppControllerAgentTokenTest {
         agentProperties = new AgentProperties();
         AgentJwtProperties jwtProperties = new AgentJwtProperties();
         jwtProperties.setSecret(SECRET);
-        AppController controller = new AppController(appService, userService,
-                mock(ProjectDownloadService.class), agentProperties,
-                jwtProperties, new AgentJwtService(jwtProperties));
+        AppController controller = new AppController(
+            appService,
+            userService,
+            mock(ProjectDownloadService.class),
+            agentProperties,
+            jwtProperties,
+            new AgentJwtService(jwtProperties)
+        );
 
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
-                .setControllerAdvice(new GlobalExceptionHandler())
-                .build();
+            .setControllerAdvice(new GlobalExceptionHandler())
+            .build();
     }
-
 
     private App mockOwnedApp(Long ownerId) {
         User loginUser = new User();
@@ -74,16 +76,16 @@ class AppControllerAgentTokenTest {
         return app;
     }
 
-
     @Test
     void notLoginReturns40100() throws Exception {
-        when(userService.getLoginUser(org.mockito.ArgumentMatchers.any()))
-                .thenThrow(new BusinessException(ErrorCode.NOT_LOGIN_ERROR));
-        mockMvc.perform(get("/app/agent/token").param("appId", String.valueOf(APP_ID)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(40100));
+        when(userService.getLoginUser(org.mockito.ArgumentMatchers.any())).thenThrow(
+            new BusinessException(ErrorCode.NOT_LOGIN_ERROR)
+        );
+        mockMvc
+            .perform(get("/app/agent/token").param("appId", String.valueOf(APP_ID)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value(40100));
     }
-
 
     @Test
     void appNotFoundReturns40400() throws Exception {
@@ -91,39 +93,40 @@ class AppControllerAgentTokenTest {
         loginUser.setId(OWNER_ID);
         when(userService.getLoginUser(org.mockito.ArgumentMatchers.any())).thenReturn(loginUser);
         when(appService.getById(APP_ID)).thenReturn(null);
-        mockMvc.perform(get("/app/agent/token").param("appId", String.valueOf(APP_ID)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(40400));
+        mockMvc
+            .perform(get("/app/agent/token").param("appId", String.valueOf(APP_ID)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value(40400));
     }
-
 
     @Test
     void notOwnerReturns40101() throws Exception {
         mockOwnedApp(999L);
-        mockMvc.perform(get("/app/agent/token").param("appId", String.valueOf(APP_ID)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(40101));
+        mockMvc
+            .perform(get("/app/agent/token").param("appId", String.valueOf(APP_ID)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value(40101));
     }
-
 
     @Test
     void disabledSwitchReturns40410() throws Exception {
         mockOwnedApp(OWNER_ID);
         agentProperties.setEnabled(false);
-        mockMvc.perform(get("/app/agent/token").param("appId", String.valueOf(APP_ID)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(40410));
+        mockMvc
+            .perform(get("/app/agent/token").param("appId", String.valueOf(APP_ID)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value(40410));
     }
-
 
     @Test
     void ownerReceivesVerifiableToken() throws Exception {
         mockOwnedApp(OWNER_ID);
-        MvcResult result = mockMvc.perform(get("/app/agent/token").param("appId", String.valueOf(APP_ID)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.workspacePath").isNotEmpty())
-                .andReturn();
+        MvcResult result = mockMvc
+            .perform(get("/app/agent/token").param("appId", String.valueOf(APP_ID)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value(0))
+            .andExpect(jsonPath("$.data.workspacePath").isNotEmpty())
+            .andReturn();
         JSONObject body = JSONUtil.parseObj(result.getResponse().getContentAsString());
         JSONObject data = body.getJSONObject("data");
         String token = data.getStr("token");

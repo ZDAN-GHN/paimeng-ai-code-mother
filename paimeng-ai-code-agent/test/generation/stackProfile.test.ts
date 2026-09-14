@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { INTENSITY_TIERS } from '../../src/generation/intensity.js'
 import { PROMPT_NAMES } from '../../src/generation/prompts/index.js'
-import { DefaultBuildVerifier, DefaultVisualDiffVerifier } from '../../src/generation/review/index.js'
+import {
+  DefaultBuildVerifier,
+  DefaultVisualDiffVerifier,
+} from '../../src/generation/review/index.js'
 import { resolveBudgetLimits, resolveStackProfile } from '../../src/generation/stackProfile.js'
 
 describe('resolveStackProfile', () => {
@@ -51,7 +54,10 @@ describe('resolveStackProfile', () => {
       for (const tier of Object.values(INTENSITY_TIERS)) {
         expect(resolveBudgetLimits(tier.limits, profile.budgetScale)).toEqual({
           maxTurns: Math.round(tier.limits.maxTurns * scale.turns),
-          maxOutputTokens: Math.min(32000, Math.round(tier.limits.maxOutputTokens * scale.outputTokens)),
+          maxOutputTokens: Math.min(
+            32000,
+            Math.round(tier.limits.maxOutputTokens * scale.outputTokens),
+          ),
           maxToolCalls: Math.round(tier.limits.maxToolCalls * scale.toolCalls),
           maxImages: tier.limits.maxImages,
         })
@@ -62,6 +68,11 @@ describe('resolveStackProfile', () => {
       { maxTurns: 1, maxOutputTokens: 16001, maxToolCalls: 3, maxImages: 1 },
       { turns: 1.5, outputTokens: 3, toolCalls: 1.5 },
     )
-    expect(fractional).toEqual({ maxTurns: 2, maxOutputTokens: 32000, maxToolCalls: 5, maxImages: 1 })
+    expect(fractional).toEqual({
+      maxTurns: 2,
+      maxOutputTokens: 32000,
+      maxToolCalls: 5,
+      maxImages: 1,
+    })
   })
 })

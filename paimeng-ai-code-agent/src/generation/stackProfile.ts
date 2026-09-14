@@ -9,7 +9,6 @@ import {
 } from './review/index.js'
 import type { CodeGenType } from './review/types.js'
 
-
 export interface BudgetScale {
   turns: number
   outputTokens: number
@@ -56,11 +55,13 @@ const STACK_PROFILES: Record<CodeGenType, StackProfile> = {
 
 const MAX_OUTPUT_TOKENS = 32000
 
-
 export function resolveBudgetLimits(limits: IntensityLimits, scale: BudgetScale): IntensityLimits {
   return {
     maxTurns: Math.round(limits.maxTurns * scale.turns),
-    maxOutputTokens: Math.min(MAX_OUTPUT_TOKENS, Math.round(limits.maxOutputTokens * scale.outputTokens)),
+    maxOutputTokens: Math.min(
+      MAX_OUTPUT_TOKENS,
+      Math.round(limits.maxOutputTokens * scale.outputTokens),
+    ),
     maxToolCalls: Math.round(limits.maxToolCalls * scale.toolCalls),
     maxImages: limits.maxImages,
   }

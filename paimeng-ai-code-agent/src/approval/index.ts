@@ -46,11 +46,13 @@ export function createApprovalService(store: SessionStore): ApprovalService {
         userId: input.userId,
         turnId: input.turnId,
         batchSeq: 1,
-        events: [{
-          kind: 'approval/asked',
-          source: 'system',
-          payload: { approvalId, action: input.action, turnId: input.turnId },
-        }],
+        events: [
+          {
+            kind: 'approval/asked',
+            source: 'system',
+            payload: { approvalId, action: input.action, turnId: input.turnId },
+          },
+        ],
       })
       return { approvalId }
     },
@@ -62,11 +64,13 @@ export function createApprovalService(store: SessionStore): ApprovalService {
         userId: input.userId,
         turnId: input.turnId,
         batchSeq: 1,
-        events: [{
-          kind: 'approval/decided',
-          source: 'human',
-          payload: { approvalId: input.approvalId, decision: input.decision },
-        }],
+        events: [
+          {
+            kind: 'approval/decided',
+            source: 'human',
+            payload: { approvalId: input.approvalId, decision: input.decision },
+          },
+        ],
       })
     },
 

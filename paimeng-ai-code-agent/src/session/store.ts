@@ -21,8 +21,16 @@ export interface SessionStore {
     lastSeq: number
     hasMore: boolean
   }>
-  assertHumanApproved(input: { appId: string; approvalId: string }): Promise<{ ok: true } | { ok: false; reason: string }>
-  consumeHumanApproval(input: { appId: string; userId: string; turnId: string; approvalId: string }): Promise<{ ok: true } | { ok: false; reason: string }>
+  assertHumanApproved(input: {
+    appId: string
+    approvalId: string
+  }): Promise<{ ok: true } | { ok: false; reason: string }>
+  consumeHumanApproval(input: {
+    appId: string
+    userId: string
+    turnId: string
+    approvalId: string
+  }): Promise<{ ok: true } | { ok: false; reason: string }>
 }
 
 type EventRow = QueryResultRow & {
@@ -45,18 +53,22 @@ type EventRow = QueryResultRow & {
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
-  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))
+  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+    a.localeCompare(b),
+  )
   return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(',')}}`
 }
 
 function sameEvent(row: EventRow, event: SessionEventInput, eventIndex: number): boolean {
-  return row.event_index === eventIndex &&
+  return (
+    row.event_index === eventIndex &&
     row.kind === event.kind &&
     row.version === (event.version ?? 1) &&
     row.ignorable === (event.ignorable ?? false) &&
     row.source === event.source &&
     (row.run_id ?? null) === (event.runId ?? null) &&
     canonicalJson(row.payload) === canonicalJson(event.payload)
+  )
 }
 
 function toRecord(row: EventRow): SessionEventRecord {
@@ -74,7 +86,8 @@ function toRecord(row: EventRow): SessionEventRecord {
     ignorable: row.ignorable,
     source: row.source,
     payload: row.payload,
-    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    createdAt:
+      row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
   }
 }
 
@@ -89,7 +102,8 @@ export class PgSessionStore implements SessionStore {
     events: SessionEventInput[]
   }): Promise<{ seqFrom: number; seqTo: number; firstSeqNext: number; appended: number }> {
     if (!input.events.length) throw new Error('事件批次不能为空')
-    if (!Number.isInteger(input.batchSeq) || input.batchSeq < 1) throw new Error('batchSeq 必须为正整数')
+    if (!Number.isInteger(input.batchSeq) || input.batchSeq < 1)
+      throw new Error('batchSeq 必须为正整数')
     input.events.forEach(validateSessionEvent)
     const client = await this.pool.connect()
     try {
@@ -101,7 +115,10 @@ export class PgSessionStore implements SessionStore {
         [input.appId, input.turnId, input.batchSeq],
       )
       if (existing.rowCount) {
-        if (existing.rowCount !== input.events.length || existing.rows.some((row, index) => !sameEvent(row, input.events[index]!, index))) {
+        if (
+          existing.rowCount !== input.events.length ||
+          existing.rows.some((row, index) => !sameEvent(row, input.events[index]!, index))
+        ) {
           throw new Error('批次重放事件内容不一致')
         }
         const first = Number(existing.rows[0]?.seq)
@@ -119,8 +136,20 @@ export class PgSessionStore implements SessionStore {
           `INSERT INTO session_event
              (app_id, user_id, run_id, seq, turn_id, batch_seq, event_index, kind, version, ignorable, source, payload)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)`,
-          [input.appId, input.userId, event.runId ?? null, first + eventIndex, input.turnId, input.batchSeq,
-            eventIndex, event.kind, event.version ?? 1, event.ignorable ?? false, event.source, JSON.stringify(event.payload)],
+          [
+            input.appId,
+            input.userId,
+            event.runId ?? null,
+            first + eventIndex,
+            input.turnId,
+            input.batchSeq,
+            eventIndex,
+            event.kind,
+            event.version ?? 1,
+            event.ignorable ?? false,
+            event.source,
+            JSON.stringify(event.payload),
+          ],
         )
       }
       await client.query('COMMIT')
@@ -156,10 +185,17 @@ export class PgSessionStore implements SessionStore {
       }
       return [toRecord(row)]
     })
-    return { events, lastSeq: lastScannedSeq === undefined ? (input.afterSeq ?? 0) : Number(lastScannedSeq), hasMore }
+    return {
+      events,
+      lastSeq: lastScannedSeq === undefined ? (input.afterSeq ?? 0) : Number(lastScannedSeq),
+      hasMore,
+    }
   }
 
-  async assertHumanApproved(input: { appId: string; approvalId: string }): Promise<{ ok: true } | { ok: false; reason: string }> {
+  async assertHumanApproved(input: {
+    appId: string
+    approvalId: string
+  }): Promise<{ ok: true } | { ok: false; reason: string }> {
     const decided = await this.pool.query<{ seq: string | number; decision: unknown }>(
       `SELECT seq, payload->>'decision' AS decision FROM session_event
        WHERE app_id = $1 AND kind = 'approval/decided' AND source = 'human'
@@ -184,7 +220,12 @@ export class PgSessionStore implements SessionStore {
     return { ok: true }
   }
 
-  async consumeHumanApproval(input: { appId: string; userId: string; turnId: string; approvalId: string }): Promise<{ ok: true } | { ok: false; reason: string }> {
+  async consumeHumanApproval(input: {
+    appId: string
+    userId: string
+    turnId: string
+    approvalId: string
+  }): Promise<{ ok: true } | { ok: false; reason: string }> {
     let client: PoolClient | undefined
     try {
       client = await this.pool.connect()

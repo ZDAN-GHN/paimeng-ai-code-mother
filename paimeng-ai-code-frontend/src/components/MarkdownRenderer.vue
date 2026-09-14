@@ -7,7 +7,6 @@ import { computed } from 'vue'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 
-
 import 'highlight.js/styles/github.css'
 
 interface Props {
@@ -15,7 +14,6 @@ interface Props {
 }
 
 const props = defineProps<Props>()
-
 
 const md: MarkdownIt = new MarkdownIt({
   html: true,
@@ -29,14 +27,12 @@ const md: MarkdownIt = new MarkdownIt({
           hljs.highlight(str, { language: lang, ignoreIllegals: true }).value +
           '</code></pre>'
         )
-      } catch {
-      }
+      } catch {}
     }
 
     return '<pre class="hljs"><code>' + md.utils.escapeHtml(str) + '</code></pre>'
   },
 })
-
 
 const renderedMarkdown = computed(() => {
   return md.render(props.content)
@@ -49,7 +45,6 @@ const renderedMarkdown = computed(() => {
   color: #333;
   word-wrap: break-word;
 }
-
 
 .markdown-content :deep(h1),
 .markdown-content :deep(h2),
@@ -169,7 +164,6 @@ const renderedMarkdown = computed(() => {
   margin: 1.5em 0;
 }
 
-
 .markdown-content :deep(.hljs) {
   background-color: #f8f8f8 !important;
   border-radius: 6px;
@@ -177,7 +171,6 @@ const renderedMarkdown = computed(() => {
   font-size: 0.9em;
   line-height: 1.4;
 }
-
 
 .markdown-content :deep(.hljs-keyword) {
   color: #d73a49;

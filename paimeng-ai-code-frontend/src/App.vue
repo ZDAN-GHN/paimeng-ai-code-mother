@@ -26,7 +26,6 @@ onMounted(() => {
 </template>
 
 <style>
-
 * {
   box-sizing: border-box;
 }

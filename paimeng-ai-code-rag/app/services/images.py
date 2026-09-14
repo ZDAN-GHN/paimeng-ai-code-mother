@@ -1,5 +1,3 @@
-
-
 import json
 import logging
 import re
@@ -19,17 +17,12 @@ from app.core.config import get_settings
 from app.services.llm import create_chat_model, load_prompt
 
 logger = logging.getLogger(__name__)
-
 _IMAGE_PLAN_PROMPT = "image-collection-plan-system-prompt.txt"
 _IMAGE_COLLECTION_PROMPT = "image-collection-system-prompt.txt"
-
-
 MAX_TOOL_CALLS = 20
 
 
 class ImageCategory(StrEnum):
-
-
     CONTENT = "CONTENT"
     ILLUSTRATION = "ILLUSTRATION"
     ARCHITECTURE = "ARCHITECTURE"
@@ -37,53 +30,35 @@ class ImageCategory(StrEnum):
 
 
 class ImageResource(BaseModel):
-
-
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
-
     category: ImageCategory
     description: str = ""
     url: str
 
 
 class ImageSearchTask(BaseModel):
-
-
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
-
     query: str
 
 
 class IllustrationTask(BaseModel):
-
-
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
-
     query: str
 
 
 class DiagramTask(BaseModel):
-
-
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
-
     mermaid_code: str
     description: str = ""
 
 
 class LogoTask(BaseModel):
-
-
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
-
     description: str
 
 
 class ImageCollectionPlan(BaseModel):
-
-
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
-
     content_image_tasks: list[ImageSearchTask] = Field(default_factory=list)
     illustration_tasks: list[IllustrationTask] = Field(default_factory=list)
     diagram_tasks: list[DiagramTask] = Field(default_factory=list)
@@ -115,7 +90,9 @@ def _parse_plan(text: str) -> ImageCollectionPlan:
         return ImageCollectionPlan()
 
 
-def plan_image_collection(user_prompt: str, *, model: Any = None) -> ImageCollectionPlan:
+def plan_image_collection(
+    user_prompt: str, *, model: Any = None
+) -> ImageCollectionPlan:
 
     model = model or create_chat_model()
     system = load_prompt(_IMAGE_PLAN_PROMPT)
@@ -124,25 +101,19 @@ def plan_image_collection(user_prompt: str, *, model: Any = None) -> ImageCollec
 
 
 class ImageTools:
-
-
-
     PEXELS_API_URL = "https://api.pexels.com/v1/search"
-
-    UNDRAW_API_URL = (
-        "https://undraw.co/_next/data/rxbI0cNBbVhP70ybALHAo/search/{query}.json?term={query}"
-    )
+    UNDRAW_API_URL = "https://undraw.co/_next/data/rxbI0cNBbVhP70ybALHAo/search/{query}.json?term={query}"
 
     DASHSCOPE_IMAGE_URL = (
         "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
     )
 
-    def __init__(self, *, settings: Any = None, http_client: httpx.Client | None = None) -> None:
+    def __init__(
+        self, *, settings: Any = None, http_client: httpx.Client | None = None
+    ) -> None:
 
         self._settings = settings or get_settings()
         self._http = http_client or httpx.Client(timeout=15.0)
-
-
 
     def search_content_images(self, query: str) -> list[dict[str, Any]]:
 
@@ -223,7 +194,9 @@ class ImageTools:
             logger.error("Logo 生成失败: %s", exc)
             return []
 
-    def generate_architecture_diagram(self, mermaid_code: str, description: str) -> list[dict[str, Any]]:
+    def generate_architecture_diagram(
+        self, mermaid_code: str, description: str
+    ) -> list[dict[str, Any]]:
 
         if not mermaid_code:
             return []
@@ -234,7 +207,15 @@ class ImageTools:
                 output_file = Path(tmp) / "mermaid_output.svg"
                 input_file.write_text(mermaid_code, encoding="utf-8")
                 subprocess.run(
-                    [mmdc, "-i", str(input_file), "-o", str(output_file), "-b", "transparent"],
+                    [
+                        mmdc,
+                        "-i",
+                        str(input_file),
+                        "-o",
+                        str(output_file),
+                        "-b",
+                        "transparent",
+                    ],
                     check=True,
                     capture_output=True,
                     text=True,
@@ -254,8 +235,6 @@ class ImageTools:
             logger.error("Mermaid 架构图生成失败: %s", exc)
             return []
 
-
-
     def tools(self) -> list[Any]:
 
         impl = self
@@ -274,7 +253,8 @@ class ImageTools:
         def generate_architecture_diagram(mermaid_code: str, description: str) -> str:
 
             return json.dumps(
-                impl.generate_architecture_diagram(mermaid_code, description), ensure_ascii=False
+                impl.generate_architecture_diagram(mermaid_code, description),
+                ensure_ascii=False,
             )
 
         @langchain_tool("generateLogos")
@@ -282,7 +262,12 @@ class ImageTools:
 
             return json.dumps(impl.generate_logos(description), ensure_ascii=False)
 
-        return [search_content_images, search_illustrations, generate_architecture_diagram, generate_logos]
+        return [
+            search_content_images,
+            search_illustrations,
+            generate_architecture_diagram,
+            generate_logos,
+        ]
 
     def execute(self, tool_name: str, args: dict[str, Any]) -> str:
 
@@ -291,11 +276,13 @@ class ImageTools:
         elif tool_name == "searchIllustrations":
             result = self.search_illustrations(args["query"])
         elif tool_name == "generateArchitectureDiagram":
-            result = self.generate_architecture_diagram(args["mermaid_code"], args["description"])
+            result = self.generate_architecture_diagram(
+                args["mermaid_code"], args["description"]
+            )
         elif tool_name == "generateLogos":
             result = self.generate_logos(args["description"])
         else:
-            return f'错误：不存在的工具 {tool_name}'
+            return f"错误：不存在的工具 {tool_name}"
         return json.dumps(result, ensure_ascii=False)
 
 
@@ -306,11 +293,16 @@ def _is_windows() -> bool:
     return platform.system() == "Windows"
 
 
-def collect_images(user_prompt: str, *, model: Any = None, image_tools: ImageTools | None = None) -> list[ImageResource]:
+def collect_images(
+    user_prompt: str, *, model: Any = None, image_tools: ImageTools | None = None
+) -> list[ImageResource]:
 
     image_tools = image_tools or ImageTools()
     model = (model or create_chat_model()).bind_tools(image_tools.tools())
-    messages = [SystemMessage(load_prompt(_IMAGE_COLLECTION_PROMPT)), HumanMessage(user_prompt)]
+    messages = [
+        SystemMessage(load_prompt(_IMAGE_COLLECTION_PROMPT)),
+        HumanMessage(user_prompt),
+    ]
     collected: list[ImageResource] = []
 
     for _ in range(MAX_TOOL_CALLS):
@@ -324,7 +316,11 @@ def collect_images(user_prompt: str, *, model: Any = None, image_tools: ImageToo
             result_text = image_tools.execute(name, tool_call.get("args", {}))
             try:
                 items = json.loads(result_text)
-                collected.extend(ImageResource.model_validate(item) for item in items if isinstance(item, dict))
+                collected.extend(
+                    ImageResource.model_validate(item)
+                    for item in items
+                    if isinstance(item, dict)
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("图片工具结果解析失败: %s", exc)
             messages.append(ToolMessage(result_text, tool_call_id=tool_call["id"]))

@@ -1,6 +1,3 @@
-
-
-
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { customProvider } from 'ai'
@@ -16,15 +13,22 @@ import {
   type BuildVerifier,
   type VisualDiffVerifier,
 } from '../../../src/generation/review/index.js'
-import { runReviewGates, type ReviewContext, type ReviewGate } from '../../../src/generation/review/types.js'
+import {
+  runReviewGates,
+  type ReviewContext,
+  type ReviewGate,
+} from '../../../src/generation/review/types.js'
 import { createScriptedLlm, type LlmProvider } from '../../../src/llm/index.js'
 
-
 function makeContext(overrides: Partial<ReviewContext> = {}): ReviewContext {
-  return { workspacePath: makeWorkspaceRoot(), wireframePath: undefined, codeGenType: 'html', codeContent: '', ...overrides }
+  return {
+    workspacePath: makeWorkspaceRoot(),
+    wireframePath: undefined,
+    codeGenType: 'html',
+    codeContent: '',
+    ...overrides,
+  }
 }
-
-
 
 class BrokenOutputQualityModel implements LanguageModelV2 {
   readonly specificationVersion = 'v2' as const
@@ -41,7 +45,6 @@ class BrokenOutputQualityModel implements LanguageModelV2 {
     }
   }
   async doStream() {
-
     return {
       stream: new ReadableStream<LanguageModelV2StreamPart>({
         start(controller) {
@@ -53,7 +56,9 @@ class BrokenOutputQualityModel implements LanguageModelV2 {
 }
 
 function brokenQualityProvider(text: string): LlmProvider {
-  return customProvider({ languageModels: { 'scripted-quality': new BrokenOutputQualityModel(text) } })
+  return customProvider({
+    languageModels: { 'scripted-quality': new BrokenOutputQualityModel(text) },
+  })
 }
 
 describe('结构化质检分（Issue #9）', () => {
@@ -68,8 +73,6 @@ describe('结构化质检分（Issue #9）', () => {
     const scorer = new LlmQualityScorer(createScriptedLlm('quality-fail-always'))
     const score = await scorer.score('<html><body>bad</body></html>')
     expect(score.isValid).toBe(false)
-
-
     expect(score.errors).toEqual(['生成页面缺少必要的视觉还原（模拟质检失败）'])
     expect(score.suggestions).toEqual(['按已确认线框调整页面布局与区块结构'])
     expect(score.grade).toBe(80)
@@ -89,12 +92,13 @@ describe('结构化质检分（Issue #9）', () => {
     expect(score.isValid).toBe(false)
     expect(score.grade).toBe(0)
     expect(score.errors).toEqual(['质检结果无法解析，视为未通过'])
-
     expect(score.usage).toEqual({ inputTokens: 5, outputTokens: 5, totalTokens: 10 })
   })
 
   it('LlmQualityScorer：模型输出不合 schema（字段类型错）→ 同样视为未通过（#19 schema 显式契约）', async () => {
-    const scorer = new LlmQualityScorer(brokenQualityProvider('{"isValid": "yes", "errors": [], "suggestions": []}'))
+    const scorer = new LlmQualityScorer(
+      brokenQualityProvider('{"isValid": "yes", "errors": [], "suggestions": []}'),
+    )
     const score = await scorer.score('<html></html>')
     expect(score.isValid).toBe(false)
     expect(score.grade).toBe(0)
@@ -111,7 +115,9 @@ describe('结构化质检分（Issue #9）', () => {
 
   it('QualityScoreGate：abort signal 透传到质检 scorer（#10 审查整改：review 工位 LLM 随中断取消）', async () => {
     const signal = new AbortController().signal
-    const score = vi.fn().mockResolvedValue({ isValid: true, grade: 100, errors: [], suggestions: [] })
+    const score = vi
+      .fn()
+      .mockResolvedValue({ isValid: true, grade: 100, errors: [], suggestions: [] })
     const gate = new QualityScoreGate({ score }, signal)
     const context = makeContext({ codeContent: '<html>ok</html>' })
     await gate.verify(context)
@@ -129,7 +135,11 @@ describe('build 门禁（Issue #9）', () => {
 
   it('html 类型：入口存在且含 <html> 根 → 通过', async () => {
     const root = makeWorkspaceRoot()
-    writeFileSync(path.join(root, 'index.html'), '<!DOCTYPE html><html><body>ok</body></html>', 'utf8')
+    writeFileSync(
+      path.join(root, 'index.html'),
+      '<!DOCTYPE html><html><body>ok</body></html>',
+      'utf8',
+    )
     const verifier: BuildVerifier = new DefaultBuildVerifier()
     const result = await verifier.verify(makeContext({ workspacePath: root }))
     expect(result.passed).toBe(true)
@@ -146,7 +156,10 @@ describe('build 门禁（Issue #9）', () => {
 
   it('html 类型：入口 index.html 为符号链接 → 失败', async () => {
     const root = makeWorkspaceRoot()
-    const outside = path.join(path.dirname(root), `issue-52-html-outside-${path.basename(root)}.html`)
+    const outside = path.join(
+      path.dirname(root),
+      `issue-52-html-outside-${path.basename(root)}.html`,
+    )
     writeFileSync(outside, '<html></html>', 'utf8')
     symlinkSync(outside, path.join(root, 'index.html'))
     const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root }))
@@ -156,10 +169,16 @@ describe('build 门禁（Issue #9）', () => {
   it('multi_file 类型：入口、资源文件和相对引用均有效 → 通过', async () => {
     const root = makeWorkspaceRoot()
     mkdirSync(path.join(root, 'assets'), { recursive: true })
-    writeFileSync(path.join(root, 'index.html'), '<!doctype html><html><head><link href="assets/app.css"></head><body><script src="assets/app.js"></script></body></html>', 'utf8')
+    writeFileSync(
+      path.join(root, 'index.html'),
+      '<!doctype html><html><head><link href="assets/app.css"></head><body><script src="assets/app.js"></script></body></html>',
+      'utf8',
+    )
     writeFileSync(path.join(root, 'assets', 'app.css'), 'body { color: red }', 'utf8')
     writeFileSync(path.join(root, 'assets', 'app.js'), 'console.log(1)', 'utf8')
-    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    const result = await new DefaultBuildVerifier().verify(
+      makeContext({ workspacePath: root, codeGenType: 'multi_file' }),
+    )
     expect(result.passed).toBe(true)
     expect(result.detail).toContain('3')
   })
@@ -167,16 +186,24 @@ describe('build 门禁（Issue #9）', () => {
   it('multi_file 类型：缺少 index.html → 失败并指出入口', async () => {
     const root = makeWorkspaceRoot()
     writeFileSync(path.join(root, 'app.js'), 'console.log(1)', 'utf8')
-    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    const result = await new DefaultBuildVerifier().verify(
+      makeContext({ workspacePath: root, codeGenType: 'multi_file' }),
+    )
     expect(result.passed).toBe(false)
     expect(result.detail).toContain('index.html')
   })
 
   it('multi_file 类型：本地引用不存在 → 失败并指出引用', async () => {
     const root = makeWorkspaceRoot()
-    writeFileSync(path.join(root, 'index.html'), '<html><script src="missing.js"></script></html>', 'utf8')
+    writeFileSync(
+      path.join(root, 'index.html'),
+      '<html><script src="missing.js"></script></html>',
+      'utf8',
+    )
     writeFileSync(path.join(root, 'other.js'), 'console.log(1)', 'utf8')
-    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    const result = await new DefaultBuildVerifier().verify(
+      makeContext({ workspacePath: root, codeGenType: 'multi_file' }),
+    )
     expect(result.passed).toBe(false)
     expect(result.detail).toContain('missing.js')
   })
@@ -184,7 +211,9 @@ describe('build 门禁（Issue #9）', () => {
   it('multi_file 类型：项目文件不足 → 失败并指出最小数量', async () => {
     const root = makeWorkspaceRoot()
     writeFileSync(path.join(root, 'index.html'), '<html></html>', 'utf8')
-    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    const result = await new DefaultBuildVerifier().verify(
+      makeContext({ workspacePath: root, codeGenType: 'multi_file' }),
+    )
     expect(result.passed).toBe(false)
     expect(result.detail).toContain('至少需要 2 个')
   })
@@ -194,23 +223,37 @@ describe('build 门禁（Issue #9）', () => {
     mkdirSync(path.join(root, 'wireframe'), { recursive: true })
     writeFileSync(path.join(root, 'index.html'), '<html></html>', 'utf8')
     writeFileSync(path.join(root, 'wireframe', 'wireframe.html'), '<html></html>', 'utf8')
-    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    const result = await new DefaultBuildVerifier().verify(
+      makeContext({ workspacePath: root, codeGenType: 'multi_file' }),
+    )
     expect(result.passed).toBe(false)
     expect(result.detail).toContain('当前 1 个')
   })
   it('multi_file 类型：http(s) 外部引用不参与本地文件校验', async () => {
     const root = makeWorkspaceRoot()
-    writeFileSync(path.join(root, 'index.html'), '<html><link href="https://cdn.example.test/app.css"><script src="http://cdn.example.test/app.js"></script></html>', 'utf8')
+    writeFileSync(
+      path.join(root, 'index.html'),
+      '<html><link href="https://cdn.example.test/app.css"><script src="http://cdn.example.test/app.js"></script></html>',
+      'utf8',
+    )
     writeFileSync(path.join(root, 'app.js'), 'console.log(1)', 'utf8')
-    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    const result = await new DefaultBuildVerifier().verify(
+      makeContext({ workspacePath: root, codeGenType: 'multi_file' }),
+    )
     expect(result.passed).toBe(true)
   })
 
   it('multi_file 类型：未加引号的本地引用缺失 → 失败并指出引用', async () => {
     const root = makeWorkspaceRoot()
-    writeFileSync(path.join(root, 'index.html'), '<html><script src=missing.js></script></html>', 'utf8')
+    writeFileSync(
+      path.join(root, 'index.html'),
+      '<html><script src=missing.js></script></html>',
+      'utf8',
+    )
     writeFileSync(path.join(root, 'other.js'), 'console.log(1)', 'utf8')
-    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    const result = await new DefaultBuildVerifier().verify(
+      makeContext({ workspacePath: root, codeGenType: 'multi_file' }),
+    )
     expect(result.passed).toBe(false)
     expect(result.detail).toContain('missing.js')
   })
@@ -221,7 +264,9 @@ describe('build 门禁（Issue #9）', () => {
     writeFileSync(outside, '<html></html>', 'utf8')
     symlinkSync(outside, path.join(root, 'index.html'))
     writeFileSync(path.join(root, 'app.js'), 'console.log(1)', 'utf8')
-    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    const result = await new DefaultBuildVerifier().verify(
+      makeContext({ workspacePath: root, codeGenType: 'multi_file' }),
+    )
     expect(result.passed).toBe(false)
     expect(result.detail).toContain('符号链接')
   })
@@ -230,18 +275,30 @@ describe('build 门禁（Issue #9）', () => {
     const root = makeWorkspaceRoot()
     const outside = path.join(path.dirname(root), `issue-52-resource-${path.basename(root)}.js`)
     writeFileSync(outside, 'console.log(1)', 'utf8')
-    writeFileSync(path.join(root, 'index.html'), '<html><script src=assets.js></script></html>', 'utf8')
+    writeFileSync(
+      path.join(root, 'index.html'),
+      '<html><script src=assets.js></script></html>',
+      'utf8',
+    )
     symlinkSync(outside, path.join(root, 'assets.js'))
     writeFileSync(path.join(root, 'other.js'), 'console.log(2)', 'utf8')
-    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    const result = await new DefaultBuildVerifier().verify(
+      makeContext({ workspacePath: root, codeGenType: 'multi_file' }),
+    )
     expect(result.passed).toBe(false)
     expect(result.detail).toContain('符号链接')
   })
   it('multi_file 类型：路径遍历引用 → 失败并指出不安全引用', async () => {
     const root = makeWorkspaceRoot()
-    writeFileSync(path.join(root, 'index.html'), '<html><script src="../outside.js"></script></html>', 'utf8')
+    writeFileSync(
+      path.join(root, 'index.html'),
+      '<html><script src="../outside.js"></script></html>',
+      'utf8',
+    )
     writeFileSync(path.join(root, 'app.js'), 'console.log(1)', 'utf8')
-    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    const result = await new DefaultBuildVerifier().verify(
+      makeContext({ workspacePath: root, codeGenType: 'multi_file' }),
+    )
     expect(result.passed).toBe(false)
     expect(result.detail).toContain('不安全')
   })
@@ -251,10 +308,16 @@ describe('build 门禁（Issue #9）', () => {
     const outside = path.join(path.dirname(root), `issue-52-assets-outside-${path.basename(root)}`)
     mkdirSync(outside, { recursive: true })
     writeFileSync(path.join(outside, 'app.js'), 'console.log(1)', 'utf8')
-    writeFileSync(path.join(root, 'index.html'), '<html><script src="assets/app.js"></script></html>', 'utf8')
+    writeFileSync(
+      path.join(root, 'index.html'),
+      '<html><script src="assets/app.js"></script></html>',
+      'utf8',
+    )
     symlinkSync(outside, path.join(root, 'assets'))
     writeFileSync(path.join(root, 'other.js'), 'console.log(2)', 'utf8')
-    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    const result = await new DefaultBuildVerifier().verify(
+      makeContext({ workspacePath: root, codeGenType: 'multi_file' }),
+    )
     expect(result.passed).toBe(false)
     expect(result.detail).toContain('符号链接')
   })
@@ -267,22 +330,31 @@ describe('build 门禁（Issue #9）', () => {
       'utf8',
     )
     writeFileSync(path.join(root, 'app.js'), 'console.log(1)', 'utf8')
-    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    const result = await new DefaultBuildVerifier().verify(
+      makeContext({ workspacePath: root, codeGenType: 'multi_file' }),
+    )
     expect(result.passed).toBe(true)
   })
 
   it('html 类型：脚本和注释中的伪 <html> 不满足根元素校验', async () => {
     const root = makeWorkspaceRoot()
-    writeFileSync(path.join(root, 'index.html'), '<!-- <html> --><script>const fake = "<html>"</script>', 'utf8')
+    writeFileSync(
+      path.join(root, 'index.html'),
+      '<!-- <html> --><script>const fake = "<html>"</script>',
+      'utf8',
+    )
     const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root }))
     expect(result.passed).toBe(false)
     expect(result.detail).toContain('<html>')
   })
 
-
   it('html 类型：raw-text 中的相似结束标签不截断脚本解析', async () => {
     const root = makeWorkspaceRoot()
-    writeFileSync(path.join(root, 'index.html'), '<script>const s = "</scripture><html>"</script>', 'utf8')
+    writeFileSync(
+      path.join(root, 'index.html'),
+      '<script>const s = "</scripture><html>"</script>',
+      'utf8',
+    )
     const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root }))
     expect(result.passed).toBe(false)
     expect(result.detail).toContain('<html>')
@@ -291,14 +363,15 @@ describe('build 门禁（Issue #9）', () => {
     const root = makeWorkspaceRoot()
     writeFileSync(path.join(root, 'index.html'), '<html></html>', 'utf8')
     const verifier: BuildVerifier = new DefaultBuildVerifier()
-    const result = await verifier.verify(makeContext({ workspacePath: root, codeGenType: 'vue_project' }))
+    const result = await verifier.verify(
+      makeContext({ workspacePath: root, codeGenType: 'vue_project' }),
+    )
     expect(result.passed).toBe(false)
     expect(result.detail).toContain('npm run build')
   })
 })
 
 describe('视觉 diff 门禁（Issue #9，基准 = 已确认线框）', () => {
-
   function wireframeHtml(anchors: string[]): string {
     return `<!DOCTYPE html><html><head><title>线框</title></head><body>
 ${anchors.map((id, i) => `<section class="page" id="${id}"><h2>页面 ${i + 1}</h2></section>`).join('\n')}
@@ -319,7 +392,11 @@ ${anchors.map((id, i) => `<section class="page" id="${id}"><h2>页面 ${i + 1}</
     const wireframePath = path.join(root, 'wireframe', 'wireframe.html')
     mkdirSync(path.dirname(wireframePath), { recursive: true })
     writeFileSync(wireframePath, wireframeHtml(['page-0', 'page-1']), 'utf8')
-    writeFileSync(path.join(root, 'index.html'), '<html><body><section id="page-0"></section><section id="page-1"></section></body></html>', 'utf8')
+    writeFileSync(
+      path.join(root, 'index.html'),
+      '<html><body><section id="page-0"></section><section id="page-1"></section></body></html>',
+      'utf8',
+    )
     const verifier: VisualDiffVerifier = new DefaultVisualDiffVerifier()
     const result = await verifier.verify(makeContext({ workspacePath: root, wireframePath }))
     expect(result.passed).toBe(true)
@@ -335,11 +412,25 @@ ${anchors.map((id, i) => `<section class="page" id="${id}"><h2>页面 ${i + 1}</
     mkdirSync(path.join(root, '.hidden'), { recursive: true })
     mkdirSync(path.join(root, 'build'), { recursive: true })
     writeFileSync(path.join(root, 'pages', 'home.html'), '<section id="page-0"></section>', 'utf8')
-    writeFileSync(path.join(root, 'pages', 'nested', 'about.htm'), '<div id="page-1"></div><div id="page-2"></div>', 'utf8')
-    writeFileSync(path.join(root, '.hidden', 'ignored.html'), '<section id="page-9"></section>', 'utf8')
-    writeFileSync(path.join(root, 'build', 'ignored.html'), '<section id="page-8"></section>', 'utf8')
+    writeFileSync(
+      path.join(root, 'pages', 'nested', 'about.htm'),
+      '<div id="page-1"></div><div id="page-2"></div>',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(root, '.hidden', 'ignored.html'),
+      '<section id="page-9"></section>',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(root, 'build', 'ignored.html'),
+      '<section id="page-8"></section>',
+      'utf8',
+    )
     const verifier: VisualDiffVerifier = new DefaultVisualDiffVerifier()
-    const result = await verifier.verify(makeContext({ workspacePath: root, wireframePath, codeGenType: 'multi_file' }))
+    const result = await verifier.verify(
+      makeContext({ workspacePath: root, wireframePath, codeGenType: 'multi_file' }),
+    )
     expect(result.passed).toBe(true)
   })
 
@@ -351,7 +442,9 @@ ${anchors.map((id, i) => `<section class="page" id="${id}"><h2>页面 ${i + 1}</
     mkdirSync(path.join(root, 'pages'), { recursive: true })
     writeFileSync(path.join(root, 'pages', 'home.html'), '<section id="page-0"></section>', 'utf8')
     const verifier: VisualDiffVerifier = new DefaultVisualDiffVerifier()
-    const result = await verifier.verify(makeContext({ workspacePath: root, wireframePath, codeGenType: 'multi_file' }))
+    const result = await verifier.verify(
+      makeContext({ workspacePath: root, wireframePath, codeGenType: 'multi_file' }),
+    )
     expect(result.passed).toBe(false)
     expect(result.detail).toContain('page-1')
     expect(result.detail).toContain('pages/home.html')
@@ -364,10 +457,16 @@ ${anchors.map((id, i) => `<section class="page" id="${id}"><h2>页面 ${i + 1}</
     writeFileSync(wireframePath, wireframeHtml(['page-1']), 'utf8')
     mkdirSync(path.join(root, 'build'), { recursive: true })
     mkdirSync(path.join(root, 'dist'), { recursive: true })
-    writeFileSync(path.join(root, 'build', 'ignored.html'), '<section id="page-1"></section>', 'utf8')
+    writeFileSync(
+      path.join(root, 'build', 'ignored.html'),
+      '<section id="page-1"></section>',
+      'utf8',
+    )
     writeFileSync(path.join(root, 'dist', 'ignored.htm'), '<section id="page-1"></section>', 'utf8')
     const verifier: VisualDiffVerifier = new DefaultVisualDiffVerifier()
-    const result = await verifier.verify(makeContext({ workspacePath: root, wireframePath, codeGenType: 'multi_file' }))
+    const result = await verifier.verify(
+      makeContext({ workspacePath: root, wireframePath, codeGenType: 'multi_file' }),
+    )
     expect(result.passed).toBe(false)
     expect(result.detail).toContain('page-1')
     expect(result.detail).toContain('未找到可扫描的 HTML 文件')
@@ -385,7 +484,9 @@ ${anchors.map((id, i) => `<section class="page" id="${id}"><h2>页面 ${i + 1}</
     writeFileSync(path.join(root, 'pages', 'other.html'), '<section id="page-1"></section>', 'utf8')
     const verifier: VisualDiffVerifier = new DefaultVisualDiffVerifier()
     for (const codeGenType of ['html', 'vue_project'] as const) {
-      const result = await verifier.verify(makeContext({ workspacePath: root, wireframePath, codeGenType }))
+      const result = await verifier.verify(
+        makeContext({ workspacePath: root, wireframePath, codeGenType }),
+      )
       expect(result.passed).toBe(false)
       expect(result.detail).toContain('page-1')
       expect(result.detail).toContain('index.html')
@@ -403,17 +504,24 @@ ${anchors.map((id, i) => `<section class="page" id="${id}"><h2>页面 ${i + 1}</
     writeFileSync(path.join(root, 'pages', 'other.html'), '<section id="page-1"></section>', 'utf8')
     const verifier: VisualDiffVerifier = new DefaultVisualDiffVerifier()
     for (const codeGenType of ['html', 'vue_project'] as const) {
-      const result = await verifier.verify(makeContext({ workspacePath: root, wireframePath, codeGenType }))
+      const result = await verifier.verify(
+        makeContext({ workspacePath: root, wireframePath, codeGenType }),
+      )
       expect(result.passed).toBe(true)
     }
   })
 })
 
-
 describe('门禁汇总（Issue #9）', () => {
   it('全部通过 → passed；任一失败 → 收集失败门禁 errors/suggestions', async () => {
-    const passing: ReviewGate = { name: 'a', verify: async () => ({ name: 'a', passed: true, detail: 'ok' }) }
-    const failing: ReviewGate = { name: 'b', verify: async () => ({ name: 'b', passed: false, detail: 'b 失败' }) }
+    const passing: ReviewGate = {
+      name: 'a',
+      verify: async () => ({ name: 'a', passed: true, detail: 'ok' }),
+    }
+    const failing: ReviewGate = {
+      name: 'b',
+      verify: async () => ({ name: 'b', passed: false, detail: 'b 失败' }),
+    }
     const context = makeContext()
 
     const allPass = await runReviewGates([passing, passing], context)

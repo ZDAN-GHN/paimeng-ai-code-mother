@@ -1,14 +1,8 @@
-
-
-
-
 import { spawn } from 'node:child_process'
 import { writeFile as writeFsFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { DASHSCOPE_IMAGE_URL, PEXELS_API_URL, UNDRAW_API_URL } from '../../server/config.js'
-
-
 
 export type ImageCategory = 'CONTENT' | 'ILLUSTRATION' | 'ARCHITECTURE' | 'LOGO'
 
@@ -18,25 +12,23 @@ export interface ImageResource {
   url: string
 }
 
-
-
-export type ImageToolResult =
-  | { ok: true; images: ImageResource[] }
-  | { ok: false; error: string }
-
-
+export type ImageToolResult = { ok: true; images: ImageResource[] } | { ok: false; error: string }
 
 export interface ImageConfig {
   pexelsApiKey: string
   dashscopeApiKey: string
-
   imageModel: string
 }
 
-
 export interface HttpClient {
-  get(url: string, opts?: { params?: Record<string, string>; headers?: Record<string, string>; timeout?: number }): Promise<HttpResponse>
-  post(url: string, opts?: { headers?: Record<string, string>; json?: unknown; timeout?: number }): Promise<HttpResponse>
+  get(
+    url: string,
+    opts?: { params?: Record<string, string>; headers?: Record<string, string>; timeout?: number },
+  ): Promise<HttpResponse>
+  post(
+    url: string,
+    opts?: { headers?: Record<string, string>; json?: unknown; timeout?: number },
+  ): Promise<HttpResponse>
 }
 
 export interface HttpResponse {
@@ -44,17 +36,21 @@ export interface HttpResponse {
   json(): Promise<unknown>
 }
 
-
 export type DiagramRenderer = (mermaidCode: string, outputFile: string) => Promise<void>
 
-
 export const DEFAULT_IMAGE_QUOTA = 4
-
 
 export const IMAGE_QUOTA_EXCEEDED_MESSAGE = `图片配额已用完（每 run 最多 ${DEFAULT_IMAGE_QUOTA} 张），请降低图片需求后重试`
 
 class FetchHttpClient implements HttpClient {
-  async get(url: string, opts: { params?: Record<string, string>; headers?: Record<string, string>; timeout?: number } = {}): Promise<HttpResponse> {
+  async get(
+    url: string,
+    opts: {
+      params?: Record<string, string>
+      headers?: Record<string, string>
+      timeout?: number
+    } = {},
+  ): Promise<HttpResponse> {
     const qs = new URLSearchParams(opts.params ?? {}).toString()
     const res = await fetch(qs ? `${url}?${qs}` : url, {
       headers: opts.headers,
@@ -63,7 +59,10 @@ class FetchHttpClient implements HttpClient {
     return { ok: res.ok, json: () => res.json() }
   }
 
-  async post(url: string, opts: { headers?: Record<string, string>; json?: unknown; timeout?: number } = {}): Promise<HttpResponse> {
+  async post(
+    url: string,
+    opts: { headers?: Record<string, string>; json?: unknown; timeout?: number } = {},
+  ): Promise<HttpResponse> {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...opts.headers },
@@ -74,15 +73,11 @@ class FetchHttpClient implements HttpClient {
   }
 }
 
-
-
 export class ImageTools {
   private readonly config: ImageConfig
   private readonly http: HttpClient
   private readonly renderer: DiagramRenderer
-
   private remaining: number
-
   constructor(
     config: ImageConfig,
     opts: { http?: HttpClient; renderer?: DiagramRenderer; quota?: number } = {},
@@ -93,7 +88,6 @@ export class ImageTools {
     this.remaining = opts.quota ?? DEFAULT_IMAGE_QUOTA
   }
 
-
   private acquire(count: number): number | null {
     if (this.remaining <= 0) return null
     const allowed = Math.min(count, this.remaining)
@@ -101,19 +95,15 @@ export class ImageTools {
     return allowed
   }
 
-
-
   private noOutput(allowed: number): ImageToolResult {
     this.remaining += allowed
     return { ok: true, images: [] }
   }
 
-
   async searchContentImages(query: string): Promise<ImageToolResult> {
     const allowed = this.acquire(12)
     if (allowed === null) return { ok: false, error: IMAGE_QUOTA_EXCEEDED_MESSAGE }
     if (!this.config.pexelsApiKey) {
-
       return this.noOutput(allowed)
     }
     try {
@@ -122,18 +112,22 @@ export class ImageTools {
         headers: { Authorization: this.config.pexelsApiKey },
       })
       if (!resp.ok) return this.noOutput(allowed)
-      const data = (await resp.json()) as { photos?: Array<{ alt?: string; src?: { medium?: string } }> }
+      const data = (await resp.json()) as {
+        photos?: Array<{ alt?: string; src?: { medium?: string } }>
+      }
       const images = (data.photos ?? [])
         .filter((photo) => photo.src?.medium)
         .slice(0, allowed)
-        .map((photo) => ({ category: 'CONTENT' as const, description: photo.alt || query, url: photo.src!.medium! }))
+        .map((photo) => ({
+          category: 'CONTENT' as const,
+          description: photo.alt || query,
+          url: photo.src!.medium!,
+        }))
       return { ok: true, images }
     } catch {
-
       return this.noOutput(allowed)
     }
   }
-
 
   async searchIllustrations(query: string): Promise<ImageToolResult> {
     const allowed = this.acquire(12)
@@ -142,18 +136,23 @@ export class ImageTools {
       const url = UNDRAW_API_URL.replaceAll('{query}', encodeURIComponent(query))
       const resp = await this.http.get(url, { timeout: 10_000 })
       if (!resp.ok) return this.noOutput(allowed)
-      const data = (await resp.json()) as { pageProps?: { initialResults?: Array<{ title?: string; media?: string }> } }
+      const data = (await resp.json()) as {
+        pageProps?: { initialResults?: Array<{ title?: string; media?: string }> }
+      }
       const initialResults = data.pageProps?.initialResults ?? []
       const images = initialResults
         .slice(0, allowed)
         .filter((item) => item.media)
-        .map((item) => ({ category: 'ILLUSTRATION' as const, description: item.title || '插画', url: item.media! }))
+        .map((item) => ({
+          category: 'ILLUSTRATION' as const,
+          description: item.title || '插画',
+          url: item.media!,
+        }))
       return { ok: true, images }
     } catch {
       return this.noOutput(allowed)
     }
   }
-
 
   async generateLogos(description: string): Promise<ImageToolResult> {
     const allowed = this.acquire(1)
@@ -183,8 +182,10 @@ export class ImageTools {
     }
   }
 
-
-  async generateArchitectureDiagram(mermaidCode: string, description: string): Promise<ImageToolResult> {
+  async generateArchitectureDiagram(
+    mermaidCode: string,
+    description: string,
+  ): Promise<ImageToolResult> {
     const allowed = this.acquire(1)
     if (allowed === null) return { ok: false, error: IMAGE_QUOTA_EXCEEDED_MESSAGE }
     if (!mermaidCode) {
@@ -193,26 +194,28 @@ export class ImageTools {
     try {
       const outputFile = path.join(tmpdir(), `paimeng-mermaid-${Date.now()}.svg`)
       await this.renderer(mermaidCode, outputFile)
-      return { ok: true, images: [{ category: 'ARCHITECTURE' as const, description, url: `file://${outputFile}` }] }
+      return {
+        ok: true,
+        images: [{ category: 'ARCHITECTURE' as const, description, url: `file://${outputFile}` }],
+      }
     } catch {
-
       return this.noOutput(allowed)
     }
   }
-
 
   get remainingQuota(): number {
     return this.remaining
   }
 }
 
-
 async function renderMermaidDiagram(mermaidCode: string, outputFile: string): Promise<void> {
   const inputFile = path.join(tmpdir(), `paimeng-mermaid-${Date.now()}.mmd`)
   await writeFsFile(inputFile, mermaidCode, 'utf8')
   const cmd = process.platform === 'win32' ? 'mmdc.cmd' : 'mmdc'
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(cmd, ['-i', inputFile, '-o', outputFile, '-b', 'transparent'], { stdio: 'ignore' })
+    const child = spawn(cmd, ['-i', inputFile, '-o', outputFile, '-b', 'transparent'], {
+      stdio: 'ignore',
+    })
     child.on('error', reject)
     child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`mmdc 退出码 ${code}`))))
   })

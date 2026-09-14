@@ -1,15 +1,8 @@
-
-
-
-
 import type { InterviewSummary } from './index.js'
-
 
 export const WIREFRAME_FILENAME = 'wireframe.html'
 
-
 export const PAGE_LIMIT = 5
-
 
 function pageSection(page: string, index: number): string {
   return [
@@ -27,22 +20,25 @@ function pageSection(page: string, index: number): string {
   ].join('\n')
 }
 
-
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (ch) => {
-    const map: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
+    const map: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }
     return map[ch]!
   })
 }
 
-
-
-
-
 export function buildWireframeHtml(summary: InterviewSummary): string {
   const pages = summary.pages.slice(0, PAGE_LIMIT)
   const siteTitle = summary.message || '我的网站'
-  const sitemapItems = pages.map((page, index) => `    <li><a href="#page-${index}">${escapeHtml(page)}</a></li>`).join('\n')
+  const sitemapItems = pages
+    .map((page, index) => `    <li><a href="#page-${index}">${escapeHtml(page)}</a></li>`)
+    .join('\n')
   const sections = pages.map((page, index) => pageSection(page, index)).join('\n')
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -84,7 +80,6 @@ ${sections}
 </html>
 `
 }
-
 
 export function countWireframePages(html: string): number {
   const matches = html.match(/<section class="page"/g)

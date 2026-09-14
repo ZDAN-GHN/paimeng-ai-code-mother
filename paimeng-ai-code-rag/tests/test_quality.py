@@ -1,5 +1,3 @@
-
-
 from app.services.quality import (
     QualityResult,
     check_code_quality,
@@ -8,23 +6,16 @@ from app.services.quality import (
 
 
 class _FakeResponse:
-
-
     def __init__(self, content: str) -> None:
         self.content = content
 
 
 class _FakeModel:
-
-
     def __init__(self, content: str) -> None:
         self._content = content
 
     def invoke(self, messages, **kwargs):
         return _FakeResponse(self._content)
-
-
-
 
 
 def test_concatenate_includes_code_and_skips_ignored(tmp_path):
@@ -57,15 +48,14 @@ def test_concatenate_missing_dir_returns_empty(tmp_path):
     assert read_and_concatenate_code_files(tmp_path / "nope") == ""
 
 
-
-
-
 def test_check_quality_parses_json(monkeypatch):
 
     payload = """```json
 {"isValid": false, "errors": ["缺少闭合标签"], "suggestions": ["补全标签"]}
 ```"""
-    monkeypatch.setattr("app.services.quality.create_chat_model", lambda **kw: _FakeModel(payload))
+    monkeypatch.setattr(
+        "app.services.quality.create_chat_model", lambda **kw: _FakeModel(payload)
+    )
     result = check_code_quality("<div>")
     assert result.is_valid is False
     assert result.errors == ["缺少闭合标签"]
@@ -74,7 +64,9 @@ def test_check_quality_parses_json(monkeypatch):
 
 def test_check_quality_fallback_pass_on_error(monkeypatch):
 
-    monkeypatch.setattr("app.services.quality.create_chat_model", lambda **kw: _FakeModel("垃圾输出"))
+    monkeypatch.setattr(
+        "app.services.quality.create_chat_model", lambda **kw: _FakeModel("垃圾输出")
+    )
     result = check_code_quality("<div>")
     assert result.is_valid is True
     assert result == QualityResult(is_valid=True)

@@ -1,7 +1,6 @@
 /* eslint-disable */
 import request from '@/request'
 
-
 export async function addApp(body: API.AppAddRequest, options?: { [key: string]: any }) {
   return request<API.BaseResponseLong>('/app/add', {
     method: 'POST',
@@ -12,7 +11,6 @@ export async function addApp(body: API.AppAddRequest, options?: { [key: string]:
     ...(options || {}),
   })
 }
-
 
 export async function deleteAppByAdmin(body: API.DeleteRequest, options?: { [key: string]: any }) {
   return request<API.BaseResponseBoolean>('/app/admin/delete', {
@@ -25,11 +23,9 @@ export async function deleteAppByAdmin(body: API.DeleteRequest, options?: { [key
   })
 }
 
-
 export async function getAppVoByIdByAdmin(
-
   params: API.getAppVOByIdByAdminParams,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponseAppVO>('/app/admin/get/vo', {
     method: 'GET',
@@ -40,10 +36,9 @@ export async function getAppVoByIdByAdmin(
   })
 }
 
-
 export async function listAppVoByPageByAdmin(
   body: API.AppQueryRequest,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponsePageAppVO>('/app/admin/list/page/vo', {
     method: 'POST',
@@ -55,10 +50,9 @@ export async function listAppVoByPageByAdmin(
   })
 }
 
-
 export async function updateAppByAdmin(
   body: API.AppAdminUpdateRequest,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponseBoolean>('/app/admin/update', {
     method: 'POST',
@@ -70,11 +64,9 @@ export async function updateAppByAdmin(
   })
 }
 
-
 export async function chatToGenCode(
-
   params: API.chatToGenCodeParams,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.ServerSentEventString[]>('/app/chat/gen/code', {
     method: 'GET',
@@ -84,7 +76,6 @@ export async function chatToGenCode(
     ...(options || {}),
   })
 }
-
 
 export async function deleteApp(body: API.DeleteRequest, options?: { [key: string]: any }) {
   return request<API.BaseResponseBoolean>('/app/delete', {
@@ -97,7 +88,6 @@ export async function deleteApp(body: API.DeleteRequest, options?: { [key: strin
   })
 }
 
-
 export async function deployApp(body: API.AppDeployRequest, options?: { [key: string]: any }) {
   return request<API.BaseResponseString>('/app/deploy', {
     method: 'POST',
@@ -109,11 +99,9 @@ export async function deployApp(body: API.AppDeployRequest, options?: { [key: st
   })
 }
 
-
 export async function downloadAppCode(
-
   params: API.downloadAppCodeParams,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   const { appId: param0, ...queryParams } = params
   return request<any>(`/app/download/${param0}`, {
@@ -123,11 +111,9 @@ export async function downloadAppCode(
   })
 }
 
-
 export async function getAppVoById(
-
   params: API.getAppVOByIdParams,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponseAppVO>('/app/get/vo', {
     method: 'GET',
@@ -138,10 +124,9 @@ export async function getAppVoById(
   })
 }
 
-
 export async function listGoodAppVoByPage(
   body: API.AppQueryRequest,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponsePageAppVO>('/app/good/list/page/vo', {
     method: 'POST',
@@ -153,10 +138,9 @@ export async function listGoodAppVoByPage(
   })
 }
 
-
 export async function listMyAppVoByPage(
   body: API.AppQueryRequest,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponsePageAppVO>('/app/my/list/page/vo', {
     method: 'POST',
@@ -167,7 +151,6 @@ export async function listMyAppVoByPage(
     ...(options || {}),
   })
 }
-
 
 export async function updateApp(body: API.AppUpdateRequest, options?: { [key: string]: any }) {
   return request<API.BaseResponseBoolean>('/app/update', {

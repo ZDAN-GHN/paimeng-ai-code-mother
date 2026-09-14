@@ -19,17 +19,18 @@ import com.zdan.paimengaicodebackend.service.ChatHistoryService;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+import java.time.LocalDateTime;
+import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
-import java.util.List;
-
-
 @Slf4j
 @Service
-public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatHistory> implements ChatHistoryService {
+public class ChatHistoryServiceImpl
+    extends ServiceImpl<ChatHistoryMapper, ChatHistory>
+    implements ChatHistoryService
+{
 
     private final AppService appService;
 
@@ -38,21 +39,22 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
     }
 
     @Override
-    public int loadChatHistoryToMemory(Long appId, MessageWindowChatMemory chatMemory, int maxCount) {
+    public int loadChatHistoryToMemory(
+        Long appId,
+        MessageWindowChatMemory chatMemory,
+        int maxCount
+    ) {
         try {
-
             QueryWrapper queryWrapper = QueryWrapper.create()
-                    .eq(ChatHistory::getAppId, appId)
-                    .orderBy(ChatHistory::getCreateTime, false)
-                    .limit(1, maxCount);
+                .eq(ChatHistory::getAppId, appId)
+                .orderBy(ChatHistory::getCreateTime, false)
+                .limit(1, maxCount);
             List<ChatHistory> historyList = this.list(queryWrapper);
             if (CollUtil.isEmpty(historyList)) {
                 return 0;
             }
 
-
             historyList = historyList.reversed();
-
 
             int loadedCount = 0;
 
@@ -61,7 +63,9 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
                 if (ChatHistoryMessageTypeEnum.USER.getValue().equals(history.getMessageType())) {
                     chatMemory.add(UserMessage.from(history.getMessage()));
                     loadedCount++;
-                } else if (ChatHistoryMessageTypeEnum.AI.getValue().equals(history.getMessageType())) {
+                } else if (
+                    ChatHistoryMessageTypeEnum.AI.getValue().equals(history.getMessageType())
+                ) {
                     chatMemory.add(AiMessage.from(history.getMessage()));
                     loadedCount++;
                 }
@@ -69,34 +73,46 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
             log.info("{} chatHistory were successfully loaded for appId: {}", loadedCount, appId);
             return loadedCount;
         } catch (Exception e) {
-            log.error("failed to load chatHistory to chatMemory，appId: {}, error: {}", appId, e.getMessage(), e);
+            log.error(
+                "failed to load chatHistory to chatMemory，appId: {}, error: {}",
+                appId,
+                e.getMessage(),
+                e
+            );
 
             return 0;
         }
     }
 
     @Override
-    public Page<ChatHistory> listAppChatHistoryByPage(Long appId, int pageSize,
-                                                      LocalDateTime lastCreateTime,
-                                                      User loginUser) {
-
+    public Page<ChatHistory> listAppChatHistoryByPage(
+        Long appId,
+        int pageSize,
+        LocalDateTime lastCreateTime,
+        User loginUser
+    ) {
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用ID不能为空");
-        ThrowUtils.throwIf(pageSize <= 0 || pageSize > 50, ErrorCode.PARAMS_ERROR, "页面大小必须在1-50之间");
+        ThrowUtils.throwIf(
+            pageSize <= 0 || pageSize > 50,
+            ErrorCode.PARAMS_ERROR,
+            "页面大小必须在1-50之间"
+        );
         ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
-
 
         App app = appService.getById(appId);
         ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
         boolean isAdmin = UserConstant.ADMIN_ROLE.equals(loginUser.getUserRole());
         boolean isCreator = app.getUserId().equals(loginUser.getId());
-        ThrowUtils.throwIf(!isAdmin && !isCreator, ErrorCode.NO_AUTH_ERROR, "无权查看该应用的对话历史");
-
+        ThrowUtils.throwIf(
+            !isAdmin && !isCreator,
+            ErrorCode.NO_AUTH_ERROR,
+            "无权查看该应用的对话历史"
+        );
 
         ChatHistoryQueryRequest queryRequest = new ChatHistoryQueryRequest();
         queryRequest.setAppId(appId);
         queryRequest.setLastCreateTime(lastCreateTime);
         QueryWrapper queryWrapper = this.getQueryWrapper(queryRequest);
-
 
         return this.page(Page.of(1, pageSize), queryWrapper);
     }
@@ -117,23 +133,20 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
         String sortField = chatHistoryQueryRequest.getSortField();
         String sortOrder = chatHistoryQueryRequest.getSortOrder();
 
-
-        queryWrapper.eq("id", id)
-                .like("message", message)
-                .eq("messageType", messageType)
-                .eq("appId", appId)
-                .eq("userId", userId);
-
+        queryWrapper
+            .eq("id", id)
+            .like("message", message)
+            .eq("messageType", messageType)
+            .eq("appId", appId)
+            .eq("userId", userId);
 
         if (lastCreateTime != null) {
             queryWrapper.lt("createTime", lastCreateTime);
         }
 
-
         if (StrUtil.isNotBlank(sortField)) {
             queryWrapper.orderBy(sortField, "ascend".equals(sortOrder));
         } else {
-
             queryWrapper.orderBy("createTime", false);
         }
 
@@ -156,13 +169,10 @@ public class ChatHistoryServiceImpl extends ServiceImpl<ChatHistoryMapper, ChatH
 
     @Override
     public void removeByAppId(Long appId) {
-        this.mapper.deleteByQuery(QueryWrapper.create()
-                .eq(ChatHistory::getAppId, appId));
+        this.mapper.deleteByQuery(QueryWrapper.create().eq(ChatHistory::getAppId, appId));
     }
 
-
     private void validateParam(Long appId, String message, String messageType, User user) {
-
         if (appId == null || appId <= 0) {
             ThrowUtils.throwForParam("应用 id 不能为空");
         }

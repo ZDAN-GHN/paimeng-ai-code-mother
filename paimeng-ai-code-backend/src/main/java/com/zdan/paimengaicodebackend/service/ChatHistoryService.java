@@ -7,26 +7,21 @@ import com.zdan.paimengaicodebackend.model.dto.chathistory.ChatHistoryQueryReque
 import com.zdan.paimengaicodebackend.model.entity.ChatHistory;
 import com.zdan.paimengaicodebackend.model.entity.User;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
-
 import java.time.LocalDateTime;
 
-
 public interface ChatHistoryService extends IService<ChatHistory> {
-
-
     int loadChatHistoryToMemory(Long appId, MessageWindowChatMemory chatMemory, int maxCount);
 
-
-    Page<ChatHistory> listAppChatHistoryByPage(Long appId, int pageSize,
-                                               LocalDateTime lastCreateTime,
-                                               User loginUser);
-
+    Page<ChatHistory> listAppChatHistoryByPage(
+        Long appId,
+        int pageSize,
+        LocalDateTime lastCreateTime,
+        User loginUser
+    );
 
     QueryWrapper getQueryWrapper(ChatHistoryQueryRequest chatHistoryQueryRequest);
 
-
     void addChatMessage(Long appId, String message, String messageType, User user);
-
 
     void removeByAppId(Long appId);
 }

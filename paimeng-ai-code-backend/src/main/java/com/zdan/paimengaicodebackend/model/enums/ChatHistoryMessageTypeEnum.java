@@ -3,10 +3,8 @@ package com.zdan.paimengaicodebackend.model.enums;
 import cn.hutool.core.util.ObjUtil;
 import lombok.Getter;
 
-
 @Getter
 public enum ChatHistoryMessageTypeEnum {
-
     USER("用户", "user"),
     AI("AI", "ai");
 
@@ -17,7 +15,6 @@ public enum ChatHistoryMessageTypeEnum {
         this.text = text;
         this.value = value;
     }
-
 
     public static ChatHistoryMessageTypeEnum getEnumByValue(String value) {
         if (ObjUtil.isEmpty(value)) {

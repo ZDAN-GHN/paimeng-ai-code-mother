@@ -1,26 +1,16 @@
-
-
-
-
-
 import { assign, createMachine } from 'xstate'
 import type { RunPhase } from '../../runs/runClient.js'
 
-
 export const MAX_QUALITY_RETRIES = 2
-
 
 export const MAX_QUALITY_ATTEMPTS = MAX_QUALITY_RETRIES + 1
 
 export interface GenerationContext {
-
   milestones: string[]
-
   qualityAttempts: number
 }
 
 export type GenerationEvent =
-
   | { type: 'PROCEED' }
   | { type: 'PASS' }
   | { type: 'RETRY' }
@@ -40,15 +30,15 @@ export const generationMachine = createMachine({
       entry: assign({ milestones: ({ context }) => [...context.milestones, '开始生成'] }),
       on: {
         PROCEED: { target: 'coding' },
-
         FAIL: { target: 'failed' },
       },
     },
     coding: {
-
       entry: assign({
-        milestones: ({ context }) =>
-          [...context.milestones, context.qualityAttempts > 0 ? '根据质检意见重新生成' : '规划页面结构'],
+        milestones: ({ context }) => [
+          ...context.milestones,
+          context.qualityAttempts > 0 ? '根据质检意见重新生成' : '规划页面结构',
+        ],
         qualityAttempts: ({ context }) => context.qualityAttempts + 1,
       }),
       on: {
@@ -57,15 +47,14 @@ export const generationMachine = createMachine({
       },
     },
     review: {
-
       entry: assign({
-        milestones: ({ context }) =>
-          [...context.milestones, context.qualityAttempts > 1 ? '复查生成结果' : '检查生成结果'],
+        milestones: ({ context }) => [
+          ...context.milestones,
+          context.qualityAttempts > 1 ? '复查生成结果' : '检查生成结果',
+        ],
       }),
       on: {
         PASS: { target: 'done' },
-
-
         RETRY: {
           target: 'coding',
           guard: ({ context }) => context.qualityAttempts < MAX_QUALITY_ATTEMPTS,
@@ -81,7 +70,6 @@ export const generationMachine = createMachine({
   },
 })
 
-
 export const PHASE_BY_STATE: Record<string, RunPhase> = {
   interview: 'interview',
   coding: 'coding',
@@ -89,7 +77,6 @@ export const PHASE_BY_STATE: Record<string, RunPhase> = {
   done: 'done',
   failed: 'failed',
 }
-
 
 export const MILESTONE_DETAILS: Record<string, string> = {
   开始生成: '正在分析需求',

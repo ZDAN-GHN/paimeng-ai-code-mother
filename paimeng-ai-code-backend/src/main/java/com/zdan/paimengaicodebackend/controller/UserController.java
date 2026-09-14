@@ -6,10 +6,10 @@ import com.zdan.paimengaicodebackend.annotation.AuthCheck;
 import com.zdan.paimengaicodebackend.common.BaseResponse;
 import com.zdan.paimengaicodebackend.common.DeleteRequest;
 import com.zdan.paimengaicodebackend.common.ResultUtils;
+import com.zdan.paimengaicodebackend.constant.UserConstant;
 import com.zdan.paimengaicodebackend.exception.BusinessException;
 import com.zdan.paimengaicodebackend.exception.ErrorCode;
 import com.zdan.paimengaicodebackend.exception.ThrowUtils;
-import com.zdan.paimengaicodebackend.constant.UserConstant;
 import com.zdan.paimengaicodebackend.model.dto.user.UserLoginRequest;
 import com.zdan.paimengaicodebackend.model.dto.user.UserQueryRequest;
 import com.zdan.paimengaicodebackend.model.dto.user.UserRegisterRequest;
@@ -19,10 +19,8 @@ import com.zdan.paimengaicodebackend.model.vo.LoginUserVO;
 import com.zdan.paimengaicodebackend.model.vo.UserVO;
 import com.zdan.paimengaicodebackend.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.web.bind.annotation.*;
-
 import java.util.List;
-
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/user")
@@ -33,7 +31,6 @@ public class UserController {
     public UserController(UserService userService) {
         this.userService = userService;
     }
-
 
     @PostMapping("/update")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
@@ -48,7 +45,6 @@ public class UserController {
         return ResultUtils.success(true);
     }
 
-
     @PostMapping("/delete")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> deleteUser(@RequestBody DeleteRequest deleteRequest) {
@@ -59,15 +55,18 @@ public class UserController {
         return ResultUtils.success(b);
     }
 
-
     @PostMapping("/list/page/vo")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
-    public BaseResponse<Page<UserVO>> listUserVOByPage(@RequestBody UserQueryRequest userQueryRequest) {
+    public BaseResponse<Page<UserVO>> listUserVOByPage(
+        @RequestBody UserQueryRequest userQueryRequest
+    ) {
         ThrowUtils.throwIf(userQueryRequest == null, ErrorCode.PARAMS_ERROR);
         long pageNum = userQueryRequest.getPageNum();
         long pageSize = userQueryRequest.getPageSize();
-        Page<User> userPage = userService.page(Page.of(pageNum, pageSize),
-                userService.getQueryWrapper(userQueryRequest));
+        Page<User> userPage = userService.page(
+            Page.of(pageNum, pageSize),
+            userService.getQueryWrapper(userQueryRequest)
+        );
 
         Page<UserVO> userVOPage = new Page<>(pageNum, pageSize, userPage.getTotalRow());
         List<UserVO> userVOList = userService.getUserVOList(userPage.getRecords());
@@ -75,14 +74,12 @@ public class UserController {
         return ResultUtils.success(userVOPage);
     }
 
-
     @GetMapping("/get/vo")
     public BaseResponse<UserVO> getUserVOById(long id) {
         BaseResponse<User> response = getUserById(id);
         User user = response.getData();
         return ResultUtils.success(userService.getUserVO(user));
     }
-
 
     @GetMapping("/get")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
@@ -93,7 +90,6 @@ public class UserController {
         return ResultUtils.success(user);
     }
 
-
     @PostMapping("/logout")
     public BaseResponse<Boolean> userLogout(HttpServletRequest request) {
         ThrowUtils.throwIf(request == null, ErrorCode.PARAMS_ERROR);
@@ -101,24 +97,23 @@ public class UserController {
         return ResultUtils.success(result);
     }
 
-
     @GetMapping("/get/login")
     public BaseResponse<LoginUserVO> getLoginUser(HttpServletRequest request) {
         User loginUser = userService.getLoginUser(request);
         return ResultUtils.success(userService.getLoginUserVO(loginUser));
     }
 
-
     @PostMapping("/login")
-    public BaseResponse<LoginUserVO> userLogin(@RequestBody UserLoginRequest userLoginRequest,
-                                               HttpServletRequest request) {
+    public BaseResponse<LoginUserVO> userLogin(
+        @RequestBody UserLoginRequest userLoginRequest,
+        HttpServletRequest request
+    ) {
         ThrowUtils.throwIf(userLoginRequest == null, ErrorCode.PARAMS_ERROR);
         String userAccount = userLoginRequest.getUserAccount();
         String userPassword = userLoginRequest.getUserPassword();
         LoginUserVO loginUserVO = userService.userLogin(userAccount, userPassword, request);
         return ResultUtils.success(loginUserVO);
     }
-
 
     @PostMapping("register")
     public BaseResponse<Long> userRegister(@RequestBody UserRegisterRequest userRegisterRequest) {

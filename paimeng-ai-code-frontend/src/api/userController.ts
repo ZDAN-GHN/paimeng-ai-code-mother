@@ -1,7 +1,6 @@
 /* eslint-disable */
 import request from '@/request'
 
-
 export async function deleteUser(body: API.DeleteRequest, options?: { [key: string]: any }) {
   return request<API.BaseResponseBoolean>('/user/delete', {
     method: 'POST',
@@ -13,12 +12,7 @@ export async function deleteUser(body: API.DeleteRequest, options?: { [key: stri
   })
 }
 
-
-export async function getUserById(
-
-  params: API.getUserByIdParams,
-  options?: { [key: string]: any }
-) {
+export async function getUserById(params: API.getUserByIdParams, options?: { [key: string]: any }) {
   return request<API.BaseResponseUser>('/user/get', {
     method: 'GET',
     params: {
@@ -28,7 +22,6 @@ export async function getUserById(
   })
 }
 
-
 export async function getLoginUser(options?: { [key: string]: any }) {
   return request<API.BaseResponseLoginUserVO>('/user/get/login', {
     method: 'GET',
@@ -36,11 +29,9 @@ export async function getLoginUser(options?: { [key: string]: any }) {
   })
 }
 
-
 export async function getUserVoById(
-
   params: API.getUserVOByIdParams,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponseUserVO>('/user/get/vo', {
     method: 'GET',
@@ -51,10 +42,9 @@ export async function getUserVoById(
   })
 }
 
-
 export async function listUserVoByPage(
   body: API.UserQueryRequest,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponsePageUserVO>('/user/list/page/vo', {
     method: 'POST',
@@ -65,7 +55,6 @@ export async function listUserVoByPage(
     ...(options || {}),
   })
 }
-
 
 export async function userLogin(body: API.UserLoginRequest, options?: { [key: string]: any }) {
   return request<API.BaseResponseLoginUserVO>('/user/login', {
@@ -78,7 +67,6 @@ export async function userLogin(body: API.UserLoginRequest, options?: { [key: st
   })
 }
 
-
 export async function userLogout(options?: { [key: string]: any }) {
   return request<API.BaseResponseBoolean>('/user/logout', {
     method: 'POST',
@@ -86,10 +74,9 @@ export async function userLogout(options?: { [key: string]: any }) {
   })
 }
 
-
 export async function userRegister(
   body: API.UserRegisterRequest,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponseLong>('/user/register', {
     method: 'POST',
@@ -100,7 +87,6 @@ export async function userRegister(
     ...(options || {}),
   })
 }
-
 
 export async function updateUser(body: API.UserUpdateRequest, options?: { [key: string]: any }) {
   return request<API.BaseResponseBoolean>('/user/update', {

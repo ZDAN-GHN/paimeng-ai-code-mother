@@ -1,46 +1,35 @@
-
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { agentRoot } from './agentRoot.js'
 
-
 export const DEFAULT_IMAGE_MODEL = 'wan2.2-t2i-flash'
 
-
 export const PEXELS_API_URL = 'https://api.pexels.com/v1/search'
-export const UNDRAW_API_URL = 'https://undraw.co/_next/data/rxbI0cNBbVhP70ybALHAo/search/{query}.json?term={query}'
-export const DASHSCOPE_IMAGE_URL = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis'
+export const UNDRAW_API_URL =
+  'https://undraw.co/_next/data/rxbI0cNBbVhP70ybALHAo/search/{query}.json?term={query}'
+export const DASHSCOPE_IMAGE_URL =
+  'https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis'
 
 export interface AgentConfig {
   port: number
   jwtSecret: string
   workspaceRoot: string
   logLevel: string
-
   javaInternalBaseUrl: string
   javaInternalToken: string
-
   pexelsApiKey: string
   dashscopeApiKey: string
-
   imageModel: string
-
-
   modelFast: string
   modelStandard: string
   modelDeep: string
   modelQuality: string
-
   modelRouter: string
-
-
   deepCodingApiKey: string
   deepCodingBaseUrl: string
 }
 
-
 export type ConfigOverrides = Partial<AgentConfig>
-
 
 function loadDotEnv(env: NodeJS.ProcessEnv): void {
   const envPath = path.join(agentRoot, '.env')
@@ -66,20 +55,26 @@ function positiveInt(value: string | undefined): number | undefined {
   return Number.isInteger(n) && n > 0 ? n : undefined
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: ConfigOverrides = {}): AgentConfig {
+export function loadConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  overrides: ConfigOverrides = {},
+): AgentConfig {
   loadDotEnv(env)
   const port = overrides.port ?? positiveInt(env.PORT) ?? 8092
   const jwtSecret = overrides.jwtSecret ?? env.JWT_SECRET ?? ''
   if (!jwtSecret) {
-
     if (env.NODE_ENV === 'production') throw new Error('JWT_SECRET 必须配置')
     console.warn('[config] JWT_SECRET 未配置，使用不安全的开发默认值（勿用于生产）')
   }
-  const workspaceRootEnv = overrides.workspaceRoot ?? env.WORKSPACE_ROOT ?? '../runtime/tmp/code_output'
+  const workspaceRootEnv =
+    overrides.workspaceRoot ?? env.WORKSPACE_ROOT ?? '../runtime/tmp/code_output'
 
-  const workspaceRoot = path.isAbsolute(workspaceRootEnv) ? workspaceRootEnv : path.resolve(agentRoot, workspaceRootEnv)
+  const workspaceRoot = path.isAbsolute(workspaceRootEnv)
+    ? workspaceRootEnv
+    : path.resolve(agentRoot, workspaceRootEnv)
   const logLevel = overrides.logLevel ?? env.LOG_LEVEL ?? 'info'
-  const javaInternalBaseUrl = overrides.javaInternalBaseUrl ?? env.JAVA_INTERNAL_BASE_URL ?? 'http://localhost:8123/api'
+  const javaInternalBaseUrl =
+    overrides.javaInternalBaseUrl ?? env.JAVA_INTERNAL_BASE_URL ?? 'http://localhost:8123/api'
   const javaInternalToken = overrides.javaInternalToken ?? env.JAVA_INTERNAL_TOKEN ?? ''
   const pexelsApiKey = overrides.pexelsApiKey ?? env.PEXELS_API_KEY ?? ''
   const dashscopeApiKey = overrides.dashscopeApiKey ?? env.DASHSCOPE_API_KEY ?? ''
@@ -90,6 +85,26 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Conf
   const modelQuality = overrides.modelQuality ?? env.MODEL_QUALITY ?? ''
   const modelRouter = overrides.modelRouter ?? env.MODEL_ROUTER ?? ''
   const deepCodingApiKey = overrides.deepCodingApiKey ?? env.DASHSCOPE_CODING_API_KEY ?? ''
-  const deepCodingBaseUrl = overrides.deepCodingBaseUrl ?? env.DASHSCOPE_CODING_BASE_URL ?? 'https://coding.dashscope.aliyuncs.com/v1'
-  return { port, jwtSecret: jwtSecret || 'dev-insecure-secret', workspaceRoot, logLevel, javaInternalBaseUrl, javaInternalToken, pexelsApiKey, dashscopeApiKey, imageModel, modelFast, modelStandard, modelDeep, modelQuality, modelRouter, deepCodingApiKey, deepCodingBaseUrl }
+  const deepCodingBaseUrl =
+    overrides.deepCodingBaseUrl ??
+    env.DASHSCOPE_CODING_BASE_URL ??
+    'https://coding.dashscope.aliyuncs.com/v1'
+  return {
+    port,
+    jwtSecret: jwtSecret || 'dev-insecure-secret',
+    workspaceRoot,
+    logLevel,
+    javaInternalBaseUrl,
+    javaInternalToken,
+    pexelsApiKey,
+    dashscopeApiKey,
+    imageModel,
+    modelFast,
+    modelStandard,
+    modelDeep,
+    modelQuality,
+    modelRouter,
+    deepCodingApiKey,
+    deepCodingBaseUrl,
+  }
 }

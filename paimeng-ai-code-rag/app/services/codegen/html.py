@@ -1,5 +1,3 @@
-
-
 from collections.abc import Iterator
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -11,12 +9,13 @@ _SYSTEM_PROMPT = "codegen-html-system-prompt.txt"
 
 
 class HtmlCodeGenService(CodeGenService):
-
-
     def stream(self, user_message: str) -> Iterator[str]:
 
         model = create_chat_model()
-        messages = [SystemMessage(load_prompt(_SYSTEM_PROMPT)), HumanMessage(user_message)]
+        messages = [
+            SystemMessage(load_prompt(_SYSTEM_PROMPT)),
+            HumanMessage(user_message),
+        ]
         for chunk in model.stream(messages):
             text = getattr(chunk, "content", None)
             if text:

@@ -1,5 +1,3 @@
-
-
 import json
 from pathlib import Path
 
@@ -39,8 +37,6 @@ class _FakeGuardrail:
 
 
 class _FixtureExecutor:
-
-
     def __init__(self, generated_text: str) -> None:
         self._text = generated_text
 
@@ -72,7 +68,9 @@ def test_offline_html_e2e():
     fixture = state["_fixture"]
     assert state["code_gen_type"] == "html"
     for rel_path, fragments in fixture["expected_files"].items():
-        content = (Path(WORKSPACE_ROOT) / f"e2e_html" / rel_path).read_text(encoding="utf-8")
+        content = (Path(WORKSPACE_ROOT) / f"e2e_html" / rel_path).read_text(
+            encoding="utf-8"
+        )
         for fragment in fragments:
             assert fragment in content
 
@@ -84,6 +82,8 @@ def test_offline_multi_file_e2e():
     fixture = state["_fixture"]
     assert state["code_gen_type"] == "multi_file"
     for rel_path, fragments in fixture["expected_files"].items():
-        content = (Path(WORKSPACE_ROOT) / "e2e_multi_file" / rel_path).read_text(encoding="utf-8")
+        content = (Path(WORKSPACE_ROOT) / "e2e_multi_file" / rel_path).read_text(
+            encoding="utf-8"
+        )
         for fragment in fragments:
             assert fragment in content

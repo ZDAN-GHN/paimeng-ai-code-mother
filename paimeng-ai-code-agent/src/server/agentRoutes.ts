@@ -1,8 +1,3 @@
-
-
-
-
-
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -21,7 +16,11 @@ import { createRealLlm, isRealLlmConfigured } from '../llm/real.js'
 import { WorkspacePathError, validateWorkspacePath } from '../generation/workspace.js'
 import { buildSummary, type InterviewAnswer } from '../interview/index.js'
 import { conductInterview } from '../interview/conduct.js'
-import { WIREFRAME_FILENAME, buildWireframeHtml, countWireframePages } from '../interview/wireframe.js'
+import {
+  WIREFRAME_FILENAME,
+  buildWireframeHtml,
+  countWireframePages,
+} from '../interview/wireframe.js'
 import { parseContext, buildPlanningArtifact } from '../interview/context.js'
 import type { ImageTools } from '../generation/tools/imageTools.js'
 import type { ReviewGateSet } from '../generation/review/index.js'
@@ -30,24 +29,13 @@ import type { ObservationSink } from '../eval/observer.js'
 
 export interface AgentRouteOptions {
   runClient?: RunClient
-
-
   provider?: LlmProvider
-
   imageTools?: ImageTools
-
   reviewGates?: ReviewGateSet
-
   sessionStore?: SessionStore
-
   turnIdFactory?: () => string
   observer?: ObservationSink
 }
-
-
-
-
-
 
 function tolerantBody<T extends z.ZodRawShape>(shape: T) {
   return z.preprocess(
@@ -56,18 +44,21 @@ function tolerantBody<T extends z.ZodRawShape>(shape: T) {
   )
 }
 
-
 const interviewBodySchema = tolerantBody({
   runId: z.string().catch(''),
   appId: z.union([z.string(), z.number()]).catch(''),
   userId: z.union([z.number(), z.string()]).optional().catch(undefined),
   message: z.string().optional().catch(undefined),
-  answers: z.array(z.unknown()).optional().catch(undefined)
-    .transform((entries) => entries?.filter((a): a is InterviewAnswer => Boolean(a) && typeof a === 'object')),
+  answers: z
+    .array(z.unknown())
+    .optional()
+    .catch(undefined)
+    .transform((entries) =>
+      entries?.filter((a): a is InterviewAnswer => Boolean(a) && typeof a === 'object'),
+    ),
 })
 
 type InterviewBody = z.infer<typeof interviewBodySchema>
-
 
 const wireframeBodySchema = tolerantBody({
   runId: z.string().catch(''),
@@ -78,20 +69,16 @@ const wireframeBodySchema = tolerantBody({
 
 type WireframeBody = z.infer<typeof wireframeBodySchema>
 
-
 const CODE_GEN_TYPE_WHITELIST: Record<string, NonNullable<StreamRequest['codeGenType']>> = {
   html: 'html',
   multi_file: 'multi_file',
   vue_project: 'vue_project',
 }
 
-
 const historyTurnSchema = z.object({
   role: z.enum(['user', 'assistant']),
   content: z.string(),
 })
-
-
 
 const streamBodySchema = tolerantBody({
   runId: z.string().catch(''),
@@ -101,11 +88,16 @@ const streamBodySchema = tolerantBody({
   workspacePath: z.string().optional().catch(undefined),
   intensity: z.enum(['fast', 'standard', 'deep']).optional().catch(undefined),
   codeGenType: z.unknown().optional().catch(undefined),
-  history: z.array(historyTurnSchema.nullable().catch(null)).optional().catch(undefined)
+  history: z
+    .array(historyTurnSchema.nullable().catch(null))
+    .optional()
+    .catch(undefined)
     .transform((entries) => entries?.filter((turn): turn is HistoryTurn => turn !== null)),
 }).transform((input) => {
   const rawCodeGenType = input.codeGenType
-  const validCodeGenType = typeof rawCodeGenType === 'string' && Object.prototype.hasOwnProperty.call(CODE_GEN_TYPE_WHITELIST, rawCodeGenType)
+  const validCodeGenType =
+    typeof rawCodeGenType === 'string' &&
+    Object.prototype.hasOwnProperty.call(CODE_GEN_TYPE_WHITELIST, rawCodeGenType)
   return {
     ...input,
     codeGenType: validCodeGenType ? CODE_GEN_TYPE_WHITELIST[rawCodeGenType] : undefined,
@@ -125,13 +117,23 @@ const turnBodySchema = tolerantBody({
 
 type TurnBody = z.infer<typeof turnBodySchema>
 
-export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, options: AgentRouteOptions = {}): void {
-
-
-  const llmProvider: LlmProvider | undefined = options.provider ?? (isRealLlmConfigured(config) ? createRealLlm(config) : undefined)
+export function buildAgentRoutes(
+  fastify: FastifyInstance,
+  config: AgentConfig,
+  options: AgentRouteOptions = {},
+): void {
+  const llmProvider: LlmProvider | undefined =
+    options.provider ?? (isRealLlmConfigured(config) ? createRealLlm(config) : undefined)
 
   const resolveRunClient = (): RunClient | undefined =>
-    options.runClient ?? (config.javaInternalToken ? new RunClient({ baseUrl: config.javaInternalBaseUrl, token: config.javaInternalToken, observer: options.observer }) : undefined)
+    options.runClient ??
+    (config.javaInternalToken
+      ? new RunClient({
+          baseUrl: config.javaInternalBaseUrl,
+          token: config.javaInternalToken,
+          observer: options.observer,
+        })
+      : undefined)
 
   fastify.post('/agent/turn', async (request, reply) => {
     const input = turnBodySchema.parse(request.body)
@@ -145,7 +147,8 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     } else if (!input.approvalId) {
       throw httpError(400, 'confirm_generation 必须提供 approvalId')
     }
-    if (!input.codeGenType || !input.workspacePath) throw httpError(400, 'codeGenType、workspacePath 必填')
+    if (!input.codeGenType || !input.workspacePath)
+      throw httpError(400, 'codeGenType、workspacePath 必填')
     try {
       validateWorkspacePath(input.workspacePath, config.workspaceRoot)
     } catch (error) {
@@ -154,33 +157,66 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     }
     if (!options.sessionStore) throw httpError(503, '会话存储未配置，无法处理统一回合')
     const turnId = `turn-${(options.turnIdFactory ?? randomUUID)()}`
-    const events = action === 'chat'
-      ? [
-          { kind: 'session/turn-start' as const, source: 'human' as const, payload: { turnId, action } },
-          { kind: 'user/message' as const, source: 'human' as const, payload: { text: input.message?.trim() ?? '' } },
-        ]
-      : [{ kind: 'session/turn-start' as const, source: 'human' as const, payload: { turnId, action } }]
+    const events =
+      action === 'chat'
+        ? [
+            {
+              kind: 'session/turn-start' as const,
+              source: 'human' as const,
+              payload: { turnId, action },
+            },
+            {
+              kind: 'user/message' as const,
+              source: 'human' as const,
+              payload: { text: input.message?.trim() ?? '' },
+            },
+          ]
+        : [
+            {
+              kind: 'session/turn-start' as const,
+              source: 'human' as const,
+              payload: { turnId, action },
+            },
+          ]
     let batch
     try {
       batch = await options.sessionStore.appendBatch({
-        appId: String(input.appId), userId, turnId, batchSeq: 1, events,
+        appId: String(input.appId),
+        userId,
+        turnId,
+        batchSeq: 1,
+        events,
       })
     } catch (error) {
-      throw httpError(503, `会话事件写入失败：${error instanceof Error ? error.message : '未知错误'}`)
+      throw httpError(
+        503,
+        `会话事件写入失败：${error instanceof Error ? error.message : '未知错误'}`,
+      )
     }
     let terminalBatch
-    const terminalMessage = action === 'chat'
-      ? '统一回合的模型工具尚未接入，当前请求已安全拒绝'
-      : '统一回合的审批与生成尚未接入，当前请求已安全拒绝'
+    const terminalMessage =
+      action === 'chat'
+        ? '统一回合的模型工具尚未接入，当前请求已安全拒绝'
+        : '统一回合的审批与生成尚未接入，当前请求已安全拒绝'
     try {
-
-
       terminalBatch = await options.sessionStore.appendBatch({
-        appId: String(input.appId), userId, turnId, batchSeq: 2,
-        events: [{ kind: 'model/message', source: 'system', payload: { type: 'error', message: terminalMessage, text: terminalMessage } }],
+        appId: String(input.appId),
+        userId,
+        turnId,
+        batchSeq: 2,
+        events: [
+          {
+            kind: 'model/message',
+            source: 'system',
+            payload: { type: 'error', message: terminalMessage, text: terminalMessage },
+          },
+        ],
       })
     } catch (error) {
-      throw httpError(503, `会话终态写入失败：${error instanceof Error ? error.message : '未知错误'}`)
+      throw httpError(
+        503,
+        `会话终态写入失败：${error instanceof Error ? error.message : '未知错误'}`,
+      )
     }
     const terminal: AgentTurnEvent = {
       type: 'error',
@@ -206,9 +242,6 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     }
   })
 
-
-
-
   fastify.post('/agent/interview', async (request, _reply) => {
     const input = interviewBodySchema.parse(request.body)
     const userId = input.userId ?? request.user?.sub ?? ''
@@ -220,7 +253,13 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
       throw httpError(503, 'Java 内部 API 未配置，无法进行访谈')
     }
     const outcome = await conductInterview(
-      { runId: input.runId, appId: input.appId, userId, message: input.message, answers: input.answers },
+      {
+        runId: input.runId,
+        appId: input.appId,
+        userId,
+        message: input.message,
+        answers: input.answers,
+      },
       runClient,
     )
     if (outcome.kind === 'conflict') {
@@ -230,7 +269,6 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
       ? { runId: input.runId, round: outcome.round, complete: false, questions: outcome.questions }
       : { runId: input.runId, round: outcome.round, complete: true, summary: outcome.summary }
   })
-
 
   fastify.post('/agent/wireframe', async (request, _reply) => {
     const input = wireframeBodySchema.parse(request.body)
@@ -256,7 +294,6 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
       throw httpError(400, '请先完成需求访谈再生成线框（访谈尚未完成）')
     }
 
-
     try {
       await runClient.acquireWireframeQuota(userId)
     } catch (err) {
@@ -266,17 +303,22 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
       throw err
     }
 
-
     const workspace = validateWorkspacePath(input.workspacePath, config.workspaceRoot)
     const html = buildWireframeHtml(buildSummary(context.interview))
     await mkdir(path.join(workspace, 'wireframe'), { recursive: true })
     await writeFile(path.join(workspace, 'wireframe', WIREFRAME_FILENAME), html, 'utf8')
 
-    const wireframe = { relativeUrl: `wireframe/${WIREFRAME_FILENAME}`, pageCount: countWireframePages(html), confirmed: false }
-    await runClient.updateRun(input.runId, { phase: 'wireframe_pending', context: JSON.stringify({ ...context, wireframe }) })
+    const wireframe = {
+      relativeUrl: `wireframe/${WIREFRAME_FILENAME}`,
+      pageCount: countWireframePages(html),
+      confirmed: false,
+    }
+    await runClient.updateRun(input.runId, {
+      phase: 'wireframe_pending',
+      context: JSON.stringify({ ...context, wireframe }),
+    })
     return { runId: input.runId, phase: 'wireframe_pending', wireframe }
   })
-
 
   fastify.post('/agent/wireframe/confirm', async (request, _reply) => {
     const input = wireframeBodySchema.parse(request.body)
@@ -295,7 +337,11 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     }
 
     if (run.phase === 'wireframe_confirmed') {
-      return { runId: input.runId, phase: 'wireframe_confirmed', wireframe: parseContext(run.context).wireframe }
+      return {
+        runId: input.runId,
+        phase: 'wireframe_confirmed',
+        wireframe: parseContext(run.context).wireframe,
+      }
     }
     if (run.phase !== 'wireframe_pending') {
       throw httpError(409, `当前阶段（${run.phase}）没有待确认的线框`)
@@ -305,11 +351,17 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
       throw httpError(400, '没有已生成的线框')
     }
 
-    const wireframe = { ...context.wireframe, confirmed: true, confirmedAt: new Date().toISOString() }
-    await runClient.updateRun(input.runId, { phase: 'wireframe_confirmed', context: JSON.stringify({ ...context, wireframe }) })
+    const wireframe = {
+      ...context.wireframe,
+      confirmed: true,
+      confirmedAt: new Date().toISOString(),
+    }
+    await runClient.updateRun(input.runId, {
+      phase: 'wireframe_confirmed',
+      context: JSON.stringify({ ...context, wireframe }),
+    })
     return { runId: input.runId, phase: 'wireframe_confirmed', wireframe }
   })
-
 
   fastify.post('/agent/stream', async (request, reply) => {
     const input = streamBodySchema.parse(request.body)
@@ -325,11 +377,6 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
 
     const runClient = resolveRunClient()
 
-
-
-
-
-
     if (!runClient) {
       throw httpError(503, 'Java 内部 API 未配置，无法校验线框闸门，拒绝进入代码生成')
     }
@@ -344,13 +391,18 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
       throw httpError(400, 'run 不存在，请先完成需求工程（访谈/线框/确认）')
     }
     if (run.phase !== 'wireframe_confirmed') {
-      throw httpError(409, `未确认线框，无法进入代码生成（当前阶段为 ${run.phase}）：请先完成访谈并确认线框`)
+      throw httpError(
+        409,
+        `未确认线框，无法进入代码生成（当前阶段为 ${run.phase}）：请先完成访谈并确认线框`,
+      )
     }
 
-
     const context = parseContext(run.context)
-    const sessionConclusion = context.interview?.complete ? buildSummary(context.interview) : undefined
-    const planningArtifact = context.planning ?? (sessionConclusion ? buildPlanningArtifact(sessionConclusion) : undefined)
+    const sessionConclusion = context.interview?.complete
+      ? buildSummary(context.interview)
+      : undefined
+    const planningArtifact =
+      context.planning ?? (sessionConclusion ? buildPlanningArtifact(sessionConclusion) : undefined)
     let wireframePath: string | undefined
     if (context.wireframe?.relativeUrl) {
       try {
@@ -359,12 +411,9 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
           config.workspaceRoot,
         )
       } catch {
-
         wireframePath = undefined
       }
     }
-
-
 
     try {
       await runClient.freezeCredit(input.runId, { intensity: input.intensity })
@@ -372,22 +421,16 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
       if (err instanceof RunApiError && err.status === 402) {
         throw httpError(402, err.message)
       }
-      throw httpError(502, `冻结积分失败，无法进入代码生成：${err instanceof Error ? err.message : '未知错误'}`)
+      throw httpError(
+        502,
+        `冻结积分失败，无法进入代码生成：${err instanceof Error ? err.message : '未知错误'}`,
+      )
     }
-
-
-
-
 
     reply.hijack()
     reply.raw.writeHead(200, SSE_HEADERS)
 
-
     reply.raw.on('error', () => {})
-
-
-
-
 
     const abortController = new AbortController()
     reply.raw.on('close', () => {
@@ -395,8 +438,6 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
         abortController.abort()
       }
     })
-
-
 
     const writeFrame = async (event: AgentEvent): Promise<void> => {
       if (reply.raw.writableEnded || reply.raw.destroyed) return
@@ -416,7 +457,11 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     try {
       await options.observer?.metadata(input.runId, {
         model: isRealLlmConfigured(config)
-          ? (input.intensity === 'fast' ? (config.modelFast || 'qwen3-coder-next') : input.intensity === 'deep' ? (config.modelDeep || 'qwen3.7-plus') : (config.modelStandard || 'qwen3-coder-plus'))
+          ? input.intensity === 'fast'
+            ? config.modelFast || 'qwen3-coder-next'
+            : input.intensity === 'deep'
+              ? config.modelDeep || 'qwen3.7-plus'
+              : config.modelStandard || 'qwen3-coder-plus'
           : `scripted-${input.intensity ?? 'standard'}`,
         channel: isRealLlmConfigured(config) ? 'dashscope-coding' : 'scripted',
       })
@@ -443,7 +488,6 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
         },
 
         abortSignal: abortController.signal,
-
         logger: request.log,
       })) {
         await options.observer?.event(input.runId, event)
@@ -452,8 +496,10 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
         if (event.type === 'done' || event.type === 'error') break
       }
     } catch (error) {
-
-      await writeFrame({ type: 'error', message: error instanceof Error ? error.message : '生成失败' })
+      await writeFrame({
+        type: 'error',
+        message: error instanceof Error ? error.message : '生成失败',
+      })
     } finally {
       await options.observer?.close(input.runId)
 
@@ -464,14 +510,24 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     return reply
   })
 
-
   fastify.get('/agent/smoke/sse', async (_request, reply) => {
     const events: AgentEvent[] = [
       { type: 'milestone', title: '开始生成', detail: '工作流启动' },
       { type: 'ai_thinking', text: '分析需求中' },
       { type: 'ai_response', data: '<!DOCTYPE html>\n<html><body>smoke</body></html>' },
-      { type: 'tool_request', id: 'smoke-1', name: 'writeFile', arguments: '{"relativeFilePath":"index.html"}' },
-      { type: 'tool_executed', id: 'smoke-1', name: 'writeFile', arguments: '{"relativeFilePath":"index.html"}', result: 'ok' },
+      {
+        type: 'tool_request',
+        id: 'smoke-1',
+        name: 'writeFile',
+        arguments: '{"relativeFilePath":"index.html"}',
+      },
+      {
+        type: 'tool_executed',
+        id: 'smoke-1',
+        name: 'writeFile',
+        arguments: '{"relativeFilePath":"index.html"}',
+        result: 'ok',
+      },
       { type: 'milestone', title: '生成完成' },
       { type: 'done' },
     ]

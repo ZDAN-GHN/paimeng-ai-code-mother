@@ -1,4 +1,3 @@
-
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -11,23 +10,25 @@ import { RunClient, type Run } from '../src/runs/runClient.js'
 
 export const TEST_SECRET = 'test-secret'
 
-
 export type Frame = { event: string; data: Record<string, unknown> }
 
 export type RunCall = { url: string; body: Record<string, unknown> }
 
-
 export function frames(body: string): Frame[] {
-  return body.split('\n\n').filter(Boolean).map((raw) => {
-    const lines = raw.split('\n')
-    const event = lines.find((line) => line.startsWith('event: '))!.slice(7)
-    const data = JSON.parse(lines.find((line) => line.startsWith('data: '))!.slice(6)) as Record<string, unknown>
-    expect(data.type).toBe(event)
-    return { event, data }
-  })
+  return body
+    .split('\n\n')
+    .filter(Boolean)
+    .map((raw) => {
+      const lines = raw.split('\n')
+      const event = lines.find((line) => line.startsWith('event: '))!.slice(7)
+      const data = JSON.parse(lines.find((line) => line.startsWith('data: '))!.slice(6)) as Record<
+        string,
+        unknown
+      >
+      expect(data.type).toBe(event)
+      return { event, data }
+    })
 }
-
-
 
 export function fakeRunClient(
   calls: RunCall[],
@@ -40,26 +41,38 @@ export function fakeRunClient(
     token: 'test',
     fetchImpl: vi.fn(async (url, init) => {
       const method = init?.method ?? 'GET'
-      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {}
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {}
       calls.push({ url: String(url), body })
 
       if (completeFails && String(url).endsWith('/complete')) {
         return new Response(JSON.stringify({ code: 500, message: '内部错误' }), { status: 500 })
       }
-      const data = method === 'GET'
-        ? { runId: String(url).split('/').at(-1), appId: 1, userId: 1, phase: gatePhase, context, milestones: null }
-        : { runId: String(url).split('/').at(-2), appId: 1, userId: 1, phase: body.phase ?? 'interview', context: null, milestones: null }
+      const data =
+        method === 'GET'
+          ? {
+              runId: String(url).split('/').at(-1),
+              appId: 1,
+              userId: 1,
+              phase: gatePhase,
+              context,
+              milestones: null,
+            }
+          : {
+              runId: String(url).split('/').at(-2),
+              appId: 1,
+              userId: 1,
+              phase: body.phase ?? 'interview',
+              context: null,
+              milestones: null,
+            }
       return new Response(JSON.stringify({ code: 0, data, message: 'ok' }), { status: 200 })
     }),
   })
 }
 
-
 export function makeWorkspaceRoot(): string {
   return mkdtempSync(path.join(tmpdir(), 'paimeng-workspace-'))
 }
-
-
 
 export function makePassingReviewGates(): ReviewGateSet {
   return {
@@ -77,8 +90,9 @@ export function makePassingReviewGates(): ReviewGateSet {
   }
 }
 
-
-export async function makeToken(overrides: { expiresIn?: string | number; sub?: string } = {}): Promise<string> {
+export async function makeToken(
+  overrides: { expiresIn?: string | number; sub?: string } = {},
+): Promise<string> {
   return new SignJWT({ appId: 1 })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(overrides.sub ?? '42')
@@ -87,10 +101,10 @@ export async function makeToken(overrides: { expiresIn?: string | number; sub?: 
     .sign(new TextEncoder().encode(TEST_SECRET))
 }
 
-export function buildTestApp(workspaceRoot: string = makeWorkspaceRoot(), overrides: Parameters<typeof buildApp>[0] = {}) {
-
-
-
+export function buildTestApp(
+  workspaceRoot: string = makeWorkspaceRoot(),
+  overrides: Parameters<typeof buildApp>[0] = {},
+) {
   return buildApp({
     jwtSecret: TEST_SECRET,
     workspaceRoot,
@@ -104,7 +118,6 @@ export function buildTestApp(workspaceRoot: string = makeWorkspaceRoot(), overri
     modelQuality: '',
     ...overrides,
     agentRoutes: {
-
       reviewGates: makePassingReviewGates(),
       ...(overrides.agentRoutes ?? {}),
     },

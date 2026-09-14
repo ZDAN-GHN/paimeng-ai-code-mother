@@ -1,8 +1,5 @@
-
-
 import { describe, expect, it } from 'vitest'
 import { validatePrompt } from '../../src/interview/guardrails.js'
-
 
 function reason(text: string): string {
   return validatePrompt(text).reason

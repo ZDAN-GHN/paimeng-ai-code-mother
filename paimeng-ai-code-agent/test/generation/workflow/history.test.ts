@@ -1,7 +1,9 @@
-
-
 import { describe, expect, it } from 'vitest'
-import { SUMMARY_CHAR_LIMIT, windowHistory, type HistoryTurn } from '../../../src/generation/workflow/history.js'
+import {
+  SUMMARY_CHAR_LIMIT,
+  windowHistory,
+  type HistoryTurn,
+} from '../../../src/generation/workflow/history.js'
 
 describe('输入历史滑窗（Issue #9）', () => {
   it('历史轮次 ≤ 滑窗 → 全部保留全文，无摘要', () => {
@@ -47,7 +49,10 @@ describe('输入历史滑窗（Issue #9）', () => {
   })
 
   it('滑窗为 0 且历史非空 → 全部折叠进摘要（无全文槽位）', () => {
-    const turns: HistoryTurn[] = [{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }]
+    const turns: HistoryTurn[] = [
+      { role: 'user', content: 'a' },
+      { role: 'assistant', content: 'b' },
+    ]
     const result = windowHistory(turns, 0)
     expect(result.recent).toEqual([])
     expect(result.foldedCount).toBe(2)
@@ -62,7 +67,10 @@ describe('输入历史滑窗（Issue #9）', () => {
   })
 
   it('摘要超长时截断到 SUMMARY_CHAR_LIMIT', () => {
-    const long: HistoryTurn[] = Array.from({ length: 100 }, (_, i) => ({ role: 'user' as const, content: `轮次${i}的内容`.repeat(20) }))
+    const long: HistoryTurn[] = Array.from({ length: 100 }, (_, i) => ({
+      role: 'user' as const,
+      content: `轮次${i}的内容`.repeat(20),
+    }))
     const result = windowHistory(long, 2)
     expect(result.foldedCount).toBe(98)
     expect(result.earlierSummary.length).toBeLessThanOrEqual(SUMMARY_CHAR_LIMIT + 1)

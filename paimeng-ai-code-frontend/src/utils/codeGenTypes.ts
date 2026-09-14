@@ -1,10 +1,8 @@
-
 export enum CodeGenTypeEnum {
   HTML = 'html',
   MULTI_FILE = 'multi_file',
   VUE_PROJECT = 'vue_project',
 }
-
 
 export const CODE_GEN_TYPE_CONFIG = {
   [CodeGenTypeEnum.HTML]: {
@@ -21,12 +19,10 @@ export const CODE_GEN_TYPE_CONFIG = {
   },
 } as const
 
-
 export const CODE_GEN_TYPE_OPTIONS = Object.values(CODE_GEN_TYPE_CONFIG).map((config) => ({
   label: config.label,
   value: config.value,
 }))
-
 
 export const formatCodeGenType = (type: string | undefined): string => {
   if (!type) return '未知类型'
@@ -35,11 +31,9 @@ export const formatCodeGenType = (type: string | undefined): string => {
   return config ? config.label : type
 }
 
-
 export const getAllCodeGenTypes = () => {
   return Object.values(CodeGenTypeEnum)
 }
-
 
 export const isValidCodeGenType = (type: string): type is CodeGenTypeEnum => {
   return Object.values(CodeGenTypeEnum).includes(type as CodeGenTypeEnum)

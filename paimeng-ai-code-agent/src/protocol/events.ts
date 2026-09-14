@@ -1,20 +1,14 @@
-
-
-
 export interface AgentEventBase {
-
   seq?: number
 }
 
 export interface AiResponseEvent extends AgentEventBase {
   type: 'ai_response'
-
   data: string
 }
 
 export interface AiThinkingEvent extends AgentEventBase {
   type: 'ai_thinking'
-
   text: string
 }
 
@@ -35,7 +29,6 @@ export interface ToolExecutedEvent extends AgentEventBase {
 
 export interface MilestoneEvent extends AgentEventBase {
   type: 'milestone'
-
   title: string
   detail?: string
 }
@@ -85,13 +78,14 @@ export type AgentEvent =
 
 export type AgentTurnEvent = AgentEvent & { seq: number }
 
-
-export type AgentTurnTerminalEvent = AwaitingUserEvent & { seq: number } | DoneEvent & { seq: number } | ErrorEvent & { seq: number }
+export type AgentTurnTerminalEvent =
+  | (AwaitingUserEvent & { seq: number })
+  | (DoneEvent & { seq: number })
+  | (ErrorEvent & { seq: number })
 
 export function isAgentTurnTerminalEvent(event: AgentTurnEvent): event is AgentTurnTerminalEvent {
   return event.type === 'awaiting_user' || event.type === 'done' || event.type === 'error'
 }
-
 
 export function validateAgentTurnEvents(events: readonly AgentTurnEvent[]): void {
   let previous = 0
@@ -105,5 +99,6 @@ export function validateAgentTurnEvents(events: readonly AgentTurnEvent[]): void
     if (isAgentTurnTerminalEvent(event)) terminalSeen = true
   }
   if (events.length === 0 || !terminalSeen) throw new Error('统一回合必须包含一个终态事件')
-  if (events.filter(isAgentTurnTerminalEvent).length !== 1) throw new Error('统一回合必须恰有一个终态事件')
+  if (events.filter(isAgentTurnTerminalEvent).length !== 1)
+    throw new Error('统一回合必须恰有一个终态事件')
 }

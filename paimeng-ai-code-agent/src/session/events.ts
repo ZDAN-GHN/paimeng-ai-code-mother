@@ -57,6 +57,8 @@ export function isSessionEventKind(value: string): value is SessionEventKind {
 
 export function validateSessionEvent(input: SessionEventInput): void {
   if (!isSessionEventKind(input.kind)) throw new UnknownEventKindError(input.kind)
-  if (!['human', 'model', 'system'].includes(input.source)) throw new Error(`非法事件来源: ${input.source}`)
-  if (!Number.isInteger(input.version ?? 1) || (input.version ?? 1) < 1) throw new Error('事件版本必须为正整数')
+  if (!['human', 'model', 'system'].includes(input.source))
+    throw new Error(`非法事件来源: ${input.source}`)
+  if (!Number.isInteger(input.version ?? 1) || (input.version ?? 1) < 1)
+    throw new Error('事件版本必须为正整数')
 }

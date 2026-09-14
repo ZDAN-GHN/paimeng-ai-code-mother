@@ -1,30 +1,43 @@
-
-
 from pathlib import Path
 
 from app.workspace.manager import validate_workspace_path
 
-
 IGNORED_NAMES = {
-    "node_modules", ".git", "dist", "build", ".DS_Store",
-    ".env", "target", ".mvn", ".idea", ".vscode", "coverage",
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    ".DS_Store",
+    ".env",
+    "target",
+    ".mvn",
+    ".idea",
+    ".vscode",
+    "coverage",
 }
 
-
 IGNORED_EXTENSIONS = (".log", ".tmp", ".cache", ".lock")
-
-
 IMPORTANT_FILES = {
-    "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
-    "vite.config.js", "vite.config.ts", "vue.config.js",
-    "tsconfig.json", "tsconfig.app.json", "tsconfig.node.json",
-    "index.html", "main.js", "main.ts", "app.vue", ".gitignore", "readme.md",
+    "package.json",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "vite.config.js",
+    "vite.config.ts",
+    "vue.config.js",
+    "tsconfig.json",
+    "tsconfig.app.json",
+    "tsconfig.node.json",
+    "index.html",
+    "main.js",
+    "main.ts",
+    "app.vue",
+    ".gitignore",
+    "readme.md",
 }
 
 
 class FileTools:
-
-
     def __init__(self, workspace_path: Path | str) -> None:
 
         self._root = validate_workspace_path(str(workspace_path))
@@ -52,7 +65,9 @@ class FileTools:
             return f"错误：文件不存在或不是文件 - {relative_file_path}"
         return path.read_text(encoding="utf-8")
 
-    def modify_file(self, relative_file_path: str, old_content: str, new_content: str) -> str:
+    def modify_file(
+        self, relative_file_path: str, old_content: str, new_content: str
+    ) -> str:
 
         path = self._resolve(relative_file_path)
         if not path.exists() or not path.is_file():

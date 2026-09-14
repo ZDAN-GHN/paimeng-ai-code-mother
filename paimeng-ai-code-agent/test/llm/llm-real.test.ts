@@ -1,11 +1,7 @@
-
-
-
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { generateText } from 'ai'
 import { createRealLlm, DEFAULT_MODEL_STANDARD, isRealLlmConfigured } from '../../src/llm/real.js'
 import type { AgentConfig } from '../../src/server/config.js'
-
 
 function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
@@ -29,7 +25,6 @@ function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   }
 }
 
-
 const OK_COMPLETION = {
   id: 'chatcmpl-test',
   object: 'chat.completion',
@@ -39,11 +34,12 @@ const OK_COMPLETION = {
   usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
 }
 
-
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  })
 }
-
 
 function stubFetch() {
   const calls: Array<{ url: string; body: Record<string, unknown> }> = []
@@ -54,11 +50,18 @@ function stubFetch() {
     return state.response
   })
   vi.stubGlobal('fetch', fake)
-  return { calls, setNext: (response: Response) => { state.response = response } }
+  return {
+    calls,
+    setNext: (response: Response) => {
+      state.response = response
+    },
+  }
 }
 
-
-async function completeOnce(modelId: string, maxRetries = 0): Promise<{ text?: string; error?: unknown }> {
+async function completeOnce(
+  modelId: string,
+  maxRetries = 0,
+): Promise<{ text?: string; error?: unknown }> {
   const provider = createRealLlm(baseConfig())
   try {
     const result = await generateText({
@@ -88,12 +91,21 @@ describe('isRealLlmConfigured（DashScope key 缺失回退）', () => {
 
 describe('createRealLlm（fail-fast 与别名注册）', () => {
   it('缺少 Coding Plan key → 抛出 fail-fast 错误', () => {
-    expect(() => createRealLlm(baseConfig({ deepCodingApiKey: '' }))).toThrow(/DASHSCOPE_CODING_API_KEY/)
+    expect(() => createRealLlm(baseConfig({ deepCodingApiKey: '' }))).toThrow(
+      /DASHSCOPE_CODING_API_KEY/,
+    )
   })
 
   it('scripted-* 别名与配置 model id 双键注册；未知 id 抛错', () => {
     const provider = createRealLlm(baseConfig({ modelFast: 'my-fast-model' }))
-    for (const id of ['scripted-router', 'scripted-fast', 'scripted-quality', 'scripted-standard', 'scripted-deep', 'my-fast-model']) {
+    for (const id of [
+      'scripted-router',
+      'scripted-fast',
+      'scripted-quality',
+      'scripted-standard',
+      'scripted-deep',
+      'my-fast-model',
+    ]) {
       expect(() => provider.languageModel(id)).not.toThrow()
     }
     expect(provider.languageModel('my-fast-model').modelId).toBe('my-fast-model')
@@ -147,7 +159,12 @@ describe('「HTTP 200 包 error 体」归一化转码', () => {
   })
 
   it('HTTP 200 但响应体非 JSON（网关垃圾页）→ 502 交由 SDK 重试', async () => {
-    stubFetch().setNext(new Response('<html>bad gateway</html>', { status: 200, headers: { 'content-type': 'text/html' } }))
+    stubFetch().setNext(
+      new Response('<html>bad gateway</html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      }),
+    )
     const { error } = await completeOnce('scripted-standard')
     expect((error as { statusCode?: number }).statusCode).toBe(502)
   })

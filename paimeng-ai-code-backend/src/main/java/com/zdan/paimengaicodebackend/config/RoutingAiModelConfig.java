@@ -8,8 +8,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Scope;
 
-
-
 @Configuration
 @ConfigurationProperties(prefix = "langchain4j.open-ai.routing-chat-model")
 @Data
@@ -29,18 +27,17 @@ public class RoutingAiModelConfig {
 
     private Boolean logResponses = false;
 
-
     @Bean
     @Scope("prototype")
     public ChatModel routingChatModelPrototype() {
         return OpenAiChatModel.builder()
-                .apiKey(apiKey)
-                .modelName(modelName)
-                .baseUrl(baseUrl)
-                .maxTokens(maxTokens)
-                .temperature(temperature)
-                .logRequests(logRequests)
-                .logResponses(logResponses)
-                .build();
+            .apiKey(apiKey)
+            .modelName(modelName)
+            .baseUrl(baseUrl)
+            .maxTokens(maxTokens)
+            .temperature(temperature)
+            .logRequests(logRequests)
+            .logResponses(logResponses)
+            .build();
     }
 }

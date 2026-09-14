@@ -1,11 +1,3 @@
-
-
-
-
-
-
-
-
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 import { NoObjectGeneratedError, generateObject } from 'ai'
@@ -24,16 +16,11 @@ import {
   type ReviewVerdict,
 } from './types.js'
 
-
-
-
 export interface QualityScore {
   isValid: boolean
-
   grade: number
   errors: string[]
   suggestions: string[]
-
   usage?: TokenUsage
 }
 
@@ -41,18 +28,11 @@ export interface QualityScorer {
   score(codeContent: string, signal?: AbortSignal): Promise<QualityScore>
 }
 
-
-
-
-
 export const qualityScoreOutputSchema = z.object({
   isValid: z.boolean(),
   errors: z.array(z.string()),
   suggestions: z.array(z.string()),
 })
-
-
-
 
 export class LlmQualityScorer implements QualityScorer {
   constructor(private readonly provider: LlmProvider) {}
@@ -63,9 +43,7 @@ export class LlmQualityScorer implements QualityScorer {
         schema: qualityScoreOutputSchema,
         system: loadPrompt(PROMPT_NAMES.codeQualityCheck),
         prompt: codeContent,
-
         maxRetries: SHORT_CALL_MAX_RETRIES,
-
 
         ...(signal ? { abortSignal: signal } : {}),
       })
@@ -84,15 +62,12 @@ export class LlmQualityScorer implements QualityScorer {
         },
       }
     } catch (error) {
-
-
       if (!NoObjectGeneratedError.isInstance(error)) throw error
       return {
         isValid: false,
         grade: 0,
         errors: ['质检结果无法解析，视为未通过'],
         suggestions: [],
-
         usage: {
           inputTokens: error.usage?.inputTokens ?? 0,
           outputTokens: error.usage?.outputTokens ?? 0,
@@ -107,29 +82,33 @@ export class QualityScoreGate implements ReviewGate {
   readonly name = GATE_NAMES.qualityScore
   constructor(
     private readonly scorer: QualityScorer,
-
     private readonly signal?: AbortSignal,
   ) {}
   async verify(context: ReviewContext): Promise<GateResult> {
     const result = await this.scorer.score(context.codeContent, this.signal)
 
     if (result.isValid) {
-      return { name: this.name, passed: true, detail: `质检通过（得分 ${result.grade}）`, usage: result.usage }
+      return {
+        name: this.name,
+        passed: true,
+        detail: `质检通过（得分 ${result.grade}）`,
+        usage: result.usage,
+      }
     }
 
     const parts: string[] = []
     if (result.errors.length > 0) parts.push(result.errors.join('；'))
     if (result.suggestions.length > 0) parts.push(`建议：${result.suggestions.join('；')}`)
-    return { name: this.name, passed: false, detail: parts.join('；') || '质检未通过', usage: result.usage }
+    return {
+      name: this.name,
+      passed: false,
+      detail: parts.join('；') || '质检未通过',
+      usage: result.usage,
+    }
   }
 }
 
-
-
-
 export interface BuildVerifier extends ReviewGate {}
-
-
 
 export class DefaultBuildVerifier implements BuildVerifier {
   readonly name = GATE_NAMES.build
@@ -153,14 +132,22 @@ export class DefaultBuildVerifier implements BuildVerifier {
       return { name: GATE_NAMES.build, passed: false, detail: '缺少入口文件 index.html' }
     }
     if (entryStats.isSymbolicLink()) {
-      return { name: GATE_NAMES.build, passed: false, detail: '入口文件 index.html 不允许使用符号链接' }
+      return {
+        name: GATE_NAMES.build,
+        passed: false,
+        detail: '入口文件 index.html 不允许使用符号链接',
+      }
     }
     if (!entryStats.isFile()) {
       return { name: GATE_NAMES.build, passed: false, detail: '入口文件 index.html 不是普通文件' }
     }
     const content = readFileSync(entry, 'utf8')
     if (!hasHtmlElement(content)) {
-      return { name: GATE_NAMES.build, passed: false, detail: '入口文件缺少 <html> 根元素，无法通过构建验证' }
+      return {
+        name: GATE_NAMES.build,
+        passed: false,
+        detail: '入口文件缺少 <html> 根元素，无法通过构建验证',
+      }
     }
     return { name: GATE_NAMES.build, passed: true, detail: '入口文件结构与根元素校验通过' }
   }
@@ -169,13 +156,25 @@ export class DefaultBuildVerifier implements BuildVerifier {
     const entry = path.join(context.workspacePath, 'index.html')
     const entryStats = safeLstat(entry)
     if (!entryStats) {
-      return { name: GATE_NAMES.build, passed: false, detail: 'multi_file 构建缺少入口文件 index.html' }
+      return {
+        name: GATE_NAMES.build,
+        passed: false,
+        detail: 'multi_file 构建缺少入口文件 index.html',
+      }
     }
     if (entryStats.isSymbolicLink()) {
-      return { name: GATE_NAMES.build, passed: false, detail: 'multi_file 入口 index.html 不允许使用符号链接' }
+      return {
+        name: GATE_NAMES.build,
+        passed: false,
+        detail: 'multi_file 入口 index.html 不允许使用符号链接',
+      }
     }
     if (!entryStats.isFile()) {
-      return { name: GATE_NAMES.build, passed: false, detail: 'multi_file 入口 index.html 不是普通文件' }
+      return {
+        name: GATE_NAMES.build,
+        passed: false,
+        detail: 'multi_file 入口 index.html 不是普通文件',
+      }
     }
     const files = listProjectFiles(context.workspacePath)
     if (files < 2) {
@@ -187,26 +186,50 @@ export class DefaultBuildVerifier implements BuildVerifier {
     }
     const content = readFileSync(entry, 'utf8')
     if (!hasHtmlElement(content)) {
-      return { name: GATE_NAMES.build, passed: false, detail: 'multi_file 入口 index.html 缺少 <html> 根元素' }
+      return {
+        name: GATE_NAMES.build,
+        passed: false,
+        detail: 'multi_file 入口 index.html 缺少 <html> 根元素',
+      }
     }
     const references = extractLocalReferences(content)
     for (const reference of references) {
       const resolved = resolveLocalReference(context.workspacePath, reference)
       if (!resolved) {
-        return { name: GATE_NAMES.build, passed: false, detail: `multi_file 入口包含不安全本地引用：${reference}` }
+        return {
+          name: GATE_NAMES.build,
+          passed: false,
+          detail: `multi_file 入口包含不安全本地引用：${reference}`,
+        }
       }
       if (!isSafeWorkspacePath(context.workspacePath, resolved)) {
-        return { name: GATE_NAMES.build, passed: false, detail: `multi_file 入口引用的本地路径包含不安全符号链接：${reference}` }
+        return {
+          name: GATE_NAMES.build,
+          passed: false,
+          detail: `multi_file 入口引用的本地路径包含不安全符号链接：${reference}`,
+        }
       }
       const referenceStats = safeLstat(resolved)
       if (!referenceStats) {
-        return { name: GATE_NAMES.build, passed: false, detail: `multi_file 入口引用的本地文件不存在：${reference}` }
+        return {
+          name: GATE_NAMES.build,
+          passed: false,
+          detail: `multi_file 入口引用的本地文件不存在：${reference}`,
+        }
       }
       if (referenceStats.isSymbolicLink()) {
-        return { name: GATE_NAMES.build, passed: false, detail: `multi_file 入口引用的本地文件不允许使用符号链接：${reference}` }
+        return {
+          name: GATE_NAMES.build,
+          passed: false,
+          detail: `multi_file 入口引用的本地文件不允许使用符号链接：${reference}`,
+        }
       }
       if (!referenceStats.isFile()) {
-        return { name: GATE_NAMES.build, passed: false, detail: `multi_file 入口引用的本地路径不是普通文件：${reference}` }
+        return {
+          name: GATE_NAMES.build,
+          passed: false,
+          detail: `multi_file 入口引用的本地路径不是普通文件：${reference}`,
+        }
       }
     }
     return {
@@ -254,7 +277,6 @@ function hasHtmlElement(html: string): boolean {
 }
 
 type ParsedHtml = { hasHtmlElement: boolean; references: string[] }
-
 
 function parseHtml(html: string): ParsedHtml {
   const references: string[] = []
@@ -370,12 +392,15 @@ function isSafeWorkspacePath(root: string, candidate: string): boolean {
     }
     const realCandidate = realpathSync(candidate)
     const realRelative = path.relative(realRoot, realCandidate)
-    return realRelative !== '..' && !realRelative.startsWith(`..${path.sep}`) && !path.isAbsolute(realRelative)
+    return (
+      realRelative !== '..' &&
+      !realRelative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(realRelative)
+    )
   } catch {
     return false
   }
 }
-
 
 function resolveLocalReference(root: string, reference: string): string | undefined {
   let decoded: string
@@ -388,15 +413,12 @@ function resolveLocalReference(root: string, reference: string): string | undefi
   if (!withoutQuery || withoutQuery.startsWith('/') || withoutQuery.includes('\\')) return undefined
   const resolved = path.resolve(root, withoutQuery)
   const relative = path.relative(root, resolved)
-  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return undefined
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+    return undefined
   return resolved
 }
 
-
-
-
 export interface VisualDiffVerifier extends ReviewGate {}
-
 
 export function extractPageAnchors(html: string): string[] {
   const anchors = new Set<string>()
@@ -415,14 +437,28 @@ export function extractPageAnchors(html: string): string[] {
   return [...anchors]
 }
 
-const visualDiffExcludedDirectories = new Set(['node_modules', 'dist', 'build', 'target', '.git', 'wireframe'])
+const visualDiffExcludedDirectories = new Set([
+  'node_modules',
+  'dist',
+  'build',
+  'target',
+  '.git',
+  'wireframe',
+])
 
-function collectMultiFileHtmlAnchors(workspacePath: string): { anchors: string[]; files: string[] } {
+function collectMultiFileHtmlAnchors(workspacePath: string): {
+  anchors: string[]
+  files: string[]
+} {
   const anchors = new Set<string>()
   const files: string[] = []
   const walk = (directory: string): void => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      if (entry.name.startsWith('.') || (entry.isDirectory() && visualDiffExcludedDirectories.has(entry.name))) continue
+      if (
+        entry.name.startsWith('.') ||
+        (entry.isDirectory() && visualDiffExcludedDirectories.has(entry.name))
+      )
+        continue
       const fullPath = path.join(directory, entry.name)
       if (entry.isDirectory()) {
         walk(fullPath)
@@ -438,19 +474,25 @@ function collectMultiFileHtmlAnchors(workspacePath: string): { anchors: string[]
   return { anchors: [...anchors], files }
 }
 
-
-
 export class DefaultVisualDiffVerifier implements VisualDiffVerifier {
   readonly name = GATE_NAMES.visualDiff
   async verify(context: ReviewContext): Promise<GateResult> {
     if (!context.wireframePath || !existsSync(context.wireframePath)) {
-      return { name: GATE_NAMES.visualDiff, passed: false, detail: '缺少已确认线框作为视觉 diff 基准' }
+      return {
+        name: GATE_NAMES.visualDiff,
+        passed: false,
+        detail: '缺少已确认线框作为视觉 diff 基准',
+      }
     }
     const wireframe = readFileSync(context.wireframePath, 'utf8')
     const baseline = [...new Set(extractPageAnchors(wireframe))]
 
     if (baseline.length === 0) {
-      return { name: GATE_NAMES.visualDiff, passed: false, detail: '线框基准未声明页面区段，无法进行视觉 diff' }
+      return {
+        name: GATE_NAMES.visualDiff,
+        passed: false,
+        detail: '线框基准未声明页面区段，无法进行视觉 diff',
+      }
     }
 
     let produced: string[]
@@ -466,19 +508,23 @@ export class DefaultVisualDiffVerifier implements VisualDiffVerifier {
     }
     const missing = baseline.filter((anchor) => !produced.includes(anchor))
     if (missing.length > 0) {
-      const filesDetail = scannedFiles.length > 0 ? `；已扫描文件：${scannedFiles.join(', ')}` : '；未找到可扫描的 HTML 文件'
+      const filesDetail =
+        scannedFiles.length > 0
+          ? `；已扫描文件：${scannedFiles.join(', ')}`
+          : '；未找到可扫描的 HTML 文件'
       return {
         name: GATE_NAMES.visualDiff,
         passed: false,
         detail: `视觉 diff 未通过：生成页缺少线框声明的页面区段（${missing.join(', ')}）${filesDetail}`,
       }
     }
-    return { name: GATE_NAMES.visualDiff, passed: true, detail: `视觉 diff 通过：覆盖线框全部 ${baseline.length} 个页面区段` }
+    return {
+      name: GATE_NAMES.visualDiff,
+      passed: true,
+      detail: `视觉 diff 通过：覆盖线框全部 ${baseline.length} 个页面区段`,
+    }
   }
 }
-
-
-
 
 export interface ReviewGateSet {
   quality: QualityScorer
@@ -495,10 +541,8 @@ export function buildDefaultReviewGates(provider: LlmProvider): ReviewGateSet {
 }
 
 export function gatesFromSet(set: ReviewGateSet, signal?: AbortSignal): ReviewGate[] {
-
   return [new QualityScoreGate(set.quality, signal), set.build, set.visualDiff]
 }
-
 
 export function readAndConcatenateCodeFiles(workspacePath: string): string {
   if (!existsSync(workspacePath)) return ''
@@ -525,16 +569,12 @@ export function readAndConcatenateCodeFiles(workspacePath: string): string {
   return lines.join('\n')
 }
 
-
-
 export interface RunReviewOptions {
   gates: ReviewGateSet
   workspacePath: string
   wireframePath?: string
   codeGenType: CodeGenType
-
   onQualityUsage?: (usage: TokenUsage) => void
-
   abortSignal?: AbortSignal
 }
 

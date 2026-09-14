@@ -1,12 +1,4 @@
-
-
-
-
-
-
-
 export type CodeGenType = 'html' | 'multi_file' | 'vue_project'
-
 
 export interface TokenUsage {
   inputTokens: number
@@ -14,55 +6,42 @@ export interface TokenUsage {
   totalTokens: number
 }
 
-
 export const GATE_NAMES = {
   qualityScore: 'quality-score',
   build: 'build',
   visualDiff: 'visual-diff',
 } as const
 
-
 export interface GateResult {
-
   name: string
   passed: boolean
-
   detail: string
-
   usage?: TokenUsage
 }
 
-
 export interface ReviewContext {
-
   workspacePath: string
-
   wireframePath?: string
-
   codeGenType: CodeGenType
-
   codeContent: string
 }
 
-
 export interface ReviewVerdict {
   passed: boolean
-
   gates: GateResult[]
-
   errors: string[]
-
   suggestions: string[]
 }
-
 
 export interface ReviewGate {
   readonly name: string
   verify(context: ReviewContext): Promise<GateResult>
 }
 
-
-export async function runReviewGates(gates: ReviewGate[], context: ReviewContext): Promise<ReviewVerdict> {
+export async function runReviewGates(
+  gates: ReviewGate[],
+  context: ReviewContext,
+): Promise<ReviewVerdict> {
   const results: GateResult[] = []
   for (const gate of gates) {
     results.push(await gate.verify(context))

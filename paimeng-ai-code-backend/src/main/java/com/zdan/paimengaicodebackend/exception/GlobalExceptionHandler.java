@@ -6,15 +6,13 @@ import com.zdan.paimengaicodebackend.common.ResultUtils;
 import io.swagger.v3.oas.annotations.Hidden;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
-
-import java.io.IOException;
-import java.util.Map;
-
 
 @Hidden
 @RestControllerAdvice
@@ -42,9 +40,9 @@ public class GlobalExceptionHandler {
         return ResultUtils.error(ErrorCode.SYSTEM_ERROR, "系统错误");
     }
 
-
     private boolean handleSseError(int errorCode, String errorMessage) {
-        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        ServletRequestAttributes attributes =
+            (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
         if (attributes == null) {
             return false;
         }
@@ -54,19 +52,22 @@ public class GlobalExceptionHandler {
         String uri = request.getRequestURI();
 
         boolean isSseRequest =
-                (accept != null && accept.contains("text/event-stream")) || uri.contains("/chat/gen/code");
+            (accept != null && accept.contains("text/event-stream")) ||
+            uri.contains("/chat/gen/code");
         if (isSseRequest) {
             try {
-
                 response.setContentType("text/event-stream");
                 response.setCharacterEncoding("UTF-8");
                 response.setHeader("Cache-Control", "no-cache");
                 response.setHeader("Connection", "keep-alive");
 
                 Map<String, Object> errorData = Map.of(
-                        "error", true,
-                        "code", errorCode,
-                        "message", errorMessage
+                    "error",
+                    true,
+                    "code",
+                    errorCode,
+                    "message",
+                    errorMessage
                 );
                 String errorJson = JSONUtil.toJsonStr(errorData);
 

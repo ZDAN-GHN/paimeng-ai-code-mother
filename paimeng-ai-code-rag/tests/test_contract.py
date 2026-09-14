@@ -1,5 +1,3 @@
-
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -59,7 +57,6 @@ def test_stream_with_wrong_token(client):
 
 @pytest.mark.contract
 def test_stream_with_valid_token(client, monkeypatch):
-
 
     class _FakeExec:
         def stream(self, code_gen_type, user_message, file_tools=None):

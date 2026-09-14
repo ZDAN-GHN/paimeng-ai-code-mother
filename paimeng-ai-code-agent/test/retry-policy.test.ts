@@ -1,13 +1,8 @@
-
-
-
-
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { streamText } from 'ai'
 import { createRealLlm } from '../src/llm/real.js'
 import { LlmQualityScorer } from '../src/generation/review/index.js'
 import type { AgentConfig } from '../src/server/config.js'
-
 
 function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
@@ -31,20 +26,27 @@ function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   }
 }
 
-
 const QUALITY_PASS_COMPLETION = {
   id: 'chatcmpl-retry',
   object: 'chat.completion',
   created: 0,
   model: 'test-model',
-  choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: '{"isValid":true,"errors":[],"suggestions":[]}' } }],
+  choices: [
+    {
+      index: 0,
+      finish_reason: 'stop',
+      message: { role: 'assistant', content: '{"isValid":true,"errors":[],"suggestions":[]}' },
+    },
+  ],
   usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  })
 }
-
 
 function stubFetchQueue(responses: Response[]) {
   const calls: Array<{ url: string; body: Record<string, unknown> }> = []

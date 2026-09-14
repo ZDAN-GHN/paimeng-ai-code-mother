@@ -1,5 +1,7 @@
 package com.zdan.paimengaicodebackend.service.impl;
 
+import static com.zdan.paimengaicodebackend.constant.UserConstant.USER_LOGIN_STATE;
+
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
@@ -15,16 +17,12 @@ import com.zdan.paimengaicodebackend.model.vo.LoginUserVO;
 import com.zdan.paimengaicodebackend.model.vo.UserVO;
 import com.zdan.paimengaicodebackend.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-import org.springframework.util.DigestUtils;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
-
-import static com.zdan.paimengaicodebackend.constant.UserConstant.USER_LOGIN_STATE;
-
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.util.DigestUtils;
 
 @Service
 @Slf4j
@@ -43,12 +41,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         String sortField = userQueryRequest.getSortField();
         String sortOrder = userQueryRequest.getSortOrder();
         return QueryWrapper.create()
-                .eq("id", id)
-                .eq("userRole", userRole)
-                .like("userAccount", userAccount)
-                .like("userName", userName)
-                .like("userProfile", userProfile)
-                .orderBy(sortField, "ascend".equals(sortOrder));
+            .eq("id", id)
+            .eq("userRole", userRole)
+            .like("userAccount", userAccount)
+            .like("userName", userName)
+            .like("userProfile", userProfile)
+            .orderBy(sortField, "ascend".equals(sortOrder));
     }
 
     @Override
@@ -71,7 +69,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Override
     public boolean userLogout(HttpServletRequest request) {
-
         Object userObj = request.getSession().getAttribute(USER_LOGIN_STATE);
         if (userObj == null) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "未登录");
@@ -83,7 +80,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Override
     public User getLoginUser(HttpServletRequest request) {
-
         Object userObj = request.getSession().getAttribute(USER_LOGIN_STATE);
         User currentUser = (User) userObj;
         if (currentUser == null) {
@@ -102,8 +98,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     }
 
     @Override
-    public LoginUserVO userLogin(String userAccount, String userPassword, HttpServletRequest request) {
-
+    public LoginUserVO userLogin(
+        String userAccount,
+        String userPassword,
+        HttpServletRequest request
+    ) {
         if (StrUtil.hasBlank(userAccount, userPassword)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数为空");
         }
@@ -142,14 +141,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Override
     public String getEncryptPassword(String userPassword) {
-
         final String salt = "ZDAN-GHN";
         return DigestUtils.md5DigestAsHex((salt + userPassword).getBytes());
     }
 
     @Override
     public long userRegister(String userAccount, String userPassword, String checkPassword) {
-
         if (StrUtil.hasBlank(userAccount, userPassword, checkPassword)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数为空");
         }

@@ -1,17 +1,15 @@
 package com.zdan.paimengaicodebackend.job.cycle;
 
 import com.zdan.paimengaicodebackend.utils.WebScreenshotUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
-import lombok.extern.slf4j.Slf4j;
-
 
 @Configuration
 @EnableScheduling
 @Slf4j
 public class ScreenshotConfig {
-
 
     @Scheduled(cron = "0 0 2 * * ?")
     public void cleanupTempScreenshots() {

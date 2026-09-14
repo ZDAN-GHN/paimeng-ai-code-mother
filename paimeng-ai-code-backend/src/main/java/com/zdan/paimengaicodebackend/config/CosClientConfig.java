@@ -11,35 +11,27 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-
-
 @Configuration
 @ConfigurationProperties(prefix = "cos.client")
 @ConditionalOnProperty(
-        prefix = "cos.client",
-        name = {"host", "secretId", "secretKey", "region", "bucket"}
+    prefix = "cos.client",
+    name = { "host", "secretId", "secretKey", "region", "bucket" }
 )
 @Data
 public class CosClientConfig {
 
-
     private String host;
-
 
     private String secretId;
 
-
     private String secretKey;
 
-
     private String region;
-
 
     private String bucket;
 
     @Bean
     public COSClient cosClient() {
-
         COSCredentials cred = new BasicCOSCredentials(secretId, secretKey);
 
         ClientConfig clientConfig = new ClientConfig(new Region(region));

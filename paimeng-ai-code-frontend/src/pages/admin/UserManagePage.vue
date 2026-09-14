@@ -1,6 +1,5 @@
 <template>
   <div id="userManagePage">
-
     <a-form layout="inline" :model="searchParams" @finish="doSearch">
       <a-form-item label="账号">
         <a-input v-model:value="searchParams.userAccount" placeholder="输入账号" />
@@ -83,16 +82,13 @@ const columns = [
   },
 ]
 
-
 const data = ref<API.UserVO[]>([])
 const total = ref(0)
-
 
 const searchParams = reactive<API.UserQueryRequest>({
   pageNum: 1,
   pageSize: 10,
 })
-
 
 const fetchData = async () => {
   const res = await listUserVoByPage({
@@ -106,7 +102,6 @@ const fetchData = async () => {
   }
 }
 
-
 const pagination = computed(() => {
   return {
     current: searchParams.pageNum ?? 1,
@@ -117,20 +112,16 @@ const pagination = computed(() => {
   }
 })
 
-
 const doTableChange = (page: { current: number; pageSize: number }) => {
   searchParams.pageNum = page.current
   searchParams.pageSize = page.pageSize
   fetchData()
 }
 
-
 const doSearch = () => {
-
   searchParams.pageNum = 1
   fetchData()
 }
-
 
 const doDelete = async (id: number) => {
   if (!id) {
@@ -145,7 +136,6 @@ const doDelete = async (id: number) => {
     message.error('删除失败')
   }
 }
-
 
 onMounted(() => {
   fetchData()

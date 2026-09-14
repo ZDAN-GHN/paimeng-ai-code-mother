@@ -1,26 +1,12 @@
-
-
-
-
-
-
-
-
-
-
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { customProvider } from 'ai'
 import type { AgentConfig } from '../server/config.js'
-
 
 export const DEFAULT_MODEL_ROUTER = 'qwen3.7-plus'
 export const DEFAULT_MODEL_FAST = 'qwen3-coder-next'
 export const DEFAULT_MODEL_STANDARD = 'qwen3-coder-plus'
 export const DEFAULT_MODEL_DEEP = 'qwen3.7-plus'
 export const DEFAULT_MODEL_QUALITY = 'qwen3.7-plus'
-
-
-
 
 export function isRealLlmConfigured(config: AgentConfig): boolean {
   return Boolean(config.deepCodingApiKey)
@@ -34,14 +20,9 @@ function safeJsonParse(text: string): Record<string, unknown> | null {
   }
 }
 
-
-
-
-
-
-
-
-function createChannelFetch(bodyPatch?: (model: string) => Record<string, unknown> | undefined): typeof fetch {
+function createChannelFetch(
+  bodyPatch?: (model: string) => Record<string, unknown> | undefined,
+): typeof fetch {
   return async (url, init) => {
     let requestInit = init
     if (bodyPatch && typeof requestInit?.body === 'string' && requestInit) {
@@ -83,7 +64,6 @@ function createChannelFetch(bodyPatch?: (model: string) => Record<string, unknow
   }
 }
 
-
 interface ChannelSpec {
   name: string
   baseURL: string
@@ -92,14 +72,11 @@ interface ChannelSpec {
   bodyPatch?: (model: string) => Record<string, unknown> | undefined
 }
 
-
-
 interface TierRouting {
   alias: string
   channel: string
   modelId: string
 }
-
 
 export function createRealLlm(config: AgentConfig) {
   const missing = [

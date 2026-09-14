@@ -3,7 +3,9 @@ import { buildTestApp, frames, makeWorkspaceRoot, makeToken } from '../helpers.j
 import type { SessionStore } from '../../src/session/store.js'
 import type { SessionEventRecord } from '../../src/session/events.js'
 
-function memorySessionStore(options: { failOnAppend?: number } = {}): SessionStore & { batches: unknown[] } {
+function memorySessionStore(
+  options: { failOnAppend?: number } = {},
+): SessionStore & { batches: unknown[] } {
   const batches: unknown[] = []
   let nextSeq = 1
   let appendCalls = 0
@@ -31,7 +33,11 @@ function memorySessionStore(options: { failOnAppend?: number } = {}): SessionSto
 }
 
 const validPayload = (root: string) => ({
-  appId: '1001', message: '做一个简单主页', action: 'chat', codeGenType: 'html', workspacePath: root,
+  appId: '1001',
+  message: '做一个简单主页',
+  action: 'chat',
+  codeGenType: 'html',
+  workspacePath: root,
 })
 
 describe('POST /agent/turn', () => {
@@ -40,7 +46,12 @@ describe('POST /agent/turn', () => {
     const root = makeWorkspaceRoot()
     const app = buildTestApp(root, { agentRoutes: { sessionStore: store } })
     const token = await makeToken()
-    const response = await app.inject({ method: 'POST', url: '/agent/turn', headers: { authorization: `Bearer ${token}` }, payload: validPayload(root) })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/turn',
+      headers: { authorization: `Bearer ${token}` },
+      payload: validPayload(root),
+    })
     expect(response.statusCode).toBe(200)
     const output = frames(response.body)
     expect(output).toHaveLength(1)
@@ -51,8 +62,16 @@ describe('POST /agent/turn', () => {
     expect(output.at(-1)!.data.type).toBe('error')
     expect(store.batches).toHaveLength(2)
     expect((store.batches[0] as { events: unknown[] }).events).toHaveLength(2)
-    expect((store.batches[1] as { events: Array<{ kind: string; payload: Record<string, unknown> }> }).events[0]).toMatchObject({
-      kind: 'model/message', payload: { type: 'error', message: '统一回合的模型工具尚未接入，当前请求已安全拒绝', text: '统一回合的模型工具尚未接入，当前请求已安全拒绝' },
+    expect(
+      (store.batches[1] as { events: Array<{ kind: string; payload: Record<string, unknown> }> })
+        .events[0],
+    ).toMatchObject({
+      kind: 'model/message',
+      payload: {
+        type: 'error',
+        message: '统一回合的模型工具尚未接入，当前请求已安全拒绝',
+        text: '统一回合的模型工具尚未接入，当前请求已安全拒绝',
+      },
     })
   })
 
@@ -61,7 +80,12 @@ describe('POST /agent/turn', () => {
     const root = makeWorkspaceRoot()
     const app = buildTestApp(root, { agentRoutes: { sessionStore: store } })
     const token = await makeToken()
-    const response = await app.inject({ method: 'POST', url: '/agent/turn', headers: { authorization: `Bearer ${token}` }, payload: validPayload(root) })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/turn',
+      headers: { authorization: `Bearer ${token}` },
+      payload: validPayload(root),
+    })
     expect(response.statusCode).toBe(503)
     expect(response.headers['content-type']).toContain('application/json')
     expect(response.body).not.toContain('event:')
@@ -76,7 +100,12 @@ describe('POST /agent/turn', () => {
     const root = makeWorkspaceRoot()
     const app = buildTestApp(root, { agentRoutes: { sessionStore: store } })
     const token = await makeToken()
-    const request = { method: 'POST' as const, url: '/agent/turn', headers: { authorization: `Bearer ${token}` }, payload: validPayload(root) }
+    const request = {
+      method: 'POST' as const,
+      url: '/agent/turn',
+      headers: { authorization: `Bearer ${token}` },
+      payload: validPayload(root),
+    }
     const first = await app.inject(request)
     const second = await app.inject(request)
     const firstSeq = frames(first.body)[0]!.data.seq as number
@@ -85,7 +114,9 @@ describe('POST /agent/turn', () => {
     expect(second.statusCode).toBe(200)
     expect(secondSeq).toBeGreaterThan(firstSeq)
     expect(store.batches).toHaveLength(4)
-    const persisted = store.batches.flatMap((batch) => (batch as { events: Array<{ payload: Record<string, unknown> }> }).events)
+    const persisted = store.batches.flatMap(
+      (batch) => (batch as { events: Array<{ payload: Record<string, unknown> }> }).events,
+    )
     const terminalSeqs = [firstSeq, secondSeq]
     expect(terminalSeqs).toEqual([3, 6])
     expect(persisted.filter((event) => event.payload.type === 'error')).toHaveLength(2)
@@ -96,12 +127,18 @@ describe('POST /agent/turn', () => {
     try {
       const store = memorySessionStore()
       const root = makeWorkspaceRoot()
-      const turnIdFactory = vi.fn()
+      const turnIdFactory = vi
+        .fn()
         .mockReturnValueOnce('00000000-0000-4000-8000-000000000001')
         .mockReturnValueOnce('00000000-0000-4000-8000-000000000002')
       const app = buildTestApp(root, { agentRoutes: { sessionStore: store, turnIdFactory } })
       const token = await makeToken()
-      const request = { method: 'POST' as const, url: '/agent/turn', headers: { authorization: `Bearer ${token}` }, payload: validPayload(root) }
+      const request = {
+        method: 'POST' as const,
+        url: '/agent/turn',
+        headers: { authorization: `Bearer ${token}` },
+        payload: validPayload(root),
+      }
       const first = await app.inject(request)
       const second = await app.inject(request)
       const firstSeq = frames(first.body)[0]!.data.seq as number
@@ -121,7 +158,10 @@ describe('POST /agent/turn', () => {
 
   it.each([
     [{ ...validPayload('/tmp'), action: 'unknown' }, 'action'],
-    [{ ...validPayload('/tmp'), action: 'confirm_generation', approvalId: undefined }, 'approvalId'],
+    [
+      { ...validPayload('/tmp'), action: 'confirm_generation', approvalId: undefined },
+      'approvalId',
+    ],
     [{ ...validPayload('/tmp'), message: '   ' }, 'message'],
     [{ ...validPayload('/tmp'), codeGenType: undefined }, 'codeGenType'],
     [{ ...validPayload('/tmp'), workspacePath: undefined }, 'workspacePath'],
@@ -129,7 +169,12 @@ describe('POST /agent/turn', () => {
     const store = memorySessionStore()
     const app = buildTestApp(makeWorkspaceRoot(), { agentRoutes: { sessionStore: store } })
     const token = await makeToken()
-    const response = await app.inject({ method: 'POST', url: '/agent/turn', headers: { authorization: `Bearer ${token}` }, payload })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/turn',
+      headers: { authorization: `Bearer ${token}` },
+      payload,
+    })
     expect(response.statusCode).toBe(400)
     expect(store.batches).toHaveLength(0)
   })
@@ -138,7 +183,12 @@ describe('POST /agent/turn', () => {
     const root = makeWorkspaceRoot()
     const app = buildTestApp(root)
     const token = await makeToken()
-    const response = await app.inject({ method: 'POST', url: '/agent/turn', headers: { authorization: `Bearer ${token}` }, payload: validPayload(root) })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/turn',
+      headers: { authorization: `Bearer ${token}` },
+      payload: validPayload(root),
+    })
     expect(response.statusCode).toBe(503)
   })
 
@@ -148,8 +198,16 @@ describe('POST /agent/turn', () => {
     const app = buildTestApp(root, { agentRoutes: { sessionStore: store } })
     const token = await makeToken()
     const response = await app.inject({
-      method: 'POST', url: '/agent/turn', headers: { authorization: `Bearer ${token}` },
-      payload: { appId: '1001', action: 'confirm_generation', approvalId: 'ap-1', codeGenType: 'html', workspacePath: root },
+      method: 'POST',
+      url: '/agent/turn',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        appId: '1001',
+        action: 'confirm_generation',
+        approvalId: 'ap-1',
+        codeGenType: 'html',
+        workspacePath: root,
+      },
     })
     expect(response.statusCode).toBe(200)
     expect(frames(response.body)[0]!.data.message).toContain('审批与生成尚未接入')

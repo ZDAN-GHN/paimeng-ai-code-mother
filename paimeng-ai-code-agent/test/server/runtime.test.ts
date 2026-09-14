@@ -9,7 +9,9 @@ function testConfig(): AgentConfig {
 }
 
 function fakePool() {
-  return { end: vi.fn(async () => undefined) } as unknown as Pool & { end: ReturnType<typeof vi.fn> }
+  return { end: vi.fn(async () => undefined) } as unknown as Pool & {
+    end: ReturnType<typeof vi.fn>
+  }
 }
 
 function fakeApp(listen: () => Promise<void>): FastifyInstance {
@@ -35,9 +37,11 @@ describe('production server wiring', () => {
       exit,
     })
 
-    expect(buildApp).toHaveBeenCalledWith(expect.objectContaining({
-      agentRoutes: { sessionStore: store },
-    }))
+    expect(buildApp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentRoutes: { sessionStore: store },
+      }),
+    )
     expect(createSessionStore).toHaveBeenCalledWith(pool)
     await server.stop()
     await server.stop()
@@ -51,12 +55,17 @@ describe('production server wiring', () => {
     const app = fakeApp(async () => undefined)
     const error = new Error('build failed')
 
-    await expect(startProductionServer(testConfig(), {
-      buildApp: () => { throw error },
-      createSessionPool: () => pool,
-      createSessionStore: () => ({} as InstanceType<typeof import('../../src/session/store.js').PgSessionStore>),
-      exit: vi.fn(),
-    })).rejects.toBe(error)
+    await expect(
+      startProductionServer(testConfig(), {
+        buildApp: () => {
+          throw error
+        },
+        createSessionPool: () => pool,
+        createSessionStore: () =>
+          ({}) as InstanceType<typeof import('../../src/session/store.js').PgSessionStore>,
+        exit: vi.fn(),
+      }),
+    ).rejects.toBe(error)
 
     expect(pool.end).toHaveBeenCalledTimes(1)
     expect(app.listen).not.toHaveBeenCalled()
@@ -64,15 +73,20 @@ describe('production server wiring', () => {
 
   it('cleans up app and pool after listen fails and exits unsuccessfully', async () => {
     const pool = fakePool()
-    const app = fakeApp(async () => { throw new Error('listen failed') })
+    const app = fakeApp(async () => {
+      throw new Error('listen failed')
+    })
     const exit = vi.fn()
 
-    await expect(startProductionServer(testConfig(), {
-      buildApp: () => app,
-      createSessionPool: () => pool,
-      createSessionStore: () => ({} as InstanceType<typeof import('../../src/session/store.js').PgSessionStore>),
-      exit,
-    })).rejects.toThrow('listen failed')
+    await expect(
+      startProductionServer(testConfig(), {
+        buildApp: () => app,
+        createSessionPool: () => pool,
+        createSessionStore: () =>
+          ({}) as InstanceType<typeof import('../../src/session/store.js').PgSessionStore>,
+        exit,
+      }),
+    ).rejects.toThrow('listen failed')
 
     expect(app.close).toHaveBeenCalledTimes(1)
     expect(pool.end).toHaveBeenCalledTimes(1)

@@ -1,5 +1,3 @@
-
-
 from collections.abc import Iterator
 
 from app.models.schemas import StreamMessage

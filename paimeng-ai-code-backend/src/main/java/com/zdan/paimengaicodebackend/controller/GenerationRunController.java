@@ -29,85 +29,101 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-
 @Slf4j
 @RestController
 @RequestMapping("/internal")
 public class GenerationRunController {
-
 
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final GenerationRunService generationRunService;
     private final InternalApiProperties internalApiProperties;
 
-    public GenerationRunController(GenerationRunService generationRunService,
-                                   InternalApiProperties internalApiProperties) {
+    public GenerationRunController(
+        GenerationRunService generationRunService,
+        InternalApiProperties internalApiProperties
+    ) {
         this.generationRunService = generationRunService;
         this.internalApiProperties = internalApiProperties;
     }
 
-
     @PostMapping("/runs")
-    public ResponseEntity<BaseResponse<RunVO>> createRun(@RequestBody RunCreateRequest request,
-                                                         @RequestHeader(value = "Authorization", required = false) String authorization) {
+    public ResponseEntity<BaseResponse<RunVO>> createRun(
+        @RequestBody RunCreateRequest request,
+        @RequestHeader(value = "Authorization", required = false) String authorization
+    ) {
         checkInternalAuth(authorization);
         return ResponseEntity.ok(ResultUtils.success(generationRunService.createRun(request)));
     }
 
-
     @PatchMapping("/runs/{runId}")
-    public ResponseEntity<BaseResponse<RunVO>> updateRun(@PathVariable String runId,
-                                                         @RequestBody RunUpdateRequest request,
-                                                         @RequestHeader(value = "Authorization", required = false) String authorization) {
+    public ResponseEntity<BaseResponse<RunVO>> updateRun(
+        @PathVariable String runId,
+        @RequestBody RunUpdateRequest request,
+        @RequestHeader(value = "Authorization", required = false) String authorization
+    ) {
         checkInternalAuth(authorization);
-        return ResponseEntity.ok(ResultUtils.success(generationRunService.updateRun(runId, request)));
+        return ResponseEntity.ok(
+            ResultUtils.success(generationRunService.updateRun(runId, request))
+        );
     }
 
-
     @GetMapping("/runs/{runId}")
-    public ResponseEntity<BaseResponse<RunVO>> getRun(@PathVariable String runId,
-                                                      @RequestHeader(value = "Authorization", required = false) String authorization) {
+    public ResponseEntity<BaseResponse<RunVO>> getRun(
+        @PathVariable String runId,
+        @RequestHeader(value = "Authorization", required = false) String authorization
+    ) {
         checkInternalAuth(authorization);
         return ResponseEntity.ok(ResultUtils.success(generationRunService.getByRunId(runId)));
     }
 
-
     @GetMapping("/apps/{appId}/runs/latest-nonterminal")
-    public ResponseEntity<BaseResponse<RunVO>> getLatestNonTerminalRun(@PathVariable Long appId,
-                                                                       @RequestParam(required = false) Long userId,
-                                                                       @RequestHeader(value = "Authorization", required = false) String authorization) {
+    public ResponseEntity<BaseResponse<RunVO>> getLatestNonTerminalRun(
+        @PathVariable Long appId,
+        @RequestParam(required = false) Long userId,
+        @RequestHeader(value = "Authorization", required = false) String authorization
+    ) {
         checkInternalAuth(authorization);
-        return ResponseEntity.ok(ResultUtils.success(generationRunService.getLatestNonTerminalRun(appId, userId)));
+        return ResponseEntity.ok(
+            ResultUtils.success(generationRunService.getLatestNonTerminalRun(appId, userId))
+        );
     }
 
-
     @PostMapping("/agent/runs/{runId}/complete")
-    public ResponseEntity<BaseResponse<Boolean>> completeRun(@PathVariable String runId,
-                                                             @RequestBody AgentCompleteRequest request,
-                                                             @RequestHeader(value = "Authorization", required = false) String authorization) {
+    public ResponseEntity<BaseResponse<Boolean>> completeRun(
+        @PathVariable String runId,
+        @RequestBody AgentCompleteRequest request,
+        @RequestHeader(value = "Authorization", required = false) String authorization
+    ) {
         checkInternalAuth(authorization);
         generationRunService.completeRun(runId, request);
         return ResponseEntity.ok(ResultUtils.success(true));
     }
 
-
     @PostMapping("/agent/wireframe/quota/acquire")
-    public ResponseEntity<BaseResponse<Boolean>> acquireWireframeQuota(@RequestBody WireframeQuotaRequest request,
-                                                                       @RequestHeader(value = "Authorization", required = false) String authorization) {
+    public ResponseEntity<BaseResponse<Boolean>> acquireWireframeQuota(
+        @RequestBody WireframeQuotaRequest request,
+        @RequestHeader(value = "Authorization", required = false) String authorization
+    ) {
         checkInternalAuth(authorization);
-        return ResponseEntity.ok(ResultUtils.success(generationRunService.acquireWireframeDailyQuota(request.getUserId())));
+        return ResponseEntity.ok(
+            ResultUtils.success(
+                generationRunService.acquireWireframeDailyQuota(request.getUserId())
+            )
+        );
     }
-
 
     @PostMapping("/agent/runs/{runId}/credit/freeze")
-    public ResponseEntity<BaseResponse<CreditFreezeVO>> freezeCredit(@PathVariable String runId,
-                                                                     @RequestBody(required = false) CreditFreezeRequest request,
-                                                                     @RequestHeader(value = "Authorization", required = false) String authorization) {
+    public ResponseEntity<BaseResponse<CreditFreezeVO>> freezeCredit(
+        @PathVariable String runId,
+        @RequestBody(required = false) CreditFreezeRequest request,
+        @RequestHeader(value = "Authorization", required = false) String authorization
+    ) {
         checkInternalAuth(authorization);
-        return ResponseEntity.ok(ResultUtils.success(generationRunService.freezeCredit(runId, request)));
+        return ResponseEntity.ok(
+            ResultUtils.success(generationRunService.freezeCredit(runId, request))
+        );
     }
-
 
     private void checkInternalAuth(String authorization) {
         String expected = BEARER_PREFIX + internalApiProperties.getToken();
@@ -116,24 +132,25 @@ public class GenerationRunController {
         }
     }
 
-
     @ExceptionHandler(ConcurrentRunException.class)
     public ResponseEntity<BaseResponse<?>> handleConcurrentRun(ConcurrentRunException e) {
         log.warn("拒绝并发 run：{}", e.getMessage());
-        return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body(ResultUtils.error(ErrorCode.OPERATION_ERROR.getCode(), e.getMessage()));
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(
+            ResultUtils.error(ErrorCode.OPERATION_ERROR.getCode(), e.getMessage())
+        );
     }
-
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<BaseResponse<?>> handleBusiness(BusinessException e) {
-        return ResponseEntity.status(mapHttpStatus(e.getCode()))
-                .body(ResultUtils.error(e.getCode(), e.getMessage()));
+        return ResponseEntity.status(mapHttpStatus(e.getCode())).body(
+            ResultUtils.error(e.getCode(), e.getMessage())
+        );
     }
 
-
     private int mapHttpStatus(int code) {
-        if (code == ErrorCode.NOT_LOGIN_ERROR.getCode() || code == ErrorCode.NO_AUTH_ERROR.getCode()) {
+        if (
+            code == ErrorCode.NOT_LOGIN_ERROR.getCode() || code == ErrorCode.NO_AUTH_ERROR.getCode()
+        ) {
             return HttpStatus.UNAUTHORIZED.value();
         }
         if (code == ErrorCode.PARAMS_ERROR.getCode()) {
@@ -149,7 +166,6 @@ public class GenerationRunController {
             return HttpStatus.TOO_MANY_REQUESTS.value();
         }
         if (code == ErrorCode.CREDIT_NOT_ENOUGH.getCode()) {
-
             return HttpStatus.PAYMENT_REQUIRED.value();
         }
         return HttpStatus.INTERNAL_SERVER_ERROR.value();

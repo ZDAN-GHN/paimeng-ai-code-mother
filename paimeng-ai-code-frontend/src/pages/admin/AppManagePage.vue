@@ -1,6 +1,5 @@
 <template>
   <div id="appManagePage">
-
     <a-form layout="inline" :model="searchParams" @finish="doSearch">
       <a-form-item label="应用名称">
         <a-input v-model:value="searchParams.appName" placeholder="输入应用名称" />
@@ -29,7 +28,6 @@
       </a-form-item>
     </a-form>
     <a-divider />
-
 
     <a-table
       :columns="columns"
@@ -154,16 +152,13 @@ const columns = [
   },
 ]
 
-
 const data = ref<API.AppVO[]>([])
 const total = ref(0)
-
 
 const searchParams = reactive<API.AppQueryRequest>({
   pageNum: 1,
   pageSize: 10,
 })
-
 
 const fetchData = async () => {
   try {
@@ -182,11 +177,9 @@ const fetchData = async () => {
   }
 }
 
-
 onMounted(() => {
   fetchData()
 })
-
 
 const pagination = computed(() => {
   return {
@@ -198,25 +191,20 @@ const pagination = computed(() => {
   }
 })
 
-
 const doTableChange = (page: { current: number; pageSize: number }) => {
   searchParams.pageNum = page.current
   searchParams.pageSize = page.pageSize
   fetchData()
 }
 
-
 const doSearch = () => {
-
   searchParams.pageNum = 1
   fetchData()
 }
 
-
 const editApp = (app: API.AppVO) => {
   router.push(`/app/edit/${app.id}`)
 }
-
 
 const toggleFeatured = async (app: API.AppVO) => {
   if (!app.id) return
@@ -241,7 +229,6 @@ const toggleFeatured = async (app: API.AppVO) => {
     message.error('操作失败')
   }
 }
-
 
 const deleteApp = async (id: number | undefined) => {
   if (!id) return

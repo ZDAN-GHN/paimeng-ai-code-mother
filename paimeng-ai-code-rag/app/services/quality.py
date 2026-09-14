@@ -1,5 +1,3 @@
-
-
 import json
 import logging
 import re
@@ -13,21 +11,23 @@ from pydantic.alias_generators import to_camel
 from app.services.llm import create_chat_model, load_prompt
 
 logger = logging.getLogger(__name__)
-
 _QUALITY_CHECK_PROMPT = "code-quality-check-system-prompt.txt"
-
-
-CODE_EXTENSIONS = (".html", ".htm", ".css", ".js", ".json", ".vue", ".ts", ".jsx", ".tsx")
-
-
+CODE_EXTENSIONS = (
+    ".html",
+    ".htm",
+    ".css",
+    ".js",
+    ".json",
+    ".vue",
+    ".ts",
+    ".jsx",
+    ".tsx",
+)
 SKIP_DIR_SEGMENTS = ("node_modules", "dist", "target", ".git")
 
 
 class QualityResult(BaseModel):
-
-
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
-
     is_valid: bool = True
     errors: list[str] = Field(default_factory=list)
     suggestions: list[str] = Field(default_factory=list)

@@ -1,6 +1,5 @@
 /* eslint-disable */
 
-
 import * as userController from './userController'
 import * as chatHistoryController from './chatHistoryController'
 import * as appController from './appController'

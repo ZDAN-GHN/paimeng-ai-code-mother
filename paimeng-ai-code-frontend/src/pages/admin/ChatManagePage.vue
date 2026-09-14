@@ -1,6 +1,5 @@
 <template>
   <div id="chatManagePage">
-
     <a-form layout="inline" :model="searchParams" @finish="doSearch">
       <a-form-item label="消息内容">
         <a-input v-model:value="searchParams.message" placeholder="输入消息内容" />
@@ -27,7 +26,6 @@
       </a-form-item>
     </a-form>
     <a-divider />
-
 
     <a-table
       :columns="columns"
@@ -79,56 +77,53 @@ const columns = [
     title: 'ID',
     dataIndex: 'id',
     width: 80,
-    fixed: 'left'
+    fixed: 'left',
   },
   {
     title: '消息内容',
     dataIndex: 'message',
-    width: 300
+    width: 300,
   },
   {
     title: '消息类型',
     dataIndex: 'messageType',
-    width: 100
+    width: 100,
   },
   {
     title: '应用ID',
     dataIndex: 'appId',
-    width: 80
+    width: 80,
   },
   {
     title: '用户ID',
     dataIndex: 'userId',
-    width: 80
+    width: 80,
   },
   {
     title: '创建时间',
     dataIndex: 'createTime',
-    width: 160
+    width: 160,
   },
   {
     title: '操作',
     key: 'action',
     width: 180,
-    fixed: 'right'
-  }
+    fixed: 'right',
+  },
 ]
-
 
 const data = ref<API.ChatHistory[]>([])
 const total = ref(0)
 
-
 const searchParams = reactive<API.ChatHistoryQueryRequest>({
   pageNum: 1,
-  pageSize: 10
+  pageSize: 10,
 })
-
 
 const fetchData = async () => {
   try {
     const res = await listAllChatHistoryByPageForAdmin({
-      ...searchParams
+      ...searchParams,
     })
     if (res.data.data) {
       data.value = res.data.data.records ?? []
@@ -142,11 +137,9 @@ const fetchData = async () => {
   }
 }
 
-
 onMounted(() => {
   fetchData()
 })
-
 
 const pagination = computed(() => {
   return {
@@ -154,10 +147,9 @@ const pagination = computed(() => {
     pageSize: searchParams.pageSize ?? 10,
     total: total.value,
     showSizeChanger: true,
-    showTotal: (total: number) => `共 ${total} 条`
+    showTotal: (total: number) => `共 ${total} 条`,
   }
 })
-
 
 const doTableChange = (page: { current: number; pageSize: number }) => {
   searchParams.pageNum = page.current
@@ -165,13 +157,10 @@ const doTableChange = (page: { current: number; pageSize: number }) => {
   fetchData()
 }
 
-
 const doSearch = () => {
-
   searchParams.pageNum = 1
   fetchData()
 }
-
 
 const viewAppChat = (appId: number | undefined) => {
   if (appId) {
@@ -179,13 +168,10 @@ const viewAppChat = (appId: number | undefined) => {
   }
 }
 
-
 const deleteMessage = async (id: number | undefined) => {
   if (!id) return
 
   try {
-
-
     message.success('删除成功')
 
     fetchData()

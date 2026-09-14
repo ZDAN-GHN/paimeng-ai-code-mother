@@ -1,6 +1,3 @@
-
-
-
 import { parseContext } from './context.js'
 import {
   buildRound1Questions,
@@ -17,30 +14,38 @@ import type { RunClient } from '../runs/runClient.js'
 
 export interface ConductInterviewInput {
   runId: string
-
   appId: number | string
   userId: string | number
   message?: string
   answers?: InterviewAnswer[]
 }
 
-
 export type InterviewOutcome =
   | { kind: 'questions'; round: number; questions: InterviewQuestion[] }
   | { kind: 'summary'; round: number; summary: InterviewSummary }
   | { kind: 'conflict'; message: string }
 
-export async function conductInterview(input: ConductInterviewInput, runClient: RunClient): Promise<InterviewOutcome> {
-
+export async function conductInterview(
+  input: ConductInterviewInput,
+  runClient: RunClient,
+): Promise<InterviewOutcome> {
   let run = await runClient.getRun(input.runId)
   if (!run) {
-    run = await runClient.createRun({ runId: input.runId, appId: input.appId, userId: input.userId, phase: 'interview' })
+    run = await runClient.createRun({
+      runId: input.runId,
+      appId: input.appId,
+      userId: input.userId,
+      phase: 'interview',
+    })
   }
   const context = parseContext(run.context)
 
-
   if (context.interview?.complete) {
-    return { kind: 'summary', round: context.interview.round, summary: buildSummary(context.interview) }
+    return {
+      kind: 'summary',
+      round: context.interview.round,
+      summary: buildSummary(context.interview),
+    }
   }
 
   if (run.phase === 'wireframe_confirmed') {
@@ -51,14 +56,15 @@ export async function conductInterview(input: ConductInterviewInput, runClient: 
     return { kind: 'conflict', message: `当前阶段（${run.phase}）不能进行访谈` }
   }
 
-
   if (run.phase === 'wireframe_pending') {
     const invalidated = { ...context }
     delete invalidated.wireframe
-    await runClient.updateRun(input.runId, { phase: 'interview', context: JSON.stringify(invalidated) })
+    await runClient.updateRun(input.runId, {
+      phase: 'interview',
+      context: JSON.stringify(invalidated),
+    })
     delete context.wireframe
   }
-
 
   let state: InterviewState = context.interview ?? { round: 0, answers: {}, complete: false }
   state = { ...state, answers: state.answers ?? {} }
@@ -70,13 +76,13 @@ export async function conductInterview(input: ConductInterviewInput, runClient: 
   }
   const merged = mergeAnswers(state, input.answers)
 
-
   const persist = async (next: InterviewState): Promise<void> => {
-    await runClient.updateRun(input.runId, { context: JSON.stringify({ ...context, interview: next }) })
+    await runClient.updateRun(input.runId, {
+      context: JSON.stringify({ ...context, interview: next }),
+    })
   }
 
   if (state.round === 1) {
-
     if (!input.answers || input.answers.length === 0) {
       await persist(merged)
       return { kind: 'questions', round: 1, questions: buildRound1Questions(state.message) }
@@ -93,7 +99,6 @@ export async function conductInterview(input: ConductInterviewInput, runClient: 
     }
     return { kind: 'questions', round: 2, questions: decision.questions ?? [] }
   }
-
 
   if (input.answers && input.answers.length > 0) {
     merged.complete = true

@@ -86,7 +86,6 @@
         </a-form>
       </a-card>
 
-
       <a-card title="应用信息" style="margin-top: 24px">
         <a-descriptions :column="2" bordered>
           <a-descriptions-item label="应用ID">
@@ -132,12 +131,10 @@ const route = useRoute()
 const router = useRouter()
 const loginUserStore = useLoginUserStore()
 
-
 const appInfo = ref<API.AppVO>()
 const loading = ref(false)
 const submitting = ref(false)
 const formRef = ref<FormInstance>()
-
 
 const formData = reactive({
   appName: '',
@@ -145,24 +142,21 @@ const formData = reactive({
   priority: 0,
   initPrompt: '',
   codeGenType: '',
-  deployKey: ''
+  deployKey: '',
 })
-
 
 const isAdmin = computed(() => {
   return loginUserStore.loginUser.userRole === 'admin'
 })
 
-
 const rules = {
   appName: [
     { required: true, message: '请输入应用名称', trigger: 'blur' },
-    { min: 1, max: 50, message: '应用名称长度在1-50个字符', trigger: 'blur' }
+    { min: 1, max: 50, message: '应用名称长度在1-50个字符', trigger: 'blur' },
   ],
   cover: [{ type: 'url', message: '请输入有效的URL', trigger: 'blur' }],
-  priority: [{ type: 'number', min: 0, max: 99, message: '优先级范围0-99', trigger: 'blur' }]
+  priority: [{ type: 'number', min: 0, max: 99, message: '优先级范围0-99', trigger: 'blur' }],
 }
-
 
 const fetchAppInfo = async () => {
   const id = route.params.id as string
@@ -178,13 +172,11 @@ const fetchAppInfo = async () => {
     if (res.data.code === 0 && res.data.data) {
       appInfo.value = res.data.data
 
-
       if (!isAdmin.value && appInfo.value.userId !== loginUserStore.loginUser.id) {
         message.error('您没有权限编辑此应用')
         router.push('/')
         return
       }
-
 
       formData.appName = appInfo.value.appName || ''
       formData.cover = appInfo.value.cover || ''
@@ -205,7 +197,6 @@ const fetchAppInfo = async () => {
   }
 }
 
-
 const handleSubmit = async () => {
   if (!appInfo.value?.id) return
 
@@ -213,18 +204,16 @@ const handleSubmit = async () => {
   try {
     let res
     if (isAdmin.value) {
-
       res = await updateAppByAdmin({
         id: appInfo.value.id,
         appName: formData.appName,
         cover: formData.cover,
-        priority: formData.priority
+        priority: formData.priority,
       })
     } else {
-
       res = await updateApp({
         id: appInfo.value.id,
-        appName: formData.appName
+        appName: formData.appName,
       })
     }
 
@@ -243,7 +232,6 @@ const handleSubmit = async () => {
   }
 }
 
-
 const resetForm = () => {
   if (appInfo.value) {
     formData.appName = appInfo.value.appName || ''
@@ -253,18 +241,16 @@ const resetForm = () => {
   formRef.value?.clearValidate()
 }
 
-
 const goToChat = () => {
   if (appInfo.value?.id) {
     router.push({
       path: `/app/chat/${appInfo.value.id}`,
       query: {
-        view: 1
-      }
+        view: 1,
+      },
     })
   }
 }
-
 
 const openPreview = () => {
   if (appInfo.value?.codeGenType && appInfo.value?.id) {
@@ -272,7 +258,6 @@ const openPreview = () => {
     window.open(url, '_blank')
   }
 }
-
 
 onMounted(() => {
   fetchAppInfo()

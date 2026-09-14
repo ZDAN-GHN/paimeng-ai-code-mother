@@ -1,12 +1,8 @@
-
-
-
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { agentRoot } from '../../server/agentRoot.js'
 
 const PROMPTS_DIR = path.join(agentRoot, 'src', 'generation', 'prompts')
-
 
 export const PROMPT_NAMES = {
   codegenHtml: 'codegen-html-system-prompt.txt',
@@ -15,7 +11,6 @@ export const PROMPT_NAMES = {
 } as const
 
 export type PromptName = (typeof PROMPT_NAMES)[keyof typeof PROMPT_NAMES]
-
 
 export function loadPrompt(name: PromptName): string {
   try {

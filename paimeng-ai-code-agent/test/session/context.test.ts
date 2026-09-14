@@ -5,10 +5,21 @@ import type { SessionStore } from '../../src/session/store.js'
 
 function event(overrides: Partial<SessionEventRecord> = {}): SessionEventRecord {
   return {
-    id: '1', appId: 'app-1', userId: 'user-1', runId: null, seq: 1,
-    turnId: 'turn-1', batchSeq: 1, eventIndex: 0, kind: 'user/message', version: 1,
-    ignorable: false, source: 'human', payload: { text: '第一轮需求' },
-    createdAt: '2026-01-01T00:00:00.000Z', ...overrides,
+    id: '1',
+    appId: 'app-1',
+    userId: 'user-1',
+    runId: null,
+    seq: 1,
+    turnId: 'turn-1',
+    batchSeq: 1,
+    eventIndex: 0,
+    kind: 'user/message',
+    version: 1,
+    ignorable: false,
+    source: 'human',
+    payload: { text: '第一轮需求' },
+    createdAt: '2026-01-01T00:00:00.000Z',
+    ...overrides,
   }
 }
 
@@ -16,10 +27,26 @@ function contextEvents(): SessionEventRecord[] {
   return [
     event({ seq: 1, kind: 'session/turn-start', payload: { turnId: 'turn-1', action: 'chat' } }),
     event({ seq: 2, kind: 'user/message', payload: { text: '做一个宠物店首页' } }),
-    event({ seq: 3, kind: 'model/message', source: 'model', payload: { text: '我会保留清爽风格，并准备首页布局。' } }),
-    event({ seq: 4, turnId: 'turn-2', kind: 'session/turn-start', payload: { turnId: 'turn-2', action: 'chat' } }),
+    event({
+      seq: 3,
+      kind: 'model/message',
+      source: 'model',
+      payload: { text: '我会保留清爽风格，并准备首页布局。' },
+    }),
+    event({
+      seq: 4,
+      turnId: 'turn-2',
+      kind: 'session/turn-start',
+      payload: { turnId: 'turn-2', action: 'chat' },
+    }),
     event({ seq: 5, turnId: 'turn-2', kind: 'user/message', payload: { text: '再增加预约入口' } }),
-    event({ seq: 6, turnId: 'turn-2', kind: 'model/message', source: 'model', payload: { text: '已记录预约入口需求。' } }),
+    event({
+      seq: 6,
+      turnId: 'turn-2',
+      kind: 'model/message',
+      source: 'model',
+      payload: { text: '已记录预约入口需求。' },
+    }),
   ]
 }
 
@@ -38,20 +65,48 @@ describe('session context reconstruction', () => {
 
   it('重放 model/message 终态时保留安全拒绝文本到上下文', () => {
     const refusal = '统一回合的模型工具尚未接入，当前请求已安全拒绝'
-    const result = rebuildSessionContext([
-      event({ kind: 'model/message', source: 'system', payload: { type: 'error', message: refusal, text: refusal } }),
-    ], { appId: 'app-1', userId: 'user-1' })
+    const result = rebuildSessionContext(
+      [
+        event({
+          kind: 'model/message',
+          source: 'system',
+          payload: { type: 'error', message: refusal, text: refusal },
+        }),
+      ],
+      { appId: 'app-1', userId: 'user-1' },
+    )
     expect(result.history).toEqual([{ role: 'assistant', content: refusal, turnId: 'turn-1' }])
     expect(result.systemPrompt).toContain(refusal)
   })
   it('keeps only the configured recent turns and summarizes earlier turns', () => {
     const events = [1, 2, 3].flatMap((turn) => [
-      event({ seq: turn * 2 - 1, turnId: `turn-${turn}`, kind: 'user/message', payload: { text: `需求-${turn}` } }),
-      event({ seq: turn * 2, turnId: `turn-${turn}`, kind: 'model/message', source: 'model', payload: { text: `结论-${turn}` } }),
+      event({
+        seq: turn * 2 - 1,
+        turnId: `turn-${turn}`,
+        kind: 'user/message',
+        payload: { text: `需求-${turn}` },
+      }),
+      event({
+        seq: turn * 2,
+        turnId: `turn-${turn}`,
+        kind: 'model/message',
+        source: 'model',
+        payload: { text: `结论-${turn}` },
+      }),
     ])
-    const result = rebuildSessionContext(events, { appId: 'app-1', userId: 'user-1', recentTurns: 2, summaryCharLimit: 100 })
+    const result = rebuildSessionContext(events, {
+      appId: 'app-1',
+      userId: 'user-1',
+      recentTurns: 2,
+      summaryCharLimit: 100,
+    })
     expect(result.foldedCount).toBe(1)
-    expect(result.history.map((message) => message.content)).toEqual(['需求-2', '结论-2', '需求-3', '结论-3'])
+    expect(result.history.map((message) => message.content)).toEqual([
+      '需求-2',
+      '结论-2',
+      '需求-3',
+      '结论-3',
+    ])
     expect(result.systemPrompt).toContain('需求-1')
     expect(result.systemPrompt).toContain('需求-3')
     expect(result.systemPrompt).toContain('结论-3')
@@ -59,24 +114,40 @@ describe('session context reconstruction', () => {
 
   it('rejects non-ignorable unknown events and skips ignorable unknown events', () => {
     const unknown = { ...event({ payload: {} }), kind: 'future/event', ignorable: false }
-    expect(() => rebuildSessionContext([unknown], { appId: 'app-1', userId: 'user-1' })).toThrow(UnknownEventKindError)
-    const ignored = rebuildSessionContext([{ ...unknown, ignorable: true }, event({ seq: 2 })], { appId: 'app-1', userId: 'user-1' })
+    expect(() => rebuildSessionContext([unknown], { appId: 'app-1', userId: 'user-1' })).toThrow(
+      UnknownEventKindError,
+    )
+    const ignored = rebuildSessionContext([{ ...unknown, ignorable: true }, event({ seq: 2 })], {
+      appId: 'app-1',
+      userId: 'user-1',
+    })
     expect(ignored.history.map((message) => message.content)).toEqual(['第一轮需求'])
   })
 
   it('rejects invalid history window options', () => {
-    expect(() => rebuildSessionContext([], { appId: 'app-1', userId: 'user-1', recentTurns: 0 })).toThrow('recentTurns 必须为正整数')
-    expect(() => rebuildSessionContext([], { appId: 'app-1', userId: 'user-1', recentTurns: 1.5 })).toThrow('recentTurns 必须为正整数')
-    expect(() => rebuildSessionContext([], { appId: 'app-1', userId: 'user-1', summaryCharLimit: 0 })).toThrow('summaryCharLimit 必须为正整数')
-    expect(() => rebuildSessionContext([], { appId: 'app-1', userId: 'user-1', summaryCharLimit: 1.5 })).toThrow('summaryCharLimit 必须为正整数')
+    expect(() =>
+      rebuildSessionContext([], { appId: 'app-1', userId: 'user-1', recentTurns: 0 }),
+    ).toThrow('recentTurns 必须为正整数')
+    expect(() =>
+      rebuildSessionContext([], { appId: 'app-1', userId: 'user-1', recentTurns: 1.5 }),
+    ).toThrow('recentTurns 必须为正整数')
+    expect(() =>
+      rebuildSessionContext([], { appId: 'app-1', userId: 'user-1', summaryCharLimit: 0 }),
+    ).toThrow('summaryCharLimit 必须为正整数')
+    expect(() =>
+      rebuildSessionContext([], { appId: 'app-1', userId: 'user-1', summaryCharLimit: 1.5 }),
+    ).toThrow('summaryCharLimit 必须为正整数')
   })
 
   it('isolates events by app and user', () => {
-    const result = rebuildSessionContext([
-      event({ payload: { text: '当前应用消息' } }),
-      event({ appId: 'other-app', payload: { text: '其他应用机密' } }),
-      event({ userId: 'other-user', payload: { text: '其他用户机密' } }),
-    ], { appId: 'app-1', userId: 'user-1' })
+    const result = rebuildSessionContext(
+      [
+        event({ payload: { text: '当前应用消息' } }),
+        event({ appId: 'other-app', payload: { text: '其他应用机密' } }),
+        event({ userId: 'other-user', payload: { text: '其他用户机密' } }),
+      ],
+      { appId: 'app-1', userId: 'user-1' },
+    )
     expect(result.history.map((message) => message.content)).toEqual(['当前应用消息'])
     expect(result.systemPrompt).not.toContain('其他应用机密')
     expect(result.systemPrompt).not.toContain('其他用户机密')
@@ -97,7 +168,11 @@ describe('session context reconstruction', () => {
       assertHumanApproved: async () => ({ ok: false, reason: '未找到人类批准' }),
       consumeHumanApproval: async () => ({ ok: false, reason: '未找到人类批准' }),
     }
-    const result = await loadSessionContext(store, { appId: 'app-1', userId: 'user-1', replayLimit: 3 })
+    const result = await loadSessionContext(store, {
+      appId: 'app-1',
+      userId: 'user-1',
+      replayLimit: 3,
+    })
     expect(cursors).toEqual([0, 3])
     expect(result.history).toHaveLength(4)
     expect(result.systemPrompt).toContain('已记录预约入口需求。')
@@ -113,7 +188,11 @@ describe('session context reconstruction', () => {
       assertHumanApproved: async () => ({ ok: false, reason: '未找到人类批准' }),
       consumeHumanApproval: async () => ({ ok: false, reason: '未找到人类批准' }),
     }
-    const result = await loadSessionContext(store, { appId: 'app-1', userId: 'user-1', afterSeq: 5 })
+    const result = await loadSessionContext(store, {
+      appId: 'app-1',
+      userId: 'user-1',
+      afterSeq: 5,
+    })
     expect(result.history).toHaveLength(4)
     expect(result.lastSeq).toBe(6)
   })
@@ -125,7 +204,9 @@ describe('session context reconstruction', () => {
       assertHumanApproved: async () => ({ ok: false, reason: '未找到人类批准' }),
       consumeHumanApproval: async () => ({ ok: false, reason: '未找到人类批准' }),
     }
-    await expect(loadSessionContext(store, { appId: 'app-1', userId: 'user-1' })).rejects.toThrow('会话事件重放游标未前进')
+    await expect(loadSessionContext(store, { appId: 'app-1', userId: 'user-1' })).rejects.toThrow(
+      '会话事件重放游标未前进',
+    )
   })
 
   it('replays from the store on every load without a persistent projection', async () => {
@@ -139,7 +220,12 @@ describe('session context reconstruction', () => {
       assertHumanApproved: async () => ({ ok: false, reason: '未找到人类批准' }),
       consumeHumanApproval: async () => ({ ok: false, reason: '未找到人类批准' }),
     }
-    const result = await loadSessionContext(store, { appId: 'app-1', userId: 'user-1', afterSeq: 0, replayLimit: 100 })
+    const result = await loadSessionContext(store, {
+      appId: 'app-1',
+      userId: 'user-1',
+      afterSeq: 0,
+      replayLimit: 100,
+    })
     expect(result.lastSeq).toBe(6)
     expect(result.systemPrompt).toContain('做一个宠物店首页')
   })

@@ -1,5 +1,3 @@
-
-
 import json
 from pathlib import Path
 
@@ -19,24 +17,17 @@ WORKSPACE_ROOT = "/tmp/paimeng-test-workspace"
 
 
 class _FakeResponse:
-
-
     def __init__(self, content: str) -> None:
         self.content = content
         self.tool_calls = None
 
 
 class _FakeModel:
-
-
     def __init__(self, content: str) -> None:
         self._content = content
 
     def invoke(self, messages, **kwargs):
         return _FakeResponse(self._content)
-
-
-
 
 
 def test_parse_html_code_extracts_block():
@@ -90,9 +81,6 @@ def test_to_files_multi_file_skips_blank():
     assert set(files) == {"index.html"}
 
 
-
-
-
 @pytest.mark.parametrize(
     ("reply", "expected"),
     [
@@ -104,11 +92,10 @@ def test_to_files_multi_file_skips_blank():
 )
 def test_route_code_gen_type(monkeypatch, reply, expected):
 
-    monkeypatch.setattr("app.services.codegen.routing.create_chat_model", lambda **kw: _FakeModel(reply))
+    monkeypatch.setattr(
+        "app.services.codegen.routing.create_chat_model", lambda **kw: _FakeModel(reply)
+    )
     assert route_code_gen_type("做一个页面") == expected
-
-
-
 
 
 def test_factory_creates_by_type():
@@ -135,14 +122,14 @@ def test_executor_stream_html_multi_file_uses_text_stream(monkeypatch):
 
     monkeypatch.setattr(html_mod, "create_chat_model", lambda **kw: object())
     monkeypatch.setattr(mf_mod, "create_chat_model", lambda **kw: object())
-    monkeypatch.setattr("app.services.codegen._SERVICE_CLASSES", {"html": _StreamSvc, "multi_file": _StreamSvc})
+    monkeypatch.setattr(
+        "app.services.codegen._SERVICE_CLASSES",
+        {"html": _StreamSvc, "multi_file": _StreamSvc},
+    )
 
     executor = CodeGenServiceExecutor()
     assert list(executor.stream("html", "msg")) == ["chunk1", "chunk2"]
     assert captured == ["msg"]
-
-
-
 
 
 def test_vue_tools_binding(tmp_path_factory):
@@ -154,7 +141,14 @@ def test_vue_tools_binding(tmp_path_factory):
     service = VueCodeGenService(FileTools(str(ws)))
     tools = service._tools()
     names = {getattr(t, "name", "") for t in tools}
-    assert names == {"writeFile", "readFile", "modifyFile", "deleteFile", "readDir", "exit"}
+    assert names == {
+        "writeFile",
+        "readFile",
+        "modifyFile",
+        "deleteFile",
+        "readDir",
+        "exit",
+    }
 
 
 def test_vue_execute_dispatches(tmp_path_factory):
@@ -164,7 +158,9 @@ def test_vue_execute_dispatches(tmp_path_factory):
     from app.tools.file_tools import FileTools
 
     service = VueCodeGenService(FileTools(str(ws)))
-    result = service._execute("writeFile", {"relativeFilePath": "a.txt", "content": "hello"})
+    result = service._execute(
+        "writeFile", {"relativeFilePath": "a.txt", "content": "hello"}
+    )
     assert result == "文件写入成功：a.txt"
     assert service._execute("readFile", {"relativeFilePath": "a.txt"}) == "hello"
     assert service._execute("exit", {}) == "不要继续调用工具，可以输出最终结果了"

@@ -7,10 +7,8 @@ import org.springframework.boot.jackson.JsonComponent;
 import org.springframework.context.annotation.Bean;
 import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
 
-
 @JsonComponent
 public class JsonConfig {
-
 
     @Bean
     public ObjectMapper jacksonObjectMapper(Jackson2ObjectMapperBuilder builder) {

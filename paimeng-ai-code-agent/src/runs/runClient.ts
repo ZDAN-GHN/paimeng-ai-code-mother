@@ -9,10 +9,6 @@ export const FAILURE_CODES = [
 ] as const
 export type FailureCode = (typeof FAILURE_CODES)[number]
 
-
-
-
-
 export const RUN_PHASES = [
   'interview',
   'wireframe_pending',
@@ -26,27 +22,19 @@ export const RUN_PHASES = [
 ] as const
 export type RunPhase = (typeof RUN_PHASES)[number]
 
-
 export const TERMINAL_PHASES: readonly RunPhase[] = ['done', 'failed', 'aborted']
 
 export interface RunCreateRequest {
-
   runId: string
-
   appId: number | string
   userId: number | string
   phase: RunPhase
-
   context?: string
-
   milestones?: string
-
   tokenUsage?: string
-
   creditLedgerRef?: string
   startedTime?: string
 }
-
 
 export interface RunUpdateRequest {
   phase?: RunPhase
@@ -57,26 +45,21 @@ export interface RunUpdateRequest {
   finishedTime?: string
 }
 
-
 export interface AgentCompleteMessage {
   messageType: 'user' | 'ai'
   content: string
 }
 
-
 export interface AgentCompleteRequest {
   appId: number | string
   userId: number | string
-
   status: 'success' | 'failed' | 'aborted'
   messages: AgentCompleteMessage[]
   workspacePath?: string
-
   filesWritten?: number
   errorMessage?: string
   errorCode?: FailureCode
 }
-
 
 export interface CreditFreezeVO {
   ledgerId: number | string
@@ -86,7 +69,6 @@ export interface CreditFreezeVO {
 
 export interface Run {
   runId: string
-
   appId: string | number
   userId: string | number
   phase: RunPhase
@@ -100,13 +82,11 @@ export interface Run {
   updateTime: string | null
 }
 
-
 interface JavaResponse<T> {
   code: number
   data: T | null
   message: string | null
 }
-
 
 export class RunApiError extends Error {
   constructor(
@@ -118,7 +98,6 @@ export class RunApiError extends Error {
   }
 }
 
-
 export class RunConflictError extends RunApiError {
   constructor(message: string) {
     super(409, message)
@@ -127,13 +106,9 @@ export class RunConflictError extends RunApiError {
 }
 
 export interface RunClientOptions {
-
   baseUrl: string
-
   token: string
-
   fetchImpl?: typeof fetch
-
   observer?: ObservationSink
 }
 
@@ -147,7 +122,6 @@ export class RunClient {
   private readonly token: string
   private readonly fetchImpl: typeof fetch
   private readonly observer?: ObservationSink
-
   constructor(options: RunClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '')
     this.token = options.token
@@ -155,44 +129,48 @@ export class RunClient {
     this.observer = options.observer
   }
 
-
   async createRun(request: RunCreateRequest): Promise<Run> {
     return this.request<Run>('POST', '/internal/runs', request)
   }
-
 
   async updateRun(runId: string, patch: RunUpdateRequest): Promise<Run> {
     return this.request<Run>('PATCH', `/internal/runs/${encodeURIComponent(runId)}`, patch)
   }
 
-
   async completeRun(runId: string, request: AgentCompleteRequest): Promise<Run | null> {
-    return this.request<Run | null>('POST', `/internal/agent/runs/${encodeURIComponent(runId)}/complete`, request)
+    return this.request<Run | null>(
+      'POST',
+      `/internal/agent/runs/${encodeURIComponent(runId)}/complete`,
+      request,
+    )
   }
-
-
 
   async acquireWireframeQuota(userId: number | string): Promise<boolean> {
     return this.request<boolean>('POST', '/internal/agent/wireframe/quota/acquire', { userId })
   }
 
-
-
   async freezeCredit(runId: string, body: { intensity?: string }): Promise<CreditFreezeVO> {
-    return this.request<CreditFreezeVO>('POST', `/internal/agent/runs/${encodeURIComponent(runId)}/credit/freeze`, body)
+    return this.request<CreditFreezeVO>(
+      'POST',
+      `/internal/agent/runs/${encodeURIComponent(runId)}/credit/freeze`,
+      body,
+    )
   }
-
 
   async getRun(runId: string): Promise<Run | null> {
     return this.request<Run | null>('GET', `/internal/runs/${encodeURIComponent(runId)}`)
   }
 
-
-  async getLatestNonTerminalRun(appId: number | string, userId?: number | string): Promise<Run | null> {
+  async getLatestNonTerminalRun(
+    appId: number | string,
+    userId?: number | string,
+  ): Promise<Run | null> {
     const query = userId == null ? '' : `?userId=${encodeURIComponent(String(userId))}`
-    return this.request<Run | null>('GET', `/internal/apps/${appId}/runs/latest-nonterminal${query}`)
+    return this.request<Run | null>(
+      'GET',
+      `/internal/apps/${appId}/runs/latest-nonterminal${query}`,
+    )
   }
-
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     let response: Response
@@ -206,17 +184,20 @@ export class RunClient {
         body: body !== undefined ? JSON.stringify(body) : undefined,
       })
     } catch (err) {
-
       throw new RunApiError(0, `Java 内部 API 请求失败: ${(err as Error).message}`)
     }
     let payload: JavaResponse<T> | null = null
     try {
       payload = (await response.json()) as JavaResponse<T>
-    } catch {
-    }
+    } catch {}
     const observedId = this.observer?.enabled ? observedRunId(path) : undefined
     if (observedId) {
-      await this.observer!.callback(observedId, { method, path, status: response.status, ok: response.ok })
+      await this.observer!.callback(observedId, {
+        method,
+        path,
+        status: response.status,
+        ok: response.ok,
+      })
     }
     const message = payload?.message ?? `HTTP ${response.status}`
     if (response.status === 409) {

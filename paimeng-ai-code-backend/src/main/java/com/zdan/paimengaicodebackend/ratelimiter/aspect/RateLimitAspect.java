@@ -6,6 +6,8 @@ import com.zdan.paimengaicodebackend.model.entity.User;
 import com.zdan.paimengaicodebackend.ratelimiter.annotaion.RateLimit;
 import com.zdan.paimengaicodebackend.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
+import java.lang.reflect.Method;
+import java.time.Duration;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.JoinPoint;
@@ -19,10 +21,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
-import java.lang.reflect.Method;
-import java.time.Duration;
-
-
 @Aspect
 @Component
 @Slf4j
@@ -32,7 +30,6 @@ public class RateLimitAspect {
     private RedissonClient redissonClient;
     private UserService userService;
 
-
     @Before("@annotation(rateLimit)")
     public void doBefore(JoinPoint joinPoint, RateLimit rateLimit) {
         String key = generateRateLimitKey(joinPoint, rateLimit);
@@ -40,13 +37,16 @@ public class RateLimitAspect {
         RRateLimiter rRateLimiter = redissonClient.getRateLimiter(key);
         rRateLimiter.expire(Duration.ofHours(1));
 
-        rRateLimiter.trySetRate(RateType.OVERALL, rateLimit.rate(), Duration.ofSeconds(rateLimit.rateInterval()));
+        rRateLimiter.trySetRate(
+            RateType.OVERALL,
+            rateLimit.rate(),
+            Duration.ofSeconds(rateLimit.rateInterval())
+        );
 
         if (!rRateLimiter.tryAcquire(1)) {
             throw new BusinessException(ErrorCode.TOO_MANY_REQUEST, rateLimit.message());
         }
     }
-
 
     private String generateRateLimitKey(JoinPoint joinPoint, RateLimit rateLimit) {
         StringBuilder keyBuilder = new StringBuilder();
@@ -58,34 +58,32 @@ public class RateLimitAspect {
 
         switch (rateLimit.limitType()) {
             case API:
-
                 MethodSignature signature = (MethodSignature) joinPoint.getSignature();
                 Method method = signature.getMethod();
 
-                keyBuilder.append("api:").append(method.getDeclaringClass().getSimpleName())
-                        .append(".").append(method.getName());
+                keyBuilder
+                    .append("api:")
+                    .append(method.getDeclaringClass().getSimpleName())
+                    .append(".")
+                    .append(method.getName());
                 break;
             case USER:
-
                 try {
-                    ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+                    ServletRequestAttributes attributes =
+                        (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
                     if (attributes != null) {
                         HttpServletRequest request = attributes.getRequest();
                         User loginUser = userService.getLoginUser(request);
 
                         keyBuilder.append("user:").append(loginUser.getId());
                     } else {
-
                         keyBuilder.append("ip:").append(getClientIP());
                     }
                 } catch (BusinessException e) {
-
                     keyBuilder.append("ip:").append(getClientIP());
                 }
                 break;
             case IP:
-
-
                 keyBuilder.append("ip:").append(getClientIP());
                 break;
             default:
@@ -94,9 +92,9 @@ public class RateLimitAspect {
         return keyBuilder.toString();
     }
 
-
     private String getClientIP() {
-        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        ServletRequestAttributes attributes =
+            (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
         if (attributes == null) {
             return "unknown";
         }

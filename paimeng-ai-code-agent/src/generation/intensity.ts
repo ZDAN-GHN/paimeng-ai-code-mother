@@ -1,31 +1,18 @@
-
-
-
-
-
 export type Intensity = 'fast' | 'standard' | 'deep'
 
 export const DEFAULT_INTENSITY: Intensity = 'standard'
 
-
 export interface IntensityLimits {
-
   maxTurns: number
-
   maxOutputTokens: number
-
   maxToolCalls: number
-
   maxImages: number
 }
 
 export interface IntensityConfig {
   key: Intensity
-
   label: string
-
   modelId: string
-
   priceMultiplier: number
   limits: IntensityLimits
 }
@@ -35,7 +22,6 @@ export const INTENSITY_TIERS: Record<Intensity, IntensityConfig> = {
     key: 'fast',
     label: '快速',
     modelId: 'scripted-fast',
-
     priceMultiplier: 0.5,
     limits: {
       maxTurns: 1,
@@ -48,12 +34,10 @@ export const INTENSITY_TIERS: Record<Intensity, IntensityConfig> = {
     key: 'standard',
     label: '标准',
     modelId: 'scripted-standard',
-
     priceMultiplier: 1,
     limits: {
       maxTurns: 3,
       maxOutputTokens: 8000,
-
       maxToolCalls: 50,
       maxImages: 4,
     },
@@ -71,7 +55,6 @@ export const INTENSITY_TIERS: Record<Intensity, IntensityConfig> = {
     },
   },
 }
-
 
 export function resolveIntensity(value: unknown): IntensityConfig {
   const tier = typeof value === 'string' ? INTENSITY_TIERS[value as Intensity] : undefined

@@ -10,10 +10,8 @@ import AppCard from '@/components/AppCard.vue'
 const router = useRouter()
 const loginUserStore = useLoginUserStore()
 
-
 const userPrompt = ref('')
 const creating = ref(false)
-
 
 const myApps = ref<API.AppVO[]>([])
 const myAppsPage = reactive({
@@ -22,7 +20,6 @@ const myAppsPage = reactive({
   total: 0,
 })
 
-
 const featuredApps = ref<API.AppVO[]>([])
 const featuredAppsPage = reactive({
   current: 1,
@@ -30,13 +27,9 @@ const featuredAppsPage = reactive({
   total: 0,
 })
 
-
 const setPrompt = (prompt: string) => {
   userPrompt.value = prompt
 }
-
-
-
 
 const createApp = async () => {
   if (!userPrompt.value.trim()) {
@@ -72,7 +65,6 @@ const createApp = async () => {
   }
 }
 
-
 const loadMyApps = async () => {
   if (!loginUserStore.loginUser.id) {
     return
@@ -95,7 +87,6 @@ const loadMyApps = async () => {
   }
 }
 
-
 const loadFeaturedApps = async () => {
   try {
     const res = await listGoodAppVoByPage({
@@ -114,13 +105,11 @@ const loadFeaturedApps = async () => {
   }
 }
 
-
 const viewChat = (appId: string | number | undefined) => {
   if (appId) {
     router.push(`/app/chat/${appId}?view=1`)
   }
 }
-
 
 const viewWork = (app: API.AppVO) => {
   if (app.deployKey) {
@@ -129,13 +118,9 @@ const viewWork = (app: API.AppVO) => {
   }
 }
 
-
-
-
 onMounted(() => {
   loadMyApps()
   loadFeaturedApps()
-
 
   const handleMouseMove = (e: MouseEvent) => {
     const { clientX, clientY } = e
@@ -149,7 +134,6 @@ onMounted(() => {
 
   document.addEventListener('mousemove', handleMouseMove)
 
-
   return () => {
     document.removeEventListener('mousemove', handleMouseMove)
   }
@@ -159,12 +143,10 @@ onMounted(() => {
 <template>
   <div id="homePage">
     <div class="container">
-
       <div class="hero-section">
         <h1 class="hero-title">AI 应用生成平台</h1>
         <p class="hero-description">一句话轻松创建网站应用</p>
       </div>
-
 
       <div class="input-section">
         <a-textarea
@@ -182,7 +164,6 @@ onMounted(() => {
           </a-button>
         </div>
       </div>
-
 
       <div class="quick-actions">
         <a-button
@@ -223,7 +204,6 @@ onMounted(() => {
         >
       </div>
 
-
       <div class="section">
         <h2 class="section-title">我的作品</h2>
         <div class="app-grid">
@@ -246,7 +226,6 @@ onMounted(() => {
           />
         </div>
       </div>
-
 
       <div class="section">
         <h2 class="section-title">精选案例</h2>
@@ -289,7 +268,6 @@ onMounted(() => {
   overflow: hidden;
 }
 
-
 #homePage::before {
   content: '';
   position: absolute;
@@ -310,7 +288,6 @@ onMounted(() => {
   pointer-events: none;
   animation: gridFloat 20s ease-in-out infinite;
 }
-
 
 #homePage::after {
   content: '';
@@ -360,9 +337,6 @@ onMounted(() => {
   width: 100%;
   box-sizing: border-box;
 }
-
-
-
 
 .hero-section {
   text-align: center;
@@ -442,7 +416,6 @@ onMounted(() => {
   z-index: 2;
 }
 
-
 .input-section {
   position: relative;
   margin: 0 auto 24px;
@@ -473,7 +446,6 @@ onMounted(() => {
   gap: 8px;
   align-items: center;
 }
-
 
 .quick-actions {
   display: flex;
@@ -519,7 +491,6 @@ onMounted(() => {
   box-shadow: 0 8px 25px rgba(255, 150, 150, 0.25);
 }
 
-
 .section {
   margin-bottom: 60px;
 }
@@ -531,14 +502,12 @@ onMounted(() => {
   color: #1e293b;
 }
 
-
 .app-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 24px;
   margin-bottom: 32px;
 }
-
 
 .featured-grid {
   display: grid;
@@ -547,13 +516,11 @@ onMounted(() => {
   margin-bottom: 32px;
 }
 
-
 .pagination-wrapper {
   display: flex;
   justify-content: center;
   margin-top: 32px;
 }
-
 
 @media (max-width: 768px) {
   .hero-title {

@@ -1,6 +1,9 @@
-
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_INTENSITY, INTENSITY_TIERS, resolveIntensity } from '../../src/generation/intensity.js'
+import {
+  DEFAULT_INTENSITY,
+  INTENSITY_TIERS,
+  resolveIntensity,
+} from '../../src/generation/intensity.js'
 
 describe('三档推理强度（Issue #9）', () => {
   it('档位表齐全：fast / standard / deep，各含模型映射、价格系数与护栏上限', () => {

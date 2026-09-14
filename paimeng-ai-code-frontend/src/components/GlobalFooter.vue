@@ -15,9 +15,7 @@
   </a-layout-footer>
 </template>
 
-<script setup lang="ts">
-
-</script>
+<script setup lang="ts"></script>
 
 <style scoped>
 .footer {

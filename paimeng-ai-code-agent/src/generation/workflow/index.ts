@@ -1,21 +1,13 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
 import { createActor } from 'xstate'
 import { generateText, isStepCount, streamText, type ToolSet } from 'ai'
 import type { StepResult } from 'ai'
 import type { AgentEvent } from '../../protocol/events.js'
-import { MAX_QUALITY_ATTEMPTS, MILESTONE_DETAILS, PHASE_BY_STATE, generationMachine } from './machine.js'
+import {
+  MAX_QUALITY_ATTEMPTS,
+  MILESTONE_DETAILS,
+  PHASE_BY_STATE,
+  generationMachine,
+} from './machine.js'
 import { createScriptedLlm, type LlmProvider } from '../../llm/index.js'
 import { DEFAULT_IMAGE_MODEL } from '../../server/config.js'
 import { resolveIntensity, type Intensity, type IntensityConfig } from '../intensity.js'
@@ -34,7 +26,6 @@ import { buildDefaultReviewGates, runReviewCycle, type ReviewGateSet } from '../
 import { resolveStackProfile, resolveBudgetLimits } from '../stackProfile.js'
 import { type CodeGenType, type ReviewVerdict, type TokenUsage } from '../review/types.js'
 
-
 const HISTORY_WINDOW = 10
 
 export interface StreamRequest {
@@ -43,51 +34,32 @@ export interface StreamRequest {
   userId?: number | string
   message: string
   workspacePath?: string
-
   intensity?: Intensity
-
   history?: HistoryTurn[]
-
   codeGenType?: CodeGenType
-
   sessionConclusion?: InterviewSummary
   planningArtifact?: PlanningArtifact
 }
-
-
 
 export interface WorkflowLogger {
   error(mergeObject: object, message: string): void
 }
 
 export interface WorkflowOptions {
-
   provider?: LlmProvider
   runClient?: RunClient
   workspaceRoot: string
-
   imageConfig?: ImageConfig
-
   imageTools?: ImageTools
-
   reviewGates?: ReviewGateSet
-
   wireframePath?: string
-
   wireframeRelativePath?: string
-
   sessionConclusion?: InterviewSummary
   planningArtifact?: PlanningArtifact
-
   modelOverrides?: Partial<Record<Intensity, string>>
-
-
   abortSignal?: AbortSignal
-
   logger?: WorkflowLogger
 }
-
-
 
 export class GenerationAborted extends Error {
   constructor() {
@@ -96,15 +68,19 @@ export class GenerationAborted extends Error {
   }
 }
 
-
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
-
 function classifyFailureCode(error: unknown): FailureCode {
   if (!(error instanceof Error)) return 'unknown'
-  const modelErrorNames = new Set(['AI_APICallError', 'AI_RetryError', 'APICallError', 'RetryError', 'ModelInvocationError'])
+  const modelErrorNames = new Set([
+    'AI_APICallError',
+    'AI_RetryError',
+    'APICallError',
+    'RetryError',
+    'ModelInvocationError',
+  ])
   return modelErrorNames.has(error.name) ? 'model-error' : 'unknown'
 }
 
@@ -116,8 +92,10 @@ interface ProviderErrorLike {
 }
 
 function plainRecord(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype
-    ? value as Record<string, unknown>
+  return value !== null &&
+    typeof value === 'object' &&
+    Object.getPrototypeOf(value) === Object.prototype
+    ? (value as Record<string, unknown>)
     : undefined
 }
 
@@ -127,8 +105,9 @@ function boundedValue(value: unknown): string | number | undefined {
   return undefined
 }
 
-
-export function summarizeProviderError(error: unknown): Record<string, string | number | undefined> {
+export function summarizeProviderError(
+  error: unknown,
+): Record<string, string | number | undefined> {
   if (!(error instanceof Error)) return { name: typeof error }
   const source = error as Error & ProviderErrorLike
   const data = plainRecord(source.data)
@@ -145,14 +124,15 @@ export function summarizeProviderError(error: unknown): Record<string, string | 
   }
   return {
     name: error.name,
-    statusCode: typeof source.statusCode === 'number' && Number.isInteger(source.statusCode) ? source.statusCode : undefined,
+    statusCode:
+      typeof source.statusCode === 'number' && Number.isInteger(source.statusCode)
+        ? source.statusCode
+        : undefined,
     providerCode: boundedValue(upstream?.code),
     endpoint,
     requestId: boundedValue(headers?.['x-request-id'] ?? headers?.['request-id']),
   }
 }
-
-
 
 function throwIfAborted(abortSignal?: AbortSignal): void {
   if (abortSignal?.aborted) {
@@ -160,8 +140,10 @@ function throwIfAborted(abortSignal?: AbortSignal): void {
   }
 }
 
-
-function resolveModelId(tier: IntensityConfig, overrides: WorkflowOptions['modelOverrides']): string {
+function resolveModelId(
+  tier: IntensityConfig,
+  overrides: WorkflowOptions['modelOverrides'],
+): string {
   return overrides?.[tier.key]?.trim() || tier.modelId
 }
 
@@ -169,21 +151,18 @@ function json(value: unknown): string {
   return JSON.stringify(value)
 }
 
-
-
-function withAbort<T extends object>(opts: T, signal?: AbortSignal): T | (T & { abortSignal: AbortSignal }) {
+function withAbort<T extends object>(
+  opts: T,
+  signal?: AbortSignal,
+): T | (T & { abortSignal: AbortSignal }) {
   return signal ? { ...opts, abortSignal: signal } : opts
 }
-
 
 function accumulateUsage(target: TokenUsage, usage: Partial<TokenUsage>): void {
   target.inputTokens += usage.inputTokens ?? 0
   target.outputTokens += usage.outputTokens ?? 0
   target.totalTokens += usage.totalTokens ?? 0
 }
-
-
-
 
 function stopWhenToolCalls<TOOLS extends ToolSet>(maxToolCalls: number) {
   return ({ steps }: { steps: Array<StepResult<TOOLS>> }): boolean => {
@@ -192,14 +171,14 @@ function stopWhenToolCalls<TOOLS extends ToolSet>(maxToolCalls: number) {
   }
 }
 
-
 function windowedHistoryOf(request: StreamRequest): WindowedHistory {
   return windowHistory(request.history ?? [], HISTORY_WINDOW)
 }
 
-
-
-function buildModelMessages(request: StreamRequest, history: WindowedHistory): Array<{ role: 'user' | 'assistant'; content: string }> {
+function buildModelMessages(
+  request: StreamRequest,
+  history: WindowedHistory,
+): Array<{ role: 'user' | 'assistant'; content: string }> {
   const messages: Array<{ role: 'user' | 'assistant'; content: string }> = []
   for (const turn of history.recent) {
     messages.push({ role: turn.role, content: turn.content })
@@ -208,7 +187,10 @@ function buildModelMessages(request: StreamRequest, history: WindowedHistory): A
   return messages
 }
 
-export async function* runGenerationWorkflow(request: StreamRequest, options: WorkflowOptions): AsyncGenerator<AgentEvent> {
+export async function* runGenerationWorkflow(
+  request: StreamRequest,
+  options: WorkflowOptions,
+): AsyncGenerator<AgentEvent> {
   const { runClient, workspaceRoot } = options
 
   const provider = options.provider ?? createScriptedLlm('success')
@@ -218,18 +200,14 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
   const tier = resolveIntensity(request.intensity)
   const budget = resolveBudgetLimits(tier.limits, stackProfile.budgetScale)
 
-
   const actor = createActor(generationMachine, { input: { milestones: [] } })
   actor.start()
-
 
   let emitted = 0
 
   let lastPhase: RunPhase | null = PHASE_BY_STATE[String(actor.getSnapshot().value)] ?? 'failed'
 
-
   const tokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
-
 
   async function* sync(): AsyncGenerator<AgentEvent> {
     const snapshot = actor.getSnapshot()
@@ -237,7 +215,10 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     if (phase !== lastPhase) {
       lastPhase = phase
       if (runClient) {
-        await runClient.updateRun(request.runId, { phase, milestones: json(snapshot.context.milestones) })
+        await runClient.updateRun(request.runId, {
+          phase,
+          milestones: json(snapshot.context.milestones),
+        })
       }
     }
     while (emitted < snapshot.context.milestones.length) {
@@ -246,8 +227,6 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
       yield { type: 'milestone', title, detail: MILESTONE_DETAILS[title] }
     }
   }
-
-
 
   async function notifyComplete(
     status: 'success' | 'failed' | 'aborted',
@@ -270,14 +249,14 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
         ...(options_.filesWritten !== undefined ? { filesWritten: options_.filesWritten } : {}),
       })
     } catch (error) {
-
       options.logger?.error({ err: error, runId: request.runId }, '完成回调失败')
     }
   }
 
-
-
-  async function* fail(message: string, errorCode: FailureCode = 'unknown'): AsyncGenerator<AgentEvent> {
+  async function* fail(
+    message: string,
+    errorCode: FailureCode = 'unknown',
+  ): AsyncGenerator<AgentEvent> {
     if (actor.getSnapshot().status === 'active') {
       actor.send({ type: 'FAIL', error: message })
     }
@@ -289,10 +268,6 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     yield { type: 'error', message }
   }
 
-
-
-
-
   async function* abortRun(filesWritten: number): AsyncGenerator<AgentEvent> {
     if (runClient) {
       await runClient.updateRun(request.runId, {
@@ -301,13 +276,15 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
         tokenUsage: json(tokenUsage),
       })
     }
-    await notifyComplete('aborted', `生成已中断，已保留 ${filesWritten} 个已生成文件，可在对话中继续补完`, {
-      filesWritten,
-    })
+    await notifyComplete(
+      'aborted',
+      `生成已中断，已保留 ${filesWritten} 个已生成文件，可在对话中继续补完`,
+      {
+        filesWritten,
+      },
+    )
     yield { type: 'error', message: '生成已中断' }
   }
-
-
 
   async function runReview(): Promise<ReviewVerdict> {
     return runReviewCycle({
@@ -317,24 +294,19 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
         visualDiff: stackProfile.visualDiffGate,
       },
       workspacePath: request.workspacePath ?? workspaceRoot,
-
       wireframePath: options.wireframePath,
       codeGenType,
 
       onQualityUsage: (usage) => accumulateUsage(tokenUsage, usage),
-
       abortSignal: options.abortSignal,
     })
   }
 
-
   let files: FileTools | undefined
 
   try {
-
     yield* sync()
     yield { type: 'ai_thinking', text: '分析需求中' }
-
 
     const guardrail = validatePrompt(request.message)
     if (!guardrail.isAllowed) {
@@ -342,31 +314,31 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
       return
     }
 
-
     actor.send({ type: 'PROCEED' })
     yield* sync()
-
 
     const workspace = validateWorkspacePath(request.workspacePath ?? workspaceRoot, workspaceRoot)
 
     files = new FileTools(workspace, workspaceRoot)
     const images =
       options.imageTools ??
-      new ImageTools(options.imageConfig ?? { pexelsApiKey: '', dashscopeApiKey: '', imageModel: DEFAULT_IMAGE_MODEL }, {
-        quota: budget.maxImages,
-      })
-
+      new ImageTools(
+        options.imageConfig ?? {
+          pexelsApiKey: '',
+          dashscopeApiKey: '',
+          imageModel: DEFAULT_IMAGE_MODEL,
+        },
+        {
+          quota: budget.maxImages,
+        },
+      )
 
     let pageContent = ''
 
     let qualityOpinions: string[] = []
 
-
-
     for (;;) {
-
       throwIfAborted(options.abortSignal)
-
 
       const windowed = windowedHistoryOf(request)
       const codegenSystem = [
@@ -376,15 +348,16 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
           ? [`\n会话结论（服务端重建）：\n${json(options.sessionConclusion)}`]
           : []),
 
-        ...(options.planningArtifact
-          ? [`\n规划产物：\n${json(options.planningArtifact)}`]
+        ...(options.planningArtifact ? [`\n规划产物：\n${json(options.planningArtifact)}`] : []),
+        ...(options.wireframeRelativePath
+          ? [`\n线框文件相对路径：${options.wireframeRelativePath}`]
           : []),
-        ...(options.wireframeRelativePath ? [`\n线框文件相对路径：${options.wireframeRelativePath}`] : []),
 
         ...(qualityOpinions.length > 0
-          ? [`\n上一轮质检未通过，请根据以下意见修复生成结果：\n${[...new Set(qualityOpinions)].join('\n')}`]
+          ? [
+              `\n上一轮质检未通过，请根据以下意见修复生成结果：\n${[...new Set(qualityOpinions)].join('\n')}`,
+            ]
           : []),
-
 
         `\n本次生成推理强度档位：${tier.label}（模型 ${tier.modelId}）。`,
 
@@ -394,19 +367,21 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
 
       const modelId = resolveModelId(tier, options.modelOverrides)
 
-      const result = streamText(withAbort({
-        model: provider.languageModel(modelId),
-        system: codegenSystem,
-        messages,
+      const result = streamText(
+        withAbort(
+          {
+            model: provider.languageModel(modelId),
+            system: codegenSystem,
+            messages,
 
-        maxRetries: 0,
-
-
-        maxOutputTokens: budget.maxOutputTokens,
-        stopWhen: [isStepCount(budget.maxTurns), stopWhenToolCalls(budget.maxToolCalls)],
-        tools: buildTools({ files: files!, images }),
-      }, options.abortSignal))
-
+            maxRetries: 0,
+            maxOutputTokens: budget.maxOutputTokens,
+            stopWhen: [isStepCount(budget.maxTurns), stopWhenToolCalls(budget.maxToolCalls)],
+            tools: buildTools({ files: files!, images }),
+          },
+          options.abortSignal,
+        ),
+      )
 
       let truncatedByLimit = false
       for await (const part of result.fullStream) {
@@ -416,8 +391,12 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
             yield { type: 'ai_response', data: part.text }
             break
           case 'tool-call':
-
-            yield { type: 'tool_request', id: part.toolCallId, name: part.toolName, arguments: json(part.input) }
+            yield {
+              type: 'tool_request',
+              id: part.toolCallId,
+              name: part.toolName,
+              arguments: json(part.input),
+            }
             break
           case 'tool-result':
             yield {
@@ -429,7 +408,6 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
             }
             break
           case 'error':
-
             if (isAbortError(part.error)) {
               throw new GenerationAborted()
             }
@@ -439,37 +417,29 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
       }
       const finishReason = await result.finishReason
 
-
       truncatedByLimit = finishReason === 'tool-calls' || finishReason === 'length'
-
       accumulateUsage(tokenUsage, await result.usage)
-
-
-
-
       if (truncatedByLimit) {
         yield { type: 'ai_thinking', text: '已达本次生成硬上限，正在收尾' }
-        const wrapUp = await generateText(withAbort({
-          model: provider.languageModel(modelId),
-          system: `${codegenSystem}\n\n已达本次生成硬上限（工具调用/生成步数/输出长度上限）。请不要再调用工具，基于以下已生成内容立即输出最终完整交代：\n${pageContent}`,
-          messages,
+        const wrapUp = await generateText(
+          withAbort(
+            {
+              model: provider.languageModel(modelId),
+              system: `${codegenSystem}\n\n已达本次生成硬上限（工具调用/生成步数/输出长度上限）。请不要再调用工具，基于以下已生成内容立即输出最终完整交代：\n${pageContent}`,
+              messages,
 
-          maxRetries: SHORT_CALL_MAX_RETRIES,
-          maxOutputTokens: budget.maxOutputTokens,
-        }, options.abortSignal))
+              maxRetries: SHORT_CALL_MAX_RETRIES,
+              maxOutputTokens: budget.maxOutputTokens,
+            },
+            options.abortSignal,
+          ),
+        )
         const wrapUpText = wrapUp.text
         pageContent += wrapUpText
 
         if (wrapUpText) yield { type: 'ai_response', data: wrapUpText }
         accumulateUsage(tokenUsage, wrapUp.usage)
       }
-
-
-
-
-
-
-
 
       if (truncatedByLimit) {
         actor.send({ type: 'PROCEED' })
@@ -480,26 +450,23 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
       yield* sync()
       const verdict = await runReview()
       if (verdict.passed) {
-
         break
       }
 
-
       const attempts = actor.getSnapshot().context.qualityAttempts
       if (attempts < MAX_QUALITY_ATTEMPTS) {
-
-
         qualityOpinions = verdict.suggestions
         actor.send({ type: 'RETRY' })
         yield* sync()
         continue
       }
 
-      yield* fail('重试次数已用尽，生成结果仍未能通过质量门禁：' + verdict.errors.join('；'), 'quality-gate-exhausted')
+      yield* fail(
+        '重试次数已用尽，生成结果仍未能通过质量门禁：' + verdict.errors.join('；'),
+        'quality-gate-exhausted',
+      )
       return
     }
-
-
 
     throwIfAborted(options.abortSignal)
     actor.send({ type: 'PASS' })
@@ -512,15 +479,16 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     await notifyComplete('success', pageContent)
     yield { type: 'done' }
   } catch (error) {
-
-
     if (error instanceof GenerationAborted || isAbortError(error)) {
       yield* abortRun(files?.filesWritten ?? 0)
       return
     }
 
     const message = error instanceof Error ? error.message : '生成失败'
-    options.logger?.error({ runId: request.runId, providerError: summarizeProviderError(error) }, '生成工作流失败')
+    options.logger?.error(
+      { runId: request.runId, providerError: summarizeProviderError(error) },
+      '生成工作流失败',
+    )
     yield* fail(message, classifyFailureCode(error))
   }
 }

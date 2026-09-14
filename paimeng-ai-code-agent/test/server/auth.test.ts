@@ -3,13 +3,16 @@ import { SignJWT } from 'jose'
 import { describe, expect, it } from 'vitest'
 import { makeToken, makeWorkspaceRoot, buildTestApp, TEST_SECRET } from '../helpers.js'
 
-
 const PROTECTED_URL = '/agent/workspace/validate'
 
 describe('/agent/* JWT 鉴权', () => {
   it('无 Authorization → 401', async () => {
     const app = buildTestApp()
-    const res = await app.inject({ method: 'POST', url: PROTECTED_URL, payload: { workspacePath: '/tmp/x' } })
+    const res = await app.inject({
+      method: 'POST',
+      url: PROTECTED_URL,
+      payload: { workspacePath: '/tmp/x' },
+    })
     expect(res.statusCode).toBe(401)
   })
 

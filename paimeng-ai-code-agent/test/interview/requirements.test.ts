@@ -1,7 +1,3 @@
-
-
-
-
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -10,8 +6,12 @@ import { RunClient, type Run, type RunPhase } from '../../src/runs/runClient.js'
 
 type Call = { method: string; url: string; body: Record<string, unknown> }
 
-
-function memoryRunClient(): { client: RunClient; store: Map<string, Run>; calls: Call[]; setQuotaResult: (ok: boolean) => void } {
+function memoryRunClient(): {
+  client: RunClient
+  store: Map<string, Run>
+  calls: Call[]
+  setQuotaResult: (ok: boolean) => void
+} {
   const store = new Map<string, Run>()
   const calls: Call[] = []
   let quotaOk = true
@@ -36,20 +36,29 @@ function memoryRunClient(): { client: RunClient; store: Map<string, Run>; calls:
     token: 'test',
     fetchImpl: vi.fn(async (url, init) => {
       const method = init?.method ?? 'GET'
-      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {}
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {}
       calls.push({ method, url: String(url), body })
       const pathPart = String(url).replace(/^http:\/\/java\.invalid/, '')
 
-
       if (method === 'POST' && pathPart.endsWith('/wireframe/quota/acquire')) {
         if (!quotaOk) {
-          return new Response(JSON.stringify({ code: 429, data: null, message: '今日线框生成次数已用完，请明天再试' }), { status: 429 })
+          return new Response(
+            JSON.stringify({
+              code: 429,
+              data: null,
+              message: '今日线框生成次数已用完，请明天再试',
+            }),
+            { status: 429 },
+          )
         }
         return new Response(JSON.stringify({ code: 0, data: true, message: 'ok' }), { status: 200 })
       }
       if (method === 'GET' && pathPart.includes('/internal/runs/')) {
         const id = pathPart.split('/').at(-1)!
-        return new Response(JSON.stringify({ code: 0, data: store.get(id) ?? null, message: 'ok' }), { status: 200 })
+        return new Response(
+          JSON.stringify({ code: 0, data: store.get(id) ?? null, message: 'ok' }),
+          { status: 200 },
+        )
       }
       if (method === 'POST' && pathPart.endsWith('/internal/runs')) {
         const run = newRun(body)
@@ -60,7 +69,9 @@ function memoryRunClient(): { client: RunClient; store: Map<string, Run>; calls:
         const id = pathPart.split('/').at(-1)!
         const existing = store.get(id)
         if (!existing) {
-          return new Response(JSON.stringify({ code: 404, data: null, message: '运行不存在' }), { status: 404 })
+          return new Response(JSON.stringify({ code: 404, data: null, message: '运行不存在' }), {
+            status: 404,
+          })
         }
         const next: Run = { ...existing, ...(body.phase ? { phase: body.phase as RunPhase } : {}) }
         if (body.context !== undefined) next.context = String(body.context)
@@ -72,15 +83,25 @@ function memoryRunClient(): { client: RunClient; store: Map<string, Run>; calls:
       return new Response(JSON.stringify({ code: 0, data: true, message: 'ok' }), { status: 200 })
     }),
   })
-  return { client, store, calls, setQuotaResult: (ok) => { quotaOk = ok } }
+  return {
+    client,
+    store,
+    calls,
+    setQuotaResult: (ok) => {
+      quotaOk = ok
+    },
+  }
 }
 
-const optionsOf = (q: Record<string, unknown>) => (q.options as { id: string; text: string }[]).length
+const optionsOf = (q: Record<string, unknown>) =>
+  (q.options as { id: string; text: string }[]).length
 
 describe('POST /agent/interview（五维访谈）', () => {
   it('第 1 轮返回 5 维各一道选择题，每道 2-4 选项', async () => {
     const token = await makeToken()
-    const app = buildTestApp(makeWorkspaceRoot(), { agentRoutes: { runClient: memoryRunClient().client } })
+    const app = buildTestApp(makeWorkspaceRoot(), {
+      agentRoutes: { runClient: memoryRunClient().client },
+    })
     const response = await app.inject({
       method: 'POST',
       url: '/agent/interview',
@@ -104,15 +125,18 @@ describe('POST /agent/interview（五维访谈）', () => {
 
   it('各维均作答后直接收束（跳过第 2 轮），summary 含 5 维结论且页面 ≤5', async () => {
     const token = await makeToken()
-    const app = buildTestApp(makeWorkspaceRoot(), { agentRoutes: { runClient: memoryRunClient().client } })
+    const app = buildTestApp(makeWorkspaceRoot(), {
+      agentRoutes: { runClient: memoryRunClient().client },
+    })
     const round1 = await app.inject({
       method: 'POST',
       url: '/agent/interview',
       headers: { authorization: `Bearer ${token}` },
       payload: { runId: 'run-i2', appId: 1, message: '我的作品集' },
     })
-    const answers = (round1.json() as { questions: { key: string; options: { id: string }[] }[] }).questions
-      .map((q) => ({ key: q.key, optionId: q.options[0]!.id }))
+    const answers = (
+      round1.json() as { questions: { key: string; options: { id: string }[] }[] }
+    ).questions.map((q) => ({ key: q.key, optionId: q.options[0]!.id }))
     const round2 = await app.inject({
       method: 'POST',
       url: '/agent/interview',
@@ -134,7 +158,9 @@ describe('POST /agent/interview（五维访谈）', () => {
 
   it('部分作答 → 第 2 轮只追问缺失维度；补全后收束（最多 2 轮）', async () => {
     const token = await makeToken()
-    const app = buildTestApp(makeWorkspaceRoot(), { agentRoutes: { runClient: memoryRunClient().client } })
+    const app = buildTestApp(makeWorkspaceRoot(), {
+      agentRoutes: { runClient: memoryRunClient().client },
+    })
 
     const round1 = await app.inject({
       method: 'POST',
@@ -142,8 +168,10 @@ describe('POST /agent/interview（五维访谈）', () => {
       headers: { authorization: `Bearer ${token}` },
       payload: { runId: 'run-i3', appId: 1 },
     })
-    const all = (round1.json() as { questions: { key: string; options: { id: string }[] }[] }).questions
-    const partial = all.filter((q) => ['audience', 'style', 'data'].includes(q.key))
+    const all = (round1.json() as { questions: { key: string; options: { id: string }[] }[] })
+      .questions
+    const partial = all
+      .filter((q) => ['audience', 'style', 'data'].includes(q.key))
       .map((q) => ({ key: q.key, optionId: q.options[0]!.id }))
     const resp2 = await app.inject({
       method: 'POST',
@@ -158,8 +186,8 @@ describe('POST /agent/interview（五维访谈）', () => {
     const followUp = (body2.questions as { key: string }[]).map((q) => q.key).sort()
     expect(followUp).toEqual(['interaction', 'pages'])
 
-
-    const missing = all.filter((q) => ['interaction', 'pages'].includes(q.key))
+    const missing = all
+      .filter((q) => ['interaction', 'pages'].includes(q.key))
       .map((q) => ({ key: q.key, optionId: q.options[1]!.id }))
     const resp3 = await app.inject({
       method: 'POST',
@@ -174,11 +202,30 @@ describe('POST /agent/interview（五维访谈）', () => {
 
   it('已收束后重复调用幂等返回结论，不再重新提问', async () => {
     const token = await makeToken()
-    const app = buildTestApp(makeWorkspaceRoot(), { agentRoutes: { runClient: memoryRunClient().client } })
-    const r1 = await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-i4', appId: 1 } })
-    const answers = (r1.json() as { questions: { key: string; options: { id: string }[] }[] }).questions.map((q) => ({ key: q.key, optionId: q.options[0]!.id }))
-    await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-i4', appId: 1, answers } })
-    const again = await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-i4', appId: 1, answers: [] } })
+    const app = buildTestApp(makeWorkspaceRoot(), {
+      agentRoutes: { runClient: memoryRunClient().client },
+    })
+    const r1 = await app.inject({
+      method: 'POST',
+      url: '/agent/interview',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-i4', appId: 1 },
+    })
+    const answers = (
+      r1.json() as { questions: { key: string; options: { id: string }[] }[] }
+    ).questions.map((q) => ({ key: q.key, optionId: q.options[0]!.id }))
+    await app.inject({
+      method: 'POST',
+      url: '/agent/interview',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-i4', appId: 1, answers },
+    })
+    const again = await app.inject({
+      method: 'POST',
+      url: '/agent/interview',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-i4', appId: 1, answers: [] },
+    })
     const body = again.json() as Record<string, unknown>
     expect(body.complete).toBe(true)
     expect(body.summary).toBeTruthy()
@@ -186,10 +233,27 @@ describe('POST /agent/interview（五维访谈）', () => {
 })
 
 describe('POST /agent/wireframe（免费线框 + 每日限频）', () => {
-  async function interviewComplete(app: Awaited<ReturnType<typeof buildTestApp>>, token: string, runId: string, message: string): Promise<void> {
-    const r1 = await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: { runId, appId: 1, message } })
-    const answers = (r1.json() as { questions: { key: string; options: { id: string }[] }[] }).questions.map((q) => ({ key: q.key, optionId: q.options[0]!.id }))
-    await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: { runId, appId: 1, answers } })
+  async function interviewComplete(
+    app: Awaited<ReturnType<typeof buildTestApp>>,
+    token: string,
+    runId: string,
+    message: string,
+  ): Promise<void> {
+    const r1 = await app.inject({
+      method: 'POST',
+      url: '/agent/interview',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId, appId: 1, message },
+    })
+    const answers = (
+      r1.json() as { questions: { key: string; options: { id: string }[] }[] }
+    ).questions.map((q) => ({ key: q.key, optionId: q.options[0]!.id }))
+    await app.inject({
+      method: 'POST',
+      url: '/agent/interview',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId, appId: 1, answers },
+    })
   }
 
   it('生成单文件线框：含站点地图、灰块/占位图、可点击跳转、≤5 页；run → wireframe_pending', async () => {
@@ -210,8 +274,7 @@ describe('POST /agent/wireframe（免费线框 + 每日限频）', () => {
     const wireframe = body.wireframe as Record<string, unknown>
     expect(wireframe.relativeUrl).toBe('wireframe/wireframe.html')
     expect(wireframe.pageCount).toBeLessThanOrEqual(5)
-    expect((memo.store.get('run-w1')!.phase)).toBe('wireframe_pending')
-
+    expect(memo.store.get('run-w1')!.phase).toBe('wireframe_pending')
 
     const html = readFileSync(path.join(root, 'wireframe', 'wireframe.html'), 'utf8')
     expect(html).toContain('<!DOCTYPE html>')
@@ -248,7 +311,11 @@ describe('POST /agent/wireframe（免费线框 + 每日限频）', () => {
     expect((response.json() as { message: string }).message).toContain('完成需求访谈')
     expect((response.json() as { message: string }).message).toContain('尚未完成')
     expect(memo.store.get('run-w-incomplete')!.phase).toBe('interview')
-    expect(wireframeCalls.some((call) => call.method === 'PATCH' && call.url.endsWith('/internal/runs/run-w-incomplete'))).toBe(false)
+    expect(
+      wireframeCalls.some(
+        (call) => call.method === 'PATCH' && call.url.endsWith('/internal/runs/run-w-incomplete'),
+      ),
+    ).toBe(false)
     expect(wireframeCalls.some((call) => call.url.endsWith('/wireframe/quota/acquire'))).toBe(false)
     expect(existsSync(path.join(root, 'wireframe'))).toBe(false)
     expect(() => readFileSync(path.join(root, 'wireframe', 'wireframe.html'), 'utf8')).toThrow()
@@ -259,9 +326,18 @@ describe('POST /agent/wireframe（免费线框 + 每日限频）', () => {
     const root = makeWorkspaceRoot()
     const memo = memoryRunClient()
     memo.store.set('run-w-missing', {
-      runId: 'run-w-missing', appId: 1, userId: 1, phase: 'interview', context: null,
-      milestones: null, tokenUsage: null, creditLedgerRef: null, startedTime: null,
-      finishedTime: null, createTime: null, updateTime: null,
+      runId: 'run-w-missing',
+      appId: 1,
+      userId: 1,
+      phase: 'interview',
+      context: null,
+      milestones: null,
+      tokenUsage: null,
+      creditLedgerRef: null,
+      startedTime: null,
+      finishedTime: null,
+      createTime: null,
+      updateTime: null,
     })
     const app = buildTestApp(root, { agentRoutes: { runClient: memo.client } })
     const callsBeforeWireframe = memo.calls.length
@@ -275,7 +351,11 @@ describe('POST /agent/wireframe（免费线框 + 每日限频）', () => {
     expect(response.statusCode).toBe(400)
     expect((response.json() as { message: string }).message).toContain('完成需求访谈')
     expect(memo.store.get('run-w-missing')!.phase).toBe('interview')
-    expect(wireframeCalls.some((call) => call.method === 'PATCH' && call.url.endsWith('/internal/runs/run-w-missing'))).toBe(false)
+    expect(
+      wireframeCalls.some(
+        (call) => call.method === 'PATCH' && call.url.endsWith('/internal/runs/run-w-missing'),
+      ),
+    ).toBe(false)
     expect(wireframeCalls.some((call) => call.url.endsWith('/wireframe/quota/acquire'))).toBe(false)
     expect(existsSync(path.join(root, 'wireframe'))).toBe(false)
     expect(() => readFileSync(path.join(root, 'wireframe', 'wireframe.html'), 'utf8')).toThrow()
@@ -294,8 +374,9 @@ describe('POST /agent/wireframe（免费线框 + 每日限频）', () => {
       payload: { runId: 'run-w2', appId: 1, workspacePath: root },
     })
     expect(response.statusCode).toBe(429)
-    expect(String((response.json() as { message: string }).message)).toContain('今日线框生成次数已用完')
-
+    expect(String((response.json() as { message: string }).message)).toContain(
+      '今日线框生成次数已用完',
+    )
     expect(() => readFileSync(path.join(root, 'wireframe', 'wireframe.html'), 'utf8')).toThrow()
   })
 })
@@ -306,21 +387,46 @@ describe('POST /agent/wireframe/confirm（确认闸门 + 跨请求存活）', ()
     const root = makeWorkspaceRoot()
     const memo = memoryRunClient()
     const app = buildTestApp(root, { agentRoutes: { runClient: memo.client } })
-    const r1 = await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c1', appId: 1, message: '预约服务' } })
-    const answers = (r1.json() as { questions: { key: string; options: { id: string }[] }[] }).questions.map((q) => ({ key: q.key, optionId: q.options[0]!.id }))
-    await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c1', appId: 1, answers } })
-    await app.inject({ method: 'POST', url: '/agent/wireframe', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c1', appId: 1, workspacePath: root } })
+    const r1 = await app.inject({
+      method: 'POST',
+      url: '/agent/interview',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-c1', appId: 1, message: '预约服务' },
+    })
+    const answers = (
+      r1.json() as { questions: { key: string; options: { id: string }[] }[] }
+    ).questions.map((q) => ({ key: q.key, optionId: q.options[0]!.id }))
+    await app.inject({
+      method: 'POST',
+      url: '/agent/interview',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-c1', appId: 1, answers },
+    })
+    await app.inject({
+      method: 'POST',
+      url: '/agent/wireframe',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-c1', appId: 1, workspacePath: root },
+    })
 
-
-    const confirm = await app.inject({ method: 'POST', url: '/agent/wireframe/confirm', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c1', appId: 1 } })
+    const confirm = await app.inject({
+      method: 'POST',
+      url: '/agent/wireframe/confirm',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-c1', appId: 1 },
+    })
     expect(confirm.statusCode).toBe(200)
     const body = confirm.json() as Record<string, unknown>
     expect(body.phase).toBe('wireframe_confirmed')
     expect(memo.store.get('run-c1')!.phase).toBe('wireframe_confirmed')
-    expect((memo.store.get('run-c1')!.context as string)).toContain('confirmed')
+    expect(memo.store.get('run-c1')!.context as string).toContain('confirmed')
 
-
-    const again = await app.inject({ method: 'POST', url: '/agent/wireframe/confirm', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c1', appId: 1 } })
+    const again = await app.inject({
+      method: 'POST',
+      url: '/agent/wireframe/confirm',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-c1', appId: 1 },
+    })
     expect(again.statusCode).toBe(200)
     expect((again.json() as { phase: string }).phase).toBe('wireframe_confirmed')
   })
@@ -329,8 +435,18 @@ describe('POST /agent/wireframe/confirm（确认闸门 + 跨请求存活）', ()
     const token = await makeToken()
     const memo = memoryRunClient()
     const app = buildTestApp(makeWorkspaceRoot(), { agentRoutes: { runClient: memo.client } })
-    await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c2', appId: 1 } })
-    const response = await app.inject({ method: 'POST', url: '/agent/wireframe/confirm', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c2', appId: 1 } })
+    await app.inject({
+      method: 'POST',
+      url: '/agent/interview',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-c2', appId: 1 },
+    })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/wireframe/confirm',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-c2', appId: 1 },
+    })
     expect(response.statusCode).toBe(409)
     expect(String((response.json() as { message: string }).message)).toContain('没有待确认的线框')
   })
@@ -341,34 +457,71 @@ describe('POST /agent/wireframe/confirm（确认闸门 + 跨请求存活）', ()
     const memo = memoryRunClient()
     const app = buildTestApp(root, { agentRoutes: { runClient: memo.client } })
 
-    const r1 = await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c3', appId: 1, message: '咖啡店' } })
+    const r1 = await app.inject({
+      method: 'POST',
+      url: '/agent/interview',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-c3', appId: 1, message: '咖啡店' },
+    })
     const all = (r1.json() as { questions: { key: string; options: { id: string }[] }[] }).questions
-    const partial = all.filter((q) => ['audience', 'style'].includes(q.key)).map((q) => ({ key: q.key, optionId: q.options[0]!.id }))
-    await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c3', appId: 1, answers: partial } })
+    const partial = all
+      .filter((q) => ['audience', 'style'].includes(q.key))
+      .map((q) => ({ key: q.key, optionId: q.options[0]!.id }))
+    await app.inject({
+      method: 'POST',
+      url: '/agent/interview',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-c3', appId: 1, answers: partial },
+    })
 
-    const rejected = await app.inject({ method: 'POST', url: '/agent/wireframe', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c3', appId: 1, workspacePath: root } })
+    const rejected = await app.inject({
+      method: 'POST',
+      url: '/agent/wireframe',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-c3', appId: 1, workspacePath: root },
+    })
     expect(rejected.statusCode).toBe(400)
     expect(memo.store.get('run-c3')!.phase).toBe('interview')
     expect(() => readFileSync(path.join(root, 'wireframe', 'wireframe.html'), 'utf8')).toThrow()
 
-    const missing = all.filter((q) => !['audience', 'style'].includes(q.key)).map((q) => ({ key: q.key, optionId: q.options[1]!.id }))
-    const completed = await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c3', appId: 1, answers: missing } })
+    const missing = all
+      .filter((q) => !['audience', 'style'].includes(q.key))
+      .map((q) => ({ key: q.key, optionId: q.options[1]!.id }))
+    const completed = await app.inject({
+      method: 'POST',
+      url: '/agent/interview',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-c3', appId: 1, answers: missing },
+    })
     expect((completed.json() as { complete: boolean }).complete).toBe(true)
 
-    const generated = await app.inject({ method: 'POST', url: '/agent/wireframe', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c3', appId: 1, workspacePath: root } })
+    const generated = await app.inject({
+      method: 'POST',
+      url: '/agent/wireframe',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-c3', appId: 1, workspacePath: root },
+    })
     expect(generated.statusCode).toBe(200)
     expect(memo.store.get('run-c3')!.phase).toBe('wireframe_pending')
   })
 })
 
-
 describe('需求工程端点请求体校验（#18）', () => {
   it('interview：必填全缺（空 body）→ 400 必填报错', async () => {
     const token = await makeToken()
     const app = buildTestApp(makeWorkspaceRoot())
-    const response = await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: {} })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/interview',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {},
+    })
     expect(response.statusCode).toBe(400)
-    expect(response.json()).toEqual({ statusCode: 400, error: 'Bad Request', message: 'runId、appId、userId 必填' })
+    expect(response.json()).toEqual({
+      statusCode: 400,
+      error: 'Bad Request',
+      message: 'runId、appId、userId 必填',
+    })
   })
 
   it('interview：runId 类型不符（数字）→ 宽容回退后统一 400（类型回退等价）', async () => {
@@ -387,15 +540,27 @@ describe('需求工程端点请求体校验（#18）', () => {
   it('wireframe：缺 workspacePath → 400 必填报错', async () => {
     const token = await makeToken()
     const app = buildTestApp(makeWorkspaceRoot())
-    const response = await app.inject({ method: 'POST', url: '/agent/wireframe', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-v1', appId: 1 } })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/wireframe',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-v1', appId: 1 },
+    })
     expect(response.statusCode).toBe(400)
-    expect((response.json() as { message: string }).message).toBe('runId、appId、workspacePath、userId 必填')
+    expect((response.json() as { message: string }).message).toBe(
+      'runId、appId、workspacePath、userId 必填',
+    )
   })
 
   it('wireframe/confirm：必填全缺 → 400 必填报错', async () => {
     const token = await makeToken()
     const app = buildTestApp(makeWorkspaceRoot())
-    const response = await app.inject({ method: 'POST', url: '/agent/wireframe/confirm', headers: { authorization: `Bearer ${token}` }, payload: {} })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/wireframe/confirm',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {},
+    })
     expect(response.statusCode).toBe(400)
     expect((response.json() as { message: string }).message).toBe('runId、appId、userId 必填')
   })
