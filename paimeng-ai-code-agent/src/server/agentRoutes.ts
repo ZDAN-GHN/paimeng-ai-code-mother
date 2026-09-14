@@ -74,7 +74,7 @@ const wireframeBodySchema = tolerantBody({
 
 type WireframeBody = z.infer<typeof wireframeBodySchema>
 
-// 生成类型白名单（#9 审查整改：codeGenType 三元链改查表；其余回退 undefined → workflow 默认 html）
+// 生成类型白名单；省略 codeGenType 由 workflow 默认 html，显式未知值由路由在 hijack 前拒绝。
 const CODE_GEN_TYPE_WHITELIST: Record<string, NonNullable<StreamRequest['codeGenType']>> = {
   html: 'html',
   multi_file: 'multi_file',
@@ -87,7 +87,7 @@ const historyTurnSchema = z.object({
   content: z.string(),
 })
 
-// 生成流请求体：codeGenType 查表白名单，intensity 非法值回退缺省（resolveIntensity 统一回退标准档）。
+// 生成流请求体：保留原始 codeGenType 到对象 transform，区分省略与显式非法值。
 // script 测试参数已退场（#21）：公共请求体不再携带剧本，离线剧本经 agentRoutes.provider 注入表达
 const streamBodySchema = tolerantBody({
   runId: z.string().catch(''),
@@ -96,10 +96,17 @@ const streamBodySchema = tolerantBody({
   message: z.string().catch(''),
   workspacePath: z.string().optional().catch(undefined),
   intensity: z.enum(['fast', 'standard', 'deep']).optional().catch(undefined),
-  codeGenType: z.string().optional().catch(undefined)
-    .transform((s) => (s ? CODE_GEN_TYPE_WHITELIST[s] : undefined)),
+  codeGenType: z.unknown().optional().catch(undefined),
   history: z.array(historyTurnSchema.nullable().catch(null)).optional().catch(undefined)
     .transform((entries) => entries?.filter((turn): turn is HistoryTurn => turn !== null)),
+}).transform((input) => {
+  const rawCodeGenType = input.codeGenType
+  const validCodeGenType = typeof rawCodeGenType === 'string' && Object.prototype.hasOwnProperty.call(CODE_GEN_TYPE_WHITELIST, rawCodeGenType)
+  return {
+    ...input,
+    codeGenType: validCodeGenType ? CODE_GEN_TYPE_WHITELIST[rawCodeGenType] : undefined,
+    invalidCodeGenType: rawCodeGenType !== undefined && !validCodeGenType,
+  }
 })
 
 const turnBodySchema = tolerantBody({
@@ -289,6 +296,9 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
   // ── codegen 流式端点（Issue #17 真流式 + #21 双轨预检）──
   fastify.post('/agent/stream', async (request, reply) => {
     const input = streamBodySchema.parse(request.body)
+    if (input.invalidCodeGenType) {
+      throw httpError(400, 'codeGenType 必须为 html、multi_file 或 vue_project')
+    }
     const userId = input.userId ?? request.user?.sub ?? ''
     if (!input.runId || input.appId === '' || !input.message || userId === '') {
       throw httpError(400, 'runId、appId、message、userId 必填')

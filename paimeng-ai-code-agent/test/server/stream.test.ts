@@ -465,6 +465,43 @@ describe('POST /agent/stream 请求体校验（#18）', () => {
     expect(response.json()).toEqual({ statusCode: 400, error: 'Bad Request', message: 'runId、appId、message、userId 必填' })
   })
 
+  it.each([
+    null,
+    123,
+    true,
+    ['multi_file'],
+    { type: 'multi_file' },
+    'invalid',
+  ])('显式非法 codeGenType（%j）→ hijack 前 400 拒绝，不进入 SSE workflow', async (codeGenType) => {
+    const token = await makeToken()
+    const app = buildTestApp(makeWorkspaceRoot())
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/stream',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-v3', appId: 1, message: 'hello', codeGenType },
+    })
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({
+      statusCode: 400,
+      error: 'Bad Request',
+      message: 'codeGenType 必须为 html、multi_file 或 vue_project',
+    })
+  })
+
+  it('省略 codeGenType → 默认 html 并保持成功 SSE 行为', async () => {
+    const root = makeWorkspaceRoot()
+    const token = await makeToken()
+    const response = await buildTestApp(root, { agentRoutes: { runClient: fakeRunClient([], 'wireframe_confirmed') } }).inject({
+      method: 'POST',
+      url: '/agent/stream',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-v4', appId: 1, message: 'hello', workspacePath: root },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(frames(response.body).at(-1)?.event).toBe('done')
+  })
+
   it('appId 类型不符（布尔）→ 400 必填报错（类型回退等价）', async () => {
     const token = await makeToken()
     const app = buildTestApp(makeWorkspaceRoot())

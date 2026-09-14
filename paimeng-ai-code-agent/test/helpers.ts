@@ -29,7 +29,12 @@ export function frames(body: string): Frame[] {
 
 // 伪造 runClient：GET（闸门查询）返回 wireframe_confirmed，写操作按请求体 phase 回显。
 // phase 参数可覆盖 GET 返回的阶段（闸门拒绝/放行用例）；completeFails 注入 /complete 500（容错用例）。
-export function fakeRunClient(calls: RunCall[], gatePhase: Run['phase'] = 'wireframe_confirmed', completeFails = false): RunClient {
+export function fakeRunClient(
+  calls: RunCall[],
+  gatePhase: Run['phase'] = 'wireframe_confirmed',
+  completeFails = false,
+  context: string | null = null,
+): RunClient {
   return new RunClient({
     baseUrl: 'http://java.invalid',
     token: 'test',
@@ -42,7 +47,7 @@ export function fakeRunClient(calls: RunCall[], gatePhase: Run['phase'] = 'wiref
         return new Response(JSON.stringify({ code: 500, message: '内部错误' }), { status: 500 })
       }
       const data = method === 'GET'
-        ? { runId: String(url).split('/').at(-1), appId: 1, userId: 1, phase: gatePhase, context: null, milestones: null }
+        ? { runId: String(url).split('/').at(-1), appId: 1, userId: 1, phase: gatePhase, context, milestones: null }
         : { runId: String(url).split('/').at(-2), appId: 1, userId: 1, phase: body.phase ?? 'interview', context: null, milestones: null }
       return new Response(JSON.stringify({ code: 0, data, message: 'ok' }), { status: 200 })
     }),

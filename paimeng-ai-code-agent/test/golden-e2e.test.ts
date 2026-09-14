@@ -1,7 +1,7 @@
 // 离线 golden e2e（Issue #11）：从 tests/fixtures golden JSON 夹具驱动「HTTP 入口 → 闸门 → 冻结 →
 // guardrail → 假 LLM 全链（工具写盘）→ review 三重门禁（替身通过）→ done + 完成回调」，
 // 按夹具断言工作区产物文件与关键片段——对齐旧 Python Agent tests/test_e2e.py 的夹具语义。
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { makeToken, makeWorkspaceRoot, buildTestApp, frames, fakeRunClient, type RunCall } from './helpers.js'
@@ -27,9 +27,23 @@ describe.each([
     const root = makeWorkspaceRoot()
     const token = await makeToken()
     const calls: RunCall[] = []
-    // 剧本经 provider 注入表达（#21）：夹具 script 字段驱动 createScriptedLlm，不再走请求体
+    const provider = createScriptedLlm(fixture.script)
+    const useDefaultReviewGates = fixture.codeGenType === 'multi_file'
+    if (useDefaultReviewGates) {
+      mkdirSync(path.join(root, 'wireframe'), { recursive: true })
+      writeFileSync(path.join(root, 'wireframe', 'wireframe.html'), '<html><body><section id="page-1"><h2>首页</h2></section></body></html>', 'utf8')
+    }
     const response = await buildTestApp(root, {
-      agentRoutes: { runClient: fakeRunClient(calls), provider: createScriptedLlm(fixture.script) },
+      agentRoutes: {
+        runClient: fakeRunClient(
+          calls,
+          'wireframe_confirmed',
+          false,
+          useDefaultReviewGates ? JSON.stringify({ wireframe: { relativeUrl: 'wireframe/wireframe.html' } }) : null,
+        ),
+        provider,
+        ...(useDefaultReviewGates ? { reviewGates: undefined } : {}),
+      },
     }).inject({
       method: 'POST',
       url: '/agent/stream',
@@ -57,6 +71,13 @@ describe.each([
       for (const fragment of fragments) {
         expect(content).toContain(fragment)
       }
+    }
+
+    if (fixture.codeGenType === 'multi_file') {
+      const codegenCall = provider.records.find((record) => record.modelId === 'scripted-standard')
+      expect(codegenCall?.system).toContain('至少创建以下三个文件')
+      expect(codegenCall?.system).toContain('style.css')
+      expect(provider.records.some((record) => record.modelId === 'scripted-quality')).toBe(true)
     }
 
     // 完成回调：success，携带工作区路径（Java 侧写历史 + 触发构建）

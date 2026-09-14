@@ -219,7 +219,7 @@ const IMAGE_SEARCH_TOOL_CALL_IDS = ['image-search-1', 'image-search-2']
 const MULTI_FILE_CONTENTS: Array<{ relativeFilePath: string; content: string }> = [
   {
     relativeFilePath: 'index.html',
-    content: '<!DOCTYPE html>\n<html>\n<head><title>多文件页面</title></head>\n<body>\n<div id="app">多文件应用</div>\n</body>\n</html>',
+    content: '<!DOCTYPE html>\n<html>\n<head><title>多文件页面</title><link rel="stylesheet" href="style.css"></head>\n<body>\n<section id="page-1"><div id="app">多文件应用</div></section>\n<script src="script.js"></script>\n</body>\n</html>',
   },
   {
     relativeFilePath: 'style.css',

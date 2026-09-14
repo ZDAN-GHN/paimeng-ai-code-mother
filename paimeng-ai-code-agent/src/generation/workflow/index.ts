@@ -26,11 +26,12 @@ import { validateWorkspacePath } from '../workspace.js'
 import { validatePrompt } from '../../interview/guardrails.js'
 import type { InterviewSummary } from '../../interview/index.js'
 import type { PlanningArtifact } from '../../interview/context.js'
-import { loadPrompt, PROMPT_NAMES } from '../prompts/index.js'
+import { loadPrompt } from '../prompts/index.js'
 import { FileTools } from '../tools/fileTools.js'
 import { ImageTools, type ImageConfig } from '../tools/imageTools.js'
 import { buildTools } from '../tools/index.js'
 import { buildDefaultReviewGates, runReviewCycle, type ReviewGateSet } from '../review/index.js'
+import { resolveStackProfile } from '../stackProfile.js'
 import { type CodeGenType, type ReviewVerdict, type TokenUsage } from '../review/types.js'
 
 // 输入历史滑窗：保留的最近全文轮数（更早折叠为摘要；架构 §3.3 输入侧有界）
@@ -167,6 +168,8 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
   const { runClient, workspaceRoot } = options
   // 缺省离线假 LLM（success 剧本）；剧本选择已收敛到注入的 provider（公共请求体不再携带 script——#21）
   const provider = options.provider ?? createScriptedLlm('success')
+  const stackProfile = resolveStackProfile(request.codeGenType)
+  const codeGenType = stackProfile.key
   // 三档强度：路由到对应模型 id、护栏上限随档位（#9）
   const tier = resolveIntensity(request.intensity)
 
@@ -263,11 +266,15 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
   // 编排收敛在 review 模块（runReviewCycle：上下文构建/门禁执行/质检 token 计量回调），本处只做参数组装
   async function runReview(): Promise<ReviewVerdict> {
     return runReviewCycle({
-      gates: options.reviewGates ?? buildDefaultReviewGates(provider),
+      gates: options.reviewGates ?? {
+        ...buildDefaultReviewGates(provider),
+        build: stackProfile.buildGate,
+        visualDiff: stackProfile.visualDiffGate,
+      },
       workspacePath: request.workspacePath ?? workspaceRoot,
       // 视觉 diff 基准 = 已确认线框（路由解析 run.context.wireframe.relativeUrl 传入）
       wireframePath: options.wireframePath,
-      codeGenType: request.codeGenType ?? 'html',
+      codeGenType,
       // #9 计量：质检分门禁的模型调用 token 累计进 run 计量（reviewer 也是 run 的模型调用）
       onQualityUsage: (usage) => accumulateUsage(tokenUsage, usage),
       // 对话中断（#10 审查整改）：reviewer 工位质检 LLM 调用同样受 abort 约束（取消 LLM 全覆盖）
@@ -318,7 +325,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
       // 输入历史滑窗一次计算（#9）：更早摘要进 system，最近 N 轮全文进对话
       const windowed = windowedHistoryOf(request)
       const codegenSystem = [
-        loadPrompt(PROMPT_NAMES.codegenHtml),
+        loadPrompt(stackProfile.promptName),
         // 服务端注入会话五维结论，保持需求上下文不依赖浏览器伪消息。
         ...(options.sessionConclusion
           ? [`\n会话结论（服务端重建）：\n${json(options.sessionConclusion)}`]

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createScriptedLlm } from '../../../src/llm/index.js'
 import { runGenerationWorkflow } from '../../../src/generation/workflow/index.js'
 import { makePassingReviewGates, makeWorkspaceRoot } from '../../helpers.js'
+import type { AgentEvent } from '../../../src/protocol/events.js'
 
 describe('codegen system context injection (#23)', () => {
   it('injects the server-side five-dimension conclusion and bounded planning artifact', async () => {
@@ -49,5 +50,22 @@ describe('codegen system context injection (#23)', () => {
     expect(codegenCall?.system).toContain('page-0')
     expect(codegenCall?.system).toContain('三列内容卡片')
     expect(codegenCall?.system).toContain('wireframe/wireframe.html')
+  })
+
+  it('routes multi_file through its default build gate instead of the html gate', async () => {
+    const provider = createScriptedLlm('success')
+    const workspaceRoot = makeWorkspaceRoot()
+    const events: AgentEvent[] = []
+
+    for await (const event of runGenerationWorkflow(
+      { runId: 'run-multi-file-default-gates', appId: 1, message: '生成多文件页面', workspacePath: workspaceRoot, codeGenType: 'multi_file' },
+      { workspaceRoot, provider },
+    )) {
+      events.push(event)
+    }
+
+    expect(events.at(-1)).toMatchObject({ type: 'error' })
+    expect(events.at(-1)).toMatchObject({ message: expect.stringContaining('至少需要 2 个项目文件') })
+    expect(provider.records.some((record) => record.modelId === 'scripted-quality')).toBe(true)
   })
 })
