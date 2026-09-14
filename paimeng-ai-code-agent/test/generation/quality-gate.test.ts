@@ -9,6 +9,8 @@ import { createScriptedLlm } from '../../src/llm/index.js'
 import { RunClient, type Run } from '../../src/runs/runClient.js'
 import type { ReviewGateSet } from '../../src/generation/review/index.js'
 import type { BuildVerifier, VisualDiffVerifier } from '../../src/generation/review/index.js'
+import { resolveIntensity } from '../../src/generation/intensity.js'
+import { resolveBudgetLimits, resolveStackProfile } from '../../src/generation/stackProfile.js'
 import { validateWorkspacePath } from '../../src/generation/workspace.js'
 
 type Frame = { event: string; data: Record<string, unknown> }
@@ -304,6 +306,31 @@ describe('Issue #9：三档推理强度路由与上限', () => {
     }
   })
 
+  it('workflow/provider consumes per-type maxOutputTokens for every intensity', async () => {
+    const { runGenerationWorkflow } = await import('../../src/generation/workflow/index.js')
+    const root = makeWorkspaceRoot()
+    const scales = {
+      html: { turns: 1, outputTokens: 1, toolCalls: 1 },
+      multi_file: { turns: 2, outputTokens: 2, toolCalls: 2 },
+      vue_project: { turns: 4, outputTokens: 3, toolCalls: 3 },
+    } as const
+
+    for (const codeGenType of ['html', 'multi_file', 'vue_project'] as const) {
+      for (const intensity of ['fast', 'standard', 'deep'] as const) {
+        const provider = createScriptedLlm('success')
+        for await (const _event of runGenerationWorkflow(
+          { runId: `${codeGenType}-${intensity}`, appId: 1, message: 'hello', workspacePath: root, codeGenType, intensity },
+          { provider, workspaceRoot: root, reviewGates: makePassingReviewGates() },
+        )) {
+          // Consume the complete stream so the provider records the actual request.
+        }
+        const call = provider.records.find((record) => record.modelId === `scripted-${intensity}`)
+        const expected = resolveBudgetLimits(resolveIntensity(intensity).limits, resolveStackProfile(codeGenType).budgetScale)
+        expect(call?.maxOutputTokens).toBe(expected.maxOutputTokens)
+        expect(resolveStackProfile(codeGenType).budgetScale).toEqual(scales[codeGenType])
+      }
+    }
+  })
   it('workflow 按档位传 maxOutputTokens 给 provider（上限随档位变化）', async () => {
     const { runGenerationWorkflow } = await import('../../src/generation/workflow/index.js')
     const provider = createScriptedLlm('success')
@@ -314,10 +341,8 @@ describe('Issue #9：三档推理强度路由与上限', () => {
     )) {
       // 消费完整流
     }
-    // scripted-fast 模型的调用记录携带 maxOutputTokens（档位上限已传 provider）
     const fast = provider.records.find((r) => r.modelId === 'scripted-fast')
     expect(fast?.maxOutputTokens).toBeGreaterThan(0)
-    // 快速档上限低于深度档（resolveIntensity 已测，这里复核模型层收到的值随档位）
     const deepProvider = createScriptedLlm('success')
     for await (const _ev of runGenerationWorkflow(
       { runId: 'r2', appId: 1, message: 'hello', workspacePath: root, intensity: 'deep' },

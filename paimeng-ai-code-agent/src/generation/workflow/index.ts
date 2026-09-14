@@ -31,7 +31,7 @@ import { FileTools } from '../tools/fileTools.js'
 import { ImageTools, type ImageConfig } from '../tools/imageTools.js'
 import { buildTools } from '../tools/index.js'
 import { buildDefaultReviewGates, runReviewCycle, type ReviewGateSet } from '../review/index.js'
-import { resolveStackProfile } from '../stackProfile.js'
+import { resolveStackProfile, resolveBudgetLimits } from '../stackProfile.js'
 import { type CodeGenType, type ReviewVerdict, type TokenUsage } from '../review/types.js'
 
 // 输入历史滑窗：保留的最近全文轮数（更早折叠为摘要；架构 §3.3 输入侧有界）
@@ -172,6 +172,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
   const codeGenType = stackProfile.key
   // 三档强度：路由到对应模型 id、护栏上限随档位（#9）
   const tier = resolveIntensity(request.intensity)
+  const budget = resolveBudgetLimits(tier.limits, stackProfile.budgetScale)
 
   // 启动状态机（interview entry 先行：context.milestones 得到首个里程碑）
   const actor = createActor(generationMachine, { input: { milestones: [] } })
@@ -308,7 +309,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
     const images =
       options.imageTools ??
       new ImageTools(options.imageConfig ?? { pexelsApiKey: '', dashscopeApiKey: '', imageModel: DEFAULT_IMAGE_MODEL }, {
-        quota: tier.limits.maxImages,
+        quota: budget.maxImages,
       })
 
     // ai_response 增量文本的拼接即页面原始产出；writeFile 工具按模型参数 content 写盘
@@ -357,8 +358,8 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
         maxRetries: 0,
         // 输出硬上限（#9 护栏第 1 层，随档位放大）：max_output_tokens 传 provider；max_turns 截断工具循环步数；
         // max_tool_calls 累计工具调用数截断（历史先例 50，标准档）
-        maxOutputTokens: tier.limits.maxOutputTokens,
-        stopWhen: [isStepCount(tier.limits.maxTurns), stopWhenToolCalls(tier.limits.maxToolCalls)],
+        maxOutputTokens: budget.maxOutputTokens,
+        stopWhen: [isStepCount(budget.maxTurns), stopWhenToolCalls(budget.maxToolCalls)],
         tools: buildTools({ files: files!, images }),
         // 对话中断（#10）：abort 信号触发 → AI SDK 取消 LLM 调用（error part → GenerationAborted）
       }, options.abortSignal))
@@ -411,7 +412,7 @@ export async function* runGenerationWorkflow(request: StreamRequest, options: Wo
           messages,
           // 短调用恢复 SDK 默认退避重试（#20；次数单源见 generation/retryPolicy.ts）
           maxRetries: SHORT_CALL_MAX_RETRIES,
-          maxOutputTokens: tier.limits.maxOutputTokens,
+          maxOutputTokens: budget.maxOutputTokens,
           // 对话中断（#10）：收尾调用同样受 abort 信号约束
         }, options.abortSignal))
         const wrapUpText = wrapUp.text

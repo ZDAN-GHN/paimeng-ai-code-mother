@@ -1,3 +1,4 @@
+import type { IntensityLimits } from './intensity.js'
 import type { PromptName } from './prompts/index.js'
 import { PROMPT_NAMES } from './prompts/index.js'
 import {
@@ -8,7 +9,7 @@ import {
 } from './review/index.js'
 import type { CodeGenType } from './review/types.js'
 
-// 多类型生成的策略接缝。门禁和预算数值由后续票据扩展；本票保持现有 html 行为。
+// 多类型生成的策略接缝。预算系数按定稿设计落位；门禁和质量尝试上限由各票据维护。
 export interface BudgetScale {
   turns: number
   outputTokens: number
@@ -41,11 +42,30 @@ function createProfile(key: CodeGenType, promptName: PromptName): StackProfile {
   }
 }
 
-// 先注册三类稳定 key；multi_file/vue_project 的专用门禁和预算由后续票据替换，接口保持不变。
 const STACK_PROFILES: Record<CodeGenType, StackProfile> = {
   html: createProfile('html', PROMPT_NAMES.codegenHtml),
-  multi_file: createProfile('multi_file', PROMPT_NAMES.codegenMultiFile),
-  vue_project: createProfile('vue_project', PROMPT_NAMES.codegenHtml),
+  multi_file: {
+    ...createProfile('multi_file', PROMPT_NAMES.codegenMultiFile),
+    budgetScale: { turns: 2, outputTokens: 2, toolCalls: 2 },
+  },
+  vue_project: {
+    ...createProfile('vue_project', PROMPT_NAMES.codegenHtml),
+    budgetScale: { turns: 4, outputTokens: 3, toolCalls: 3 },
+  },
+}
+
+const MAX_OUTPUT_TOKENS = 32000
+
+/**
+ * 将强度基线与生成类型预算相乘；每项独立四舍五入，输出 token 另受模型上限保护。
+ */
+export function resolveBudgetLimits(limits: IntensityLimits, scale: BudgetScale): IntensityLimits {
+  return {
+    maxTurns: Math.round(limits.maxTurns * scale.turns),
+    maxOutputTokens: Math.min(MAX_OUTPUT_TOKENS, Math.round(limits.maxOutputTokens * scale.outputTokens)),
+    maxToolCalls: Math.round(limits.maxToolCalls * scale.toolCalls),
+    maxImages: limits.maxImages,
+  }
 }
 
 export function resolveStackProfile(codeGenType: CodeGenType | undefined): StackProfile {
