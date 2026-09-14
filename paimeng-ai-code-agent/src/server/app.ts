@@ -4,6 +4,7 @@ import { agentPlugin } from './authPlugin.js'
 import { loadConfig, type ConfigOverrides } from './config.js'
 import { registerHttpErrorHandler } from './httpError.js'
 import { buildHealthzRoutes } from './healthzRoutes.js'
+import { LocalEvalObserver } from '../eval/observer.js'
 import type { AgentRouteOptions } from './agentRoutes.js'
 
 export interface AppOverrides extends ConfigOverrides {
@@ -12,6 +13,11 @@ export interface AppOverrides extends ConfigOverrides {
 
 export function buildApp(overrides: AppOverrides = {}): FastifyInstance {
   const config = loadConfig(process.env, overrides)
+  const injectedObserver = overrides.agentRoutes?.observer
+  if (process.env.NODE_ENV === 'production' && injectedObserver) {
+    throw new Error('eval observation override is forbidden in production')
+  }
+  const observer = injectedObserver ?? LocalEvalObserver.fromEnvSync()
   const app = Fastify({
     logger: { level: config.logLevel },
   })
@@ -19,6 +25,6 @@ export function buildApp(overrides: AppOverrides = {}): FastifyInstance {
   // 错误 JSON 单点产出（#21）：路由/预检 throw httpError(statusCode, message)，此处统一序列化
   registerHttpErrorHandler(app)
   // /agent/* 的鉴权与业务路由集中在插件作用域
-  app.register(agentPlugin, { config, routeOptions: overrides.agentRoutes })
+  app.register(agentPlugin, { config, routeOptions: { ...overrides.agentRoutes, observer } })
   return app
 }

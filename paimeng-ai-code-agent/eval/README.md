@@ -28,13 +28,14 @@ Required top-level fields are `id`, `title`, `category`, `tags`, `executionMode`
 
 `executionMode=fake_llm` means the journey is deterministic and can run in CI without provider credentials. `executionMode=real_model` marks journeys whose final gate is provider/network validation by the main agent. This distinction does not change runtime behavior.
 
-The runner validates the frozen journeys and writes the documented report shape:
+The runner validates the frozen journeys and writes the documented report shape. Real capture accepts only the canonical repository `eval/journeys` directory; `--journeys` is not an alternate capture source. The replay manifest is mandatory in real mode and is validated before the adapter is loaded. External adapters must export `capture(journey, replay)`. They may use only the validated `replay.turns` for endpoint stimuli; each journey replay uses one stable run ID across all turns. Unsupported actions must fail closed rather than fall back to another endpoint.
+
 
 ```sh
 node eval/run.mjs --journeys eval/journeys --base eval/fixtures/baseline --out ../docs/ts_agent/agent-loop-eval-report.md
 ```
 
-The default `offline` mode is deterministic and does not invoke a provider. It records the turn inputs and expected events as journey-definition checks, leaves observed SSE/run/callback fields empty, and marks `real_model` journeys as `not-captured`. Use `--mode real` only when a provider capture adapter is available. The default adapter calls the local Agent HTTP path and requires `EVAL_JWT`, `EVAL_APP_ID`, `EVAL_USER_ID`, and `EVAL_WORKSPACE_PATH`; `EVAL_AGENT_URL` defaults to `http://127.0.0.1:8092`. For a controlled integration, set `EVAL_CAPTURE_ADAPTER` to an adapter module exporting `capture(journey)`. The built-in HTTP adapter is a transport adapter only: it intentionally reports `complete: false` until an integration adapter supplies Java callback and model/channel evidence. A configured adapter must return `complete: true` plus every required field; otherwise the runner fails closed.
+The default `offline` mode is deterministic and does not invoke a provider. It records the turn inputs and expected events as journey-definition checks, leaves observed SSE/run/callback fields empty, and marks `real_model` journeys as `not-captured`. Use `--mode real` only when a provider capture adapter is available. The default adapter calls the local Agent HTTP path and requires `EVAL_JWT`, `EVAL_APP_ID`, `EVAL_USER_ID`, and `EVAL_WORKSPACE_PATH`; `EVAL_AGENT_URL` defaults to `http://127.0.0.1:8092`. For a controlled integration, set `EVAL_CAPTURE_ADAPTER` to an adapter module exporting `capture(journey, replay)`. The built-in HTTP adapter is a transport adapter only: it intentionally reports `complete: false` until an integration adapter supplies Java callback and model/channel evidence. A configured adapter must return `complete: true` plus every required field; otherwise the runner fails closed.
 
 
 

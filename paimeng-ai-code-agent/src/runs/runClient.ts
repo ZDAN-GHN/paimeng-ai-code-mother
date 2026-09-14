@@ -1,3 +1,5 @@
+import type { ObservationSink } from '../eval/observer.js'
+
 export const FAILURE_CODES = [
   'guardrail-rejected',
   'quality-gate-exhausted',
@@ -131,17 +133,21 @@ export interface RunClientOptions {
   token: string
   // 可注入 fetch 实现（测试用）
   fetchImpl?: typeof fetch
+  // 仅由显式本地评估装配；观测写入失败时调用方收到错误并 fail-closed
+  observer?: ObservationSink
 }
 
 export class RunClient {
   private readonly baseUrl: string
   private readonly token: string
   private readonly fetchImpl: typeof fetch
+  private readonly observer?: ObservationSink
 
   constructor(options: RunClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '')
     this.token = options.token
     this.fetchImpl = options.fetchImpl ?? fetch
+    this.observer = options.observer
   }
 
   // 创建 run（幂等：同 runId 返回既有 run；同 app 并发 → RunConflictError）
@@ -203,6 +209,11 @@ export class RunClient {
       payload = (await response.json()) as JavaResponse<T>
     } catch {
       // 非 JSON 响应（如网关错误页）时退化为 status 文案
+    }
+    if (this.observer?.enabled && /\/internal\/(?:runs|agent\/runs)\//.test(path)) {
+      const segments = path.split('/')
+      const runId = decodeURIComponent(segments.at(-1) === 'complete' ? segments.at(-2) ?? '' : segments.at(-1) ?? '')
+      await this.observer.callback(runId, { method, path, status: response.status, ok: response.ok })
     }
     const message = payload?.message ?? `HTTP ${response.status}`
     if (response.status === 409) {

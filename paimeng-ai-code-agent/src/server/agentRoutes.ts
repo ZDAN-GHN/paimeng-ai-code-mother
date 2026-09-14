@@ -24,6 +24,7 @@ import { parseContext, buildPlanningArtifact } from '../interview/context.js'
 import type { ImageTools } from '../generation/tools/imageTools.js'
 import type { ReviewGateSet } from '../generation/review/index.js'
 import type { SessionStore } from '../session/store.js'
+import type { ObservationSink } from '../eval/observer.js'
 
 export interface AgentRouteOptions {
   runClient?: RunClient
@@ -36,6 +37,7 @@ export interface AgentRouteOptions {
   reviewGates?: ReviewGateSet
   // 会话事件存储（#38）：未配置时统一回合端点 fail-closed，不绕过事件记录
   sessionStore?: SessionStore
+  observer?: ObservationSink
 }
 
 // ── 请求体解析（#18 zod 单源）：形状与宽容回退在 schema 一处定义 ──
@@ -118,7 +120,7 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
   const llmProvider: LlmProvider | undefined = options.provider ?? (isRealLlmConfigured(config) ? createRealLlm(config) : undefined)
   // 会话内共享 runClient（可注入；未配置 Java token 时为 undefined → 离线/冒烟模式跳过内部 API 依赖）
   const resolveRunClient = (): RunClient | undefined =>
-    options.runClient ?? (config.javaInternalToken ? new RunClient({ baseUrl: config.javaInternalBaseUrl, token: config.javaInternalToken }) : undefined)
+    options.runClient ?? (config.javaInternalToken ? new RunClient({ baseUrl: config.javaInternalBaseUrl, token: config.javaInternalToken, observer: options.observer }) : undefined)
 
   fastify.post('/agent/turn', async (request, reply) => {
     const input = turnBodySchema.parse(request.body)
@@ -385,6 +387,12 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     }
 
     try {
+      await options.observer?.metadata(input.runId, {
+        model: isRealLlmConfigured(config)
+          ? (input.intensity === 'fast' ? (config.modelFast || 'glm-4.7-flash') : input.intensity === 'deep' ? (config.modelDeep || 'qwen3.7-plus') : (config.modelStandard || 'qwen3.6-plus'))
+          : `scripted-${input.intensity ?? 'standard'}`,
+        channel: isRealLlmConfigured(config) ? (input.intensity === 'standard' || input.intensity === 'deep' ? 'dashscope-coding' : 'zhipu') : 'scripted',
+      })
       for await (const event of runGenerationWorkflow(input, {
         workspaceRoot: config.workspaceRoot,
         provider: llmProvider,
@@ -411,6 +419,7 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
         // 生成期失败日志走请求关联 logger（Issue #17，不再 console 直落 stdout）
         logger: request.log,
       })) {
+        await options.observer?.event(input.runId, event)
         await writeFrame(event)
         // 终态守卫：done/error 都是流的最后一个事件，收到任一即停止消费（防实现缺陷把终态后的事件写进响应）
         if (event.type === 'done' || event.type === 'error') break
@@ -419,6 +428,7 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
       // 流中错误以 SSE error 事件收尾（#21 双轨：能走到这里说明首帧边界已过——连接已打开，正常关闭而非半截断流）
       await writeFrame({ type: 'error', message: error instanceof Error ? error.message : '生成失败' })
     } finally {
+      await options.observer?.close(input.runId)
       // 正常路径 end 触发连接关闭（客户端读到流终止）；客户端已断开时无需收尾（destroy 已关闭连接）
       if (!reply.raw.writableEnded && !reply.raw.destroyed) {
         reply.raw.end()

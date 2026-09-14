@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-
 export class CaptureError extends Error {}
 
 export function parseSse(text) {
@@ -19,17 +17,39 @@ export function parseSse(text) {
   return events
 }
 
-function turnBody(journey, turn, index, options) {
+export function resolveReplayInput(turn) {
+  const source = turn?.stimulus ?? turn
+  if (!source || typeof source !== 'object' || Array.isArray(source)) throw new CaptureError('replay turn input must be an object')
+  const input = { action: turn.action }
+  if (turn.action === 'chat') input.message = source.message
+  else if (turn.action === 'answer') {
+    if (source.answers !== undefined) input.answers = source.answers
+    else if (source.message !== undefined) input.message = source.message
+  } else if (turn.action === 'confirm_generation') input.approvalId = source.approvalId
+  else throw new CaptureError(`unsupported replay action ${turn.action}; no safe capture endpoint is defined`)
+  if ((turn.action === 'chat' || turn.action === 'answer') && input.message === undefined && input.answers === undefined) throw new CaptureError(`missing replay stimulus for ${turn.action}`)
+  if (turn.action === 'confirm_generation' && input.approvalId === undefined) throw new CaptureError('missing replay stimulus for confirm_generation')
+  return input
+}
+
+function replayTurnBody(journey, input, options) {
   return {
-    runId: `${options.runIdPrefix}-${journey.id}-${index + 1}`,
+    runId: `${options.runIdPrefix}-${journey.id}`,
     appId: options.appId,
     userId: options.userId,
-    message: turn.message ?? '',
+    ...(input.message === undefined ? {} : { message: input.message }),
+    ...(input.answers === undefined ? {} : { answers: input.answers }),
+    ...(input.approvalId === undefined ? {} : { approvalId: input.approvalId }),
     workspacePath: options.workspacePath,
     intensity: options.intensity ?? 'standard',
     codeGenType: 'html',
-    ...(turn.answers === undefined ? {} : { answers: turn.answers }),
   }
+}
+
+function routeForAction(action) {
+  if (action === 'chat' || action === 'answer') return { path: '/agent/interview', response: 'json' }
+  if (action === 'confirm_generation') return { path: '/agent/turn', response: 'sse' }
+  throw new CaptureError(`unsupported replay action ${action}; no safe capture endpoint is defined`)
 }
 
 export function createHttpCaptureAdapter(options = {}) {
@@ -46,23 +66,31 @@ export function createHttpCaptureAdapter(options = {}) {
   }
   if (!base.appId || !base.userId || !base.workspacePath) throw new CaptureError('EVAL_APP_ID, EVAL_USER_ID, and EVAL_WORKSPACE_PATH are required')
   return {
-    async capture(journey) {
+    async capture(journey, replay) {
+      if (!replay || !Array.isArray(replay.turns) || replay.turns.length !== journey.turns.length) throw new CaptureError(`validated replay turns are required for ${journey.id}`)
       const allEvents = []
       const runPhases = []
-      for (const [index, turn] of journey.turns.entries()) {
-        const response = await fetchImpl(`${agentUrl}/agent/stream`, {
+      for (const [index, turn] of replay.turns.entries()) {
+        const input = resolveReplayInput(turn)
+        const route = routeForAction(turn.action)
+        const response = await fetchImpl(`${agentUrl}${route.path}`, {
           method: 'POST',
           headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-          body: JSON.stringify(turnBody(journey, turn, index, base)),
+          body: JSON.stringify({ ...replayTurnBody(journey, input, base), ...(turn.action === 'chat' ? { action: 'chat' } : turn.action === 'confirm_generation' ? { action: 'confirm_generation' } : {}) }),
         })
-        if (!response.ok) throw new CaptureError(`agent HTTP ${response.status}`)
-        const events = parseSse(await response.text())
-        allEvents.push(...events)
-        runPhases.push(...events.filter((event) => event.type === 'milestone').map((event) => event.title).filter(Boolean))
+        if (!response.ok) throw new CaptureError(`agent HTTP ${response.status} for action ${turn.action}`)
+        const text = await response.text()
+        if (route.response === 'sse') {
+          const events = parseSse(text)
+          allEvents.push(...events)
+          runPhases.push(...events.filter((event) => event.type === 'milestone').map((event) => event.title).filter(Boolean))
+        } else {
+          try { JSON.parse(text) } catch { throw new CaptureError(`agent returned malformed interview response for action ${turn.action}`) }
+        }
       }
       return {
         complete: false,
-        requestSequence: journey.turns.map((turn, index) => ({ turn: index + 1, action: turn.action })),
+        requestSequence: replay.turns.map((turn, index) => ({ turn: index + 1, ...resolveReplayInput(turn) })),
         sseEvents: allEvents,
         runPhases,
         callbackPayloads: [],
@@ -76,7 +104,7 @@ export function createHttpCaptureAdapter(options = {}) {
 
 export function loadCaptureAdapter() {
   const modulePath = process.env.EVAL_CAPTURE_ADAPTER
-  if (modulePath) return import(modulePath).then((module) => module.default ?? module.createCaptureAdapter?.())
+  if (modulePath) return import(modulePath).then((module) => module.default ?? module.createCaptureAdapter?.() ?? module)
   return Promise.resolve(createHttpCaptureAdapter())
 }
 

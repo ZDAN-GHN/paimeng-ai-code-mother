@@ -1,58 +1,100 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { buildReport, parseArgs, renderReport, run } from './run.mjs'
+import { buildReport, parseArgs, projectCanonicalJourney, renderReport, run, validateCaptureEvidence } from './run.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const journeys = path.join(root, 'eval', 'journeys')
-
-function tempDir() {
-  return mkdtempSync(path.join(tmpdir(), 'paimeng-eval-'))
-}
+function tempDir() { return mkdtempSync(path.join(tmpdir(), 'paimeng-eval-')) }
 
 test('parses the documented runner arguments and offline mode', () => {
-  assert.deepEqual(parseArgs(['--journeys', 'eval/journeys', '--base', 'eval/fixtures/baseline', '--out', 'report.md']), {
-    mode: 'offline', journeys: 'eval/journeys', base: 'eval/fixtures/baseline', out: 'report.md',
-  })
+  assert.deepEqual(parseArgs(['--journeys', 'eval/journeys', '--base', 'eval/fixtures/baseline', '--out', 'report.md']), { mode: 'offline', journeys: 'eval/journeys', base: 'eval/fixtures/baseline', out: 'report.md' })
   assert.throws(() => parseArgs(['--unknown']), /unknown argument/)
 })
 
-test('rejects missing required inputs before writing output', async () => {
-  await assert.rejects(() => run(parseArgs(['--journeys', journeys, '--out', 'report.md'])), /missing required argument: --base/)
-})
+test('rejects missing required inputs before writing output', async () => { await assert.rejects(() => run(parseArgs(['--journeys', journeys, '--out', 'report.md'])), /missing required argument: --base/) })
 
 test('offline report is deterministic in shape and does not claim observed provider data', async () => {
-  const dir = tempDir()
-  const out = path.join(dir, 'report.md')
+  const dir = tempDir(); const out = path.join(dir, 'report.md')
   try {
     const report = await run({ mode: 'offline', journeys, base: path.join(root, 'eval', 'fixtures', 'baseline'), out }, ['--journeys', journeys, '--base', 'eval/fixtures/baseline', '--out', out])
-    assert.equal(report.journeyCount, 25)
-    assert.equal(report.providerInvoked, false)
-    assert.equal(report.records.filter((record) => record.captureStatus === 'offline-validated').length, 19)
-    assert.equal(report.records.filter((record) => record.captureStatus === 'not-captured').length, 6)
-    assert.ok(report.records.every((record) => record.observed === false && record.sseEvents.length === 0))
-    assert.match(readFileSync(out, 'utf8'), /Empty observed fields are intentional/)
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
+    assert.equal(report.journeyCount, 25); assert.equal(report.providerInvoked, false); assert.equal(report.records.filter((record) => record.captureStatus === 'offline-validated').length, 19); assert.equal(report.records.filter((record) => record.captureStatus === 'not-captured').length, 6); assert.ok(report.records.every((record) => record.observed === false && record.sseEvents.length === 0)); assert.match(readFileSync(out, 'utf8'), /Empty observed fields are intentional/)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('real capture rejects custom journey directories before adapter capture', async () => {
+  const dir = tempDir(); const out = path.join(dir, 'report.md')
+  try { await assert.rejects(() => run({ mode: 'real', journeys: dir, base: path.join(root, 'eval', 'fixtures', 'baseline'), out }), /canonical frozen journeys directory/) } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('real mode fails closed before capture when replay manifest is missing or invalid', async () => {
+  const dir = tempDir(); const out = path.join(dir, 'report.md')
+  try {
+    await assert.rejects(() => run({ mode: 'real', journeys, base: path.join(root, 'eval', 'fixtures', 'baseline'), out, manifest: path.join(dir, 'missing.json') }), /ENOENT|invalid replay manifest/)
+    const invalid = path.join(dir, 'invalid.json'); writeFileSync(invalid, '{}'); await assert.rejects(() => run({ mode: 'real', journeys, base: path.join(root, 'eval', 'fixtures', 'baseline'), out, manifest: invalid }), /manifestVersion/); assert.equal(existsSync(out), false)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
 test('real mode fails closed without creating a fabricated report', async () => {
-  const dir = tempDir()
-  const out = path.join(dir, 'report.md')
+  const dir = tempDir(); const out = path.join(dir, 'report.md')
+  try { await assert.rejects(() => run({ mode: 'real', journeys, base: path.join(root, 'eval', 'fixtures', 'baseline'), out }), /EVAL_JWT is required/); assert.equal(existsSync(out), false) } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('canonical journey projection rejects unknown persisted fields', () => {
+  const journey = { id: 'x', title: 'X', category: 'homepage', tags: [], executionMode: 'real_model', expect: [], turns: [{ action: 'chat', message: 'hello' }], unknown: true }
+  assert.throws(() => projectCanonicalJourney(journey), /journey schema invalid/)
+})
+
+test('plain-tree boundary rejects noncanonical, non-enumerable and symbol array keys', () => {
+  const journey = { turns: [{ action: 'confirm_generation' }] }
+  const valid = { complete: true, requestSequence: [{ turn: 1, action: 'confirm_generation' }], sseEvents: [{ type: 'done' }], runPhases: ['coding'], callbackPayloads: [{ method: 'POST', path: '/internal/runs/r1', status: 200, ok: true }], model: 'model', channel: 'channel', crossMessageMemory: { baselineRetentionRate: 0, status: 'observed' } }
+  for (const mutate of [(array) => { array['00'] = true }, (array) => { array['4294967295'] = true }, (array) => { Object.defineProperty(array, 'hidden', { value: true }) }, (array) => { array[Symbol('extra')] = true }]) {
+    const entries = [{ ...valid.requestSequence[0] }]; mutate(entries)
+    assert.throws(() => validateCaptureEvidence({ ...valid, requestSequence: entries }, journey), /custom properties/)
+  }
+})
+test('capture evidence validation accepts a complete traceable fixture', () => {
+  const journey = { turns: [{ action: 'confirm_generation' }] }
+  assert.doesNotThrow(() => validateCaptureEvidence({ complete: true, requestSequence: [{ turn: 1, action: 'confirm_generation' }], sseEvents: [{ type: 'milestone', title: 'coding' }, { type: 'done' }], runPhases: ['coding'], callbackPayloads: [{ method: 'POST', path: '/internal/runs/r1', status: 200, ok: true }], model: 'model', channel: 'channel', crossMessageMemory: { baselineRetentionRate: 0.5, status: 'observed' } }, journey))
+})
+
+test('capture evidence validation rejects malformed fields before output', () => {
+  const journey = { turns: [{ action: 'confirm_generation' }] }
+  const valid = { complete: true, requestSequence: [{ turn: 1, action: 'confirm_generation' }], sseEvents: [{ type: 'done' }], runPhases: ['coding'], callbackPayloads: [{ method: 'POST', path: '/internal/runs/r1', status: 200, ok: true }], model: 'model', channel: 'channel', crossMessageMemory: { baselineRetentionRate: 0, status: 'observed' } }
+  for (const [field, value] of [['requestSequence', null], ['sseEvents', [{ type: 'done' }, { type: 'done' }]], ['runPhases', ['']], ['callbackPayloads', [{}]], ['model', ''], ['channel', null], ['crossMessageMemory', { status: 'observed', baselineRetentionRate: 2 }]]) {
+    assert.throws(() => validateCaptureEvidence({ ...valid, [field]: value }, journey), /capture/)
+  }
+  const arrayObject = []
+  arrayObject.path = '/internal/runs/r1'; arrayObject.status = 200; arrayObject.method = 'POST'; arrayObject.ok = true
+  assert.throws(() => validateCaptureEvidence({ ...valid, callbackPayloads: [arrayObject] }, journey), /callback/)
+  assert.throws(() => validateCaptureEvidence({ ...valid, sseEvents: [{ type: 'error' }, { type: 'done' }] }, journey), /sseEvents/)
+  assert.throws(() => validateCaptureEvidence({ ...valid, requestSequence: [{ turn: 1, action: 'confirm_generation', message: 'unexpected' }] }, journey), /requestSequence/)
+  assert.throws(() => validateCaptureEvidence({ ...valid, unexpected: true }, journey), /schema/)
+
+  assert.throws(() => validateCaptureEvidence({ ...valid, sseEvents: [{ type: 'done', extra: true }] }, journey), /schema/)
+  assert.throws(() => validateCaptureEvidence({ ...valid, crossMessageMemory: [] }, journey), /schema/)
+  const custom = Object.create({ inherited: true }); Object.assign(custom, valid.callbackPayloads[0])
+  assert.throws(() => validateCaptureEvidence({ ...valid, callbackPayloads: [custom] }, journey), /plain object/)
+})
+
+
+
+test('run rejects malformed capture evidence before writing capture or report output', async () => {
+  const dir = tempDir(); const out = path.join(dir, 'report.md'); const adapterFile = path.join(dir, 'adapter.mjs')
+  writeFileSync(adapterFile, 'export function capture() { return null }\n')
+  const previous = process.env.EVAL_CAPTURE_ADAPTER; process.env.EVAL_CAPTURE_ADAPTER = adapterFile
   try {
-    await assert.rejects(() => run({ mode: 'real', journeys, base: path.join(root, 'eval', 'fixtures', 'baseline'), out }), /EVAL_JWT is required/)
+    await assert.rejects(() => run({ mode: 'real', journeys, base: path.join(root, 'eval', 'fixtures', 'baseline'), out }), /capture evidence schema invalid/)
     assert.equal(existsSync(out), false)
-  } catch (error) {
-    if (error.code === 'ENOENT') return
-    throw error
+    assert.equal(readdirSync(path.join(root, 'eval', 'fixtures', 'baseline')).some((file) => file.startsWith('booking-wireframe')), false)
   } finally {
+    if (previous === undefined) delete process.env.EVAL_CAPTURE_ADAPTER
+    else process.env.EVAL_CAPTURE_ADAPTER = previous
     rmSync(dir, { recursive: true, force: true })
   }
 })
-
 test('renderReport keeps runtime metrics null until observed data exists', () => {
   const report = buildReport({ mode: 'offline' }, [{ journey: { id: 'x', executionMode: 'fake_llm', turns: [] } }], 'node eval/run.mjs')
   assert.equal(report.metrics.done_ratio, null)
