@@ -1,6 +1,6 @@
-// 图片四工具行为测试（Issue #8）：从 Python Agent tests/test_images.py 图片工具部分逐条移植，
-// 断言 Pexels/Undraw/DashScope/mmdc 四工具的解析语义与旧实现等价，并覆盖「图片配额 4 张/run」：
-// 配额按「输出」扣减（失败返还，审查整改 A2）；用尽后被拒且有明确报错（判别联合 ok:false，整改 B6）。
+
+
+
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_IMAGE_QUOTA,
@@ -13,19 +13,19 @@ import {
 } from '../../../src/generation/tools/imageTools.js'
 import { DEFAULT_IMAGE_MODEL } from '../../../src/server/config.js'
 
-// 假配置（对齐 Python _FakeSettings）
+
 const config: ImageConfig = {
   pexelsApiKey: 'pexels-key',
   dashscopeApiKey: 'dashscope-key',
   imageModel: DEFAULT_IMAGE_MODEL,
 }
 
-// 假 HTTP 响应
+
 function fakeHttp(jsonData: unknown, ok = true): HttpResponse {
   return { ok, json: () => Promise.resolve(jsonData) }
 }
 
-// 判别联合取资源列表的辅助（无资源时为空数组）
+
 function imagesOf(result: ImageToolResult): unknown[] {
   return result.ok ? result.images : []
 }
@@ -125,12 +125,12 @@ describe('ImageTools 图片四工具（语义对齐旧实现）', () => {
     }
     const tools = makeTools({ http })
 
-    // 第一次搜索按配额截断为 4 张，配额用尽
+
     const first = await tools.searchContentImages('猫')
     expect(imagesOf(first)).toHaveLength(DEFAULT_IMAGE_QUOTA)
     expect(tools.remainingQuota).toBe(0)
 
-    // 配额已用尽：内容搜索 / Logo / 架构图 / 插画 全部被拒（ok:false + 明确报错文本）
+
     const rejected = await tools.searchContentImages('狗')
     expect(rejected.ok).toBe(false)
     if (!rejected.ok) {

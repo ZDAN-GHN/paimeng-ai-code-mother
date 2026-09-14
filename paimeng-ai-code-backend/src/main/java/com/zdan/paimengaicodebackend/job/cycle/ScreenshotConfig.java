@@ -6,19 +6,13 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import lombok.extern.slf4j.Slf4j;
 
-/**
- * 定时清理本地截图缓存
- *
- * @author LXH
- */
+
 @Configuration
 @EnableScheduling
 @Slf4j
 public class ScreenshotConfig {
 
-    /**
-     * 每天凌晨2点清理过期的临时截图文件
-     */
+
     @Scheduled(cron = "0 0 2 * * ?")
     public void cleanupTempScreenshots() {
         log.info("开始定时清理过期的临时截图文件");

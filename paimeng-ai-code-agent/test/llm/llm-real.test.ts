@@ -1,12 +1,12 @@
-// 真实 LLM provider 单测（离线：stub 全局 fetch，零外呼）——覆盖 src/llm/real.ts 的
-// 渠道 fail-fast 校验、scripted-* 别名与配置 id 双注册、智谱 thinking 关闭补丁、
-// 「HTTP 200 包 error 体」归一化转码（1305→429 / 上游 4xx5xx 原样 / 业务码→400 / 非 JSON→502）。
+
+
+
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { generateText } from 'ai'
 import { createRealLlm, DEFAULT_MODEL_STANDARD, isRealLlmConfigured } from '../../src/llm/real.js'
 import type { AgentConfig } from '../../src/server/config.js'
 
-// 最小完整配置（两渠道齐全；baseUrl 指向不存在的 test 域，配合 stub fetch 保证零外呼）
+
 function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
     port: 0,
@@ -29,7 +29,7 @@ function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   }
 }
 
-// OpenAI 兼容成功补全响应（generateText 非流式路径可解析）
+
 const OK_COMPLETION = {
   id: 'chatcmpl-test',
   object: 'chat.completion',
@@ -39,12 +39,12 @@ const OK_COMPLETION = {
   usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
 }
 
-// JSON 响应构造器（application/json 头，模拟真实渠道）
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 }
 
-// stub 全局 fetch 并记录每次请求体（断言补丁/URL 用）；返回 { calls, setNext } 控制桩
+
 function stubFetch() {
   const calls: Array<{ url: string; body: Record<string, unknown> }> = []
   const state: { response: Response } = { response: jsonResponse(OK_COMPLETION) }
@@ -57,7 +57,7 @@ function stubFetch() {
   return { calls, setNext: (response: Response) => { state.response = response } }
 }
 
-// 触发一次非流式补全（真实 AI SDK 栈；抛错时返回错误供断言）
+
 async function completeOnce(modelId: string, maxRetries = 0): Promise<{ text?: string; error?: unknown }> {
   const provider = createRealLlm(baseConfig())
   try {

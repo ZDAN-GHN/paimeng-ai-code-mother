@@ -5,12 +5,7 @@ import lombok.Data;
 
 import java.io.Serializable;
 
-/**
- * 通过响应类
- *
- * @param <T>
- * @author LXH
- */
+
 @Data
 public class BaseResponse<T> implements Serializable {
 
@@ -20,10 +15,7 @@ public class BaseResponse<T> implements Serializable {
 
     private String message;
 
-    /**
-     * 该方法仅用于 @Cacheable 反序列化 redis 存储值时，
-     * 反射调用无参构造方法创建对象，所以设置为 private
-     */
+
     private BaseResponse() {
     }
 

@@ -3,10 +3,10 @@ import { defineConfigWithVueTs, vueTsConfigs } from '@vue/eslint-config-typescri
 import pluginVue from 'eslint-plugin-vue'
 import skipFormatting from '@vue/eslint-config-prettier/skip-formatting'
 
-// To allow more languages other than `ts` in `.vue` files, uncomment the following lines:
-// import { configureVueProject } from '@vue/eslint-config-typescript'
-// configureVueProject({ scriptLangs: ['ts', 'tsx'] })
-// More info at https://github.com/vuejs/eslint-config-typescript/#advanced-setup
+
+
+
+
 
 export default defineConfigWithVueTs(
   {
@@ -18,9 +18,9 @@ export default defineConfigWithVueTs(
     '**/dist/**',
     '**/dist-ssr/**',
     '**/coverage/**',
-    // openapi2ts 生成文件不参与 lint（生成器模板自带的 @ts-ignore 头部过不了 ban-ts-comment）
+
     'src/api/**',
-    // 手写的接口封装不依赖生成模板，单独放行
+
     '!src/api/agentToken.ts',
   ]),
 

@@ -31,12 +31,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/**
- * AppController Agent 直连令牌端点测试（standalone MockMvc，纯单元测试不依赖 Spring 上下文/DB）
- * 验收口径：未登录 → 40100；应用不存在 → 40400；非归属用户 → 40101；归属用户 → 200 且令牌可验签、路径对齐旧链路
- *
- * @author LXH
- */
+
 class AppControllerAgentTokenTest {
 
     private static final String SECRET = "test-shared-secret";
@@ -60,15 +55,13 @@ class AppControllerAgentTokenTest {
         AppController controller = new AppController(appService, userService,
                 mock(ProjectDownloadService.class), agentProperties,
                 jwtProperties, new AgentJwtService(jwtProperties));
-        // standalone：注册全局异常处理器（BusinessException → 标准 JSON 错误码）
+
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
 
-    /**
-     * 构造归属明确的用户与应用
-     */
+
     private App mockOwnedApp(Long ownerId) {
         User loginUser = new User();
         loginUser.setId(OWNER_ID);
@@ -81,9 +74,7 @@ class AppControllerAgentTokenTest {
         return app;
     }
 
-    /**
-     * 未登录 → 40100
-     */
+
     @Test
     void notLoginReturns40100() throws Exception {
         when(userService.getLoginUser(org.mockito.ArgumentMatchers.any()))
@@ -93,9 +84,7 @@ class AppControllerAgentTokenTest {
                 .andExpect(jsonPath("$.code").value(40100));
     }
 
-    /**
-     * 应用不存在 → 40400
-     */
+
     @Test
     void appNotFoundReturns40400() throws Exception {
         User loginUser = new User();
@@ -107,9 +96,7 @@ class AppControllerAgentTokenTest {
                 .andExpect(jsonPath("$.code").value(40400));
     }
 
-    /**
-     * 非应用归属者 → 40101 无权限
-     */
+
     @Test
     void notOwnerReturns40101() throws Exception {
         mockOwnedApp(999L);
@@ -118,9 +105,7 @@ class AppControllerAgentTokenTest {
                 .andExpect(jsonPath("$.code").value(40101));
     }
 
-    /**
-     * 灰度开关关闭 → 40410 明确报错，不下发 JWT（Issue #14）
-     */
+
     @Test
     void disabledSwitchReturns40410() throws Exception {
         mockOwnedApp(OWNER_ID);
@@ -130,9 +115,7 @@ class AppControllerAgentTokenTest {
                 .andExpect(jsonPath("$.code").value(40410));
     }
 
-    /**
-     * 归属用户 → 200：令牌可验签、sub 为字符串用户 id、workspacePath 与旧链路命名一致
-     */
+
     @Test
     void ownerReceivesVerifiableToken() throws Exception {
         mockOwnedApp(OWNER_ID);

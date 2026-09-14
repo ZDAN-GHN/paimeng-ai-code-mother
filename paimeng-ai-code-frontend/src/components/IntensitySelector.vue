@@ -28,27 +28,27 @@
 </template>
 
 <script setup lang="ts">
-// 三档推理强度选择器（Issue #13）：列表项内说明各档积分消耗，选择随 /agent/stream 的 intensity 下发；
-// 预估积分 = 基础价 × 生成类型系数 × 档位系数，与 Java AgentProperties.Credit 默认值对齐
+
+
 import { computed, ref } from 'vue'
 
 type Intensity = 'fast' | 'standard' | 'deep'
 
-// 档位系数（对齐 TS INTENSITY_TIERS.priceMultiplier 与 Java AgentProperties.Credit：fast=0.5，standard=1，deep=2）
+
 const TIER_MULTIPLIERS: Record<Intensity, number> = {
   fast: 0.5,
   standard: 1,
   deep: 2,
 }
 
-// 生成类型系数（对齐 Java AgentProperties.Credit：html=1，multi_file=2，vue_project=3）
+
 const TYPE_MULTIPLIERS: Record<string, number> = {
   html: 1,
   multi_file: 2,
   vue_project: 3,
 }
 
-// 基础价（对齐 agent.credit.base-price 默认 100）
+
 const BASE_PRICE = 100
 
 const props = defineProps<{
@@ -58,7 +58,7 @@ const props = defineProps<{
 
 const intensity = defineModel<Intensity>({ default: 'standard' })
 
-// 列表选项：积分消耗并入每个选项内说明
+
 const tierOptions: Array<{ value: Intensity; name: string; multiplierLabel: string; desc: string }> = [
   { value: 'fast', name: '快速', multiplierLabel: '×1', desc: '最少轮次快速出稿，适合简单页面' },
   { value: 'standard', name: '标准', multiplierLabel: '×1', desc: '轮次与工具调用均衡，默认档位' },
@@ -71,7 +71,7 @@ const currentOption = computed(
   () => tierOptions.find((option) => option.value === intensity.value) ?? tierOptions[1]
 )
 
-// 档位预估冻结积分（计费系数可见；四舍五入与 Java calcFrozenAmount 对齐，保证整数积分）
+
 const creditOf = (value: Intensity) => {
   const typeMultiplier = TYPE_MULTIPLIERS[props.codeGenType ?? 'html'] ?? 1
   return Math.round(BASE_PRICE * typeMultiplier * TIER_MULTIPLIERS[value])
@@ -79,7 +79,7 @@ const creditOf = (value: Intensity) => {
 
 const estimatedCredit = computed(() => creditOf(intensity.value))
 
-// 选中即收起列表
+
 const select = (value: Intensity) => {
   intensity.value = value
   open.value = false

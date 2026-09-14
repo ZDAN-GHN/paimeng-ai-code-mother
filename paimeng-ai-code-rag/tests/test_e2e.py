@@ -1,8 +1,4 @@
-"""离线工作流端到端测试（§5 阶段 2）。
 
-给定 message + 空 history，用固定夹具快照（tests/fixtures/ golden JSON）
-断言工作流产出工作区文件，不依赖在线模型。
-"""
 
 import json
 from pathlib import Path
@@ -43,7 +39,7 @@ class _FakeGuardrail:
 
 
 class _FixtureExecutor:
-    """按固定夹具产出生成文本的执行器。"""
+
 
     def __init__(self, generated_text: str) -> None:
         self._text = generated_text
@@ -53,7 +49,7 @@ class _FixtureExecutor:
 
 
 def _run_workflow(fixture_name: str) -> dict:
-    """按 golden 夹具运行工作流并返回最终状态。"""
+
     fixture = json.loads((FIXTURES / fixture_name).read_text(encoding="utf-8"))
     ws = f"{WORKSPACE_ROOT}/e2e_{fixture['code_gen_type']}"
     wf = CodeGenWorkflow(
@@ -71,7 +67,7 @@ def _run_workflow(fixture_name: str) -> dict:
 
 @pytest.mark.e2e
 def test_offline_html_e2e():
-    """html golden 夹具：工作区产出 index.html 且含关键片段。"""
+
     state = _run_workflow("golden_html.json")
     fixture = state["_fixture"]
     assert state["code_gen_type"] == "html"
@@ -83,7 +79,7 @@ def test_offline_html_e2e():
 
 @pytest.mark.e2e
 def test_offline_multi_file_e2e():
-    """multi_file golden 夹具：工作区产出三文件且各含关键片段。"""
+
     state = _run_workflow("golden_multi_file.json")
     fixture = state["_fixture"]
     assert state["code_gen_type"] == "multi_file"

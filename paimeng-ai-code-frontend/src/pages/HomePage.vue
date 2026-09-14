@@ -10,11 +10,11 @@ import AppCard from '@/components/AppCard.vue'
 const router = useRouter()
 const loginUserStore = useLoginUserStore()
 
-// 用户提示词
+
 const userPrompt = ref('')
 const creating = ref(false)
 
-// 我的应用数据
+
 const myApps = ref<API.AppVO[]>([])
 const myAppsPage = reactive({
   current: 1,
@@ -22,7 +22,7 @@ const myAppsPage = reactive({
   total: 0,
 })
 
-// 精选应用数据
+
 const featuredApps = ref<API.AppVO[]>([])
 const featuredAppsPage = reactive({
   current: 1,
@@ -30,14 +30,14 @@ const featuredAppsPage = reactive({
   total: 0,
 })
 
-// 设置提示词
+
 const setPrompt = (prompt: string) => {
   userPrompt.value = prompt
 }
 
-// 优化提示词功能已移除
 
-// 创建应用
+
+
 const createApp = async () => {
   if (!userPrompt.value.trim()) {
     message.warning('请输入应用描述')
@@ -58,7 +58,7 @@ const createApp = async () => {
 
     if (res.data.code === 0 && res.data.data) {
       message.success('应用创建成功')
-      // 跳转到对话页面，确保ID是字符串类型
+
       const appId = String(res.data.data)
       await router.push(`/app/chat/${appId}`)
     } else {
@@ -72,7 +72,7 @@ const createApp = async () => {
   }
 }
 
-// 加载我的应用
+
 const loadMyApps = async () => {
   if (!loginUserStore.loginUser.id) {
     return
@@ -95,7 +95,7 @@ const loadMyApps = async () => {
   }
 }
 
-// 加载精选应用
+
 const loadFeaturedApps = async () => {
   try {
     const res = await listGoodAppVoByPage({
@@ -114,14 +114,14 @@ const loadFeaturedApps = async () => {
   }
 }
 
-// 查看对话
+
 const viewChat = (appId: string | number | undefined) => {
   if (appId) {
     router.push(`/app/chat/${appId}?view=1`)
   }
 }
 
-// 查看作品
+
 const viewWork = (app: API.AppVO) => {
   if (app.deployKey) {
     const url = getDeployUrl(app.deployKey)
@@ -129,14 +129,14 @@ const viewWork = (app: API.AppVO) => {
   }
 }
 
-// 格式化时间函数已移除，不再需要显示创建时间
 
-// 页面加载时获取数据
+
+
 onMounted(() => {
   loadMyApps()
   loadFeaturedApps()
 
-  // 鼠标跟随光效
+
   const handleMouseMove = (e: MouseEvent) => {
     const { clientX, clientY } = e
     const { innerWidth, innerHeight } = window
@@ -149,7 +149,7 @@ onMounted(() => {
 
   document.addEventListener('mousemove', handleMouseMove)
 
-  // 清理事件监听器
+
   return () => {
     document.removeEventListener('mousemove', handleMouseMove)
   }
@@ -159,13 +159,13 @@ onMounted(() => {
 <template>
   <div id="homePage">
     <div class="container">
-      <!-- 网站标题和描述 -->
+
       <div class="hero-section">
         <h1 class="hero-title">AI 应用生成平台</h1>
         <p class="hero-description">一句话轻松创建网站应用</p>
       </div>
 
-      <!-- 用户提示词输入框 -->
+
       <div class="input-section">
         <a-textarea
           v-model:value="userPrompt"
@@ -183,7 +183,7 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 快捷按钮 -->
+
       <div class="quick-actions">
         <a-button
           type="default"
@@ -223,7 +223,7 @@ onMounted(() => {
         >
       </div>
 
-      <!-- 我的作品 -->
+
       <div class="section">
         <h2 class="section-title">我的作品</h2>
         <div class="app-grid">
@@ -247,7 +247,7 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 精选案例 -->
+
       <div class="section">
         <h2 class="section-title">精选案例</h2>
         <div class="featured-grid">
@@ -289,7 +289,7 @@ onMounted(() => {
   overflow: hidden;
 }
 
-/* 科技感网格背景 */
+
 #homePage::before {
   content: '';
   position: absolute;
@@ -311,7 +311,7 @@ onMounted(() => {
   animation: gridFloat 20s ease-in-out infinite;
 }
 
-/* 动态光效 */
+
 #homePage::after {
   content: '';
   position: absolute;
@@ -361,9 +361,9 @@ onMounted(() => {
   box-sizing: border-box;
 }
 
-/* 移除居中光束效果 */
 
-/* 英雄区域 */
+
+
 .hero-section {
   text-align: center;
   padding: 80px 0 60px;
@@ -442,7 +442,7 @@ onMounted(() => {
   z-index: 2;
 }
 
-/* 输入区域 */
+
 .input-section {
   position: relative;
   margin: 0 auto 24px;
@@ -474,7 +474,7 @@ onMounted(() => {
   align-items: center;
 }
 
-/* 快捷按钮 */
+
 .quick-actions {
   display: flex;
   gap: 12px;
@@ -519,7 +519,7 @@ onMounted(() => {
   box-shadow: 0 8px 25px rgba(255, 150, 150, 0.25);
 }
 
-/* 区域标题 */
+
 .section {
   margin-bottom: 60px;
 }
@@ -531,7 +531,7 @@ onMounted(() => {
   color: #1e293b;
 }
 
-/* 我的作品网格 */
+
 .app-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -539,7 +539,7 @@ onMounted(() => {
   margin-bottom: 32px;
 }
 
-/* 精选案例网格 */
+
 .featured-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -547,14 +547,14 @@ onMounted(() => {
   margin-bottom: 32px;
 }
 
-/* 分页 */
+
 .pagination-wrapper {
   display: flex;
   justify-content: center;
   margin-top: 32px;
 }
 
-/* 响应式设计 */
+
 @media (max-width: 768px) {
   .hero-title {
     font-size: 32px;

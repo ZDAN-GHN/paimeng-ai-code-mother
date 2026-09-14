@@ -1,8 +1,8 @@
-// POST /agent/stream 契约测试（Issue #5 + #7 闸门 + #8 生成核心）：按事件语义断言，不比对完整响应字节。
-// 覆盖：成功剧本完整事件序列与顺序约束、error 剧本终态语义、run phase 随工作流推进、
-// 工作区沙箱、未确认线框时 codegen 被闸门拒绝（#7 闸门纪律，#21 起为 hijack 前预检 JSON）、
-// Guardrail 拦截 / 图片配额 / 导览组件（#8）。
-// 剧本注入（#21）：script 请求参数已退场，离线剧本统一经 agentRoutes.provider 注入表达。
+
+
+
+
+
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -11,17 +11,17 @@ import { createScriptedLlm } from '../../src/llm/index.js'
 import { RunClient } from '../../src/runs/runClient.js'
 import { ImageTools } from '../../src/generation/tools/imageTools.js'
 
-// 事件类型序列（用于顺序断言）
+
 const types = (list: Frame[]) => list.map((frame) => frame.event)
 
-// 里程碑标题序列
+
 const milestones = (list: Frame[]) => list.filter((frame) => frame.event === 'milestone').map((frame) => String(frame.data.title))
 
 describe('POST /agent/stream（成功剧本）', () => {
   it('输出契约要求的完整事件序列，顺序约束满足', async () => {
     const root = makeWorkspaceRoot()
     const token = await makeToken()
-    // 注入已确认线框的 runClient：闸门放行（无内部 API 的离线路径已按 #7 审查整改为拒绝）
+
     const response = await buildTestApp(root, { agentRoutes: { runClient: fakeRunClient([], 'wireframe_confirmed') } }).inject({
       method: 'POST',
       url: '/agent/stream',
@@ -34,7 +34,7 @@ describe('POST /agent/stream（成功剧本）', () => {
     const result = frames(response.body)
     const eventTypes = types(result)
 
-    // 契约要求的最小序列（按序出现）：interview → thinking → coding → tool_request → tool_executed → review → done
+
     expect(eventTypes).toEqual([
       'milestone', 'ai_thinking', 'milestone',
       'ai_response', 'ai_response',
@@ -43,26 +43,26 @@ describe('POST /agent/stream（成功剧本）', () => {
       'milestone', 'milestone', 'done',
     ])
 
-    // milestone 聚合节点跳变（interview/coding/review/done 各一次，按序）
+
     expect(milestones(result)).toEqual(['开始生成', '规划页面结构', '检查生成结果', '生成完成'])
 
-    // tool_request 先于对应 tool_executed 且同 id/name/arguments
+
     const request = result.find((frame) => frame.event === 'tool_request')!
     const executed = result.find((frame) => frame.event === 'tool_executed')!
     expect(types(result).indexOf('tool_request')).toBeLessThan(types(result).indexOf('tool_executed'))
     expect(request.data.id).toBe(executed.data.id)
     expect(request.data.name).toBe('writeFile')
-    // writeFile 参数对齐 Java ProjectFileWriteTool：relativeFilePath + content（#8 审查整改 A1）
+
     const args = JSON.parse(String(request.data.arguments)) as { relativeFilePath: string; content: string }
     expect(args.relativeFilePath).toBe('index.html')
     expect(args.content).toContain('<html')
     expect(executed.data.arguments).toBe(request.data.arguments)
 
-    // done 为唯一终态，仅在最后出现
+
     expect(eventTypes.at(-1)).toBe('done')
     expect(result.filter((frame) => frame.event === 'done')).toHaveLength(1)
 
-    // ai_response 增量文本拼接后即写入的页面内容
+
     const written = readFileSync(path.join(root, 'index.html'), 'utf8')
     expect(written).toContain('<html')
     expect(written).toContain('hello')
@@ -79,14 +79,14 @@ describe('POST /agent/stream（成功剧本）', () => {
       payload: { runId: 'run-3', appId: 1, message: 'hello' },
     })
     expect(response.statusCode).toBe(200)
-    // 闸门先经 getRun 校验（未确认线框会在此拒绝），随后节点跳变各推进一次 phase 更新
-    //（初始 wireframe_confirmed 与状态机 interview 对齐，不再重复更新；无 createRun）
+
+
     const phases = calls.map((call) => call.body.phase).filter((phase): phase is string => Boolean(phase))
     expect(phases).toEqual(['coding', 'review', 'done'])
-    // 里程碑随 run 更新累计（取最后一次携带里程碑的更新）
+
     const lastMilestones = [...calls].reverse().find((call) => call.body.milestones)?.body.milestones
     expect(lastMilestones).toBe(JSON.stringify(['开始生成', '规划页面结构', '检查生成结果', '生成完成']))
-    // 完成回调：success，携带 user/ai 消息与工作区路径（Java 侧写历史 + 构建）
+
     const complete = calls.find((call) => call.url.endsWith('/complete'))!
     expect(complete.body.status).toBe('success')
     expect(complete.body.messages).toEqual([
@@ -115,7 +115,7 @@ describe('POST /agent/stream（error 剧本）', () => {
   it('error 后不再发任何业务事件，run → failed，且回调 Java 标记失败', async () => {
     const calls: RunCall[] = []
     const token = await makeToken()
-    // error 剧本经 provider 注入（#21）：script 请求参数已退场
+
     const app = buildTestApp(makeWorkspaceRoot(), {
       agentRoutes: { runClient: fakeRunClient(calls), provider: createScriptedLlm('error') },
     })
@@ -127,14 +127,14 @@ describe('POST /agent/stream（error 剧本）', () => {
     })
     const result = frames(response.body)
     const eventTypes = types(result)
-    // error 是最后一个事件；其后无 done，也无任何业务事件
+
     expect(eventTypes.at(-1)).toBe('error')
     expect(result.some((frame) => frame.event === 'done')).toBe(false)
     expect(eventTypes).toEqual(['milestone', 'ai_thinking', 'milestone', 'error'])
-    // 阶段推进到 failed（闸门经 getRun 放行后，run 自 wireframe_confirmed 起；无 createRun 的 interview 更新）
+
     const phases = calls.map((call) => call.body.phase).filter((phase): phase is string => Boolean(phase))
     expect(phases).toEqual(['coding', 'failed'])
-    // 完成回调：failed，携带错误信息（Java 侧写错误历史）
+
     const complete = calls.find((call) => call.url.endsWith('/complete'))!
     expect(complete.body.status).toBe('failed')
     expect(complete.body.errorMessage).toBe('假 LLM 剧本故意失败')
@@ -152,7 +152,7 @@ describe('POST /agent/stream（#7 线框闸门，#21 预检 JSON）', () => {
       headers: { authorization: `Bearer ${token}` },
       payload: { runId: 'run-gate-1', appId: 1, message: 'hello' },
     })
-    // 双轨边界（#21）= 首帧写出：闸门是 hijack 前的预检，失败返回标准 409 JSON 而非 SSE 流
+
     expect(response.statusCode).toBe(409)
     expect(String(response.headers['content-type'])).toContain('application/json')
     const body = response.json() as { statusCode: number; error: string; message: string }
@@ -164,7 +164,7 @@ describe('POST /agent/stream（#7 线框闸门，#21 预检 JSON）', () => {
 
   it('run 不存在 → hijack 前 400 预检拒绝，message 含明确报错', async () => {
     const token = await makeToken()
-    // GET 查询返回 data:null（getRun 契约：不存在 → null）→ 走「run 不存在」预检 400 分支
+
     const missingRunClient = new RunClient({
       baseUrl: 'http://java.invalid',
       token: 'test',
@@ -177,7 +177,7 @@ describe('POST /agent/stream（#7 线框闸门，#21 预检 JSON）', () => {
       headers: { authorization: `Bearer ${token}` },
       payload: { runId: 'run-gate-2', appId: 999, message: 'hello' },
     })
-    // 不存在走预检 400（reason 文案区别于 409 阶段不符），核心断言：未开流即拒绝
+
     expect(response.statusCode).toBe(400)
     const body = response.json() as { statusCode: number; error: string; message: string }
     expect(body).toMatchObject({ statusCode: 400, error: 'Bad Request' })
@@ -200,7 +200,7 @@ describe('POST /agent/stream（#7 线框闸门，#21 预检 JSON）', () => {
   })
 
   it('未配置 Java 内部 API → 503 预检拒绝（无法校验闸门，不静默绕过）', async () => {
-    // 不注入 runClient（buildTestApp 默认 javaInternalToken 为空）→ 与需求工程端点 503 口径一致拒绝
+
     const token = await makeToken()
     const app = buildTestApp(makeWorkspaceRoot())
     const response = await app.inject({
@@ -229,12 +229,12 @@ describe('POST /agent/stream（Issue #8 Guardrail + 图片配额 + 导览组件�
     })
     expect(response.statusCode).toBe(200)
     const result = frames(response.body)
-    // Guardrail 在 coding 前拦截：仅 interview 里程碑 + thinking + error，无 coding 里程碑与工具事件
+
     expect(types(result)).toEqual(['milestone', 'ai_thinking', 'error'])
     expect(String(result.at(-1)!.data.message)).toBe('输入包含不当内容，请修改后重试')
     expect(result.some((frame) => frame.event === 'tool_request')).toBe(false)
     expect(result.some((frame) => frame.event === 'done')).toBe(false)
-    // 护轨拒绝同样触发 failed 完成回调（旧 test_streaming.test_failed_callback_on_guardrail_rejection 语义）
+
     const complete = calls.find((call) => call.url.endsWith('/complete'))!
     expect(complete.body.status).toBe('failed')
     expect(complete.body.errorMessage).toBe('输入包含不当内容，请修改后重试')
@@ -251,7 +251,7 @@ describe('POST /agent/stream（Issue #8 Guardrail + 图片配额 + 导览组件�
       headers: { authorization: `Bearer ${token}` },
       payload: { runId: 'run-cb-fail', appId: 1, message: 'hello', workspacePath: root },
     })
-    // 回调失败被工作流吞掉（Java 幂等兜底可补偿），主流程照常成功收尾
+
     expect(frames(response.body).at(-1)!.event).toBe('done')
     expect(readFileSync(path.join(root, 'index.html'), 'utf8')).toContain('<html')
   })
@@ -283,7 +283,7 @@ describe('POST /agent/stream（Issue #8 Guardrail + 图片配额 + 导览组件�
     const result = frames(response.body)
     expect(types(result).at(-1)).toBe('done')
     const written = readFileSync(path.join(root, 'index.html'), 'utf8')
-    // 导览是应用内组件（随页面一同产出），不是独立文档
+
     expect(written).toContain('onboarding-tour')
     expect(written).toContain('新手引导')
   })
@@ -291,7 +291,7 @@ describe('POST /agent/stream（Issue #8 Guardrail + 图片配额 + 导览组件�
   it('图片配额：images 剧本一轮内并行多次搜索，超 4 张后第 2 次被拒且有明确报错', async () => {
     const root = makeWorkspaceRoot()
     const token = await makeToken()
-    // 注入带假 http 的 ImageTools：Pexels 返回 12 张 → 第 1 次取满 4 张配额，第 2 次拒绝
+
     const imageTools = new ImageTools(
       { pexelsApiKey: 'test-key', dashscopeApiKey: '', imageModel: 'wan2.2-t2i-flash' },
       {
@@ -306,7 +306,7 @@ describe('POST /agent/stream（Issue #8 Guardrail + 图片配额 + 导览组件�
         },
       },
     )
-    // images 剧本经 provider 注入（#21）：script 请求参数已退场
+
     const app = buildTestApp(root, {
       agentRoutes: { runClient: fakeRunClient([], 'wireframe_confirmed'), imageTools, provider: createScriptedLlm('images') },
     })
@@ -317,7 +317,7 @@ describe('POST /agent/stream（Issue #8 Guardrail + 图片配额 + 导览组件�
       payload: { runId: 'run-img-1', appId: 1, message: '需要产品图', workspacePath: root },
     })
     const result = frames(response.body)
-    // 契约不变量：同一 id 的 tool_request 先于其 tool_executed（并行执行时结果顺序可与请求不同，按 id 配对断言）
+
     const requests = result.filter((frame) => frame.event === 'tool_request')
     const executed = result.filter((frame) => frame.event === 'tool_executed')
     expect(requests).toHaveLength(2)
@@ -331,21 +331,21 @@ describe('POST /agent/stream（Issue #8 Guardrail + 图片配额 + 导览组件�
       expect(req.data.name).toBe('searchContentImages')
       expect(result.indexOf(req)).toBeLessThan(result.indexOf(exe))
     }
-    // 配额 4 张：两次搜索恰好一次取满（ok:true + images）、一次被拒（ok:false + error）——
-    // 并行执行结果顺序不定，按判别联合内容断言（#8 审查整改 B6）
+
+
     const executedResults = executed.map((f) => JSON.parse(String(f.data.result)) as { ok: boolean; images?: unknown[]; error?: string })
     const rejected = executedResults.filter((r) => r.ok === false && r.error?.includes('图片配额已用完'))
     const fulfilled = executedResults.filter((r) => r.ok === true && Array.isArray(r.images))
     expect(rejected).toHaveLength(1)
     expect(fulfilled).toHaveLength(1)
     expect(JSON.stringify(fulfilled[0]!.images)).toContain('CONTENT')
-    // 配额拒绝不影响生成流终态
+
     expect(types(result).at(-1)).toBe('done')
   })
 })
 
 describe('POST /agent/stream（#10 冻结积分）', () => {
-  // 冻结被拒的 runClient：闸门放行（wireframe_confirmed），但 freeze 端点返回 402（余额不足）
+
   function freezeRejectingRunClient(): RunClient {
     return new RunClient({
       baseUrl: 'http://java.invalid',
@@ -374,14 +374,14 @@ describe('POST /agent/stream（#10 冻结积分）', () => {
       headers: { authorization: `Bearer ${token}` },
       payload: { runId: 'run-credit-1', appId: 1, message: 'hello', workspacePath: makeWorkspaceRoot() },
     })
-    // 双轨边界（#21）：冻结发生在 hijack 前，402 以标准 JSON 返回且透传 Java 明确报错
+
     expect(response.statusCode).toBe(402)
     const body = response.json() as { statusCode: number; error: string; message: string }
     expect(body).toMatchObject({ statusCode: 402, error: 'Payment Required' })
     expect(body.message).toContain('积分不足')
   })
 
-  // 预检上游故障的 runClient：闸门查询（GET run）或冻结（POST freeze）返回 500——覆盖 #21 预检 502 分支（审查整改补测）
+
   function upstreamFailureRunClient(failPoint: 'gate' | 'freeze'): RunClient {
     return new RunClient({
       baseUrl: 'http://java.invalid',
@@ -411,7 +411,7 @@ describe('POST /agent/stream（#10 冻结积分）', () => {
       headers: { authorization: `Bearer ${token}` },
       payload: { runId: 'run-gate-502', appId: 1, message: 'hello', workspacePath: makeWorkspaceRoot() },
     })
-    // 双轨边界（#21）：闸门查询在 hijack 前完成，上游 5xx 以 502 JSON 表达而非 SSE error
+
     expect(response.statusCode).toBe(502)
     const body = response.json() as { statusCode: number; error: string; message: string }
     expect(body).toMatchObject({ statusCode: 502, error: 'Bad Gateway' })
@@ -427,7 +427,7 @@ describe('POST /agent/stream（#10 冻结积分）', () => {
       headers: { authorization: `Bearer ${token}` },
       payload: { runId: 'run-freeze-502', appId: 1, message: 'hello', workspacePath: makeWorkspaceRoot() },
     })
-    // 余额不足 402 与其他上游故障 502 的分流：非 402 的 RunApiError 统一 502 并携带原因
+
     expect(response.statusCode).toBe(502)
     const body = response.json() as { statusCode: number; error: string; message: string }
     expect(body).toMatchObject({ statusCode: 502, error: 'Bad Gateway' })
@@ -450,7 +450,7 @@ describe('POST /agent/stream（#10 冻结积分）', () => {
   })
 })
 
-// 请求体非法时的 4xx 拒绝路径锁定（#18 zod 单源）：错误响应体与旧手写解析逐字节等价
+
 describe('POST /agent/stream 请求体校验（#18）', () => {
   it('缺 message → 400 必填报错（message 宽容回退空串后统一拒绝）', async () => {
     const token = await makeToken()

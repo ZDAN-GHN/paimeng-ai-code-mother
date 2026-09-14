@@ -11,7 +11,7 @@ const customTheme = {
     colorInfo: '#cb573e',
   },
 }
-// 项目加载的时候默认出用户
+
 onMounted(() => {
   useLoginUserStore().fetchLoginUser()
 })
@@ -26,7 +26,7 @@ onMounted(() => {
 </template>
 
 <style>
-/* 全局样式优化 */
+
 * {
   box-sizing: border-box;
 }

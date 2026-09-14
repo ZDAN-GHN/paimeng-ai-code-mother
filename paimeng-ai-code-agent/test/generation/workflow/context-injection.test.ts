@@ -40,7 +40,6 @@ describe('codegen system context injection (#23)', () => {
         wireframeRelativePath: 'wireframe/wireframe.html',
       },
     )) {
-      // Consume the complete stream so the provider records the real model request.
     }
 
     const codegenCall = provider.records.find((record) => record.modelId === 'scripted-standard')

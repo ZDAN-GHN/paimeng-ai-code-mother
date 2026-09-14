@@ -5,7 +5,7 @@ import {
 } from './events.js'
 import type { SessionStore } from './store.js'
 
-// PG 行的 kind 是运行时字符串；先在重放边界校验，再窄化为已知事件。
+
 type ReplayEvent = Omit<SessionEventRecord, 'kind'> & { kind: string }
 
 export interface SessionHistoryMessage {
@@ -58,9 +58,7 @@ function summarize(messages: SessionHistoryMessage[], limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit)}…`
 }
 
-/**
- * 从已重放事件纯函数重建会话上下文；不写入任何存储，也不依赖进程级缓存。
- */
+
 export function rebuildSessionContext(
   events: readonly ReplayEvent[],
   options: SessionContextOptions,
@@ -108,9 +106,7 @@ export function rebuildSessionContext(
   }
 }
 
-/**
- * 每次从 seq=0 完整重放，保证跨消息上下文不会丢失；afterSeq 仅为兼容旧调用方保留，不作为重放起点。
- */
+
 export async function loadSessionContext(
   store: SessionStore,
   options: SessionContextOptions & { afterSeq?: number; replayLimit?: number },

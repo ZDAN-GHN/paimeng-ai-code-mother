@@ -7,11 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.io.File;
 
-/**
- * 项目构建执行器
- *
- * @author LXH
- */
+
 @Slf4j
 public class BuilderExecutor {
 
@@ -21,12 +17,10 @@ public class BuilderExecutor {
         NPM_BUILDER = new NpmBuilder();
     }
 
-    /**
-     * 异步执行构建
-     */
+
     public static void doBuildAsync(CodeGenTypeEnum codeGenTypeEnum, String sourceDirPath) {
         String projectType = codeGenTypeEnum.getValue();
-        // 在单独的线程中执行构建
+
         Thread.ofVirtual().name(projectType + "-builder-" + System.currentTimeMillis()).start(() -> {
             try {
                 doBuild(codeGenTypeEnum, sourceDirPath);
@@ -36,12 +30,7 @@ public class BuilderExecutor {
         });
     }
 
-    /**
-     * 同步执行构建
-     *
-     * @param codeGenTypeEnum 代码生成类型枚举
-     * @param sourceDirPath   构建结果存放目录
-     */
+
     public static File doBuild(CodeGenTypeEnum codeGenTypeEnum, String sourceDirPath) {
         String projectType = codeGenTypeEnum.getValue();
         return switch (codeGenTypeEnum.getBuildType()) {
@@ -53,9 +42,9 @@ public class BuilderExecutor {
                 }
                 yield distDir;
             }
-            // 没有构建类型就不做处理
+
             case NONE -> new File(sourceDirPath);
-            // 找不到类型就直接抛异常
+
             default -> {
                 log.error("the given buildType is unsupported, buildType: {}", codeGenTypeEnum.getBuildType());
                 ThrowUtils.throwForParam("不支持的构建类型");

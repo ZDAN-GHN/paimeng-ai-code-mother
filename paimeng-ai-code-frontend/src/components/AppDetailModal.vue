@@ -1,7 +1,7 @@
 <template>
   <a-modal v-model:open="visible" title="应用详情" :footer="null" width="500px">
     <div class="app-detail-content">
-      <!-- 应用基础信息 -->
+
       <div class="app-basic-info">
         <div class="info-item">
           <span class="info-label">创建者：</span>
@@ -20,7 +20,7 @@
         </div>
       </div>
 
-      <!-- 操作栏（仅本人或管理员可见） -->
+
       <div v-if="showActions" class="app-actions">
         <a-space>
           <a-button type="primary" @click="handleEdit">

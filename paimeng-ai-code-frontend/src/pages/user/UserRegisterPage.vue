@@ -50,12 +50,7 @@ const formState = reactive<API.UserRegisterRequest>({
   checkPassword: '',
 })
 
-/**
- * 验证确认密码
- * @param rule
- * @param value
- * @param callback
- */
+
 const validateCheckPassword = (rule: unknown, value: string, callback: (error?: Error) => void) => {
   if (value && value !== formState.userPassword) {
     callback(new Error('两次输入密码不一致'))
@@ -64,13 +59,10 @@ const validateCheckPassword = (rule: unknown, value: string, callback: (error?: 
   }
 }
 
-/**
- * 提交表单
- * @param values
- */
+
 const handleSubmit = async (values: API.UserRegisterRequest) => {
   const res = await userRegister(values)
-  // 注册成功，跳转到登录页面
+
   if (res.data.code === 0) {
     message.success('注册成功')
     router.push({

@@ -1,4 +1,4 @@
-// 三档推理强度配置测试（Issue #9）：档位枚举、模型映射、上限随档位放大、价格系数、非法/缺省回退
+
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_INTENSITY, INTENSITY_TIERS, resolveIntensity } from '../../src/generation/intensity.js'
 

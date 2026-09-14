@@ -1,6 +1,6 @@
-// 离线 golden e2e（Issue #11）：从 tests/fixtures golden JSON 夹具驱动「HTTP 入口 → 闸门 → 冻结 →
-// guardrail → 假 LLM 全链（工具写盘）→ review 三重门禁（替身通过）→ done + 完成回调」，
-// 按夹具断言工作区产物文件与关键片段——对齐旧 Python Agent tests/test_e2e.py 的夹具语义。
+
+
+
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -9,7 +9,7 @@ import { createScriptedLlm, type LlmScript } from '../src/llm/index.js'
 
 interface GoldenFixture {
   codeGenType: 'html' | 'multi_file' | 'vue_project'
-  // 剧本名（#21 起 script 不再进 wire，仅用于构造注入的 agentRoutes.provider）
+
   script: LlmScript
   message: string
   expectedFiles: Record<string, string[]>
@@ -17,7 +17,7 @@ interface GoldenFixture {
 
 const FIXTURES = path.join(import.meta.dirname, 'fixtures')
 
-// 逐夹具跑全链：golden HTML 与 golden multi_file 共用同一断言骨架（对齐旧 test_e2e.py 结构）
+
 describe.each([
   ['golden_html.json'],
   ['golden_multi_file.json'],
@@ -60,12 +60,12 @@ describe.each([
     expect(response.statusCode).toBe(200)
     expect(String(response.headers['content-type'])).toContain('text/event-stream')
 
-    // done 是唯一成功终态且在最后；error 终态不得出现
+
     const result = frames(response.body)
     expect(result.at(-1)!.event).toBe('done')
     expect(result.some((frame) => frame.event === 'error')).toBe(false)
 
-    // 产物断言：夹具声明的每个文件存在且含关键片段（语义断言，不比对完整字节）
+
     for (const [relativePath, fragments] of Object.entries(fixture.expectedFiles)) {
       const content = readFileSync(path.join(root, relativePath), 'utf8')
       for (const fragment of fragments) {
@@ -80,7 +80,7 @@ describe.each([
       expect(provider.records.some((record) => record.modelId === 'scripted-quality')).toBe(true)
     }
 
-    // 完成回调：success，携带工作区路径（Java 侧写历史 + 触发构建）
+
     const complete = calls.find((call) => call.url.endsWith('/complete'))!
     expect(complete.body.status).toBe('success')
     expect(complete.body.workspacePath).toBeTruthy()

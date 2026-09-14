@@ -1,5 +1,5 @@
-// 输入历史滑窗测试（Issue #9，架构 §3.3 护栏第 3 层「输入侧有界」）：
-// 最近 N 轮全文 + 更早轮次折叠为摘要；空/零槽位/超长摘要边界
+
+
 import { describe, expect, it } from 'vitest'
 import { SUMMARY_CHAR_LIMIT, windowHistory, type HistoryTurn } from '../../../src/generation/workflow/history.js'
 
@@ -25,7 +25,7 @@ describe('输入历史滑窗（Issue #9）', () => {
       { role: 'user', content: '第3轮问题' },
     ]
     const result = windowHistory(turns, 2)
-    // 保留最近 2 轮：第3轮 user + 第2轮 assistant（最近在前）
+
     expect(result.recent).toEqual([
       { role: 'assistant', content: '第2轮回答' },
       { role: 'user', content: '第3轮问题' },

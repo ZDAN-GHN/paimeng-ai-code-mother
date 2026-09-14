@@ -9,11 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Scope;
 
 
-/**
- * 智能路由专用模型配置
- *
- * @author LXH
- */
+
 @Configuration
 @ConfigurationProperties(prefix = "langchain4j.open-ai.routing-chat-model")
 @Data
@@ -33,9 +29,7 @@ public class RoutingAiModelConfig {
 
     private Boolean logResponses = false;
 
-    /**
-     * 创建用于路由判断的ChatModel
-     */
+
     @Bean
     @Scope("prototype")
     public ChatModel routingChatModelPrototype() {

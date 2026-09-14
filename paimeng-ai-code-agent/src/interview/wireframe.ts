@@ -1,16 +1,16 @@
-// 线框生成（Issue #7）：单文件 HTML（灰块 + 占位图 + 可点击页面跳转 + 站点地图），MVP 页面数上限 5 页，
-// 快速档模型输出（架构 §4）。脚本化实现确定性生成线框 HTML——「访谈结论 → 线框」即快速档模型的契约；
-// 接入真实快速档模型时替换 buildWireframeHtml 内部实现，输入输出与验收断言不变。
-// 线框文件存 {workspace}/wireframe/（跨请求存活，未确认前可重生成），确认后即 codegen 布局契约与视觉 diff 基准。
+
+
+
+
 import type { InterviewSummary } from './index.js'
 
-// 线框文件名（存 {workspace}/wireframe/ 子目录下）
+
 export const WIREFRAME_FILENAME = 'wireframe.html'
 
-// MVP 线框页面数上限（架构 §4：MVP 页面数上限 5 页）
+
 export const PAGE_LIMIT = 5
 
-// 单个页面的灰块布局（导航/主视觉/内容网格/页脚 + 图片占位）
+
 function pageSection(page: string, index: number): string {
   return [
     `<section class="page" id="page-${index}">`,
@@ -27,7 +27,7 @@ function pageSection(page: string, index: number): string {
   ].join('\n')
 }
 
-// 转义 HTML 特殊字符（页面名来自用户输入，落盘前转义防注入）
+
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (ch) => {
     const map: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
@@ -35,10 +35,10 @@ function escapeHtml(value: string): string {
   })
 }
 
-// 由访谈结论生成单文件线框 HTML：
-// - 站点地图：页面清单 + 导航关系（锚点可点击跳转）
-// - 每页灰块布局 + 占位图（可点击页面跳转经页内锚点实现，单文件无需多页路由）
-// - 页面数 ≤ 5（取访谈结论的页面清单并截断到上限）
+
+
+
+
 export function buildWireframeHtml(summary: InterviewSummary): string {
   const pages = summary.pages.slice(0, PAGE_LIMIT)
   const siteTitle = summary.message || '我的网站'
@@ -85,7 +85,7 @@ ${sections}
 `
 }
 
-// 统计线框 HTML 中的页面数（验收断言：≤5 页）
+
 export function countWireframePages(html: string): number {
   const matches = html.match(/<section class="page"/g)
   return matches?.length ?? 0

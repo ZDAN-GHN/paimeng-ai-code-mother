@@ -4,11 +4,7 @@ import cn.hutool.core.util.ObjUtil;
 import lombok.Getter;
 
 
-/**
- * 用户角色枚举
- *
- * @author LXH
- */
+
 @Getter
 public enum UserRoleEnum {
 
@@ -23,12 +19,7 @@ public enum UserRoleEnum {
         this.value = value;
     }
 
-    /**
-     * 根据 value 获取枚举
-     *
-     * @param value 枚举值的value
-     * @return 枚举值
-     */
+
     public static UserRoleEnum getEnumByValue(String value) {
         if (ObjUtil.isEmpty(value)) {
             return null;

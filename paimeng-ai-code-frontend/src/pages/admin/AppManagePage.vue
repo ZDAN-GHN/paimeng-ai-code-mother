@@ -1,6 +1,6 @@
 <template>
   <div id="appManagePage">
-    <!-- 搜索表单 -->
+
     <a-form layout="inline" :model="searchParams" @finish="doSearch">
       <a-form-item label="应用名称">
         <a-input v-model:value="searchParams.appName" placeholder="输入应用名称" />
@@ -30,7 +30,7 @@
     </a-form>
     <a-divider />
 
-    <!-- 表格 -->
+
     <a-table
       :columns="columns"
       :data-source="data"
@@ -154,17 +154,17 @@ const columns = [
   },
 ]
 
-// 数据
+
 const data = ref<API.AppVO[]>([])
 const total = ref(0)
 
-// 搜索条件
+
 const searchParams = reactive<API.AppQueryRequest>({
   pageNum: 1,
   pageSize: 10,
 })
 
-// 获取数据
+
 const fetchData = async () => {
   try {
     const res = await listAppVoByPageByAdmin({
@@ -182,12 +182,12 @@ const fetchData = async () => {
   }
 }
 
-// 页面加载时请求一次
+
 onMounted(() => {
   fetchData()
 })
 
-// 分页参数
+
 const pagination = computed(() => {
   return {
     current: searchParams.pageNum ?? 1,
@@ -198,26 +198,26 @@ const pagination = computed(() => {
   }
 })
 
-// 表格变化处理
+
 const doTableChange = (page: { current: number; pageSize: number }) => {
   searchParams.pageNum = page.current
   searchParams.pageSize = page.pageSize
   fetchData()
 }
 
-// 搜索
+
 const doSearch = () => {
-  // 重置页码
+
   searchParams.pageNum = 1
   fetchData()
 }
 
-// 编辑应用
+
 const editApp = (app: API.AppVO) => {
   router.push(`/app/edit/${app.id}`)
 }
 
-// 切换精选状态
+
 const toggleFeatured = async (app: API.AppVO) => {
   if (!app.id) return
 
@@ -231,7 +231,7 @@ const toggleFeatured = async (app: API.AppVO) => {
 
     if (res.data.code === 0) {
       message.success(newPriority === 99 ? '已设为精选' : '已取消精选')
-      // 刷新数据
+
       fetchData()
     } else {
       message.error('操作失败：' + res.data.message)
@@ -242,7 +242,7 @@ const toggleFeatured = async (app: API.AppVO) => {
   }
 }
 
-// 删除应用
+
 const deleteApp = async (id: number | undefined) => {
   if (!id) return
 
@@ -250,7 +250,7 @@ const deleteApp = async (id: number | undefined) => {
     const res = await deleteAppByAdmin({ id })
     if (res.data.code === 0) {
       message.success('删除成功')
-      // 刷新数据
+
       fetchData()
     } else {
       message.error('删除失败：' + res.data.message)

@@ -1,29 +1,29 @@
-// 文件类工具集（Issue #8）：从 Python Agent 的 app/tools/file_tools.py 按语义移植，
-// 绑定到单个工作区（已通过沙箱校验），提供 写/读/改/删/列目录/退出 六个操作。
-// #18 结果通道改判别联合：成功失败按 ok 字段分支（对齐 imageTools 的 ImageToolResult 示范），
-// 不再靠中文前缀人肉区分；所有相对路径解析到工作区内，防路径穿越。
+
+
+
+
 import path from 'node:path'
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { validateWorkspacePath } from '../workspace.js'
 
-// 文件工具结果（判别联合）：读类工具 ok:true 携带 content（文件内容/目录结构文本），
-// 动作类工具 ok:true 携带 message（操作确认文本），ok:false 携带 error（操作未达成）。
-// 边界取舍：删除不存在的文件 = 终态已达成 → ok:true；替换内容未找到（文件未动）→ ok:false
+
+
+
 export type FileToolResult =
   | { ok: true; content: string }
   | { ok: true; message: string }
   | { ok: false; error: string }
 
-// 需要忽略的文件和目录（对齐 Python IGNORED_NAMES / Java ProjectFileDirReadTool）
+
 export const IGNORED_NAMES = new Set([
   'node_modules', '.git', 'dist', 'build', '.DS_Store',
   '.env', 'target', '.mvn', '.idea', '.vscode', 'coverage',
 ])
 
-// 需要忽略的文件扩展名
+
 export const IGNORED_EXTENSIONS = ['.log', '.tmp', '.cache', '.lock']
 
-// 不允许删除的重要文件（对齐 Python IMPORTANT_FILES / Java ProjectFileDeleteTool，不区分大小写）
+
 export const IMPORTANT_FILES = new Set([
   'package.json', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
   'vite.config.js', 'vite.config.ts', 'vue.config.js',
@@ -31,19 +31,19 @@ export const IMPORTANT_FILES = new Set([
   'index.html', 'main.js', 'main.ts', 'app.vue', '.gitignore', 'readme.md',
 ])
 
-// 路径越界（空/.. 逃逸/绝对路径在工作区外）→ 工具返回错误由调用方承接，这里直接抛以区分业务错误
+
 export class FilePathError extends Error {}
 
 export class FileTools {
-  // 绑定工作区根（绝对路径，构造时经沙箱校验）
+
   private readonly root: string
 
-  // 本 run 已落盘的不同文件（相对路径）集合（Issue #10 中断退款折算锚）
-  // #10 审查整改：以「落盘文件数」为语义——同一文件重复写去重、modifyFile 落盘同样计数、
-  // 删除后移除；首个文件落盘前（=0）中断 → Java 全额退款
+
+
+
   private readonly writtenFiles = new Set<string>()
 
-  // 已落盘的不同文件数（首文件落盘阈值：filesWritten=0 → 中断全额退款）
+
   get filesWritten(): number {
     return this.writtenFiles.size
   }
@@ -52,7 +52,7 @@ export class FileTools {
     this.root = validateWorkspacePath(workspacePath, workspaceRoot)
   }
 
-  // 把相对路径解析到工作区内，防路径穿越（.. / 绝对路径）；解析后不在根下 → 抛 FilePathError
+
   private resolve(relativePath: string): string {
     if (!relativePath) {
       throw new FilePathError('路径不能为空')
@@ -64,7 +64,7 @@ export class FileTools {
     return candidate
   }
 
-  // 读取已存在文件的内容；不存在或非文件 → null（调用方据此给统一错误文本，消除四处重复的 stat 检查）
+
   private async readExistingFile(target: string): Promise<string | null> {
     try {
       const info = await stat(target)
@@ -79,7 +79,7 @@ export class FileTools {
     const target = this.resolve(relativeFilePath)
     await mkdir(path.dirname(target), { recursive: true })
     await writeFile(target, content, 'utf8')
-    // 首文件落盘阈值（中断退款折算：filesWritten=0 → 全额退款；同文件重复写去重）
+
     this.writtenFiles.add(relativeFilePath)
     return { ok: true, message: `文件写入成功：${relativeFilePath}` }
   }
@@ -106,7 +106,7 @@ export class FileTools {
       return { ok: true, message: `替换后文件内容未发生变化 - ${relativeFilePath}` }
     }
     await writeFile(target, modifiedContent, 'utf8')
-    // 落盘计数：修改已存在文件也是磁盘写入（续跑场景首笔写可能经 modifyFile，需计入「已写文件」）
+
     this.writtenFiles.add(relativeFilePath)
     return { ok: true, message: `文件修改成功: ${relativeFilePath}` }
   }
@@ -117,7 +117,7 @@ export class FileTools {
     try {
       info = await stat(target)
     } catch {
-      // 文件不存在 = 删除的终态已达成（rm -f 语义），按 ok:true 幂等返回
+
       return { ok: true, message: `文件不存在，无需删除 - ${relativeFilePath}` }
     }
     if (!info.isFile()) {
@@ -127,12 +127,12 @@ export class FileTools {
       return { ok: false, error: `不允许删除重要文件 - ${path.basename(target)}` }
     }
     await rm(target, { force: true })
-    // 落盘文件数随删除移除（「已写文件」指当前盘上文件）
+
     this.writtenFiles.delete(relativeFilePath)
     return { ok: true, message: `文件删除成功: ${relativeFilePath}` }
   }
 
-  // 读取目录结构（忽略构建产物等，按深度缩进展示；对齐 Python read_dir）
+
   async readDir(relativeDirPath?: string): Promise<FileToolResult> {
     const root = relativeDirPath ? this.resolve(relativeDirPath) : this.root
     let info
@@ -154,7 +154,7 @@ export class FileTools {
     return { ok: true, content: lines.join('\n') }
   }
 
-  // 递归收集目录下文件（跳过忽略项）
+
   private async walk(dir: string, base: string, out: { rel: string; depth: number }[]): Promise<void> {
     let entries
     try {

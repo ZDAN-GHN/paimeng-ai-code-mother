@@ -23,11 +23,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-/**
- * 用户 控制层
- *
- * @author LXH
- */
+
 @RestController
 @RequestMapping("/user")
 public class UserController {
@@ -38,11 +34,7 @@ public class UserController {
         this.userService = userService;
     }
 
-    /**
-     * 更新用户
-     *
-     * @param userUpdateRequest 更新用户请求
-     */
+
     @PostMapping("/update")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> updateUser(@RequestBody UserUpdateRequest userUpdateRequest) {
@@ -56,11 +48,7 @@ public class UserController {
         return ResultUtils.success(true);
     }
 
-    /**
-     * 删除用户
-     *
-     * @param deleteRequest 删除请求
-     */
+
     @PostMapping("/delete")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> deleteUser(@RequestBody DeleteRequest deleteRequest) {
@@ -71,11 +59,7 @@ public class UserController {
         return ResultUtils.success(b);
     }
 
-    /**
-     * 分页获取用户封装列表（仅管理员）
-     *
-     * @param userQueryRequest 查询请求参数
-     */
+
     @PostMapping("/list/page/vo")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Page<UserVO>> listUserVOByPage(@RequestBody UserQueryRequest userQueryRequest) {
@@ -84,18 +68,14 @@ public class UserController {
         long pageSize = userQueryRequest.getPageSize();
         Page<User> userPage = userService.page(Page.of(pageNum, pageSize),
                 userService.getQueryWrapper(userQueryRequest));
-        // 数据脱敏
+
         Page<UserVO> userVOPage = new Page<>(pageNum, pageSize, userPage.getTotalRow());
         List<UserVO> userVOList = userService.getUserVOList(userPage.getRecords());
         userVOPage.setRecords(userVOList);
         return ResultUtils.success(userVOPage);
     }
 
-    /**
-     * 根据 id 获取包装类
-     *
-     * @param id 用户 id
-     */
+
     @GetMapping("/get/vo")
     public BaseResponse<UserVO> getUserVOById(long id) {
         BaseResponse<User> response = getUserById(id);
@@ -103,11 +83,7 @@ public class UserController {
         return ResultUtils.success(userService.getUserVO(user));
     }
 
-    /**
-     * 根据 id 获取用户（仅管理员）
-     *
-     * @param id 用户 id
-     */
+
     @GetMapping("/get")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<User> getUserById(long id) {
@@ -117,11 +93,7 @@ public class UserController {
         return ResultUtils.success(user);
     }
 
-    /**
-     * 用户注销（退出登录）
-     *
-     * @param request Http 请求
-     */
+
     @PostMapping("/logout")
     public BaseResponse<Boolean> userLogout(HttpServletRequest request) {
         ThrowUtils.throwIf(request == null, ErrorCode.PARAMS_ERROR);
@@ -129,23 +101,14 @@ public class UserController {
         return ResultUtils.success(result);
     }
 
-    /**
-     * 获取已登录用户
-     *
-     * @param request Http 请求
-     */
+
     @GetMapping("/get/login")
     public BaseResponse<LoginUserVO> getLoginUser(HttpServletRequest request) {
         User loginUser = userService.getLoginUser(request);
         return ResultUtils.success(userService.getLoginUserVO(loginUser));
     }
 
-    /**
-     * 用户登录
-     *
-     * @param userLoginRequest 用户登录请求
-     * @param request          Http 请求
-     */
+
     @PostMapping("/login")
     public BaseResponse<LoginUserVO> userLogin(@RequestBody UserLoginRequest userLoginRequest,
                                                HttpServletRequest request) {
@@ -156,11 +119,7 @@ public class UserController {
         return ResultUtils.success(loginUserVO);
     }
 
-    /**
-     * 用户注册
-     *
-     * @param userRegisterRequest 用户注册请求
-     */
+
     @PostMapping("register")
     public BaseResponse<Long> userRegister(@RequestBody UserRegisterRequest userRegisterRequest) {
         ThrowUtils.throwIf(userRegisterRequest == null, ErrorCode.PARAMS_ERROR);

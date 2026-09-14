@@ -3,11 +3,7 @@ package com.zdan.paimengaicodebackend.ai.enums;
 import cn.hutool.core.util.ObjUtil;
 import lombok.Getter;
 
-/**
- * 代码生成类型枚举
- *
- * @author LXH
- */
+
 @Getter
 public enum CodeGenTypeEnum {
 
@@ -26,12 +22,7 @@ public enum CodeGenTypeEnum {
         this.buildType = buildType;
     }
 
-    /**
-     * 根据 value 获取枚举
-     *
-     * @param value 枚举值的value
-     * @return 枚举值
-     */
+
     public static CodeGenTypeEnum getEnumByValue(String value) {
         if (ObjUtil.isEmpty(value)) {
             return null;
@@ -44,11 +35,7 @@ public enum CodeGenTypeEnum {
         return null;
     }
 
-    /**
-     * 生成代码构建方式
-     *
-     * @author LXH
-     */
+
     @Getter
     public enum BuildTypeEnum {
 
@@ -64,12 +51,7 @@ public enum CodeGenTypeEnum {
             this.value = value;
         }
 
-        /**
-         * 根据 value 获取枚举
-         *
-         * @param value 枚举值的value
-         * @return 枚举值
-         */
+
         public static BuildTypeEnum getEnumByValue(String value) {
             if (ObjUtil.isEmpty(value)) {
                 return null;

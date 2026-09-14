@@ -9,7 +9,7 @@ import {
 } from './review/index.js'
 import type { CodeGenType } from './review/types.js'
 
-// 多类型生成的策略接缝。预算系数按定稿设计落位；门禁和质量尝试上限由各票据维护。
+
 export interface BudgetScale {
   turns: number
   outputTokens: number
@@ -56,9 +56,7 @@ const STACK_PROFILES: Record<CodeGenType, StackProfile> = {
 
 const MAX_OUTPUT_TOKENS = 32000
 
-/**
- * 将强度基线与生成类型预算相乘；每项独立四舍五入，输出 token 另受模型上限保护。
- */
+
 export function resolveBudgetLimits(limits: IntensityLimits, scale: BudgetScale): IntensityLimits {
   return {
     maxTurns: Math.round(limits.maxTurns * scale.turns),

@@ -22,23 +22,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/**
- * 积分台账（credit_ledger）服务层实现。
- * 计费规则（docs/ts_agent/architecture.md §7）：按次 + 档位系数，冻结额 = 基础价 × 生成类型系数 × 强度档系数；
- * 退款折算：失败/中断于首文件落盘前全额退；中断已写文件按里程碑比例部分结算。
- * 并发/幂等（Issue #10 审查整改）：余额变动走 DB 原子 SQL（UserMapper.deduct/addCredits），
- * 台账 FROZEN→终态走条件更新（transitionIfFrozen），并发重复结算/退款只有一个线程生效。
- *
- * @author LXH
- */
+
 @Slf4j
 @Service
 public class CreditServiceImpl extends ServiceImpl<CreditLedgerMapper, CreditLedger>
         implements CreditService {
 
-    /**
-     * 里程碑 ≥ 此值视为「已进入质量审查」，中断折算用高结算比例（接近完成的产出价值更高）
-     */
+
     private static final int REVIEW_MILESTONE_THRESHOLD = 3;
 
     private final AppService appService;
@@ -55,7 +45,7 @@ public class CreditServiceImpl extends ServiceImpl<CreditLedgerMapper, CreditLed
     @Transactional(rollbackFor = Exception.class)
     public CreditFreezeVO freeze(String runId, Long appId, Long userId, String intensity) {
         ThrowUtils.throwIf(StrUtil.isBlank(runId), ErrorCode.PARAMS_ERROR, "runId 不能为空");
-        // 幂等：同 runId 已冻结（重放/重试）→ 返回既有台账，不重复扣款（uk_runId 兜底）
+
         CreditLedger existing = getByRunId(runId);
         if (existing != null) {
             log.info("台账已存在，冻结幂等返回，runId: {}, ledgerId: {}", runId, existing.getId());
@@ -65,15 +55,7 @@ public class CreditServiceImpl extends ServiceImpl<CreditLedgerMapper, CreditLed
         return buildFreezeVO(ledger);
     }
 
-    /**
-     * 实际冻结动作：计算金额 → 原子扣减余额 → 写台账（同事务，保证原子性）
-     *
-     * @param runId     运行 id
-     * @param appId     应用 id（codeGenType 系数来源）
-     * @param userId    用户 id（余额归属）
-     * @param intensity 推理强度档位
-     * @return 新建台账
-     */
+
     private CreditLedger doFreeze(String runId, Long appId, Long userId, String intensity) {
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "appId 不能为空");
         ThrowUtils.throwIf(userId == null || userId <= 0, ErrorCode.PARAMS_ERROR, "userId 不能为空");
@@ -82,7 +64,7 @@ public class CreditServiceImpl extends ServiceImpl<CreditLedgerMapper, CreditLed
         User user = userService.getById(userId);
         ThrowUtils.throwIf(user == null, ErrorCode.NOT_FOUND_ERROR, "用户不存在");
         int amount = calcFrozenAmount(app.getCodeGenType(), intensity);
-        // 原子扣减（并发安全：DB 层 WHERE credits >= amount 保证不超扣，不会互相覆盖丢更新）
+
         int affected = userService.deductCredits(userId, amount);
         if (affected == 0) {
             int balance = balanceOf(user);
@@ -117,7 +99,7 @@ public class CreditServiceImpl extends ServiceImpl<CreditLedgerMapper, CreditLed
                 .refundAmount(0)
                 .reason(AgentCompleteStatusEnum.SUCCESS.getReason())
                 .build();
-        // 条件更新：仅 FROZEN 可迁移（并发/迟到重复结算 → affected=0 幂等跳过，不重复记账）
+
         int affected = this.mapper.transitionIfFrozen(update);
         if (affected == 0) {
             log.info("台账非冻结态，结算幂等跳过，runId: {}", runId);
@@ -138,7 +120,7 @@ public class CreditServiceImpl extends ServiceImpl<CreditLedgerMapper, CreditLed
         CreditLedger update;
         int refundAmount;
         if (status == AgentCompleteStatusEnum.FAILED) {
-            // 生成失败 → 全额退款
+
             refundAmount = frozen;
             update = CreditLedger.builder()
                     .id(ledger.getId())
@@ -149,8 +131,8 @@ public class CreditServiceImpl extends ServiceImpl<CreditLedgerMapper, CreditLed
                     .milestoneCount(milestoneCount)
                     .build();
         } else {
-            // 非 FAILED 即 ABORTED（completeRun 校验已保证 status 仅 success/failed/aborted；success 走结算）
-            // 首个文件落盘前（filesWritten ≤ 0）全额退款，否则按里程碑折算部分退款
+
+
             boolean noFileWritten = filesWritten == null || filesWritten <= 0;
             if (noFileWritten) {
                 refundAmount = frozen;
@@ -175,7 +157,7 @@ public class CreditServiceImpl extends ServiceImpl<CreditLedgerMapper, CreditLed
                         .build();
             }
         }
-        // 条件更新：仅 FROZEN 可迁移。只有赢得迁移的线程才退款加钱（并发重复退款不会双倍退）
+
         int affected = this.mapper.transitionIfFrozen(update);
         if (affected == 0) {
             log.info("台账非冻结态，退款幂等跳过，runId: {}", runId);
@@ -194,7 +176,7 @@ public class CreditServiceImpl extends ServiceImpl<CreditLedgerMapper, CreditLed
         ThrowUtils.throwIf(credits <= 0, ErrorCode.PARAMS_ERROR, "充值积分数必须为正数");
         User user = userService.getById(userId);
         ThrowUtils.throwIf(user == null, ErrorCode.NOT_FOUND_ERROR, "用户不存在");
-        // 原子增加（并发安全，避免读改写竞态）
+
         int affected = userService.addCredits(userId, credits);
         ThrowUtils.throwIf(affected == 0, ErrorCode.OPERATION_ERROR, "充值失败");
         log.info("积分充值成功，userId: {}, amount: {}, balance: {}", userId, credits, balanceOf(user) + credits);
@@ -226,12 +208,7 @@ public class CreditServiceImpl extends ServiceImpl<CreditLedgerMapper, CreditLed
         return vo;
     }
 
-    /**
-     * 读取台账并要求仍处于可记账的冻结态（已终态/不存在 → 幂等返回 null，不重复记账）
-     *
-     * @param runId 运行 id
-     * @return 冻结态台账；不存在或已终态返回 null
-     */
+
     private CreditLedger getFrozenOrNull(String runId) {
         CreditLedger ledger = getByRunId(runId);
         if (ledger == null) {
@@ -246,12 +223,7 @@ public class CreditServiceImpl extends ServiceImpl<CreditLedgerMapper, CreditLed
         return ledger;
     }
 
-    /**
-     * 退款加回用户余额（原子增加；赢得台账迁移的线程才调用，并发下不重复退款）
-     *
-     * @param userId 用户 id
-     * @param amount 退款积分数
-     */
+
     private void refundBalance(Long userId, int amount) {
         int affected = userService.addCredits(userId, amount);
         if (affected == 0) {
@@ -260,13 +232,7 @@ public class CreditServiceImpl extends ServiceImpl<CreditLedgerMapper, CreditLed
         }
     }
 
-    /**
-     * 计算冻结积分：基础价 × 生成类型系数 × 强度档位系数
-     *
-     * @param codeGenType 生成类型（html/multi_file/vue_project）
-     * @param intensity   推理强度档位（fast/standard/deep，与 TS Agent INTENSITY_TIERS 对齐；空/非法按标准档）
-     * @return 冻结积分数
-     */
+
     private int calcFrozenAmount(String codeGenType, String intensity) {
         AgentProperties.Credit credit = agentProperties.getCredit();
         int base = credit.getBasePrice();
@@ -277,10 +243,10 @@ public class CreditServiceImpl extends ServiceImpl<CreditLedgerMapper, CreditLed
         };
         AgentIntensityEnum tier = AgentIntensityEnum.getEnumByValue(intensity);
         if (tier == null) {
-            // 空 / 非法档位兜底标准档（与 TS 侧 resolveIntensity 缺省 standard 对齐）
+
             tier = AgentIntensityEnum.STANDARD;
         }
-        // 档位系数支持小数折扣（fast = 0.5），四舍五入保证台账落整数积分
+
         double tierMultiplier = switch (tier) {
             case FAST -> credit.getFastMultiplier();
             case DEEP -> credit.getDeepMultiplier();
@@ -289,13 +255,7 @@ public class CreditServiceImpl extends ServiceImpl<CreditLedgerMapper, CreditLed
         return (int) Math.round(base * typeMultiplier * tierMultiplier);
     }
 
-    /**
-     * 中断已写文件后的结算额：已进入质量审查（里程碑 ≥ 阈值）用高比例，否则用基础比例
-     *
-     * @param frozen         冻结积分数
-     * @param milestoneCount 已过里程碑数
-     * @return 结算积分数（四舍五入）
-     */
+
     private int calcInterruptedSettleAmount(int frozen, Integer milestoneCount) {
         AgentProperties.Credit credit = agentProperties.getCredit();
         double ratio = milestoneCount != null && milestoneCount >= REVIEW_MILESTONE_THRESHOLD
@@ -304,12 +264,7 @@ public class CreditServiceImpl extends ServiceImpl<CreditLedgerMapper, CreditLed
         return (int) Math.round(frozen * ratio);
     }
 
-    /**
-     * 读取用户余额（空值按 0）
-     *
-     * @param user 用户实体
-     * @return 余额
-     */
+
     private static int balanceOf(User user) {
         return user == null || user.getCredits() == null ? 0 : user.getCredits();
     }

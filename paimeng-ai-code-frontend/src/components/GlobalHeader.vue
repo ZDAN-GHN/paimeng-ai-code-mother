@@ -1,7 +1,7 @@
 <template>
   <a-layout-header class="header">
     <a-row :wrap="false">
-      <!-- 左侧：Logo和标题 -->
+
       <a-col flex="200px">
         <RouterLink to="/">
           <div class="header-left">
@@ -10,7 +10,7 @@
           </div>
         </RouterLink>
       </a-col>
-      <!-- 中间：导航菜单 -->
+
       <a-col flex="auto">
         <a-menu
           v-model:selectedKeys="selectedKeys"
@@ -19,7 +19,7 @@
           @click="handleMenuClick"
         />
       </a-col>
-      <!-- 右侧：用户操作区域 -->
+
       <a-col>
         <div class="user-login-status">
           <div v-if="loginUser.id">
@@ -57,14 +57,14 @@ import { LogoutOutlined, HomeOutlined } from '@ant-design/icons-vue'
 
 const loginUserStore = useLoginUserStore()
 const router = useRouter()
-// 当前选中菜单
+
 const selectedKeys = ref<string[]>(['/'])
-// 监听路由变化，更新当前选中菜单
+
 router.afterEach((to) => {
   selectedKeys.value = [to.path]
 })
 
-// 菜单配置项
+
 const originItems = [
   {
     key: '/',
@@ -86,7 +86,7 @@ const originItems = [
 
 const loginUser = computed(() => loginUserStore.loginUser)
 
-// 过滤菜单项
+
 const filterMenus = (menus = [] as MenuProps['items']) => {
   return menus?.filter((menu) => {
     const menuKey = menu?.key as string
@@ -100,20 +100,20 @@ const filterMenus = (menus = [] as MenuProps['items']) => {
   })
 }
 
-// 展示在菜单的路由数组
+
 const menuItems = computed<MenuProps['items']>(() => filterMenus(originItems))
 
-// 处理菜单点击
+
 const handleMenuClick: MenuProps['onClick'] = (e) => {
   const key = e.key as string
   selectedKeys.value = [key]
-  // 跳转到对应页面
+
   if (key.startsWith('/')) {
     router.push(key)
   }
 }
 
-// 退出登录
+
 const doLogout = async () => {
   const res = await userLogout()
   if (res.data.code === 0) {

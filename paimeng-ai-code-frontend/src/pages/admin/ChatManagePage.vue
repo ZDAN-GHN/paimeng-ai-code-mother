@@ -1,6 +1,6 @@
 <template>
   <div id="chatManagePage">
-    <!-- 搜索表单 -->
+
     <a-form layout="inline" :model="searchParams" @finish="doSearch">
       <a-form-item label="消息内容">
         <a-input v-model:value="searchParams.message" placeholder="输入消息内容" />
@@ -28,7 +28,7 @@
     </a-form>
     <a-divider />
 
-    <!-- 表格 -->
+
     <a-table
       :columns="columns"
       :data-source="data"
@@ -114,17 +114,17 @@ const columns = [
   }
 ]
 
-// 数据
+
 const data = ref<API.ChatHistory[]>([])
 const total = ref(0)
 
-// 搜索条件
+
 const searchParams = reactive<API.ChatHistoryQueryRequest>({
   pageNum: 1,
   pageSize: 10
 })
 
-// 获取数据
+
 const fetchData = async () => {
   try {
     const res = await listAllChatHistoryByPageForAdmin({
@@ -142,12 +142,12 @@ const fetchData = async () => {
   }
 }
 
-// 页面加载时请求一次
+
 onMounted(() => {
   fetchData()
 })
 
-// 分页参数
+
 const pagination = computed(() => {
   return {
     current: searchParams.pageNum ?? 1,
@@ -158,36 +158,36 @@ const pagination = computed(() => {
   }
 })
 
-// 表格变化处理
+
 const doTableChange = (page: { current: number; pageSize: number }) => {
   searchParams.pageNum = page.current
   searchParams.pageSize = page.pageSize
   fetchData()
 }
 
-// 搜索
+
 const doSearch = () => {
-  // 重置页码
+
   searchParams.pageNum = 1
   fetchData()
 }
 
-// 查看应用对话
+
 const viewAppChat = (appId: number | undefined) => {
   if (appId) {
     router.push(`/app/chat/${appId}`)
   }
 }
 
-// 删除消息
+
 const deleteMessage = async (id: number | undefined) => {
   if (!id) return
 
   try {
-    // 注意：这里需要后端提供删除对话历史的接口
-    // 目前先显示成功，实际实现需要调用删除接口
+
+
     message.success('删除成功')
-    // 刷新数据
+
     fetchData()
   } catch (error) {
     console.error('删除失败：', error)

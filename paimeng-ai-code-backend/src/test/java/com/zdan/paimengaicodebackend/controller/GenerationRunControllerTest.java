@@ -31,12 +31,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/**
- * GenerationRunController 内部 API 测试（standalone MockMvc，纯单元测试不依赖 Spring 上下文/DB）
- * 验收口径：无/错 Bearer → 401；同 app 并发 run → 409 + 明确文案；合法调用 200。
- *
- * @author LXH
- */
+
 class GenerationRunControllerTest {
 
     private static final String TOKEN = "test-token";
@@ -50,13 +45,11 @@ class GenerationRunControllerTest {
         generationRunService = mock(GenerationRunService.class);
         InternalApiProperties properties = new InternalApiProperties();
         properties.setToken(TOKEN);
-        // standalone：注册控制器及其 @ExceptionHandler（401/404/409 映射），不加载全局 Spring 上下文
+
         mockMvc = MockMvcBuilders.standaloneSetup(new GenerationRunController(generationRunService, properties)).build();
     }
 
-    /**
-     * 无 Bearer → 401
-     */
+
     @Test
     void createRunWithoutBearerReturns401() throws Exception {
         mockMvc.perform(post("/internal/runs")
@@ -65,9 +58,7 @@ class GenerationRunControllerTest {
                 .andExpect(status().isUnauthorized());
     }
 
-    /**
-     * 错误 Bearer → 401
-     */
+
     @Test
     void createRunWithWrongBearerReturns401() throws Exception {
         mockMvc.perform(post("/internal/runs")
@@ -77,9 +68,7 @@ class GenerationRunControllerTest {
                 .andExpect(status().isUnauthorized());
     }
 
-    /**
-     * 合法 Bearer 创建 run → 200 + data
-     */
+
     @Test
     void createRunWithValidBearerReturns200() throws Exception {
         RunVO vo = new RunVO();
@@ -97,9 +86,7 @@ class GenerationRunControllerTest {
                 .andExpect(jsonPath("$.data.runId").value("run-1"));
     }
 
-    /**
-     * 同 app 并发 run → 409 + 明确文案
-     */
+
     @Test
     void createRunConcurrentReturns409WithMessage() throws Exception {
         when(generationRunService.createRun(any(RunCreateRequest.class)))
@@ -113,9 +100,7 @@ class GenerationRunControllerTest {
                 .andExpect(jsonPath("$.message").value("当前有进行中的任务"));
     }
 
-    /**
-     * 更新：run 不存在 → 404
-     */
+
     @Test
     void updateRunNotFoundReturns404() throws Exception {
         when(generationRunService.updateRun(eq("nope"), any()))
@@ -128,9 +113,7 @@ class GenerationRunControllerTest {
                 .andExpect(status().isNotFound());
     }
 
-    /**
-     * 更新：合法更新 → 200
-     */
+
     @Test
     void updateRunReturns200() throws Exception {
         RunVO vo = new RunVO();
@@ -146,9 +129,7 @@ class GenerationRunControllerTest {
                 .andExpect(jsonPath("$.data.phase").value("coding"));
     }
 
-    /**
-     * 查询最新非终态 run：合法调用 → 200
-     */
+
     @Test
     void getLatestNonTerminalRunReturns200() throws Exception {
         RunVO vo = new RunVO();
@@ -162,9 +143,7 @@ class GenerationRunControllerTest {
                 .andExpect(jsonPath("$.data.runId").value("run-1"));
     }
 
-    /**
-     * 完成回调：无 Bearer → 401
-     */
+
     @Test
     void completeRunWithoutBearerReturns401() throws Exception {
         mockMvc.perform(post("/internal/agent/runs/run-1/complete")
@@ -173,9 +152,7 @@ class GenerationRunControllerTest {
                 .andExpect(status().isUnauthorized());
     }
 
-    /**
-     * 完成回调：错 Bearer → 401
-     */
+
     @Test
     void completeRunWithWrongBearerReturns401() throws Exception {
         mockMvc.perform(post("/internal/agent/runs/run-1/complete")
@@ -185,9 +162,7 @@ class GenerationRunControllerTest {
                 .andExpect(status().isUnauthorized());
     }
 
-    /**
-     * 完成回调：合法调用 → 200 true（写历史 + 构建由 service 完成）
-     */
+
     @Test
     void completeRunWithValidBearerReturns200() throws Exception {
         mockMvc.perform(post("/internal/agent/runs/run-1/complete")
@@ -200,9 +175,7 @@ class GenerationRunControllerTest {
         verify(generationRunService, times(1)).completeRun(eq("run-1"), any());
     }
 
-    /**
-     * 完成回调：errorCode 从 HTTP JSON 解析并传入 service
-     */
+
     @Test
     void completeRunForwardsErrorCodeFromJson() throws Exception {
         mockMvc.perform(post("/internal/agent/runs/run-1/complete")
@@ -231,9 +204,7 @@ class GenerationRunControllerTest {
                 .andExpect(jsonPath("$.message").value("status 仅接受 success/failed"));
     }
 
-    /**
-     * 线框配额：无 Bearer → 401
-     */
+
     @Test
     void acquireWireframeQuotaWithoutBearerReturns401() throws Exception {
         mockMvc.perform(post("/internal/agent/wireframe/quota/acquire")
@@ -242,9 +213,7 @@ class GenerationRunControllerTest {
                 .andExpect(status().isUnauthorized());
     }
 
-    /**
-     * 线框配额：合法调用 → 200 true
-     */
+
     @Test
     void acquireWireframeQuotaWithValidBearerReturns200() throws Exception {
         when(generationRunService.acquireWireframeDailyQuota(1L)).thenReturn(true);
@@ -258,9 +227,7 @@ class GenerationRunControllerTest {
                 .andExpect(jsonPath("$.data").value(true));
     }
 
-    /**
-     * 线框配额：每日次数用完（service 抛 TOO_MANY_REQUEST）→ 429 明确文案
-     */
+
     @Test
     void acquireWireframeQuotaExceededReturns429() throws Exception {
         doThrow(new BusinessException(ErrorCode.TOO_MANY_REQUEST, "今日线框生成次数已用完，请明天再试"))
@@ -274,9 +241,7 @@ class GenerationRunControllerTest {
                 .andExpect(jsonPath("$.message").value("今日线框生成次数已用完，请明天再试"));
     }
 
-    /**
-     * 冻结积分：无 Bearer → 401
-     */
+
     @Test
     void freezeCreditWithoutBearerReturns401() throws Exception {
         mockMvc.perform(post("/internal/agent/runs/run-1/credit/freeze")
@@ -285,9 +250,7 @@ class GenerationRunControllerTest {
                 .andExpect(status().isUnauthorized());
     }
 
-    /**
-     * 冻结积分：合法调用 → 200 + 冻结结果
-     */
+
     @Test
     void freezeCreditWithValidBearerReturns200() throws Exception {
         CreditFreezeVO vo = new CreditFreezeVO();
@@ -307,9 +270,7 @@ class GenerationRunControllerTest {
                 .andExpect(jsonPath("$.data.balance").value(400));
     }
 
-    /**
-     * 冻结积分：余额不足（service 抛 CREDIT_NOT_ENOUGH）→ 402 + 明确文案（TS Agent 映射 error 事件）
-     */
+
     @Test
     void freezeCreditInsufficientBalanceReturns402() throws Exception {
         doThrow(new BusinessException(ErrorCode.CREDIT_NOT_ENOUGH, "积分不足，当前余额 50，本次生成需 100 积分，请先充值"))
@@ -323,9 +284,7 @@ class GenerationRunControllerTest {
                 .andExpect(jsonPath("$.message").value("积分不足，当前余额 50，本次生成需 100 积分，请先充值"));
     }
 
-    /**
-     * 冻结积分：未确认线框（service 抛 FORBIDDEN）→ 403
-     */
+
     @Test
     void freezeCreditNonConfirmedPhaseReturns403() throws Exception {
         doThrow(new BusinessException(ErrorCode.FORBIDDEN_ERROR, "当前阶段（wireframe_pending）不能冻结积分，请先确认线框"))

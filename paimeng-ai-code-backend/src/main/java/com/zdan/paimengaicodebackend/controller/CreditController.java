@@ -15,13 +15,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/**
- * 积分（credit）控制层（Issue #10）
- * 冻结/结算/退款经 Java 内部 API 由 TS Agent 触发（见 GenerationRunController / CreditService）；
- * 本组端点面向用户：管理员手动充值（架构 §7 MVP 后台充值）+ 当前登录用户余额查询。
- *
- * @author LXH
- */
+
 @RestController
 @RequestMapping("/credit")
 public class CreditController {
@@ -34,12 +28,7 @@ public class CreditController {
         this.userService = userService;
     }
 
-    /**
-     * 管理员手动充值（架构 §7 MVP 后台充值）：给指定用户增加积分余额
-     *
-     * @param request 充值请求（userId + credits）
-     * @return 充值成功（操作型端点，固定成功）
-     */
+
     @PostMapping("/recharge")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> recharge(@RequestBody CreditRechargeRequest request) {
@@ -47,12 +36,7 @@ public class CreditController {
         return ResultUtils.success(true);
     }
 
-    /**
-     * 查询当前登录用户积分余额（前端 #13 积分展示的后端支持）
-     *
-     * @param request Http 请求（取登录态 userId）
-     * @return 余额
-     */
+
     @GetMapping("/balance")
     public BaseResponse<Integer> getBalance(HttpServletRequest request) {
         User loginUser = userService.getLoginUser(request);

@@ -1,14 +1,14 @@
-// 重试策略参数化单测（#20）：短调用（质检）经渠道归一化 429 + SDK 默认退避重试自愈，
-// 长生成（streamText）保持 maxRetries: 0 遇 429 直接失败不重试。
-// （离线：真渠道 provider + stub 全局 fetch 零外呼，模式参考 llm-real.test.ts；
-//   buildTestApp 会清空渠道密钥，故在测试内自建 provider，不依赖全局 config）
+
+
+
+
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { streamText } from 'ai'
 import { createRealLlm } from '../src/llm/real.js'
 import { LlmQualityScorer } from '../src/generation/review/index.js'
 import type { AgentConfig } from '../src/server/config.js'
 
-// 最小完整配置（两渠道齐全；baseUrl 指向不存在的 test 域，配合 stub fetch 保证零外呼）
+
 function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
     port: 0,
@@ -31,7 +31,7 @@ function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   }
 }
 
-// 质检通过补全响应（content 为纯 JSON 文本——#19 起 LlmQualityScorer 走 generateObject 文本解析路径，schema 直接产出 typed 对象）
+
 const QUALITY_PASS_COMPLETION = {
   id: 'chatcmpl-retry',
   object: 'chat.completion',
@@ -45,7 +45,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 }
 
-// 响应序列桩：按序出队，超出队列重复最后一个（覆盖「持续 429」场景）；返回 calls 供断言调用次数
+
 function stubFetchQueue(responses: Response[]) {
   const calls: Array<{ url: string; body: Record<string, unknown> }> = []
   let index = 0
@@ -95,7 +95,7 @@ describe('长生成（streamText，maxRetries: 0）——遇 429 直接失败不
       prompt: 'hi',
       maxRetries: 0,
     })
-    // 错误以流内 error part 交付（与 workflow 消费方式一致）；迭代本身抛错也按失败计
+
     const errors: unknown[] = []
     try {
       for await (const part of result.fullStream) {

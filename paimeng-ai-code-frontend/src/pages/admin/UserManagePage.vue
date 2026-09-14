@@ -1,6 +1,6 @@
 <template>
   <div id="userManagePage">
-    <!-- 搜索表单 -->
+
     <a-form layout="inline" :model="searchParams" @finish="doSearch">
       <a-form-item label="账号">
         <a-input v-model:value="searchParams.userAccount" placeholder="输入账号" />
@@ -13,7 +13,7 @@
       </a-form-item>
     </a-form>
     <a-divider />
-    <!-- 表格 -->
+
     <a-table
       :columns="columns"
       :data-source="data"
@@ -83,17 +83,17 @@ const columns = [
   },
 ]
 
-// 展示的数据
+
 const data = ref<API.UserVO[]>([])
 const total = ref(0)
 
-// 搜索条件
+
 const searchParams = reactive<API.UserQueryRequest>({
   pageNum: 1,
   pageSize: 10,
 })
 
-// 获取数据
+
 const fetchData = async () => {
   const res = await listUserVoByPage({
     ...searchParams,
@@ -106,7 +106,7 @@ const fetchData = async () => {
   }
 }
 
-// 分页参数
+
 const pagination = computed(() => {
   return {
     current: searchParams.pageNum ?? 1,
@@ -117,21 +117,21 @@ const pagination = computed(() => {
   }
 })
 
-// 表格分页变化时的操作
+
 const doTableChange = (page: { current: number; pageSize: number }) => {
   searchParams.pageNum = page.current
   searchParams.pageSize = page.pageSize
   fetchData()
 }
 
-// 搜索数据
+
 const doSearch = () => {
-  // 重置页码
+
   searchParams.pageNum = 1
   fetchData()
 }
 
-// 删除数据
+
 const doDelete = async (id: number) => {
   if (!id) {
     return
@@ -139,14 +139,14 @@ const doDelete = async (id: number) => {
   const res = await deleteUser({ id })
   if (res.data.code === 0) {
     message.success('删除成功')
-    // 刷新数据
+
     fetchData()
   } else {
     message.error('删除失败')
   }
 }
 
-// 页面加载时请求一次
+
 onMounted(() => {
   fetchData()
 })

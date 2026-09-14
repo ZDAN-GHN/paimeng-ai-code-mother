@@ -29,7 +29,7 @@
 </template>
 
 <script setup lang="ts">
-// 访谈选择题卡（Issue #13）：对话流内渲染五维访谈题目，用户点选作答后由父页面提交 Agent
+
 import { reactive, watch } from 'vue'
 import { BulbOutlined } from '@ant-design/icons-vue'
 import type { InterviewAnswer, InterviewQuestion } from '@/utils/agentSse'
@@ -46,10 +46,10 @@ const emit = defineEmits<{
   submit: [answers: InterviewAnswer[]]
 }>()
 
-// 各维度选择值（key → optionId；未选即 undefined，提交时视为跳过）
+
 const selections = reactive<Record<string, string | undefined>>({})
 
-// 轮次变化（新一轮题目到达）时重置选择
+
 watch(
   () => props.questions,
   () => {

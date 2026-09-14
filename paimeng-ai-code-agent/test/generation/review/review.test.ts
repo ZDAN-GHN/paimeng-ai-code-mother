@@ -1,6 +1,6 @@
-// 三重门禁质检器测试（Issue #9；#19 质检输出迁移 generateObject + zod schema）：
-// 结构化质检分（schema 显式契约 + NoObjectGeneratedError 错误路径）、build 门禁（html 静态校验）、
-// 视觉 diff 门禁（以已确认线框为基准：基准缺失失败、覆盖线框页面区段通过、缺区段失败）、门禁汇总
+
+
+
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { customProvider } from 'ai'
@@ -19,13 +19,13 @@ import {
 import { runReviewGates, type ReviewContext, type ReviewGate } from '../../../src/generation/review/types.js'
 import { createScriptedLlm, type LlmProvider } from '../../../src/llm/index.js'
 
-// 构造评审上下文（默认 html 类型 + 指定线框基准路径）
+
 function makeContext(overrides: Partial<ReviewContext> = {}): ReviewContext {
   return { workspacePath: makeWorkspaceRoot(), wireframePath: undefined, codeGenType: 'html', codeContent: '', ...overrides }
 }
 
-// 返回坏输出的质检假模型：驱动 generateObject 抛 NoObjectGeneratedError 的 SDK 错误路径
-// （#19 等价迁移：原 parseQualityScore「无法解析 → 视为未通过」的手搓回退）
+
+
 class BrokenOutputQualityModel implements LanguageModelV2 {
   readonly specificationVersion = 'v2' as const
   readonly provider = 'scripted'
@@ -41,7 +41,7 @@ class BrokenOutputQualityModel implements LanguageModelV2 {
     }
   }
   async doStream() {
-    // 质检走 generateObject（doGenerate）；doStream 为接口完整性（立即闭合的空流，不应被消费）
+
     return {
       stream: new ReadableStream<LanguageModelV2StreamPart>({
         start(controller) {
@@ -68,8 +68,8 @@ describe('结构化质检分（Issue #9）', () => {
     const scorer = new LlmQualityScorer(createScriptedLlm('quality-fail-always'))
     const score = await scorer.score('<html><body>bad</body></html>')
     expect(score.isValid).toBe(false)
-    // #19 等价迁移：原「parseQualityScore 合法 JSON → isValid/grade/errors/suggestions」——
-    // 模型输出的 errors/suggestions 经 schema 直接成为 typed 对象字段，grade 本地推导（100 - 1*20）
+
+
     expect(score.errors).toEqual(['生成页面缺少必要的视觉还原（模拟质检失败）'])
     expect(score.suggestions).toEqual(['按已确认线框调整页面布局与区块结构'])
     expect(score.grade).toBe(80)
@@ -89,7 +89,7 @@ describe('结构化质检分（Issue #9）', () => {
     expect(score.isValid).toBe(false)
     expect(score.grade).toBe(0)
     expect(score.errors).toEqual(['质检结果无法解析，视为未通过'])
-    // 解析失败但模型调用已发生：usage 计量不丢（等价原 generateText 成功后本地解析失败的场景）
+
     expect(score.usage).toEqual({ inputTokens: 5, outputTokens: 5, totalTokens: 10 })
   })
 
@@ -298,7 +298,7 @@ describe('build 门禁（Issue #9）', () => {
 })
 
 describe('视觉 diff 门禁（Issue #9，基准 = 已确认线框）', () => {
-  // 生成含站点地图页面区段的线框 HTML（对齐 wireframe.ts 的结构：section class="page" id="page-N"）
+
   function wireframeHtml(anchors: string[]): string {
     return `<!DOCTYPE html><html><head><title>线框</title></head><body>
 ${anchors.map((id, i) => `<section class="page" id="${id}"><h2>页面 ${i + 1}</h2></section>`).join('\n')}

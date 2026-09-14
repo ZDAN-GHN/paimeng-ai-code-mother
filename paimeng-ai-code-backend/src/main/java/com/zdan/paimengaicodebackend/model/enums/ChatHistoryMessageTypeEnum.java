@@ -3,11 +3,7 @@ package com.zdan.paimengaicodebackend.model.enums;
 import cn.hutool.core.util.ObjUtil;
 import lombok.Getter;
 
-/**
- * 会话历史消息类型
- *
- * @author LXH
- */
+
 @Getter
 public enum ChatHistoryMessageTypeEnum {
 
@@ -22,12 +18,7 @@ public enum ChatHistoryMessageTypeEnum {
         this.value = value;
     }
 
-    /**
-     * 根据 value 获取枚举
-     *
-     * @param value 枚举值的value
-     * @return 枚举值
-     */
+
     public static ChatHistoryMessageTypeEnum getEnumByValue(String value) {
         if (ObjUtil.isEmpty(value)) {
             return null;

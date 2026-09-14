@@ -8,11 +8,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-/**
- * Redisson 客户端配置
- *
- * @author LXH
- */
+
 @Configuration
 public class RedissonConfig {
 
@@ -32,7 +28,7 @@ public class RedissonConfig {
     public RedissonClient redissonClient() {
         Config config = new Config();
         String address = "redis://" + redisHost + ":" + redisPort;
-        // 单机配置
+
         SingleServerConfig singleServerConfig = config.useSingleServer()
                 .setAddress(address)
                 .setDatabase(redisDatabase)
@@ -43,7 +39,7 @@ public class RedissonConfig {
                 .setTimeout(3000)
                 .setRetryAttempts(3)
                 .setRetryInterval(1500);
-        // 如果有密码则设置密码
+
         if (redisPassword != null && !redisPassword.isEmpty()) {
             singleServerConfig.setPassword(redisPassword);
         }

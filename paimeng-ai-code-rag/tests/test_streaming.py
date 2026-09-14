@@ -1,4 +1,4 @@
-"""SSE 流式输出适配测试（T12）：事件映射、落盘、错误事件。"""
+
 
 import asyncio
 import json
@@ -47,7 +47,7 @@ class _FakeExecutor:
 
 
 class _RecordingCallback:
-    """记录完成回调的假回调函数。"""
+
 
     def __init__(self) -> None:
         self.calls = []
@@ -58,7 +58,7 @@ class _RecordingCallback:
 
 
 def _collect(request, executor, guardrail=None, callback=None) -> str:
-    """收集 stream_events 的完整 SSE 输出。"""
+
 
     async def _run() -> str:
         parts = [
@@ -76,7 +76,7 @@ def _collect(request, executor, guardrail=None, callback=None) -> str:
 
 
 def test_html_stream_yields_text_and_writes_workspace():
-    """html：纯文本块 SSE + 解析落盘 index.html。"""
+
     req = _request(codeGenType="html", workspacePath=f"{WORKSPACE_ROOT}/stream_html")
     out = _collect(req, _FakeExecutor(items=["```html\n", "<h1>hi</h1>\n", "```"]))
     assert "data: ```html" in out
@@ -85,7 +85,7 @@ def test_html_stream_yields_text_and_writes_workspace():
 
 
 def test_multi_file_stream_writes_three_files():
-    """multi_file：三文件解析落盘。"""
+
     req = _request(codeGenType="multi_file", workspacePath=f"{WORKSPACE_ROOT}/stream_mf")
     content = "```html\n<h1>a</h1>\n```\n```css\nbody{}\n```\n```javascript\nconsole.log(1)\n```"
     out = _collect(req, _FakeExecutor(items=[content]))
@@ -96,7 +96,7 @@ def test_multi_file_stream_writes_three_files():
 
 
 def test_vue_stream_emits_structured_events():
-    """vue_project：事件 dict 归一化为 §1.3 StreamMessage JSON。"""
+
     req = _request(codeGenType="vue_project")
     events = [
         {"type": "ai_thinking", "text": "分析中"},
@@ -124,7 +124,7 @@ def test_vue_stream_emits_structured_events():
 
 
 def test_guardrail_rejection_emits_error_event():
-    """护轨拒绝：发 error 事件且不再发业务事件。"""
+
     req = _request()
     out = _collect(req, _FakeExecutor(items=["should not appear"]), guardrail=_FakeGuardrail(allowed=False))
     assert "event: error" in out
@@ -133,7 +133,7 @@ def test_guardrail_rejection_emits_error_event():
 
 
 def test_generation_exception_emits_error_event():
-    """生成异常：发 error 事件。"""
+
     req = _request()
     out = _collect(req, _FakeExecutor(error=RuntimeError("模型调用失败")))
     assert "event: error" in out
@@ -141,7 +141,7 @@ def test_generation_exception_emits_error_event():
 
 
 def test_success_callback_fired_after_workspace_write():
-    """html 成功：工作区落盘后触发 success 回调。"""
+
     req = _request(codeGenType="html", workspacePath=f"{WORKSPACE_ROOT}/stream_cb")
     cb = _RecordingCallback()
     _collect(req, _FakeExecutor(items=["```html\n<h1>hi</h1>\n```"]), callback=cb)
@@ -153,7 +153,7 @@ def test_success_callback_fired_after_workspace_write():
 
 
 def test_failed_callback_fired_on_generation_error():
-    """生成异常：触发 failed 回调并携带 message。"""
+
     req = _request()
     cb = _RecordingCallback()
     _collect(req, _FakeExecutor(error=RuntimeError("模型调用失败")), callback=cb)
@@ -164,7 +164,7 @@ def test_failed_callback_fired_on_generation_error():
 
 
 def test_failed_callback_on_guardrail_rejection():
-    """护轨拒绝：触发 failed 回调。"""
+
     req = _request()
     cb = _RecordingCallback()
     _collect(req, _FakeExecutor(items=["x"]), guardrail=_FakeGuardrail(allowed=False), callback=cb)

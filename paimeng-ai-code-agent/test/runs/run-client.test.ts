@@ -7,8 +7,8 @@ import {
   type RunCreateRequest,
 } from '../../src/runs/runClient.js'
 
-// Java 内部 API 客户端单元测试：注入 mock fetch，验证请求形状（方法/路径/头/体）
-// 与错误映射（401 / 409 + 文案 / 业务码非 0 / 网络失败）
+
+
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -17,7 +17,7 @@ function jsonResponse(payload: unknown, status = 200): Response {
   })
 }
 
-// 记录 fetch 调用形状（避免依赖 vitest mock.calls 的元组类型推断）
+
 interface CapturedCall {
   url: string
   method: string | undefined

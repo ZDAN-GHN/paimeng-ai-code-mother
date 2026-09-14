@@ -22,13 +22,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/**
- * CreditController 测试（standalone MockMvc，纯单元测试不依赖 Spring 上下文/DB）
- * 覆盖：管理员充值（成功/非法参数）、当前登录用户余额查询（成功/未登录）。
- * 注：@AuthCheck(ADMIN_ROLE) 由 AuthInterceptor 拦截器实现，standalone 不装配，此处仅验证端点行为。
- *
- * @author LXH
- */
+
 class CreditControllerTest {
 
     private CreditService creditService;
@@ -51,9 +45,7 @@ class CreditControllerTest {
         return request;
     }
 
-    /**
-     * 管理员充值成功 → 200 true
-     */
+
     @Test
     void rechargeReturns200() throws Exception {
         mockMvc.perform(post("/credit/recharge")
@@ -65,9 +57,7 @@ class CreditControllerTest {
         org.mockito.Mockito.verify(creditService).recharge(1L, 200);
     }
 
-    /**
-     * 充值非正积分数（service 抛 PARAMS_ERROR）→ 全局异常处理
-     */
+
     @Test
     void rechargeInvalidCreditsReturnsError() throws Exception {
         org.mockito.Mockito.doThrow(new BusinessException(ErrorCode.PARAMS_ERROR, "充值积分数必须为正数"))
@@ -80,9 +70,7 @@ class CreditControllerTest {
                 .andExpect(jsonPath("$.code").value(ErrorCode.PARAMS_ERROR.getCode()));
     }
 
-    /**
-     * 当前登录用户余额查询 → 200 balance
-     */
+
     @Test
     void getBalanceReturns200() throws Exception {
         User user = new User();
@@ -96,9 +84,7 @@ class CreditControllerTest {
                 .andExpect(jsonPath("$.data").value(320));
     }
 
-    /**
-     * 余额查询未登录（service 抛 NOT_LOGIN）→ 40100
-     */
+
     @Test
     void getBalanceWithoutLoginReturnsNotLogin() throws Exception {
         when(userService.getLoginUser(any(HttpServletRequest.class)))

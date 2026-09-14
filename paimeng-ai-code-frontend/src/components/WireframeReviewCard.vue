@@ -18,7 +18,7 @@
 </template>
 
 <script setup lang="ts">
-// 线框确认卡（Issue #13）：线框闸门的用户侧——确认进入 codegen / 重生成 / 回访谈
+
 import { LayoutOutlined } from '@ant-design/icons-vue'
 
 defineProps<{

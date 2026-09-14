@@ -35,11 +35,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
-/**
- * 应用 服务层实现。
- *
- * @author LXH
- */
+
 @Slf4j
 @Service
 public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppService {
@@ -58,27 +54,27 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
     @Override
     public Long createApp(AppAddRequest appAddRequest, User loginUser) {
-        // 参数校验
+
         String initPrompt = appAddRequest.getInitPrompt();
         ThrowUtils.throwIf(StrUtil.isBlank(initPrompt), ErrorCode.PARAMS_ERROR, "初始化prompt不能为空");
 
-        // 构造入库对象
+
         App app = new App();
         BeanUtil.copyProperties(appAddRequest, app);
         app.setUserId(loginUser.getId());
 
-        // 应用名称暂时为 initPrompt 前 12 位
+
         app.setAppName(initPrompt.substring(0, Math.min(initPrompt.length(), 12)));
 
-        // 使用 AI 智能选择代码生成类型（多例模式）
-        // AiCodeGenTypeRoutingService aiCodeGenTypeRoutingService = aiCodeGenTypeRoutingServiceFactory.createAiCodeGenTypeRoutingService();
-        // CodeGenTypeEnum selectedCodeGenType = aiCodeGenTypeRoutingService.routeCodeGenType(initPrompt);
 
-        // 本地 HTML 链路验收期间固定单文件类型，避免路由模型选择其他生成形态。
+
+
+
+
         CodeGenTypeEnum selectedCodeGenType = CodeGenTypeEnum.HTML;
         app.setCodeGenType(selectedCodeGenType.getValue());
 
-        // 插入数据库
+
         boolean result = this.save(app);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         log.info("应用创建成功，ID: {}，类型: {}", app.getId(), selectedCodeGenType.getValue());
@@ -94,11 +90,11 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         if (appId <= 0) {
             return false;
         }
-        // 删除应用
+
         if (!super.removeById(id)) {
             ThrowUtils.throwForOperation("删除应用失败");
         }
-        // 开启虚拟线程进行垃圾清理（删除对应的会话历史）
+
         Thread.startVirtualThread(() -> {
             try {
                 chatHistoryService.removeByAppId(appId);
@@ -111,38 +107,38 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
     @Override
     public String deployApp(Long appId, User loginUser) {
-        // 参数校验
+
         validateParam(appId, loginUser);
-        // 身份校验
+
         App app = Optional.ofNullable(this.getById(appId))
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAMS_ERROR, "应用不存在"));
         if (!app.getUserId().equals(loginUser.getId())) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "无权限部署应用");
         }
-        // 检查是否已有 deployKey
+
         String deployKey = app.getDeployKey();
-        // 如果没有则生成部署 6 位 deployKey
+
         if (StrUtil.isBlank(deployKey)) {
-            // 如果 deployKey 和其他用户的冲突，deployKey 有唯一键，插入数据库直接失败，这里不用校验是否重复了（实际重复概率约等于不可能）
+
             deployKey = RandomUtil.randomString(6);
         }
-        // 获取应用生成类型，获取代码生成路径（应用访问路径）
+
         String codeGenType = app.getCodeGenType();
         String sourceDirName = StrUtil.format("{}_{}", codeGenType, appId);
         String sourceDirPath = AppConstant.CODE_OUTPUT_ROOT_DIR + File.separator + sourceDirName;
         File sourceDir = new File(sourceDirPath);
-        // 检查已生成应用的路径是否存在
+
         if (!sourceDir.exists() || !FileUtil.isDirectory(sourceDir)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用代码路径不存在，请先生成应用");
         }
-        // 构建项目，将项目构建结果作为部署源
+
         sourceDir = BuilderExecutor.doBuild(
                 Objects.requireNonNull(
                         CodeGenTypeEnum.getEnumByValue(codeGenType)
                 ),
                 sourceDirPath
         );
-        // 复制文件到部署目录 todo 后续可能是上传到其他的服务器上
+
         String deployDirPath = AppConstant.CODE_DEPLOY_ROOT_DIR + File.separator + deployKey;
         try {
             FileUtil.copyContent(sourceDir, new File(deployDirPath), true);
@@ -150,14 +146,14 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             log.error("failed to deploy app, app: {}, userId: {}", app, loginUser.getId());
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "部署失败，请稍后再试");
         }
-        // 将部署消息上传到数据库中
+
         app.setDeployKey(deployKey);
         app.setDeployedTime(LocalDateTime.now());
         boolean updateRes = this.updateById(app);
         ThrowUtils.throwIf(!updateRes, ErrorCode.OPERATION_ERROR, "更新应用部署信息失败");
-        // 返回可访问的 URL 路径
+
         String appDeployUrl = StrUtil.format("{}/{}", AppConstant.CODE_DEPLOY_HOST, deployKey);
-        // 异步执行截图并更新应用封面
+
         generateAppScreenshotAsync(appId, appDeployUrl);
         return appDeployUrl;
     }
@@ -174,16 +170,12 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         });
     }
 
-    /**
-     * 参数校验 - 2 param
-     */
+
     private void validateParam(Long appId, User loginUser) {
         validateParam(appId, "override", loginUser);
     }
 
-    /**
-     * 参数校验 - 3 param
-     */
+
     private void validateParam(Long appId, String message, User loginUser) {
         if (appId == null || StrUtil.isBlank(message) || loginUser == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "所有参数均不能为空");
@@ -205,7 +197,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         }
         AppVO appVO = new AppVO();
         BeanUtil.copyProperties(app, appVO);
-        // 关联查询用户信息
+
         Long userId = app.getUserId();
         if (userId != null) {
             User user = userService.getById(userId);
@@ -220,7 +212,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
         if (CollUtil.isEmpty(appList)) {
             return new ArrayList<>();
         }
-        // 批量获取用户信息，避免 N+1 查询问题
+
         Set<Long> userIds = appList.stream()
                 .map(App::getUserId)
                 .collect(Collectors.toSet());
