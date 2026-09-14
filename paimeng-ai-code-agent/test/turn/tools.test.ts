@@ -17,6 +17,7 @@ function makeContext() {
     }),
     replay: vi.fn(async () => ({ events: [], lastSeq: 0, hasMore: false })),
     assertHumanApproved: vi.fn(async () => ({ ok: false as const, reason: '未找到人类批准' })),
+    consumeHumanApproval: vi.fn(async () => ({ ok: false as const, reason: '未找到人类批准' })),
   }
   return { context: { appId: 'app-1', userId: 'user-1', turnId: 'turn-1', sessionStore, files, images }, batches, files, images }
 }

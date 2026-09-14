@@ -75,19 +75,8 @@ export function createApprovalService(store: SessionStore): ApprovalService {
     },
 
     async consume(input) {
-      const result = await store.assertHumanApproved(input)
+      const result = await store.consumeHumanApproval(input)
       if (!result.ok) throw new Error(`审批不可消费: ${result.reason}`)
-      await store.appendBatch({
-        appId: input.appId,
-        userId: input.userId,
-        turnId: input.turnId,
-        batchSeq: 1,
-        events: [{
-          kind: 'approval/consumed',
-          source: 'system',
-          payload: { approvalId: input.approvalId },
-        }],
-      })
     },
   }
 }

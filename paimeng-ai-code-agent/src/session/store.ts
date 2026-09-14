@@ -22,6 +22,7 @@ export interface SessionStore {
     hasMore: boolean
   }>
   assertHumanApproved(input: { appId: string; approvalId: string }): Promise<{ ok: true } | { ok: false; reason: string }>
+  consumeHumanApproval(input: { appId: string; userId: string; turnId: string; approvalId: string }): Promise<{ ok: true } | { ok: false; reason: string }>
 }
 
 type EventRow = QueryResultRow & {
@@ -159,19 +160,80 @@ export class PgSessionStore implements SessionStore {
   }
 
   async assertHumanApproved(input: { appId: string; approvalId: string }): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const decided = await this.pool.query(
-      `SELECT 1 FROM session_event
+    const decided = await this.pool.query<{ seq: string | number; decision: unknown }>(
+      `SELECT seq, payload->>'decision' AS decision FROM session_event
        WHERE app_id = $1 AND kind = 'approval/decided' AND source = 'human'
-         AND payload->>'approvalId' = $2 AND payload->>'decision' = 'allowed' LIMIT 1`,
+         AND payload->>'approvalId' = $2 ORDER BY seq DESC LIMIT 1`,
       [input.appId, input.approvalId],
     )
-    if (!decided.rowCount) return { ok: false, reason: '未找到人类批准' }
+    const latest = decided.rows[0]
+    if (!latest || latest.decision !== 'allowed') return { ok: false, reason: '未找到人类批准' }
+    const asked = await this.pool.query(
+      `SELECT 1 FROM session_event
+       WHERE app_id = $1 AND kind = 'approval/asked' AND source = 'system'
+         AND payload->>'approvalId' = $2 AND payload->>'action' = 'start_generation' AND seq < $3 LIMIT 1`,
+      [input.appId, input.approvalId, latest.seq],
+    )
+    if (!asked.rowCount) return { ok: false, reason: '未找到审批请求' }
     const consumed = await this.pool.query(
       `SELECT 1 FROM session_event
-       WHERE app_id = $1 AND kind = 'approval/consumed' AND payload->>'approvalId' = $2 LIMIT 1`,
-      [input.appId, input.approvalId],
+       WHERE app_id = $1 AND kind = 'approval/consumed' AND payload->>'approvalId' = $2 AND seq > $3 LIMIT 1`,
+      [input.appId, input.approvalId, latest.seq],
     )
     if (consumed.rowCount) return { ok: false, reason: '审批已消费' }
     return { ok: true }
+  }
+
+  async consumeHumanApproval(input: { appId: string; userId: string; turnId: string; approvalId: string }): Promise<{ ok: true } | { ok: false; reason: string }> {
+    let client: PoolClient | undefined
+    try {
+      client = await this.pool.connect()
+      await client.query('BEGIN')
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [input.appId])
+      const decided = await client.query<{ seq: string | number; decision: unknown }>(
+        `SELECT seq, payload->>'decision' AS decision FROM session_event
+         WHERE app_id = $1 AND kind = 'approval/decided' AND source = 'human'
+           AND payload->>'approvalId' = $2 ORDER BY seq DESC LIMIT 1`,
+        [input.appId, input.approvalId],
+      )
+      const latest = decided.rows[0]
+      if (!latest || latest.decision !== 'allowed') {
+        await client.query('ROLLBACK')
+        return { ok: false, reason: '未找到人类批准' }
+      }
+      const asked = await client.query(
+        `SELECT 1 FROM session_event
+         WHERE app_id = $1 AND kind = 'approval/asked' AND source = 'system'
+           AND payload->>'approvalId' = $2 AND payload->>'action' = 'start_generation' AND seq < $3 LIMIT 1`,
+        [input.appId, input.approvalId, latest.seq],
+      )
+      if (!asked.rowCount) {
+        await client.query('ROLLBACK')
+        return { ok: false, reason: '未找到审批请求' }
+      }
+      const consumed = await client.query(
+        `SELECT 1 FROM session_event
+         WHERE app_id = $1 AND kind = 'approval/consumed' AND payload->>'approvalId' = $2 AND seq > $3 LIMIT 1`,
+        [input.appId, input.approvalId, latest.seq],
+      )
+      if (consumed.rowCount) {
+        await client.query('ROLLBACK')
+        return { ok: false, reason: '审批已消费' }
+      }
+      await client.query(
+        `INSERT INTO session_event
+           (app_id, user_id, run_id, seq, turn_id, batch_seq, event_index, kind, version, ignorable, source, payload)
+         SELECT $1, $2, NULL, COALESCE(MAX(seq), 0) + 1, $3, 1, 0, 'approval/consumed', 1, false, 'system', $4::jsonb
+           FROM session_event WHERE app_id = $1`,
+        [input.appId, input.userId, input.turnId, JSON.stringify({ approvalId: input.approvalId })],
+      )
+      await client.query('COMMIT')
+      return { ok: true }
+    } catch {
+      if (client) await client.query('ROLLBACK').catch(() => undefined)
+      return { ok: false, reason: '审批存储不可用' }
+    } finally {
+      client?.release()
+    }
   }
 }

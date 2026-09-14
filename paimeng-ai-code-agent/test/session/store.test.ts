@@ -5,6 +5,7 @@ import { PgSessionStore } from '../../src/session/store.js'
 
 
 type QueryResult = { rowCount: number; rows: any[] }
+type QueryCall = { sql: string; params: unknown[] | undefined }
 
 function fakeClient(existingRows: any[]): { client: any; queries: string[] } {
   const queries: string[] = []
@@ -28,6 +29,21 @@ function eventRow(overrides: Record<string, unknown> = {}): any {
   }
 }
 
+function approvalClient(input: { decisionRows: any[]; askedRows: any[]; consumedRows?: any[] }): { client: any; calls: QueryCall[] } {
+  const calls: QueryCall[] = []
+  const client = {
+    query: vi.fn(async (sql: string, params?: unknown[]): Promise<QueryResult> => {
+      calls.push({ sql, params })
+      if (sql.includes("kind = 'approval/decided'")) return { rowCount: input.decisionRows.length, rows: input.decisionRows }
+      if (sql.includes("kind = 'approval/asked'")) return { rowCount: input.askedRows.length, rows: input.askedRows }
+      if (sql.includes("kind = 'approval/consumed'")) return { rowCount: input.consumedRows?.length ?? 0, rows: input.consumedRows ?? [] }
+      return { rowCount: 0, rows: [] }
+    }),
+    release: vi.fn(),
+  }
+  return { client, calls }
+}
+
 describe('PgSessionStore deterministic boundaries', () => {
   it('rejects same batch replay when event content differs', async () => {
     const { client } = fakeClient([eventRow()])
@@ -38,6 +54,47 @@ describe('PgSessionStore deterministic boundaries', () => {
     })).rejects.toThrow('批次重放事件内容不一致')
   })
 
+  it('consumes only an earlier matching generation request inside the locked transaction', async () => {
+    const { client, calls } = approvalClient({ decisionRows: [{ seq: '2', decision: 'allowed' }], askedRows: [{ seq: '1' }] })
+    const store = new PgSessionStore({ connect: vi.fn(async () => client) } as any)
+    await expect(store.consumeHumanApproval({ appId: 'app', userId: 'user', turnId: 'consume', approvalId: 'ap-1' })).resolves.toEqual({ ok: true })
+    expect(calls).toHaveLength(7)
+    expect(calls[0]?.sql).toBe('BEGIN')
+    expect(calls[1]).toMatchObject({ sql: expect.stringContaining('pg_advisory_xact_lock'), params: ['app'] })
+    expect(calls[2]).toMatchObject({ params: ['app', 'ap-1'] })
+    expect(calls[2]?.sql).toContain("kind = 'approval/decided' AND source = 'human'")
+    expect(calls[3]).toMatchObject({ params: ['app', 'ap-1', '2'] })
+    expect(calls[3]?.sql).toContain("kind = 'approval/asked' AND source = 'system'")
+    expect(calls[3]?.sql).toContain("payload->>'action' = 'start_generation' AND seq < $3")
+    expect(calls[4]).toMatchObject({ params: ['app', 'ap-1', '2'] })
+    expect(calls[4]?.sql).toContain("kind = 'approval/consumed'")
+    expect(calls[4]?.sql).toContain('seq > $3')
+    expect(calls[5]).toMatchObject({ params: ['app', 'user', 'consume', JSON.stringify({ approvalId: 'ap-1' })] })
+    expect(calls[5]?.sql).toContain("'approval/consumed'")
+    expect(calls[6]?.sql).toBe('COMMIT')
+  })
+
+  it('rolls back rejected or consumed decisions without appending', async () => {
+    for (const input of [
+      { decisionRows: [{ seq: '2', decision: 'rejected' }], askedRows: [], consumedRows: [], reason: '未找到人类批准' },
+      { decisionRows: [{ seq: '2', decision: 'allowed' }], askedRows: [{ seq: '1' }], consumedRows: [{ seq: '3' }], reason: '审批已消费' },
+    ]) {
+      const { client, calls } = approvalClient(input)
+      const store = new PgSessionStore({ connect: vi.fn(async () => client) } as any)
+      await expect(store.consumeHumanApproval({ appId: 'app', userId: 'user', turnId: 'consume', approvalId: 'ap-1' })).resolves.toEqual({ ok: false, reason: input.reason })
+      expect(calls.some((call) => call.sql.startsWith('INSERT INTO'))).toBe(false)
+      expect(calls.at(-1)?.sql).toBe('ROLLBACK')
+    }
+  })
+
+  it('rolls back without insert when no earlier asked event exists', async () => {
+    const { client, calls } = approvalClient({ decisionRows: [{ seq: '2', decision: 'allowed' }], askedRows: [] })
+    const store = new PgSessionStore({ connect: vi.fn(async () => client) } as any)
+    await expect(store.consumeHumanApproval({ appId: 'app', userId: 'user', turnId: 'consume', approvalId: 'ap-1' })).resolves.toEqual({ ok: false, reason: '未找到审批请求' })
+    expect(calls.some((call) => call.sql === 'COMMIT')).toBe(false)
+    expect(calls.some((call) => call.sql.startsWith('INSERT INTO'))).toBe(false)
+    expect(calls.at(-1)?.sql).toBe('ROLLBACK')
+  })
   it('advances replay cursor past ignorable unknown rows', async () => {
     const pool = { query: vi.fn(async () => ({
       rows: [eventRow({ seq: '7', kind: 'future/event', ignorable: true }), eventRow({ seq: '8', kind: 'future/other', ignorable: true })],
@@ -46,6 +103,7 @@ describe('PgSessionStore deterministic boundaries', () => {
     await expect(store.replay({ appId: 'app', afterSeq: 6, limit: 2 })).resolves.toEqual({ events: [], lastSeq: 8, hasMore: false })
   })
 })
+
 
 const enabled = Boolean(process.env.PGHOST && process.env.PGDATABASE && process.env.PGUSER)
 
@@ -83,6 +141,10 @@ describe.skipIf(!enabled)('PgSessionStore integration', () => {
     expect(await store.assertHumanApproved({ appId, approvalId: 'ap-model' })).toEqual({ ok: false, reason: '未找到人类批准' })
     await store.appendBatch({
       appId, userId, turnId: `turn-${turn++}`, batchSeq: 1,
+      events: [{ kind: 'approval/asked', source: 'system', payload: { approvalId: 'ap-1', action: 'start_generation' } }],
+    })
+    await store.appendBatch({
+      appId, userId, turnId: `turn-${turn++}`, batchSeq: 1,
       events: [{ kind: 'approval/decided', source: 'human', payload: { approvalId: 'ap-1', decision: 'allowed' } }],
     })
     expect(await store.assertHumanApproved({ appId, approvalId: 'ap-1' })).toEqual({ ok: true })
@@ -99,6 +161,6 @@ describe.skipIf(!enabled)('PgSessionStore integration', () => {
       events: [{ kind: 'user/message', source: 'human', payload: { text: `concurrent-${index}` } }],
     })))
     expect(new Set(results.map((result) => result.seqFrom)).size).toBe(4)
-    expect(results.map((result) => result.seqFrom).sort((a, b) => a - b)).toEqual([6, 7, 8, 9])
+    expect(results.map((result) => result.seqFrom).sort((a, b) => a - b)).toEqual([7, 8, 9, 10])
   })
 })

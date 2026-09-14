@@ -24,6 +24,9 @@ function memorySessionStore(options: { failOnAppend?: number } = {}): SessionSto
     async assertHumanApproved() {
       return { ok: false, reason: 'not implemented in #38' }
     },
+    async consumeHumanApproval() {
+      return { ok: false, reason: 'not implemented in #39' }
+    },
   }
 }
 

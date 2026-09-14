@@ -95,6 +95,7 @@ describe('session context reconstruction', () => {
           : { events: secondPage, lastSeq: 6, hasMore: false }
       },
       assertHumanApproved: async () => ({ ok: false, reason: '未找到人类批准' }),
+      consumeHumanApproval: async () => ({ ok: false, reason: '未找到人类批准' }),
     }
     const result = await loadSessionContext(store, { appId: 'app-1', userId: 'user-1', replayLimit: 3 })
     expect(cursors).toEqual([0, 3])
@@ -110,6 +111,7 @@ describe('session context reconstruction', () => {
         return { events: contextEvents(), lastSeq: 6, hasMore: false }
       },
       assertHumanApproved: async () => ({ ok: false, reason: '未找到人类批准' }),
+      consumeHumanApproval: async () => ({ ok: false, reason: '未找到人类批准' }),
     }
     const result = await loadSessionContext(store, { appId: 'app-1', userId: 'user-1', afterSeq: 5 })
     expect(result.history).toHaveLength(4)
@@ -121,6 +123,7 @@ describe('session context reconstruction', () => {
       appendBatch: async () => ({ seqFrom: 1, seqTo: 1, firstSeqNext: 2, appended: 1 }),
       replay: async () => ({ events: [], lastSeq: 0, hasMore: true }),
       assertHumanApproved: async () => ({ ok: false, reason: '未找到人类批准' }),
+      consumeHumanApproval: async () => ({ ok: false, reason: '未找到人类批准' }),
     }
     await expect(loadSessionContext(store, { appId: 'app-1', userId: 'user-1' })).rejects.toThrow('会话事件重放游标未前进')
   })
@@ -134,6 +137,7 @@ describe('session context reconstruction', () => {
         return { events, lastSeq: 6, hasMore: false }
       },
       assertHumanApproved: async () => ({ ok: false, reason: '未找到人类批准' }),
+      consumeHumanApproval: async () => ({ ok: false, reason: '未找到人类批准' }),
     }
     const result = await loadSessionContext(store, { appId: 'app-1', userId: 'user-1', afterSeq: 0, replayLimit: 100 })
     expect(result.lastSeq).toBe(6)
