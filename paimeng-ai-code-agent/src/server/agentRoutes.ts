@@ -226,8 +226,8 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
       throw httpError(409, `当前阶段（${run.phase}）不能生成线框`)
     }
     const context = parseContext(run.context)
-    if (!context.interview) {
-      throw httpError(400, '请先完成需求访谈再生成线框')
+    if (!context.interview || context.interview.complete !== true) {
+      throw httpError(400, '请先完成需求访谈再生成线框（访谈尚未完成）')
     }
 
     // 每日配额（线框免费但独立限频）：超限 → 429 明确报错

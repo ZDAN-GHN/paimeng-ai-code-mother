@@ -2,7 +2,7 @@
 // 覆盖验收口径：访谈最多 2 轮、信息足够跳过剩余轮次；线框单文件 HTML 含站点地图 ≤5 页；
 // 两次独立会话完成「访谈 → 线框 → 确认」；线框免费（不扣积分）+ 超每日次数被限频（429）。
 // run 状态经「内存版 Java 内部 API」持久化（模拟 generation_run 表跨请求存活）。
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { buildTestApp, makeToken, makeWorkspaceRoot } from '../helpers.js'
@@ -223,6 +223,63 @@ describe('POST /agent/wireframe（免费线框 + 每日限频）', () => {
     expect(pageCount).toBeLessThanOrEqual(5)
   })
 
+  it('未完成访谈 → 400 明确拒绝，且不消耗配额、不写线框、不推进 run 阶段', async () => {
+    const token = await makeToken()
+    const root = makeWorkspaceRoot()
+    const memo = memoryRunClient()
+    const app = buildTestApp(root, { agentRoutes: { runClient: memo.client } })
+    const interview = await app.inject({
+      method: 'POST',
+      url: '/agent/interview',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-w-incomplete', appId: 1, message: '咖啡店' },
+    })
+    expect(interview.statusCode).toBe(200)
+
+    const callsBeforeWireframe = memo.calls.length
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/wireframe',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-w-incomplete', appId: 1, workspacePath: root },
+    })
+    const wireframeCalls = memo.calls.slice(callsBeforeWireframe)
+    expect(response.statusCode).toBe(400)
+    expect((response.json() as { message: string }).message).toContain('完成需求访谈')
+    expect((response.json() as { message: string }).message).toContain('尚未完成')
+    expect(memo.store.get('run-w-incomplete')!.phase).toBe('interview')
+    expect(wireframeCalls.some((call) => call.method === 'PATCH' && call.url.endsWith('/internal/runs/run-w-incomplete'))).toBe(false)
+    expect(wireframeCalls.some((call) => call.url.endsWith('/wireframe/quota/acquire'))).toBe(false)
+    expect(existsSync(path.join(root, 'wireframe'))).toBe(false)
+    expect(() => readFileSync(path.join(root, 'wireframe', 'wireframe.html'), 'utf8')).toThrow()
+  })
+
+  it('缺少访谈上下文 → 400 明确拒绝，且不消耗配额、不写线框、不推进 run 阶段', async () => {
+    const token = await makeToken()
+    const root = makeWorkspaceRoot()
+    const memo = memoryRunClient()
+    memo.store.set('run-w-missing', {
+      runId: 'run-w-missing', appId: 1, userId: 1, phase: 'interview', context: null,
+      milestones: null, tokenUsage: null, creditLedgerRef: null, startedTime: null,
+      finishedTime: null, createTime: null, updateTime: null,
+    })
+    const app = buildTestApp(root, { agentRoutes: { runClient: memo.client } })
+    const callsBeforeWireframe = memo.calls.length
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/wireframe',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-w-missing', appId: 1, workspacePath: root },
+    })
+    const wireframeCalls = memo.calls.slice(callsBeforeWireframe)
+    expect(response.statusCode).toBe(400)
+    expect((response.json() as { message: string }).message).toContain('完成需求访谈')
+    expect(memo.store.get('run-w-missing')!.phase).toBe('interview')
+    expect(wireframeCalls.some((call) => call.method === 'PATCH' && call.url.endsWith('/internal/runs/run-w-missing'))).toBe(false)
+    expect(wireframeCalls.some((call) => call.url.endsWith('/wireframe/quota/acquire'))).toBe(false)
+    expect(existsSync(path.join(root, 'wireframe'))).toBe(false)
+    expect(() => readFileSync(path.join(root, 'wireframe', 'wireframe.html'), 'utf8')).toThrow()
+  })
   it('超每日次数被限频：配额端点 429 → 线框端点 429 明确报错，且不写文件', async () => {
     const token = await makeToken()
     const root = makeWorkspaceRoot()
@@ -278,33 +335,29 @@ describe('POST /agent/wireframe/confirm（确认闸门 + 跨请求存活）', ()
     expect(String((response.json() as { message: string }).message)).toContain('没有待确认的线框')
   })
 
-  it('wireframe_pending 下重新访谈会失效旧线框并回到 interview（防旧线框确认脱钩，代码审查整改）', async () => {
+  it('未完成访谈不能生成线框，补全后才进入 wireframe_pending', async () => {
     const token = await makeToken()
     const root = makeWorkspaceRoot()
     const memo = memoryRunClient()
     const app = buildTestApp(root, { agentRoutes: { runClient: memo.client } })
 
-    // 第 1 轮只答 2 维（访谈未收束），仍可先生成线框 → wireframe_pending
     const r1 = await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c3', appId: 1, message: '咖啡店' } })
     const all = (r1.json() as { questions: { key: string; options: { id: string }[] }[] }).questions
     const partial = all.filter((q) => ['audience', 'style'].includes(q.key)).map((q) => ({ key: q.key, optionId: q.options[0]!.id }))
     await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c3', appId: 1, answers: partial } })
-    await app.inject({ method: 'POST', url: '/agent/wireframe', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c3', appId: 1, workspacePath: root } })
-    expect(memo.store.get('run-c3')!.phase).toBe('wireframe_pending')
-    expect(JSON.parse(memo.store.get('run-c3')!.context as string).wireframe).toBeTruthy()
 
-    // 需求变更：续答缺失维度 → 失效旧线框、回到 interview
+    const rejected = await app.inject({ method: 'POST', url: '/agent/wireframe', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c3', appId: 1, workspacePath: root } })
+    expect(rejected.statusCode).toBe(400)
+    expect(memo.store.get('run-c3')!.phase).toBe('interview')
+    expect(() => readFileSync(path.join(root, 'wireframe', 'wireframe.html'), 'utf8')).toThrow()
+
     const missing = all.filter((q) => !['audience', 'style'].includes(q.key)).map((q) => ({ key: q.key, optionId: q.options[1]!.id }))
-    const resp = await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c3', appId: 1, answers: missing } })
-    expect((resp.json() as { complete: boolean }).complete).toBe(true)
-    const after = memo.store.get('run-c3')!
-    expect(after.phase).toBe('interview')
-    expect(JSON.parse(after.context as string).wireframe).toBeUndefined()
+    const completed = await app.inject({ method: 'POST', url: '/agent/interview', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c3', appId: 1, answers: missing } })
+    expect((completed.json() as { complete: boolean }).complete).toBe(true)
 
-    // 旧线框已失效，confirm 被拒（无法用与新需求不一致的布局当契约）
-    const confirm = await app.inject({ method: 'POST', url: '/agent/wireframe/confirm', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c3', appId: 1 } })
-    expect(confirm.statusCode).toBe(409)
-    expect(String((confirm.json() as { message: string }).message)).toContain('没有待确认的线框')
+    const generated = await app.inject({ method: 'POST', url: '/agent/wireframe', headers: { authorization: `Bearer ${token}` }, payload: { runId: 'run-c3', appId: 1, workspacePath: root } })
+    expect(generated.statusCode).toBe(200)
+    expect(memo.store.get('run-c3')!.phase).toBe('wireframe_pending')
   })
 })
 
