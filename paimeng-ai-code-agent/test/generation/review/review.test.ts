@@ -326,19 +326,89 @@ ${anchors.map((id, i) => `<section class="page" id="${id}"><h2>页面 ${i + 1}</
     expect(result.detail).toContain('2')
   })
 
-  it('生成页缺少线框声明的页面区段 → 失败（指出缺失区段）', async () => {
+  it('multi_file 类型：递归合并 HTML/HTM 文件中的页面区段锚点 → 通过', async () => {
+    const root = makeWorkspaceRoot()
+    const wireframePath = path.join(root, 'wireframe', 'wireframe.html')
+    mkdirSync(path.dirname(wireframePath), { recursive: true })
+    writeFileSync(wireframePath, wireframeHtml(['page-0', 'page-1', 'page-2']), 'utf8')
+    mkdirSync(path.join(root, 'pages', 'nested'), { recursive: true })
+    mkdirSync(path.join(root, '.hidden'), { recursive: true })
+    mkdirSync(path.join(root, 'build'), { recursive: true })
+    writeFileSync(path.join(root, 'pages', 'home.html'), '<section id="page-0"></section>', 'utf8')
+    writeFileSync(path.join(root, 'pages', 'nested', 'about.htm'), '<div id="page-1"></div><div id="page-2"></div>', 'utf8')
+    writeFileSync(path.join(root, '.hidden', 'ignored.html'), '<section id="page-9"></section>', 'utf8')
+    writeFileSync(path.join(root, 'build', 'ignored.html'), '<section id="page-8"></section>', 'utf8')
+    const verifier: VisualDiffVerifier = new DefaultVisualDiffVerifier()
+    const result = await verifier.verify(makeContext({ workspacePath: root, wireframePath, codeGenType: 'multi_file' }))
+    expect(result.passed).toBe(true)
+  })
+
+  it('multi_file 类型：缺少分布式页面区段 → 失败并列出缺失锚点与扫描文件', async () => {
     const root = makeWorkspaceRoot()
     const wireframePath = path.join(root, 'wireframe', 'wireframe.html')
     mkdirSync(path.dirname(wireframePath), { recursive: true })
     writeFileSync(wireframePath, wireframeHtml(['page-0', 'page-1']), 'utf8')
-    // 生成页只有 page-0，缺 page-1
-    writeFileSync(path.join(root, 'index.html'), '<html><body><section id="page-0"></section></body></html>', 'utf8')
+    mkdirSync(path.join(root, 'pages'), { recursive: true })
+    writeFileSync(path.join(root, 'pages', 'home.html'), '<section id="page-0"></section>', 'utf8')
     const verifier: VisualDiffVerifier = new DefaultVisualDiffVerifier()
-    const result = await verifier.verify(makeContext({ workspacePath: root, wireframePath }))
+    const result = await verifier.verify(makeContext({ workspacePath: root, wireframePath, codeGenType: 'multi_file' }))
     expect(result.passed).toBe(false)
     expect(result.detail).toContain('page-1')
+    expect(result.detail).toContain('pages/home.html')
+  })
+
+  it('multi_file 类型：仅 build/dist 中的锚点不计入扫描 → 失败且扫描列表排除构建产物', async () => {
+    const root = makeWorkspaceRoot()
+    const wireframePath = path.join(root, 'wireframe', 'wireframe.html')
+    mkdirSync(path.dirname(wireframePath), { recursive: true })
+    writeFileSync(wireframePath, wireframeHtml(['page-1']), 'utf8')
+    mkdirSync(path.join(root, 'build'), { recursive: true })
+    mkdirSync(path.join(root, 'dist'), { recursive: true })
+    writeFileSync(path.join(root, 'build', 'ignored.html'), '<section id="page-1"></section>', 'utf8')
+    writeFileSync(path.join(root, 'dist', 'ignored.htm'), '<section id="page-1"></section>', 'utf8')
+    const verifier: VisualDiffVerifier = new DefaultVisualDiffVerifier()
+    const result = await verifier.verify(makeContext({ workspacePath: root, wireframePath, codeGenType: 'multi_file' }))
+    expect(result.passed).toBe(false)
+    expect(result.detail).toContain('page-1')
+    expect(result.detail).toContain('未找到可扫描的 HTML 文件')
+    expect(result.detail).not.toContain('build/ignored.html')
+    expect(result.detail).not.toContain('dist/ignored.htm')
+  })
+
+  it('html 与 vue_project 类型：嵌套 HTML 不参与单索引比较 → 各自失败且只报告 index.html', async () => {
+    const root = makeWorkspaceRoot()
+    const wireframePath = path.join(root, 'wireframe', 'wireframe.html')
+    mkdirSync(path.dirname(wireframePath), { recursive: true })
+    writeFileSync(wireframePath, wireframeHtml(['page-1']), 'utf8')
+    mkdirSync(path.join(root, 'pages'), { recursive: true })
+    writeFileSync(path.join(root, 'index.html'), '<section id="page-0"></section>', 'utf8')
+    writeFileSync(path.join(root, 'pages', 'other.html'), '<section id="page-1"></section>', 'utf8')
+    const verifier: VisualDiffVerifier = new DefaultVisualDiffVerifier()
+    for (const codeGenType of ['html', 'vue_project'] as const) {
+      const result = await verifier.verify(makeContext({ workspacePath: root, wireframePath, codeGenType }))
+      expect(result.passed).toBe(false)
+      expect(result.detail).toContain('page-1')
+      expect(result.detail).toContain('index.html')
+      expect(result.detail).not.toContain('other.html')
+    }
+  })
+
+  it('html 与 vue_project 类型：仍只读取根 index.html', async () => {
+    const root = makeWorkspaceRoot()
+    const wireframePath = path.join(root, 'wireframe', 'wireframe.html')
+    mkdirSync(path.dirname(wireframePath), { recursive: true })
+    writeFileSync(wireframePath, wireframeHtml(['page-0']), 'utf8')
+    mkdirSync(path.join(root, 'pages'), { recursive: true })
+    writeFileSync(path.join(root, 'index.html'), '<section id="page-0"></section>', 'utf8')
+    writeFileSync(path.join(root, 'pages', 'other.html'), '<section id="page-1"></section>', 'utf8')
+    const verifier: VisualDiffVerifier = new DefaultVisualDiffVerifier()
+    for (const codeGenType of ['html', 'vue_project'] as const) {
+      const result = await verifier.verify(makeContext({ workspacePath: root, wireframePath, codeGenType }))
+      expect(result.passed).toBe(true)
+    }
   })
 })
+
 
 describe('门禁汇总（Issue #9）', () => {
   it('全部通过 → passed；任一失败 → 收集失败门禁 errors/suggestions', async () => {

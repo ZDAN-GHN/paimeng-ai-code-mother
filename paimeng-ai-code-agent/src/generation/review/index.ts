@@ -399,20 +399,43 @@ export interface VisualDiffVerifier extends ReviewGate {}
 
 // 提取 HTML 中的页面区段标题（<section id="page-N"> 下的 h2 / 锚点 id），作为结构 diff 的比对面
 export function extractPageAnchors(html: string): string[] {
-  const anchors: string[] = []
-  const sectionRe = /<section[^>]*\bid="page-(\d+)"[^>]*>/g
+  const anchors = new Set<string>()
+  const sectionRe = /<section[^>]*\bid=["']page-(\d+)["'][^>]*>/g
   let match: RegExpExecArray | null
   while ((match = sectionRe.exec(html)) !== null) {
-    anchors.push(`page-${match[1]}`)
+    anchors.add(`page-${match[1]}`)
   }
   // 无 section 时退化为所有 id="page-N" 锚点（生成页常以锚点表达页面结构）
-  if (anchors.length === 0) {
-    const idRe = /id="page-(\d+)"/g
+  if (anchors.size === 0) {
+    const idRe = /\bid=["']page-(\d+)["']/g
     while ((match = idRe.exec(html)) !== null) {
-      anchors.push(`page-${match[1]}`)
+      anchors.add(`page-${match[1]}`)
     }
   }
-  return anchors
+  return [...anchors]
+}
+
+const visualDiffExcludedDirectories = new Set(['node_modules', 'dist', 'build', 'target', '.git', 'wireframe'])
+
+function collectMultiFileHtmlAnchors(workspacePath: string): { anchors: string[]; files: string[] } {
+  const anchors = new Set<string>()
+  const files: string[] = []
+  const walk = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.name.startsWith('.') || (entry.isDirectory() && visualDiffExcludedDirectories.has(entry.name))) continue
+      const fullPath = path.join(directory, entry.name)
+      if (entry.isDirectory()) {
+        walk(fullPath)
+        continue
+      }
+      if (!/\.(?:html?|HTML?)$/.test(entry.name)) continue
+      const relativePath = path.relative(workspacePath, fullPath).split(path.sep).join('/')
+      files.push(relativePath)
+      for (const anchor of extractPageAnchors(readFileSync(fullPath, 'utf8'))) anchors.add(anchor)
+    }
+  }
+  walk(workspacePath)
+  return { anchors: [...anchors], files }
 }
 
 // 默认视觉 diff：以已确认线框为基准，生成产物需覆盖线框声明的页面区段锚点（结构启发式，MVP 无真实渲染截图；
@@ -424,19 +447,30 @@ export class DefaultVisualDiffVerifier implements VisualDiffVerifier {
       return { name: GATE_NAMES.visualDiff, passed: false, detail: '缺少已确认线框作为视觉 diff 基准' }
     }
     const wireframe = readFileSync(context.wireframePath, 'utf8')
-    const baseline = extractPageAnchors(wireframe)
+    const baseline = [...new Set(extractPageAnchors(wireframe))]
     // 基准不含页面区段（异常线框）→ 无法对比，视为未通过（宁可重试）
     if (baseline.length === 0) {
       return { name: GATE_NAMES.visualDiff, passed: false, detail: '线框基准未声明页面区段，无法进行视觉 diff' }
     }
-    const code = readFileSync(path.join(context.workspacePath, 'index.html'), 'utf8')
-    const produced = extractPageAnchors(code)
+
+    let produced: string[]
+    let scannedFiles: string[]
+    if (context.codeGenType === 'multi_file') {
+      const collected = collectMultiFileHtmlAnchors(context.workspacePath)
+      produced = collected.anchors
+      scannedFiles = collected.files
+    } else {
+      const entry = path.join(context.workspacePath, 'index.html')
+      produced = extractPageAnchors(readFileSync(entry, 'utf8'))
+      scannedFiles = ['index.html']
+    }
     const missing = baseline.filter((anchor) => !produced.includes(anchor))
     if (missing.length > 0) {
+      const filesDetail = scannedFiles.length > 0 ? `；已扫描文件：${scannedFiles.join(', ')}` : '；未找到可扫描的 HTML 文件'
       return {
         name: GATE_NAMES.visualDiff,
         passed: false,
-        detail: `视觉 diff 未通过：生成页缺少线框声明的页面区段（${missing.join(', ')}）`,
+        detail: `视觉 diff 未通过：生成页缺少线框声明的页面区段（${missing.join(', ')}）${filesDetail}`,
       }
     }
     return { name: GATE_NAMES.visualDiff, passed: true, detail: `视觉 diff 通过：覆盖线框全部 ${baseline.length} 个页面区段` }
