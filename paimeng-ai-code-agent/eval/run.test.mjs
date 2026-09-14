@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { buildReport, parseArgs, projectCanonicalJourney, renderReport, run, validateCaptureEvidence } from './run.mjs'
+import { buildReport, calculateMetrics, parseArgs, projectCanonicalJourney, renderReport, run, validateCaptureEvidence } from './run.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const journeys = path.join(root, 'eval', 'journeys')
@@ -95,8 +95,35 @@ test('run rejects malformed capture evidence before writing capture or report ou
     rmSync(dir, { recursive: true, force: true })
   }
 })
-test('renderReport keeps runtime metrics null until observed data exists', () => {
+test('renderReport keeps runtime metrics pending until observed data exists', () => {
   const report = buildReport({ mode: 'offline' }, [{ journey: { id: 'x', executionMode: 'fake_llm', turns: [] } }], 'node eval/run.mjs')
-  assert.equal(report.metrics.done_ratio, null)
+  assert.equal(report.metrics.done_ratio.fake_llm.status, 'pending')
+  assert.equal(report.metrics.done_ratio.fake_llm.value, null)
+  assert.equal(report.metrics.done_ratio.real_model.status, 'pending')
   assert.match(renderReport(report), /"providerInvoked": false/)
+})
+
+test('any missing evidence in an observed mode keeps post-chain metrics pending', () => {
+  const complete = { executionMode: 'fake_llm', observed: true, crossMessageMemory: { baselineRetentionRate: 0.5 }, deterministicGate: { passed: true }, clarifyRounds: 2, runTokens: 100, done: true }
+  const incomplete = { executionMode: 'fake_llm', observed: true, crossMessageMemory: { baselineRetentionRate: 1 }, clarifyRounds: 3 }
+  const metrics = calculateMetrics([complete, incomplete])
+  for (const name of ['deterministic_gate_pass_rate', 'run_tokens', 'done_ratio']) {
+    assert.equal(metrics[name].fake_llm.status, 'pending')
+    assert.equal(metrics[name].fake_llm.value, null)
+    assert.equal(metrics[name].fake_llm.sampleCount, 1)
+  }
+  assert.equal(metrics.memory_retention.fake_llm.status, 'measured')
+  assert.equal(metrics.clarify_rounds.fake_llm.status, 'measured')
+})
+
+test('metrics use explicit evidence and keep execution modes separate', () => {
+  const records = [
+    { executionMode: 'fake_llm', observed: true, crossMessageMemory: { baselineRetentionRate: 0.5 }, deterministicGate: { passed: true }, clarifyRounds: 2, runTokens: 100, done: true },
+    { executionMode: 'real_model', observed: true, crossMessageMemory: { baselineRetentionRate: 1 }, deterministicGate: { passed: false }, clarifyRounds: 4, runTokens: 300, done: false },
+  ]
+  const metrics = calculateMetrics(records)
+  assert.deepEqual(metrics.memory_retention.fake_llm, { status: 'measured', value: 0.5, sampleCount: 1 })
+  assert.deepEqual(metrics.deterministic_gate_pass_rate.real_model, { status: 'measured', value: 0, sampleCount: 1 })
+  assert.equal(metrics.run_tokens.fake_llm.value, 100)
+  assert.equal(metrics.done_ratio.real_model.value, 0)
 })

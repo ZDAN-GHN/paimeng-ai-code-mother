@@ -46,6 +46,22 @@ node eval/validate.mjs
 
 The validator checks JSON/YAML syntax, required fields, unique IDs, action/event/metric enums, category coverage, and the required scenario coverage. It exits non-zero on any violation.
 
+## Metrics
+
+The report always defines these five metrics. Values are calculated only from `observed: true` records and are separated by `fake_llm` and `real_model`; missing input is reported as `status: pending` with `value: null`.
+
+| Metric | Definition | Required observed input |
+| --- | --- | --- |
+| `memory_retention` | Mean cross-message retention rate | `crossMessageMemory.baselineRetentionRate` |
+| `deterministic_gate_pass_rate` | Passed deterministic gates / measured gates | `deterministicGate.passed` |
+| `clarify_rounds` | Mean clarification rounds per observed journey | `clarifyRounds` |
+| `run_tokens` | Mean token count per observed journey | `runTokens` |
+| `done_ratio` | Completed observed journeys / observed journeys | `done` |
+
+The deterministic gate, token, and completion inputs are post-chain (A3-A6) evidence. They remain `pending` when absent; the runner never infers them from expected events or journey names. Fake-LLM results are never included in the real-model aggregate, and vice versa.
+
+Optional capture adapters may return the metric evidence fields alongside the required trace fields: `deterministicGate: {"passed": true}`, `clarifyRounds`, `runTokens`, and `done`. Use synthetic or approved evaluation data only.
+
 ## Coverage matrix
 
 | Scenario | Journey IDs | Mode |

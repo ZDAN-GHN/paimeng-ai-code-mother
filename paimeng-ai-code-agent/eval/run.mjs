@@ -29,7 +29,13 @@ const sseEventSchemas = {
 const sseEventSchema = z.discriminatedUnion('type', Object.values(sseEventSchemas))
 const callbackSchema = z.object({ method: z.string().min(1), path: z.string().min(1), status: z.number().int(), ok: z.boolean() }).strict()
 const memorySchema = z.object({ baselineRetentionRate: z.number().finite().min(0).max(1), status: z.string().min(1) }).strict()
-const captureEvidenceSchema = z.object({ complete: z.literal(true), requestSequence: z.array(requestEntrySchema), sseEvents: z.array(sseEventSchema).min(1), runPhases: z.array(z.string().min(1)).min(1), callbackPayloads: z.array(callbackSchema).min(1), model: z.string().min(1), channel: z.string().min(1), crossMessageMemory: memorySchema }).strict()
+const metricEvidenceSchema = z.object({
+  deterministicGate: z.object({ passed: z.boolean() }).strict().optional(),
+  clarifyRounds: z.number().int().nonnegative().optional(),
+  runTokens: z.number().finite().nonnegative().optional(),
+  done: z.boolean().optional(),
+}).strict()
+const captureEvidenceSchema = z.object({ complete: z.literal(true), requestSequence: z.array(requestEntrySchema), sseEvents: z.array(sseEventSchema).min(1), runPhases: z.array(z.string().min(1)).min(1), callbackPayloads: z.array(callbackSchema).min(1), model: z.string().min(1), channel: z.string().min(1), crossMessageMemory: memorySchema, ...metricEvidenceSchema.shape }).strict()
 const canonicalTurnSchema = z.object({ action: z.enum(['chat', 'answer', 'confirm_generation', 'abort']), message: z.string().optional(), answers: z.array(z.object({ key: z.string(), optionId: z.string(), text: z.string().optional() }).strict()).optional(), approvalId: z.string().optional(), expectEvents: z.array(z.string()).optional() }).strict()
 const canonicalJourneySchema = z.object({ id: z.string(), title: z.string(), category: z.string(), tags: z.array(z.string()), executionMode: z.enum(['fake_llm', 'real_model']), expect: z.array(z.string()), turns: z.array(canonicalTurnSchema).min(1) }).strict()
 
@@ -51,7 +57,36 @@ function assertPlainTree(value, label = 'value', seen = new Set()) {
 }
 
 
-const REQUIRED_FIELDS = ['requestSequence', 'sseEvents', 'runPhases', 'callbackPayloads', 'model', 'channel', 'command', 'exactHead', 'crossMessageMemory']
+export function calculateMetrics(records) {
+  const metricNames = ['memory_retention', 'deterministic_gate_pass_rate', 'clarify_rounds', 'run_tokens', 'done_ratio']
+  const metricFor = (mode, name) => {
+    const observed = records.filter((record) => record.executionMode === mode && record.observed === true)
+    let values; let pendingBecause
+    if (name === 'memory_retention') {
+      values = observed.map((record) => record.crossMessageMemory?.baselineRetentionRate).filter((value) => Number.isFinite(value))
+      pendingBecause = 'observed cross-message memory data is missing'
+    } else if (name === 'deterministic_gate_pass_rate') {
+      values = observed.map((record) => record.deterministicGate?.passed).filter((value) => typeof value === 'boolean')
+      pendingBecause = 'A3-A6 post-chain deterministic gate data is missing'
+    } else if (name === 'clarify_rounds') {
+      values = observed.map((record) => record.clarifyRounds).filter((value) => Number.isInteger(value) && value >= 0)
+      pendingBecause = 'observed clarification-round data is missing'
+    } else if (name === 'run_tokens') {
+      values = observed.map((record) => record.runTokens).filter((value) => Number.isFinite(value) && value >= 0)
+      pendingBecause = 'A3-A6 post-chain token data is missing'
+    } else if (name === 'done_ratio') {
+      values = observed.map((record) => record.done).filter((value) => typeof value === 'boolean')
+      pendingBecause = 'A3-A6 post-chain completion data is missing'
+    } else throw new Error(`unknown metric ${name}`)
+    const value = values.length === 0 || (observed.length > 0 && values.length < observed.length)
+      ? null
+      : name.includes('pass_rate') || name === 'done_ratio'
+        ? values.filter(Boolean).length / values.length
+        : values.reduce((sum, item) => sum + item, 0) / values.length
+    return { status: value === null ? 'pending' : 'measured', value, sampleCount: values.length, ...(value === null ? { pendingBecause: observed.length > values.length ? `one or more observed ${name} records are missing evidence` : pendingBecause } : {}) }
+  }
+  return Object.fromEntries(metricNames.map((name) => [name, { fake_llm: metricFor('fake_llm', name), real_model: metricFor('real_model', name) }]))
+}
 
 export function parseArgs(argv) {
   const options = { mode: 'offline' }
@@ -162,13 +197,7 @@ export function buildReport(options, entries, command) {
       offlineValidated: captured,
       notCaptured: records.length - captured,
     },
-    metrics: {
-      memory_retention: null,
-      deterministic_gate_pass_rate: null,
-      clarify_rounds: null,
-      run_tokens: null,
-      done_ratio: null,
-    },
+    metrics: calculateMetrics(records),
     records,
     note: 'This report contains journey-definition validation only. Empty observed fields are intentional; no model/provider result is fabricated.',
   }
@@ -196,7 +225,7 @@ export function validateCaptureEvidence(evidence, journey, replay = journey) {
 
 export function renderReport(report) {
   const rows = report.records.map((record) => `| ${record.id} | ${record.executionMode} | ${record.captureStatus} | ${record.observed ? 'yes' : 'no'} |`).join('\n')
-  return `# Agent Loop Evaluation Report\n\n- Report version: ${report.reportVersion}\n- Mode: ${report.mode}\n- Provider invoked: ${report.providerInvoked}\n- Journeys: ${report.journeyCount}\n- Offline validated: ${report.counts.offlineValidated}\n- Not captured: ${report.counts.notCaptured}\n\n## Journey status\n\n| ID | Execution mode | Status | Observed runtime data |\n| --- | --- | --- | --- |\n${rows}\n\n## Metrics\n\nThe five runtime metrics are intentionally null until a real capture supplies observed events and run data.\n\n~~~json\n${JSON.stringify(report, null, 2)}\n~~~\n`
+  return `# Agent Loop Evaluation Report\n\n- Report version: ${report.reportVersion}\n- Mode: ${report.mode}\n- Provider invoked: ${report.providerInvoked}\n- Journeys: ${report.journeyCount}\n- Offline validated: ${report.counts.offlineValidated}\n- Not captured: ${report.counts.notCaptured}\n\n## Journey status\n\n| ID | Execution mode | Status | Observed runtime data |\n| --- | --- | --- | --- |\n${rows}\n\n## Metrics\n\nThe report defines five runtime metrics. Missing observed inputs are represented as pending and value: null; no provider result is fabricated.\n\n~~~json\n${JSON.stringify(report, null, 2)}\n~~~\n`
 }
 
 export async function run(options, argv = []) {
@@ -235,11 +264,13 @@ export async function run(options, argv = []) {
     report.providerInvoked = true
     report.counts = { offlineValidated: 0, notCaptured: entries.length - captured.length, captured: captured.length }
     report.records = entries.map(({ journey }) => captured.find((record) => record.id === journey.id) ?? recordFor(journey, options, command))
+    report.metrics = calculateMetrics(report.records)
     mkdirSync(path.dirname(outFile), { recursive: true })
     writeFileSync(outFile, renderReport(report), 'utf8')
     return report
   }
   const report = buildReport(options, entries, command)
+  report.metrics = calculateMetrics(report.records)
   mkdirSync(path.dirname(outFile), { recursive: true })
   writeFileSync(outFile, renderReport(report), 'utf8')
   return report
