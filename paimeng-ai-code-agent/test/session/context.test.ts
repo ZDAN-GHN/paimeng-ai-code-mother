@@ -36,6 +36,14 @@ describe('session context reconstruction', () => {
     expect(result.systemPrompt).toContain('我会保留清爽风格，并准备首页布局。')
   })
 
+  it('重放 model/message 终态时保留安全拒绝文本到上下文', () => {
+    const refusal = '统一回合的模型工具尚未接入，当前请求已安全拒绝'
+    const result = rebuildSessionContext([
+      event({ kind: 'model/message', source: 'system', payload: { type: 'error', message: refusal, text: refusal } }),
+    ], { appId: 'app-1', userId: 'user-1' })
+    expect(result.history).toEqual([{ role: 'assistant', content: refusal, turnId: 'turn-1' }])
+    expect(result.systemPrompt).toContain(refusal)
+  })
   it('keeps only the configured recent turns and summarizes earlier turns', () => {
     const events = [1, 2, 3].flatMap((turn) => [
       event({ seq: turn * 2 - 1, turnId: `turn-${turn}`, kind: 'user/message', payload: { text: `需求-${turn}` } }),

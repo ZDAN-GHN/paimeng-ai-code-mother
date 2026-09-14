@@ -4,6 +4,7 @@
 // 错误协议（#21 双轨，边界 = 首帧写出）：hijack 前的预检失败 throw httpError → 标准状态码 JSON；
 // hijack 开流后的失败仍以 SSE error 终态收尾。错误 JSON 由 setErrorHandler 单点产出（server/httpError.ts）。
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { z } from 'zod'
 import type { FastifyInstance } from 'fastify'
@@ -12,6 +13,7 @@ import { httpError } from './httpError.js'
 import { RunClient, RunApiError } from '../runs/runClient.js'
 import { encodeEvent, encodeEventStream, SSE_HEADERS } from '../protocol/sse.js'
 import type { AgentEvent, AgentTurnEvent } from '../protocol/events.js'
+import { validateAgentTurnEvents } from '../protocol/events.js'
 import { runGenerationWorkflow, type StreamRequest } from '../generation/workflow/index.js'
 import type { HistoryTurn } from '../generation/workflow/history.js'
 import type { LlmProvider } from '../llm/index.js'
@@ -37,6 +39,8 @@ export interface AgentRouteOptions {
   reviewGates?: ReviewGateSet
   // 会话事件存储（#38）：未配置时统一回合端点 fail-closed，不绕过事件记录
   sessionStore?: SessionStore
+  // 回合 ID 生成器（生产默认使用 crypto.randomUUID；测试可注入确定值）
+  turnIdFactory?: () => string
   observer?: ObservationSink
 }
 
@@ -149,7 +153,7 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
       throw error
     }
     if (!options.sessionStore) throw httpError(503, '会话存储未配置，无法处理统一回合')
-    const turnId = `turn-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    const turnId = `turn-${(options.turnIdFactory ?? randomUUID)()}`
     const events = action === 'chat'
       ? [
           { kind: 'session/turn-start' as const, source: 'human' as const, payload: { turnId, action } },
@@ -164,14 +168,27 @@ export function buildAgentRoutes(fastify: FastifyInstance, config: AgentConfig, 
     } catch (error) {
       throw httpError(503, `会话事件写入失败：${error instanceof Error ? error.message : '未知错误'}`)
     }
+    let terminalBatch
+    const terminalMessage = action === 'chat'
+      ? '统一回合的模型工具尚未接入，当前请求已安全拒绝'
+      : '统一回合的审批与生成尚未接入，当前请求已安全拒绝'
+    try {
+      // 终态也必须进入事件日志：使用现有白名单事件承载公共 framing，seq 由 store 原子分配。
+      // model/message 的持久化投影以 text 为上下文语义；SSE 仍在下方映射为 error/message。
+      terminalBatch = await options.sessionStore.appendBatch({
+        appId: String(input.appId), userId, turnId, batchSeq: 2,
+        events: [{ kind: 'model/message', source: 'system', payload: { type: 'error', message: terminalMessage, text: terminalMessage } }],
+      })
+    } catch (error) {
+      throw httpError(503, `会话终态写入失败：${error instanceof Error ? error.message : '未知错误'}`)
+    }
     const terminal: AgentTurnEvent = {
       type: 'error',
-      seq: batch.seqTo + 1,
-      message: action === 'chat'
-        ? '统一回合的模型工具尚未接入，当前请求已安全拒绝'
-        : '统一回合的审批与生成尚未接入，当前请求已安全拒绝',
+      seq: terminalBatch.seqTo,
+      message: terminalMessage,
     }
     const responseEvents: AgentTurnEvent[] = [terminal]
+    validateAgentTurnEvents(responseEvents)
     return reply.headers(SSE_HEADERS).send(encodeEventStream(responseEvents))
   })
 
