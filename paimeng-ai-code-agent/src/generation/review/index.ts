@@ -6,7 +6,7 @@
 // ③ 视觉 diff（VisualDiffGate）：以已确认线框为基准做结构启发式对比（页面区段覆盖）。
 // 各门禁的「执行器」（scorer / buildVerifier / visualDiff）可注入替身——测试断言失败触发重试、
 // 「以已确认线框为基准」的基准来源正确。
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 import { NoObjectGeneratedError, generateObject } from 'ai'
 import { z } from 'zod'
@@ -130,11 +130,12 @@ export class QualityScoreGate implements ReviewGate {
 export interface BuildVerifier extends ReviewGate {}
 
 // 默认 build 验证：html 单文件（L0 静态部署管线）校验 index.html 存在且含 html 根元素；
-// multi_file / vue_project（L1+）走 npm run build（MVP 生成主链路为 html，真实 npm build 由 Java BuilderExecutor 负责，
-// Agent 侧 build 门禁在此先做入口存在性校验，npm 项目类型返回明确「需构建管线」待 L1 补齐）
+// multi_file 校验入口、项目文件数量和入口 HTML 的本地引用；vue_project 仍等待 L1 构建管线。
 export class DefaultBuildVerifier implements BuildVerifier {
   readonly name = GATE_NAMES.build
+
   async verify(context: ReviewContext): Promise<GateResult> {
+    if (context.codeGenType === 'multi_file') return this.verifyMultiFile(context)
     if (context.codeGenType !== 'html') {
       return {
         name: GATE_NAMES.build,
@@ -142,17 +143,253 @@ export class DefaultBuildVerifier implements BuildVerifier {
         detail: `${context.codeGenType} 类型需要 npm run build（L1 构建管线未接入，MVP 主链路为 html 静态部署）`,
       }
     }
-    // html 类型：入口文件存在 + 含 <html> 根（与生成核心「缺失 html 根 → 失败」口径一致）
+    return this.verifyHtmlEntry(context)
+  }
+
+  private verifyHtmlEntry(context: ReviewContext): GateResult {
     const entry = path.join(context.workspacePath, 'index.html')
-    if (!existsSync(entry)) {
+    const entryStats = safeLstat(entry)
+    if (!entryStats) {
       return { name: GATE_NAMES.build, passed: false, detail: '缺少入口文件 index.html' }
     }
+    if (entryStats.isSymbolicLink()) {
+      return { name: GATE_NAMES.build, passed: false, detail: '入口文件 index.html 不允许使用符号链接' }
+    }
+    if (!entryStats.isFile()) {
+      return { name: GATE_NAMES.build, passed: false, detail: '入口文件 index.html 不是普通文件' }
+    }
     const content = readFileSync(entry, 'utf8')
-    if (!/<html/i.test(content)) {
+    if (!hasHtmlElement(content)) {
       return { name: GATE_NAMES.build, passed: false, detail: '入口文件缺少 <html> 根元素，无法通过构建验证' }
     }
     return { name: GATE_NAMES.build, passed: true, detail: '入口文件结构与根元素校验通过' }
   }
+
+  private verifyMultiFile(context: ReviewContext): GateResult {
+    const entry = path.join(context.workspacePath, 'index.html')
+    const entryStats = safeLstat(entry)
+    if (!entryStats) {
+      return { name: GATE_NAMES.build, passed: false, detail: 'multi_file 构建缺少入口文件 index.html' }
+    }
+    if (entryStats.isSymbolicLink()) {
+      return { name: GATE_NAMES.build, passed: false, detail: 'multi_file 入口 index.html 不允许使用符号链接' }
+    }
+    if (!entryStats.isFile()) {
+      return { name: GATE_NAMES.build, passed: false, detail: 'multi_file 入口 index.html 不是普通文件' }
+    }
+    const files = listProjectFiles(context.workspacePath)
+    if (files < 2) {
+      return {
+        name: GATE_NAMES.build,
+        passed: false,
+        detail: `multi_file 构建至少需要 2 个项目文件（当前 ${files} 个；请补充 CSS、JavaScript 或其他本地资源）`,
+      }
+    }
+    const content = readFileSync(entry, 'utf8')
+    if (!hasHtmlElement(content)) {
+      return { name: GATE_NAMES.build, passed: false, detail: 'multi_file 入口 index.html 缺少 <html> 根元素' }
+    }
+    const references = extractLocalReferences(content)
+    for (const reference of references) {
+      const resolved = resolveLocalReference(context.workspacePath, reference)
+      if (!resolved) {
+        return { name: GATE_NAMES.build, passed: false, detail: `multi_file 入口包含不安全本地引用：${reference}` }
+      }
+      if (!isSafeWorkspacePath(context.workspacePath, resolved)) {
+        return { name: GATE_NAMES.build, passed: false, detail: `multi_file 入口引用的本地路径包含不安全符号链接：${reference}` }
+      }
+      const referenceStats = safeLstat(resolved)
+      if (!referenceStats) {
+        return { name: GATE_NAMES.build, passed: false, detail: `multi_file 入口引用的本地文件不存在：${reference}` }
+      }
+      if (referenceStats.isSymbolicLink()) {
+        return { name: GATE_NAMES.build, passed: false, detail: `multi_file 入口引用的本地文件不允许使用符号链接：${reference}` }
+      }
+      if (!referenceStats.isFile()) {
+        return { name: GATE_NAMES.build, passed: false, detail: `multi_file 入口引用的本地路径不是普通文件：${reference}` }
+      }
+    }
+    return {
+      name: GATE_NAMES.build,
+      passed: true,
+      detail: `multi_file 构建校验通过（${files} 个项目文件，${references.length} 个本地引用）`,
+    }
+  }
+}
+
+const IGNORED_PROJECT_DIRECTORIES = new Set(['node_modules', 'dist', 'target', '.git', 'wireframe'])
+
+function safeLstat(filePath: string): ReturnType<typeof lstatSync> | undefined {
+  try {
+    return lstatSync(filePath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    return undefined
+  }
+}
+
+function listProjectFiles(root: string): number {
+  const walk = (directory: string): number => {
+    let count = 0
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.name.startsWith('.') || IGNORED_PROJECT_DIRECTORIES.has(entry.name)) continue
+      const fullPath = path.join(directory, entry.name)
+      if (entry.isDirectory()) count += walk(fullPath)
+      else if (entry.isFile()) count += 1
+    }
+    return count
+  }
+  return walk(root)
+}
+
+function extractLocalReferences(html: string): string[] {
+  return parseHtml(html).references.filter((reference) => {
+    if (!reference || reference.startsWith('#')) return false
+    return !/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(reference)
+  })
+}
+
+function hasHtmlElement(html: string): boolean {
+  return parseHtml(html).hasHtmlElement
+}
+
+type ParsedHtml = { hasHtmlElement: boolean; references: string[] }
+
+// 有界标签 tokenizer：不把注释、声明或 script/style 等原始文本当作标签解析。
+function parseHtml(html: string): ParsedHtml {
+  const references: string[] = []
+  let hasHtmlElement = false
+  let cursor = 0
+  while (cursor < html.length) {
+    const open = html.indexOf('<', cursor)
+    if (open < 0) break
+    if (html.startsWith('<!--', open)) {
+      const end = html.indexOf('-->', open + 4)
+      cursor = end < 0 ? html.length : end + 3
+      continue
+    }
+    if (html[open + 1] === '!' || html[open + 1] === '?') {
+      cursor = findTagEnd(html, open + 1)
+      continue
+    }
+    let nameStart = open + 1
+    const closing = html[nameStart] === '/'
+    if (closing) nameStart += 1
+    if (!/[A-Za-z]/.test(html[nameStart] ?? '')) {
+      cursor = open + 1
+      continue
+    }
+    let nameEnd = nameStart
+    while (nameEnd < html.length && /[A-Za-z0-9:-]/.test(html[nameEnd] ?? '')) nameEnd += 1
+    const end = findTagEnd(html, nameEnd)
+    if (end >= html.length) break
+    const name = html.slice(nameStart, nameEnd).toLowerCase()
+    if (!closing) {
+      if (name === 'html') hasHtmlElement = true
+      references.push(...parseTagReferences(html.slice(nameEnd, end)))
+      if (name === 'script' || name === 'style' || name === 'textarea' || name === 'title') {
+        const close = findRawTextClosingTag(html, name, end + 1)
+        cursor = close < 0 ? html.length : close
+        continue
+      }
+    }
+    cursor = end + 1
+  }
+  return { hasHtmlElement, references }
+}
+
+function findRawTextClosingTag(html: string, name: string, start: number): number {
+  const lowerHtml = html.toLowerCase()
+  const closingPrefix = `</${name}`
+  let candidate = lowerHtml.indexOf(closingPrefix, start)
+  while (candidate >= 0) {
+    const boundary = lowerHtml[candidate + closingPrefix.length]
+    if (boundary === '>' || boundary === '/' || /\s/.test(boundary ?? '')) return candidate
+    candidate = lowerHtml.indexOf(closingPrefix, candidate + closingPrefix.length)
+  }
+  return -1
+}
+function findTagEnd(html: string, start: number): number {
+  let quote = ''
+  for (let i = start; i < html.length; i += 1) {
+    const character = html[i]
+    if (quote) {
+      if (character === quote) quote = ''
+    } else if (character === '"' || character === "'") {
+      quote = character
+    } else if (character === '>') {
+      return i
+    }
+  }
+  return html.length
+}
+
+function parseTagReferences(attributes: string): string[] {
+  const references: string[] = []
+  let cursor = 0
+  while (cursor < attributes.length) {
+    while (/\s/.test(attributes[cursor] ?? '')) cursor += 1
+    if (cursor >= attributes.length || attributes[cursor] === '/') break
+    const nameStart = cursor
+    while (cursor < attributes.length && !/[\s=/>]/.test(attributes[cursor] ?? '')) cursor += 1
+    const name = attributes.slice(nameStart, cursor).toLowerCase()
+    while (/\s/.test(attributes[cursor] ?? '')) cursor += 1
+    if (attributes[cursor] !== '=') {
+      while (cursor < attributes.length && !/\s/.test(attributes[cursor] ?? '')) cursor += 1
+      continue
+    }
+    cursor += 1
+    while (/\s/.test(attributes[cursor] ?? '')) cursor += 1
+    let value = ''
+    const quote = attributes[cursor]
+    if (quote === '"' || quote === "'") {
+      cursor += 1
+      const valueStart = cursor
+      while (cursor < attributes.length && attributes[cursor] !== quote) cursor += 1
+      value = attributes.slice(valueStart, cursor)
+      if (cursor < attributes.length) cursor += 1
+    } else {
+      const valueStart = cursor
+      while (cursor < attributes.length && !/[\s>]/.test(attributes[cursor] ?? '')) cursor += 1
+      value = attributes.slice(valueStart, cursor)
+    }
+    if (name === 'src' || name === 'href') references.push(value.trim())
+  }
+  return references
+}
+
+function isSafeWorkspacePath(root: string, candidate: string): boolean {
+  try {
+    const realRoot = realpathSync(root)
+    const relative = path.relative(root, candidate)
+    let current = root
+    for (const component of relative.split(path.sep)) {
+      if (!component || component === '.') continue
+      current = path.join(current, component)
+      if (safeLstat(current)?.isSymbolicLink()) return false
+    }
+    const realCandidate = realpathSync(candidate)
+    const realRelative = path.relative(realRoot, realCandidate)
+    return realRelative !== '..' && !realRelative.startsWith(`..${path.sep}`) && !path.isAbsolute(realRelative)
+  } catch {
+    return false
+  }
+}
+
+
+function resolveLocalReference(root: string, reference: string): string | undefined {
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(reference)
+  } catch {
+    return undefined
+  }
+  const withoutQuery = decoded.split(/[?#]/, 1)[0]
+  if (!withoutQuery || withoutQuery.startsWith('/') || withoutQuery.includes('\\')) return undefined
+  const resolved = path.resolve(root, withoutQuery)
+  const relative = path.relative(root, resolved)
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return undefined
+  return resolved
 }
 
 // ── ③ 视觉 diff（基准 = 已确认线框）──

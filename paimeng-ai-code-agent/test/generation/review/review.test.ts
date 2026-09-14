@@ -1,7 +1,7 @@
 // 三重门禁质检器测试（Issue #9；#19 质检输出迁移 generateObject + zod schema）：
 // 结构化质检分（schema 显式契约 + NoObjectGeneratedError 错误路径）、build 门禁（html 静态校验）、
 // 视觉 diff 门禁（以已确认线框为基准：基准缺失失败、覆盖线框页面区段通过、缺区段失败）、门禁汇总
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { customProvider } from 'ai'
 import type { LanguageModelV2, LanguageModelV2StreamPart } from '@ai-sdk/provider'
@@ -144,6 +144,149 @@ describe('build 门禁（Issue #9）', () => {
     expect(result.detail).toContain('<html>')
   })
 
+  it('html 类型：入口 index.html 为符号链接 → 失败', async () => {
+    const root = makeWorkspaceRoot()
+    const outside = path.join(path.dirname(root), `issue-52-html-outside-${path.basename(root)}.html`)
+    writeFileSync(outside, '<html></html>', 'utf8')
+    symlinkSync(outside, path.join(root, 'index.html'))
+    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root }))
+    expect(result.passed).toBe(false)
+    expect(result.detail).toContain('符号链接')
+  })
+  it('multi_file 类型：入口、资源文件和相对引用均有效 → 通过', async () => {
+    const root = makeWorkspaceRoot()
+    mkdirSync(path.join(root, 'assets'), { recursive: true })
+    writeFileSync(path.join(root, 'index.html'), '<!doctype html><html><head><link href="assets/app.css"></head><body><script src="assets/app.js"></script></body></html>', 'utf8')
+    writeFileSync(path.join(root, 'assets', 'app.css'), 'body { color: red }', 'utf8')
+    writeFileSync(path.join(root, 'assets', 'app.js'), 'console.log(1)', 'utf8')
+    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    expect(result.passed).toBe(true)
+    expect(result.detail).toContain('3')
+  })
+
+  it('multi_file 类型：缺少 index.html → 失败并指出入口', async () => {
+    const root = makeWorkspaceRoot()
+    writeFileSync(path.join(root, 'app.js'), 'console.log(1)', 'utf8')
+    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    expect(result.passed).toBe(false)
+    expect(result.detail).toContain('index.html')
+  })
+
+  it('multi_file 类型：本地引用不存在 → 失败并指出引用', async () => {
+    const root = makeWorkspaceRoot()
+    writeFileSync(path.join(root, 'index.html'), '<html><script src="missing.js"></script></html>', 'utf8')
+    writeFileSync(path.join(root, 'other.js'), 'console.log(1)', 'utf8')
+    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    expect(result.passed).toBe(false)
+    expect(result.detail).toContain('missing.js')
+  })
+
+  it('multi_file 类型：项目文件不足 → 失败并指出最小数量', async () => {
+    const root = makeWorkspaceRoot()
+    writeFileSync(path.join(root, 'index.html'), '<html></html>', 'utf8')
+    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    expect(result.passed).toBe(false)
+    expect(result.detail).toContain('至少需要 2 个')
+  })
+
+  it('multi_file 类型：index.html 加 wireframe 基线不满足最小项目文件数', async () => {
+    const root = makeWorkspaceRoot()
+    mkdirSync(path.join(root, 'wireframe'), { recursive: true })
+    writeFileSync(path.join(root, 'index.html'), '<html></html>', 'utf8')
+    writeFileSync(path.join(root, 'wireframe', 'wireframe.html'), '<html></html>', 'utf8')
+    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    expect(result.passed).toBe(false)
+    expect(result.detail).toContain('当前 1 个')
+  })
+  it('multi_file 类型：http(s) 外部引用不参与本地文件校验', async () => {
+    const root = makeWorkspaceRoot()
+    writeFileSync(path.join(root, 'index.html'), '<html><link href="https://cdn.example.test/app.css"><script src="http://cdn.example.test/app.js"></script></html>', 'utf8')
+    writeFileSync(path.join(root, 'app.js'), 'console.log(1)', 'utf8')
+    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    expect(result.passed).toBe(true)
+  })
+
+  it('multi_file 类型：未加引号的本地引用缺失 → 失败并指出引用', async () => {
+    const root = makeWorkspaceRoot()
+    writeFileSync(path.join(root, 'index.html'), '<html><script src=missing.js></script></html>', 'utf8')
+    writeFileSync(path.join(root, 'other.js'), 'console.log(1)', 'utf8')
+    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    expect(result.passed).toBe(false)
+    expect(result.detail).toContain('missing.js')
+  })
+
+  it('multi_file 类型：入口 index.html 指向工作区外的符号链接 → 失败', async () => {
+    const root = makeWorkspaceRoot()
+    const outside = path.join(path.dirname(root), `issue-52-outside-${path.basename(root)}.html`)
+    writeFileSync(outside, '<html></html>', 'utf8')
+    symlinkSync(outside, path.join(root, 'index.html'))
+    writeFileSync(path.join(root, 'app.js'), 'console.log(1)', 'utf8')
+    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    expect(result.passed).toBe(false)
+    expect(result.detail).toContain('符号链接')
+  })
+
+  it('multi_file 类型：本地引用指向工作区外的符号链接 → 失败', async () => {
+    const root = makeWorkspaceRoot()
+    const outside = path.join(path.dirname(root), `issue-52-resource-${path.basename(root)}.js`)
+    writeFileSync(outside, 'console.log(1)', 'utf8')
+    writeFileSync(path.join(root, 'index.html'), '<html><script src=assets.js></script></html>', 'utf8')
+    symlinkSync(outside, path.join(root, 'assets.js'))
+    writeFileSync(path.join(root, 'other.js'), 'console.log(2)', 'utf8')
+    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    expect(result.passed).toBe(false)
+    expect(result.detail).toContain('符号链接')
+  })
+  it('multi_file 类型：路径遍历引用 → 失败并指出不安全引用', async () => {
+    const root = makeWorkspaceRoot()
+    writeFileSync(path.join(root, 'index.html'), '<html><script src="../outside.js"></script></html>', 'utf8')
+    writeFileSync(path.join(root, 'app.js'), 'console.log(1)', 'utf8')
+    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    expect(result.passed).toBe(false)
+    expect(result.detail).toContain('不安全')
+  })
+
+  it('multi_file 类型：本地引用的中间目录为工作区外符号链接 → 失败', async () => {
+    const root = makeWorkspaceRoot()
+    const outside = path.join(path.dirname(root), `issue-52-assets-outside-${path.basename(root)}`)
+    mkdirSync(outside, { recursive: true })
+    writeFileSync(path.join(outside, 'app.js'), 'console.log(1)', 'utf8')
+    writeFileSync(path.join(root, 'index.html'), '<html><script src="assets/app.js"></script></html>', 'utf8')
+    symlinkSync(outside, path.join(root, 'assets'))
+    writeFileSync(path.join(root, 'other.js'), 'console.log(2)', 'utf8')
+    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    expect(result.passed).toBe(false)
+    expect(result.detail).toContain('符号链接')
+  })
+
+  it('multi_file 类型：脚本和注释中的伪根元素及资源文本不参与解析', async () => {
+    const root = makeWorkspaceRoot()
+    writeFileSync(
+      path.join(root, 'index.html'),
+      '<!-- <html><script src="missing-comment.js"></script> -->\n<script>const fake = "<html><script src=missing-script.js>"</script><html><body data-note="src=missing-attribute.js">src=missing-text.js</body></html>',
+      'utf8',
+    )
+    writeFileSync(path.join(root, 'app.js'), 'console.log(1)', 'utf8')
+    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root, codeGenType: 'multi_file' }))
+    expect(result.passed).toBe(true)
+  })
+
+  it('html 类型：脚本和注释中的伪 <html> 不满足根元素校验', async () => {
+    const root = makeWorkspaceRoot()
+    writeFileSync(path.join(root, 'index.html'), '<!-- <html> --><script>const fake = "<html>"</script>', 'utf8')
+    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root }))
+    expect(result.passed).toBe(false)
+    expect(result.detail).toContain('<html>')
+  })
+
+
+  it('html 类型：raw-text 中的相似结束标签不截断脚本解析', async () => {
+    const root = makeWorkspaceRoot()
+    writeFileSync(path.join(root, 'index.html'), '<script>const s = "</scripture><html>"</script>', 'utf8')
+    const result = await new DefaultBuildVerifier().verify(makeContext({ workspacePath: root }))
+    expect(result.passed).toBe(false)
+    expect(result.detail).toContain('<html>')
+  })
   it('非 html 类型（vue_project）→ 明确未接入构建管线（MVP 主链路为 html）', async () => {
     const root = makeWorkspaceRoot()
     writeFileSync(path.join(root, 'index.html'), '<html></html>', 'utf8')
