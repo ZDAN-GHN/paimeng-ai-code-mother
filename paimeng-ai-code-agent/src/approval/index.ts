@@ -9,6 +9,7 @@ export interface ApprovalRequest {
   turnId: string
   action: 'start_generation'
   approvalId?: string
+  batchSeq?: number
 }
 
 export interface ApprovalDecisionRequest {
@@ -45,7 +46,7 @@ export function createApprovalService(store: SessionStore): ApprovalService {
         appId: input.appId,
         userId: input.userId,
         turnId: input.turnId,
-        batchSeq: 1,
+        batchSeq: input.batchSeq ?? 1,
         events: [
           {
             kind: 'approval/asked',

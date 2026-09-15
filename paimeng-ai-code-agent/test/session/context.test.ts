@@ -165,6 +165,7 @@ describe('session context reconstruction', () => {
           ? { events: firstPage, lastSeq: 3, hasMore: true }
           : { events: secondPage, lastSeq: 6, hasMore: false }
       },
+      replayTurn: async () => ({ events: [], lastSeq: 0 }),
       assertHumanApproved: async () => ({ ok: false, reason: '未找到人类批准' }),
       consumeHumanApproval: async () => ({ ok: false, reason: '未找到人类批准' }),
     }
@@ -185,6 +186,7 @@ describe('session context reconstruction', () => {
         expect(input.afterSeq).toBe(0)
         return { events: contextEvents(), lastSeq: 6, hasMore: false }
       },
+      replayTurn: async () => ({ events: [], lastSeq: 0 }),
       assertHumanApproved: async () => ({ ok: false, reason: '未找到人类批准' }),
       consumeHumanApproval: async () => ({ ok: false, reason: '未找到人类批准' }),
     }
@@ -201,6 +203,7 @@ describe('session context reconstruction', () => {
     const store: SessionStore = {
       appendBatch: async () => ({ seqFrom: 1, seqTo: 1, firstSeqNext: 2, appended: 1 }),
       replay: async () => ({ events: [], lastSeq: 0, hasMore: true }),
+      replayTurn: async () => ({ events: [], lastSeq: 0 }),
       assertHumanApproved: async () => ({ ok: false, reason: '未找到人类批准' }),
       consumeHumanApproval: async () => ({ ok: false, reason: '未找到人类批准' }),
     }
@@ -217,6 +220,7 @@ describe('session context reconstruction', () => {
         expect(input).toEqual({ appId: 'app-1', afterSeq: 0, limit: 100 })
         return { events, lastSeq: 6, hasMore: false }
       },
+      replayTurn: async () => ({ events: [], lastSeq: 0 }),
       assertHumanApproved: async () => ({ ok: false, reason: '未找到人类批准' }),
       consumeHumanApproval: async () => ({ ok: false, reason: '未找到人类批准' }),
     }

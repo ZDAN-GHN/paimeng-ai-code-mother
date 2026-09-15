@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { buildSessionTurnTools } from '../../src/turn/tools.js'
+import type { ApprovalService } from '../../src/approval/index.js'
 import type { SessionStore } from '../../src/session/store.js'
 
 function makeContext() {
@@ -24,11 +25,20 @@ function makeContext() {
       }
     }),
     replay: vi.fn(async () => ({ events: [], lastSeq: 0, hasMore: false })),
+    replayTurn: vi.fn(async () => ({ events: [], lastSeq: 0 })),
     assertHumanApproved: vi.fn(async () => ({ ok: false as const, reason: '未找到人类批准' })),
     consumeHumanApproval: vi.fn(async () => ({ ok: false as const, reason: '未找到人类批准' })),
   }
   return {
-    context: { appId: 'app-1', userId: 'user-1', turnId: 'turn-1', sessionStore, files, images },
+    context: {
+      appId: 'app-1',
+      userId: 'user-1',
+      turnId: 'turn-1',
+      approvalId: 'ap-turn-1-generation-1',
+      sessionStore,
+      files,
+      images,
+    },
     batches,
     files,
     images,
@@ -116,26 +126,33 @@ describe('session turn tools', () => {
     ).rejects.toThrow()
   })
 
-  it('records generation proposal and approval request without paid side effects', async () => {
+  it('records generation proposal and approval request in a single atomic batch', async () => {
     const { context, batches } = makeContext()
     const result = await buildSessionTurnTools(context).request_generation.execute!({
       reason: '需求已明确，可以生成',
       estimatedCredits: 100,
     })
-    expect(result.type).toBe('awaiting_user')
-    expect(result.reason).toBe('approval')
-    expect(result.approvalId).toMatch(/^ap-/)
-    expect(batches.flatMap((batch) => batch.events.map((event) => event.kind))).toEqual([
+
+    expect(result).toMatchObject({ type: 'awaiting_user', reason: 'approval' })
+    expect(result.approvalId).toBe('ap-turn-1-generation-1')
+    expect(batches).toHaveLength(1)
+    const batch = batches[0]!
+    expect(batch.batchSeq).toBe(1)
+    expect(batch.events.map((event) => event.kind)).toEqual([
       'generation/proposed',
       'approval/asked',
     ])
+    expect(batch.events[1]!.payload).toMatchObject({
+      approvalId: 'ap-turn-1-generation-1',
+      action: 'start_generation',
+      turnId: 'turn-1',
+    })
     expect(
-      batches
-        .flatMap((batch) => batch.events)
-        .every((event) => !['run/start', 'credit/freeze', 'build', 'deploy'].includes(event.kind)),
+      batch.events.every(
+        (event) => !['run/start', 'credit/freeze', 'build', 'deploy'].includes(event.kind),
+      ),
     ).toBe(true)
   })
-
   it('keeps read-only tools free of writes', async () => {
     const { context, files, images } = makeContext()
     await buildSessionTurnTools(context).readFile.execute!({ relativeFilePath: 'index.html' })

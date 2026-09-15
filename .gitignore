@@ -50,3 +50,7 @@ build/
 .claude/logs/
 # 部署产物目录：内容为运行期产物不入库，仅保留目录占位（本地 nginx 只读挂载，见 docker-compose.yml）
 runtime/
+
+## ZCode ##
+.zcode/
+.mimosa/

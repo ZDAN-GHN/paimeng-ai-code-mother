@@ -57,6 +57,17 @@ class MemorySessionStore implements SessionStore {
     }
   }
 
+  async replayTurn(input: { appId: string; turnId: string; afterSeq?: number }) {
+    const events = this.events.filter(
+      (event) =>
+        event.appId === input.appId &&
+        event.turnId === input.turnId &&
+        event.seq > (input.afterSeq ?? 0),
+    )
+    const lastSeq = events.at(-1)?.seq ?? (input.afterSeq ?? 0)
+    return { events, lastSeq }
+  }
+
   async assertHumanApproved(input: { appId: string; approvalId: string }) {
     const decisions = this.events
       .filter(
@@ -194,6 +205,19 @@ describe('approval service', () => {
     })
   })
 
+  it('uses an explicit batch sequence for approval requests', async () => {
+    const store = new MemorySessionStore()
+    const service = createApprovalService(store)
+    await service.request({
+      appId: 'app-1',
+      userId: 'user-1',
+      turnId: 'turn-ask',
+      action: 'start_generation',
+      approvalId: 'ap-1',
+      batchSeq: 2,
+    })
+    expect(store.all()[0]).toMatchObject({ batchSeq: 2, kind: 'approval/asked' })
+  })
   it('records only human decisions and rejects model or system sources', async () => {
     const store = new MemorySessionStore()
     const service = createApprovalService(store)

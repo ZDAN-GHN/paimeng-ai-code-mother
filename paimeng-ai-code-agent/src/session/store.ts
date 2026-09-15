@@ -21,6 +21,10 @@ export interface SessionStore {
     lastSeq: number
     hasMore: boolean
   }>
+  replayTurn(input: { appId: string; turnId: string; afterSeq?: number }): Promise<{
+    events: SessionEventRecord[]
+    lastSeq: number
+  }>
   assertHumanApproved(input: {
     appId: string
     approvalId: string
@@ -190,6 +194,26 @@ export class PgSessionStore implements SessionStore {
       lastSeq: lastScannedSeq === undefined ? (input.afterSeq ?? 0) : Number(lastScannedSeq),
       hasMore,
     }
+  }
+
+  async replayTurn(input: { appId: string; turnId: string; afterSeq?: number }): Promise<{
+    events: SessionEventRecord[]
+    lastSeq: number
+  }> {
+    const result = await this.pool.query<EventRow>(
+      `SELECT id, app_id, user_id, run_id, seq, turn_id, batch_seq, event_index, kind, version, ignorable, source, payload, created_at
+         FROM session_event WHERE app_id = $1 AND turn_id = $2 AND seq > $3 ORDER BY seq`,
+      [input.appId, input.turnId, input.afterSeq ?? 0],
+    )
+    const events = result.rows.flatMap((row) => {
+      if (!isSessionEventKind(row.kind)) {
+        if (!row.ignorable) throw new UnknownEventKindError(row.kind)
+        return []
+      }
+      return [toRecord(row)]
+    })
+    const lastSeq = events.at(-1)?.seq ?? (input.afterSeq ?? 0)
+    return { events, lastSeq }
   }
 
   async assertHumanApproved(input: {

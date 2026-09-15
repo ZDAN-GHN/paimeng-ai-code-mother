@@ -13,6 +13,7 @@ export const SESSION_EVENT_KINDS = [
   'approval/asked',
   'approval/decided',
   'approval/consumed',
+  'turn/terminal',
   'run/start',
   'run/phase',
   'run/milestone',

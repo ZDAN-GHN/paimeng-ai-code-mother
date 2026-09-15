@@ -13,6 +13,7 @@ import { runGenerationWorkflow, type StreamRequest } from '../generation/workflo
 import type { HistoryTurn } from '../generation/workflow/history.js'
 import type { LlmProvider } from '../llm/index.js'
 import { createRealLlm, isRealLlmConfigured } from '../llm/real.js'
+import { createScriptedLlm } from '../llm/index.js'
 import { WorkspacePathError, validateWorkspacePath } from '../generation/workspace.js'
 import { buildSummary, type InterviewAnswer } from '../interview/index.js'
 import { conductInterview } from '../interview/conduct.js'
@@ -23,14 +24,17 @@ import {
 } from '../interview/wireframe.js'
 import { parseContext, buildPlanningArtifact } from '../interview/context.js'
 import type { ImageTools } from '../generation/tools/imageTools.js'
+import type { FileTools } from '../generation/tools/fileTools.js'
 import type { ReviewGateSet } from '../generation/review/index.js'
 import type { SessionStore } from '../session/store.js'
 import type { ObservationSink } from '../eval/observer.js'
+import { executeSessionTurn } from '../turn/workflow.js'
 
 export interface AgentRouteOptions {
   runClient?: RunClient
   provider?: LlmProvider
-  imageTools?: ImageTools
+  imageTools?: Pick<ImageTools, 'searchContentImages'>
+  fileTools?: Pick<FileTools, 'writeFile' | 'readFile' | 'readDir'>
   reviewGates?: ReviewGateSet
   sessionStore?: SessionStore
   turnIdFactory?: () => string
@@ -107,6 +111,7 @@ const streamBodySchema = tolerantBody({
 
 const turnBodySchema = tolerantBody({
   appId: z.union([z.string(), z.number()]).catch(''),
+  turnId: z.string().optional().catch(undefined),
   message: z.string().optional().catch(undefined),
   action: z.enum(['chat', 'confirm_generation']).optional().catch(undefined),
   approvalId: z.string().optional().catch(undefined),
@@ -156,76 +161,83 @@ export function buildAgentRoutes(
       throw error
     }
     if (!options.sessionStore) throw httpError(503, '会话存储未配置，无法处理统一回合')
-    const turnId = `turn-${(options.turnIdFactory ?? randomUUID)()}`
-    const events =
-      action === 'chat'
-        ? [
+
+    const turnId = input.turnId ?? `turn-${(options.turnIdFactory ?? randomUUID)()}`
+
+    if (action === 'confirm_generation') {
+      const terminalMessage = '统一回合的审批与生成尚未接入，当前请求已安全拒绝'
+      try {
+        await options.sessionStore.appendBatch({
+          appId: String(input.appId),
+          userId,
+          turnId,
+          batchSeq: 1,
+          events: [
             {
-              kind: 'session/turn-start' as const,
-              source: 'human' as const,
+              kind: 'session/turn-start',
+              source: 'human',
               payload: { turnId, action },
             },
+          ],
+        })
+        const terminalBatch = await options.sessionStore.appendBatch({
+          appId: String(input.appId),
+          userId,
+          turnId,
+          batchSeq: 2,
+          events: [
             {
-              kind: 'user/message' as const,
-              source: 'human' as const,
-              payload: { text: input.message?.trim() ?? '' },
+              kind: 'turn/terminal',
+              source: 'system',
+              payload: { type: 'error', message: terminalMessage },
             },
-          ]
-        : [
-            {
-              kind: 'session/turn-start' as const,
-              source: 'human' as const,
-              payload: { turnId, action },
-            },
-          ]
-    let batch
+          ],
+        })
+        const terminal: AgentTurnEvent = {
+          type: 'error',
+          seq: terminalBatch.seqTo,
+          message: terminalMessage,
+        }
+        validateAgentTurnEvents([terminal])
+        return reply.headers(SSE_HEADERS).send(encodeEventStream([terminal]))
+      } catch (error) {
+        throw httpError(
+          503,
+          `会话终态写入失败：${error instanceof Error ? error.message : '未知错误'}`,
+        )
+      }
+    }
+
+    if (!options.fileTools) throw httpError(503, '文件工具未配置，无法处理会话回合')
+    if (!options.imageTools) throw httpError(503, '图片工具未配置，无法处理会话回合')
+
+    const modelId = 'scripted-standard'
+
     try {
-      batch = await options.sessionStore.appendBatch({
-        appId: String(input.appId),
-        userId,
-        turnId,
-        batchSeq: 1,
-        events,
-      })
+      const result = await executeSessionTurn(
+        {
+          appId: String(input.appId),
+          userId,
+          turnId,
+          message: input.message?.trim() ?? '',
+          action: 'chat',
+        },
+        {
+          provider: llmProvider ?? createScriptedLlm('success'),
+          modelId,
+          sessionStore: options.sessionStore,
+          files: options.fileTools,
+          images: options.imageTools,
+        },
+      )
+      validateAgentTurnEvents(result.events)
+      return reply.headers(SSE_HEADERS).send(encodeEventStream(result.events))
     } catch (error) {
       throw httpError(
-        503,
-        `会话事件写入失败：${error instanceof Error ? error.message : '未知错误'}`,
+        500,
+        `会话回合执行失败：${error instanceof Error ? error.message : '未知错误'}`,
       )
     }
-    let terminalBatch
-    const terminalMessage =
-      action === 'chat'
-        ? '统一回合的模型工具尚未接入，当前请求已安全拒绝'
-        : '统一回合的审批与生成尚未接入，当前请求已安全拒绝'
-    try {
-      terminalBatch = await options.sessionStore.appendBatch({
-        appId: String(input.appId),
-        userId,
-        turnId,
-        batchSeq: 2,
-        events: [
-          {
-            kind: 'model/message',
-            source: 'system',
-            payload: { type: 'error', message: terminalMessage, text: terminalMessage },
-          },
-        ],
-      })
-    } catch (error) {
-      throw httpError(
-        503,
-        `会话终态写入失败：${error instanceof Error ? error.message : '未知错误'}`,
-      )
-    }
-    const terminal: AgentTurnEvent = {
-      type: 'error',
-      seq: terminalBatch.seqTo,
-      message: terminalMessage,
-    }
-    const responseEvents: AgentTurnEvent[] = [terminal]
-    validateAgentTurnEvents(responseEvents)
-    return reply.headers(SSE_HEADERS).send(encodeEventStream(responseEvents))
   })
 
   fastify.post('/agent/workspace/validate', async (request) => {

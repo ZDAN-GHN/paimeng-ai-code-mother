@@ -1,6 +1,5 @@
-import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { createApprovalService, type ApprovalService } from '../approval/index.js'
+import type { ApprovalService } from '../approval/index.js'
 import type { SessionStore } from '../session/store.js'
 import type { FileTools, FileToolResult } from '../generation/tools/fileTools.js'
 import type { ImageTools, ImageToolResult } from '../generation/tools/imageTools.js'
@@ -34,6 +33,7 @@ export interface TurnToolContext {
   appId: string
   userId: string
   turnId: string
+  approvalId: string
   sessionStore: SessionStore
   files: Pick<FileTools, 'writeFile' | 'readFile' | 'readDir'>
   images: Pick<ImageTools, 'searchContentImages'>
@@ -74,7 +74,6 @@ async function appendModelEvent(
 }
 
 export function buildSessionTurnTools(context: TurnToolContext) {
-  const approval = context.approvalService ?? createApprovalService(context.sessionStore)
   const askUser: TurnTool<z.infer<typeof askUserInputSchema>, AwaitingUserResult> = {
     description: '向用户提出结构化澄清问题；不会创建 run、扣除积分或执行付费动作。',
     inputSchema: askUserInputSchema,
@@ -121,14 +120,20 @@ export function buildSessionTurnTools(context: TurnToolContext) {
     inputSchema: requestGenerationInputSchema,
     async execute(input) {
       const { reason, estimatedCredits } = requestGenerationInputSchema.parse(input)
-      const approvalId = `ap-${randomUUID()}`
       const base = eventContext(context)
       const proposal = { reason, estimatedCredits }
+      const approvalId = context.approvalId
       await context.sessionStore.appendBatch({
         ...base,
-        events: [{ kind: 'generation/proposed', source: 'model', payload: proposal }],
+        events: [
+          { kind: 'generation/proposed', source: 'model', payload: proposal },
+          {
+            kind: 'approval/asked',
+            source: 'system',
+            payload: { approvalId, action: 'start_generation', turnId: context.turnId },
+          },
+        ],
       })
-      await approval.request({ ...base, action: 'start_generation', approvalId })
       return {
         type: 'awaiting_user',
         reason: 'approval',

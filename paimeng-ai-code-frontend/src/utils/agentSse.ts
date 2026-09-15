@@ -8,6 +8,9 @@ export type AgentEventType =
   | 'milestone'
   | 'done'
   | 'error'
+  | 'awaiting_user'
+  | 'questions'
+  | 'wireframe'
 
 export interface AgentStreamEvent {
   type: AgentEventType
@@ -32,6 +35,18 @@ export interface AgentStreamParams {
   workspacePath: string
   intensity?: Intensity
   history?: Array<{ role: 'user' | 'assistant'; content: string }>
+  signal?: AbortSignal
+}
+
+export interface AgentTurnParams {
+  token: string
+  appId: string
+  message: string
+  workspacePath: string
+  turnId?: string
+  action?: 'chat' | 'confirm_generation'
+  approvalId?: string
+  codeGenType?: 'html' | 'multi_file' | 'vue_project'
   signal?: AbortSignal
 }
 
@@ -228,6 +243,72 @@ export async function streamAgentEvents(
         if (!event) continue
         onEvent(event)
         if (event.type === 'done' || event.type === 'error') return event
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined)
+    reader.releaseLock()
+  }
+  return null
+}
+
+export function createTurnId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `turn-${crypto.randomUUID()}`
+  }
+  return `turn-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+export async function streamAgentTurn(
+  params: AgentTurnParams,
+  onEvent: (event: AgentStreamEvent) => void,
+): Promise<AgentStreamEvent | null> {
+  const turnId = params.turnId ?? createTurnId()
+  const response = await fetch(`${AGENT_BASE_URL}/turn`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${params.token}`,
+    },
+    body: JSON.stringify({
+      appId: params.appId,
+      turnId,
+      message: params.message,
+      workspacePath: params.workspacePath,
+      action: params.action ?? 'chat',
+      approvalId: params.approvalId,
+      codeGenType: params.codeGenType,
+    }),
+    signal: params.signal,
+  })
+
+  if (!response.ok || !response.body) {
+    const serverMessage = await readServerErrorMessage(response)
+    throw new AgentStreamHttpError(
+      response.status,
+      serverMessage ?? `Agent 回合请求失败: ${response.status}`,
+    )
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+      let separatorIndex: number
+
+      while ((separatorIndex = buffer.indexOf('\n\n')) !== -1) {
+        const frame = buffer.slice(0, separatorIndex)
+        buffer = buffer.slice(separatorIndex + 2)
+        const event = parseFrame(frame)
+        if (!event) continue
+        onEvent(event)
+        if (event.type === 'done' || event.type === 'error' || event.type === 'awaiting_user') {
+          return event
+        }
       }
     }
   } finally {
