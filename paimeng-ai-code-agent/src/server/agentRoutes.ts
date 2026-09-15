@@ -28,7 +28,7 @@ import type { FileTools } from '../generation/tools/fileTools.js'
 import type { ReviewGateSet } from '../generation/review/index.js'
 import type { SessionStore } from '../session/store.js'
 import type { ObservationSink } from '../eval/observer.js'
-import { executeSessionTurn } from '../turn/workflow.js'
+import { executeSessionTurn, prepareApprovedGeneration } from '../turn/workflow.js'
 
 export interface AgentRouteOptions {
   runClient?: RunClient
@@ -165,47 +165,63 @@ export function buildAgentRoutes(
     const turnId = input.turnId ?? `turn-${(options.turnIdFactory ?? randomUUID)()}`
 
     if (action === 'confirm_generation') {
-      const terminalMessage = '统一回合的审批与生成尚未接入，当前请求已安全拒绝'
+      const runClient = resolveRunClient()
+      if (!runClient) throw httpError(503, 'Java 内部 API 未配置，无法确认生成')
+      let prepared: Awaited<ReturnType<typeof prepareApprovedGeneration>>
       try {
-        await options.sessionStore.appendBatch({
-          appId: String(input.appId),
-          userId,
-          turnId,
-          batchSeq: 1,
-          events: [
-            {
-              kind: 'session/turn-start',
-              source: 'human',
-              payload: { turnId, action },
-            },
-          ],
-        })
-        const terminalBatch = await options.sessionStore.appendBatch({
-          appId: String(input.appId),
-          userId,
-          turnId,
-          batchSeq: 2,
-          events: [
-            {
-              kind: 'turn/terminal',
-              source: 'system',
-              payload: { type: 'error', message: terminalMessage },
-            },
-          ],
-        })
-        const terminal: AgentTurnEvent = {
-          type: 'error',
-          seq: terminalBatch.seqTo,
-          message: terminalMessage,
-        }
+        prepared = await prepareApprovedGeneration(
+          {
+            appId: String(input.appId),
+            userId,
+            turnId,
+            approvalId: input.approvalId!,
+            message: input.message?.trim() || '用户已确认开始生成',
+            intensity: input.intensity,
+            codeGenType: input.codeGenType!,
+            workspacePath: input.workspacePath!,
+          },
+          { sessionStore: options.sessionStore, runClient },
+        )
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '确认生成失败'
+        const terminal: AgentTurnEvent = { type: 'error', seq: 1, message }
         validateAgentTurnEvents([terminal])
         return reply.headers(SSE_HEADERS).send(encodeEventStream([terminal]))
-      } catch (error) {
-        throw httpError(
-          503,
-          `会话终态写入失败：${error instanceof Error ? error.message : '未知错误'}`,
-        )
       }
+
+      reply.hijack()
+      reply.raw.writeHead(200, SSE_HEADERS)
+      const writeFrame = async (event: AgentEvent): Promise<void> => {
+        if (!reply.raw.writableEnded && !reply.raw.destroyed) reply.raw.write(encodeEvent(event))
+      }
+      try {
+        for await (const event of runGenerationWorkflow(prepared, {
+          workspaceRoot: config.workspaceRoot,
+          provider: llmProvider,
+          runClient,
+          imageTools: options.imageTools as ImageTools | undefined,
+          reviewGates: options.reviewGates,
+          modelOverrides: {
+            fast: config.modelFast,
+            standard: config.modelStandard,
+            deep: config.modelDeep,
+          },
+          imageConfig: {
+            pexelsApiKey: config.pexelsApiKey,
+            dashscopeApiKey: config.dashscopeApiKey,
+            imageModel: config.imageModel,
+          },
+          logger: request.log,
+        })) {
+          await writeFrame(event)
+          if (event.type === 'done' || event.type === 'error') break
+        }
+      } catch (error) {
+        await writeFrame({ type: 'error', message: error instanceof Error ? error.message : '生成失败' })
+      } finally {
+        if (!reply.raw.writableEnded && !reply.raw.destroyed) reply.raw.end()
+      }
+      return reply
     }
 
     if (!options.fileTools) throw httpError(503, '文件工具未配置，无法处理会话回合')
@@ -481,7 +497,7 @@ export function buildAgentRoutes(
         workspaceRoot: config.workspaceRoot,
         provider: llmProvider,
         runClient,
-        imageTools: options.imageTools,
+        imageTools: options.imageTools as ImageTools | undefined,
         reviewGates: options.reviewGates,
         wireframePath,
         wireframeRelativePath: context.wireframe?.relativeUrl,

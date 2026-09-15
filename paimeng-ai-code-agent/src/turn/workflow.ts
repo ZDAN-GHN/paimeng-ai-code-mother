@@ -1,4 +1,5 @@
 import { streamText, tool as aiTool, type ToolSet } from 'ai'
+import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { AgentTurnEvent } from '../protocol/events.js'
 import type { SessionStore } from '../session/store.js'
@@ -8,6 +9,7 @@ import type { ImageTools } from '../generation/tools/imageTools.js'
 import { buildSessionTurnTools, type AwaitingUserResult } from './tools.js'
 import { loadSessionContext } from '../session/context.js'
 import type { LlmProvider } from '../llm/index.js'
+import type { RunClient } from '../runs/runClient.js'
 
 export interface SessionTurnRequest {
   appId: string
@@ -28,6 +30,188 @@ export interface SessionTurnOptions {
 export interface SessionTurnResult {
   events: AgentTurnEvent[]
   terminal: AgentTurnEvent
+}
+
+export interface ApprovedGenerationRequest {
+  appId: string
+  userId: string
+  turnId: string
+  approvalId: string
+  runId: string
+  message: string
+  intensity?: 'fast' | 'standard' | 'deep'
+  codeGenType: 'html' | 'multi_file' | 'vue_project'
+  workspacePath: string
+}
+
+export interface ApprovedGenerationOptions {
+  sessionStore: SessionStore
+  runClient: Pick<RunClient, 'createRun' | 'freezeCredit' | 'completeRun'>
+  runIdFactory?: () => string
+}
+
+export class ApprovedGenerationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ApprovedGenerationError'
+  }
+}
+
+async function appendConfirmationFailure(
+  request: ApprovedGenerationRequest,
+  sessionStore: SessionStore,
+  message: string,
+  options: { alert?: boolean; failureStage?: string; runId?: string } = {},
+): Promise<void> {
+  const events = [] as Array<{
+    kind: 'run/end' | 'turn/terminal'
+    source: 'system'
+    runId?: string
+    payload: Record<string, unknown>
+  }>
+  if (options.alert) {
+    events.push({
+      kind: 'run/end',
+      source: 'system',
+      runId: options.runId,
+      payload: {
+        runId: options.runId,
+        approvalId: request.approvalId,
+        status: 'failed',
+        failureStage: options.failureStage,
+        retryable: true,
+      },
+    })
+  }
+  events.push({
+    kind: 'turn/terminal',
+    source: 'system',
+    payload: { type: 'error', message },
+  })
+  await sessionStore.appendBatch({
+    appId: request.appId,
+    userId: request.userId,
+    turnId: request.turnId,
+    batchSeq: options.alert ? 3 : 1,
+    events,
+  })
+}
+
+async function failCreatedGenerationRun(
+  request: ApprovedGenerationRequest,
+  runClient: Pick<RunClient, 'completeRun'>,
+  message: string,
+): Promise<boolean> {
+  try {
+    await runClient.completeRun(request.runId, {
+      appId: request.appId,
+      userId: request.userId,
+      status: 'failed',
+      messages: [{ messageType: 'user', content: request.message }],
+      workspacePath: request.workspacePath,
+      errorMessage: message,
+      errorCode: 'unknown',
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Performs every paid-generation side effect before the model may be entered.
+ * A failed completion invokes the existing Java refund path for a frozen credit.
+ */
+export async function prepareApprovedGeneration(
+  request: Omit<ApprovedGenerationRequest, 'runId'>,
+  options: ApprovedGenerationOptions,
+): Promise<ApprovedGenerationRequest> {
+  const approval = await options.sessionStore.assertHumanApproved({
+    appId: request.appId,
+    approvalId: request.approvalId,
+  })
+  if (!approval.ok) {
+    const message = `审批不可用于生成：${approval.reason}`
+    await appendConfirmationFailure({ ...request, runId: '' }, options.sessionStore, message)
+    throw new ApprovedGenerationError(message)
+  }
+
+  const prepared = {
+    ...request,
+    runId: `run-${(options.runIdFactory ?? randomUUID)()}`,
+  }
+  try {
+    await options.runClient.createRun({
+      runId: prepared.runId,
+      appId: prepared.appId,
+      userId: prepared.userId,
+      phase: 'wireframe_confirmed',
+      context: JSON.stringify({ approvalId: prepared.approvalId, turnId: prepared.turnId }),
+    })
+  } catch (error) {
+    throw new ApprovedGenerationError(
+      `创建生成 run 失败：${error instanceof Error ? error.message : '未知错误'}`,
+    )
+  }
+
+  try {
+    await options.runClient.freezeCredit(prepared.runId, { intensity: prepared.intensity })
+  } catch (error) {
+    const message = `冻结积分失败：${error instanceof Error ? error.message : '未知错误'}`
+    const compensated = await failCreatedGenerationRun(prepared, options.runClient, message)
+    await appendConfirmationFailure(prepared, options.sessionStore, message, {
+      alert: !compensated,
+      failureStage: 'freeze-credit',
+      runId: prepared.runId,
+    })
+    throw new ApprovedGenerationError(message)
+  }
+
+  const consumed = await options.sessionStore.consumeHumanApproval({
+    appId: prepared.appId,
+    userId: prepared.userId,
+    turnId: prepared.turnId,
+    approvalId: prepared.approvalId,
+  })
+  if (!consumed.ok) {
+    const message = `消费审批失败：${consumed.reason}`
+    const compensated = await failCreatedGenerationRun(prepared, options.runClient, message)
+    await appendConfirmationFailure(prepared, options.sessionStore, message, {
+      alert: true,
+      failureStage: compensated ? 'consume-approval' : 'complete-run-after-consume-approval',
+      runId: prepared.runId,
+    })
+    throw new ApprovedGenerationError(message)
+  }
+
+  try {
+    await options.sessionStore.appendBatch({
+      appId: prepared.appId,
+      userId: prepared.userId,
+      turnId: prepared.turnId,
+      batchSeq: 2,
+      events: [
+        {
+          kind: 'run/start',
+          source: 'system',
+          runId: prepared.runId,
+          payload: { runId: prepared.runId, approvalId: prepared.approvalId },
+        },
+      ],
+    })
+  } catch (error) {
+    const message = `写入生成启动事件失败：${error instanceof Error ? error.message : '未知错误'}`
+    const compensated = await failCreatedGenerationRun(prepared, options.runClient, message)
+    if (!compensated) {
+      await appendConfirmationFailure(prepared, options.sessionStore, message, {
+        alert: true,
+        failureStage: 'complete-run-after-run-start-persist',
+        runId: prepared.runId,
+      })
+    }
+    throw new ApprovedGenerationError(message)
+  }
+  return prepared
 }
 
 function deriveApprovalId(turnId: string): string {

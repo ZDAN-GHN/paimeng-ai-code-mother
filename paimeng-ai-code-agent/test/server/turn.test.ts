@@ -4,6 +4,8 @@ import type { SessionStore } from '../../src/session/store.js'
 import type { SessionEventRecord } from '../../src/session/events.js'
 import type { FileTools } from '../../src/generation/tools/fileTools.js'
 import type { ImageTools } from '../../src/generation/tools/imageTools.js'
+import type { LlmProvider } from '../../src/llm/index.js'
+import type { RunClient } from '../../src/runs/runClient.js'
 
 function memorySessionStore(
   options: { failOnAppend?: number } = {},
@@ -117,7 +119,7 @@ describe('POST /agent/turn', () => {
     expect(store.batches.length).toBeGreaterThanOrEqual(2)
   })
 
-  it('confirm_generation 仍为 fail-closed', async () => {
+  it('confirm_generation 缺少 Java RunClient 时 fail-closed', async () => {
     const store = memorySessionStore()
     const root = makeWorkspaceRoot()
     const app = buildTestApp(root, {
@@ -140,11 +142,48 @@ describe('POST /agent/turn', () => {
         workspacePath: root,
       },
     })
+    expect(response.statusCode).toBe(503)
+    expect(response.body).toContain('Java 内部 API 未配置')
+    expect(store.batches).toHaveLength(0)
+  })
+
+  it('confirm_generation 未消费审批时不调用 provider 或 RunClient', async () => {
+    const store = memorySessionStore()
+    const root = makeWorkspaceRoot()
+    const provider = { languageModel: vi.fn() } as unknown as LlmProvider
+    const runClient = {
+      createRun: vi.fn(),
+      freezeCredit: vi.fn(),
+      completeRun: vi.fn(),
+    } as unknown as RunClient
+    const app = buildTestApp(root, {
+      agentRoutes: {
+        sessionStore: store,
+        runClient,
+        provider,
+        fileTools: fakeFileTools(),
+        imageTools: fakeImageTools(),
+      },
+    })
+    const token = await makeToken()
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/turn',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        appId: '1001',
+        action: 'confirm_generation',
+        approvalId: 'ap-1',
+        codeGenType: 'html',
+        workspacePath: root,
+      },
+    })
     expect(response.statusCode).toBe(200)
-    const output = frames(response.body)
-    expect(output).toHaveLength(1)
-    expect(output[0]!.event).toBe('error')
-    expect(output[0]!.data.message).toContain('审批与生成尚未接入')
+    expect(frames(response.body)[0]!.data.message).toContain('审批不可用于生成')
+    expect(provider.languageModel).not.toHaveBeenCalled()
+    expect(runClient.createRun).not.toHaveBeenCalled()
+    expect(runClient.freezeCredit).not.toHaveBeenCalled()
+    expect(runClient.completeRun).not.toHaveBeenCalled()
   })
 
   it('缺少 fileTools 时返回 503', async () => {
