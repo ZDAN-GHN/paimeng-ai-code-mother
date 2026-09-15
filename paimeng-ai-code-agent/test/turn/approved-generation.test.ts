@@ -207,7 +207,15 @@ describe('prepareApprovedGeneration', () => {
         runClient: fakeRunClient(calls),
       }),
     ).rejects.toThrow('写入生成启动事件失败')
-    expect(calls).toEqual(['assert', 'create', 'freeze', 'consume', 'append:run/start', 'complete:failed'])
+    expect(calls).toEqual([
+      'assert',
+      'create',
+      'freeze',
+      'consume',
+      'append:run/start',
+      'complete:failed',
+      'append:turn/terminal',
+    ])
   })
 
   it('run/start 持久化失败且补偿失败时记录可重放告警', async () => {

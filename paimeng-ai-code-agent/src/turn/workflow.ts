@@ -202,13 +202,11 @@ export async function prepareApprovedGeneration(
   } catch (error) {
     const message = `写入生成启动事件失败：${error instanceof Error ? error.message : '未知错误'}`
     const compensated = await failCreatedGenerationRun(prepared, options.runClient, message)
-    if (!compensated) {
-      await appendConfirmationFailure(prepared, options.sessionStore, message, {
-        alert: true,
-        failureStage: 'complete-run-after-run-start-persist',
-        runId: prepared.runId,
-      })
-    }
+    await appendConfirmationFailure(prepared, options.sessionStore, message, {
+      alert: !compensated,
+      failureStage: 'complete-run-after-run-start-persist',
+      runId: prepared.runId,
+    })
     throw new ApprovedGenerationError(message)
   }
   return prepared
@@ -373,6 +371,11 @@ export async function executeSessionTurn(
   let nextBatchSeq = 1
   const allocateBatch = () => nextBatchSeq++
 
+  const sessionContext = await loadSessionContext(sessionStore, {
+    appId,
+    userId,
+  })
+
   const initialBatchSeq = allocateBatch()
   await sessionStore.appendBatch({
     appId,
@@ -388,11 +391,6 @@ export async function executeSessionTurn(
   const approvalId = deriveApprovalId(turnId)
   const context = { appId, userId, turnId, approvalId, sessionStore, files, images }
 
-  const sessionContext = await loadSessionContext(sessionStore, {
-    appId,
-    userId,
-  })
-
   let awaitingResult: AwaitingUserResult | null = null
   let assistantText = ''
 
@@ -400,8 +398,8 @@ export async function executeSessionTurn(
     const model = provider.languageModel(modelId)
     const result = streamText({
       model,
+      instructions: sessionContext.systemPrompt,
       messages: [
-        { role: 'system', content: sessionContext.systemPrompt },
         ...sessionContext.history.map((h) => ({
           role: h.role as 'user' | 'assistant',
           content: h.content,

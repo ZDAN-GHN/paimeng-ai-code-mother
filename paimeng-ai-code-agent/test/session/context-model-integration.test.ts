@@ -79,11 +79,23 @@ function imageTools(): Pick<ImageTools, 'searchContentImages'> {
   return { searchContentImages: vi.fn(async () => ({ ok: true as const, images: [] })) }
 }
 
-type ModelPromptMessage = { role: string; content: string }
+type ModelPromptMessage = {
+  role: string
+  content: string | Array<{ type: string; text?: string }>
+}
 
 function modelPrompt(serialized: string | undefined): ModelPromptMessage[] {
   expect(serialized).toBeDefined()
   return JSON.parse(serialized!) as ModelPromptMessage[]
+}
+
+function messageText(message: ModelPromptMessage): string {
+  return typeof message.content === 'string'
+    ? message.content
+    : message.content
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text ?? '')
+        .join('')
 }
 
 describe('session context model integration (#40)', () => {
@@ -129,15 +141,16 @@ describe('session context model integration (#40)', () => {
 
     const secondCall = provider.records.at(-1)
     const prompt = modelPrompt(secondCall?.system)
-    const systemContext = prompt.find((message) => message.role === 'system')?.content
+    const systemContext = prompt.find((message) => message.role === 'system')
 
-    expect(systemContext).toContain(firstMessage)
-    expect(systemContext).toContain(firstConclusion)
-    expect(prompt).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ role: 'user', content: firstMessage }),
-        expect.objectContaining({ role: 'assistant', content: firstConclusion }),
-      ]),
-    )
+    expect(systemContext).toBeDefined()
+    expect(messageText(systemContext!)).toContain(firstMessage)
+    expect(messageText(systemContext!)).toContain(firstConclusion)
+    expect(
+      prompt.some((message) => message.role === 'user' && messageText(message) === firstMessage),
+    ).toBe(true)
+    expect(
+      prompt.some((message) => message.role === 'assistant' && messageText(message) === firstConclusion),
+    ).toBe(true)
   })
 })
