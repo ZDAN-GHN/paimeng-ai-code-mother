@@ -58,6 +58,7 @@ describe('resolveStackProfile', () => {
             32000,
             Math.round(tier.limits.maxOutputTokens * scale.outputTokens),
           ),
+          maxTokenBudget: tier.limits.maxTokenBudget,
           maxToolCalls: Math.round(tier.limits.maxToolCalls * scale.toolCalls),
           maxImages: tier.limits.maxImages,
         })
@@ -65,12 +66,19 @@ describe('resolveStackProfile', () => {
     }
 
     const fractional = resolveBudgetLimits(
-      { maxTurns: 1, maxOutputTokens: 16001, maxToolCalls: 3, maxImages: 1 },
+      {
+        maxTurns: 1,
+        maxOutputTokens: 16001,
+        maxTokenBudget: 120_000,
+        maxToolCalls: 3,
+        maxImages: 1,
+      },
       { turns: 1.5, outputTokens: 3, toolCalls: 1.5 },
     )
     expect(fractional).toEqual({
       maxTurns: 2,
       maxOutputTokens: 32000,
+      maxTokenBudget: 120_000,
       maxToolCalls: 5,
       maxImages: 1,
     })

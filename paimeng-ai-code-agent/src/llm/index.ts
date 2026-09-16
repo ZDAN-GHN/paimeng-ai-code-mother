@@ -14,6 +14,7 @@ export type LlmScript =
   | 'quality-fail-always'
   | 'limit'
   | 'limit-length'
+  | 'token-budget-limit'
 
 export interface ScriptedCallRecord {
   modelId: string
@@ -249,7 +250,9 @@ class ScriptedLanguageModel implements LanguageModelV2 {
     this.record(options)
 
     const wrapUp =
-      this.script === 'limit' || this.script === 'limit-length'
+      this.script === 'limit' ||
+      this.script === 'limit-length' ||
+      this.script === 'token-budget-limit'
         ? '\n已达本次生成硬上限，以上为已生成的页面内容。\n'
         : '\n页面已写入 index.html\n'
     return {
@@ -367,7 +370,11 @@ class ScriptedLanguageModel implements LanguageModelV2 {
       parts.push({
         type: 'finish',
         finishReason: 'tool-calls',
-        usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 },
+        usage: {
+          inputTokens: this.script === 'token-budget-limit' ? 30_000 : 2,
+          outputTokens: this.script === 'token-budget-limit' ? 30_000 : 3,
+          totalTokens: this.script === 'token-budget-limit' ? 60_000 : 5,
+        },
       })
       return { stream: streamFromParts(parts) }
     }

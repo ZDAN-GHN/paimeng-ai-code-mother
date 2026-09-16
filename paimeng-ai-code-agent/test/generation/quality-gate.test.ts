@@ -287,6 +287,47 @@ describe('Issue #9：硬上限优雅收尾（绝不硬杀）', () => {
     expect(milestoneTitles).toContain('门禁判决')
   })
 
+  it('累计 token 达预算时注入无工具收尾，完成后仍经既有 run accounting 落 usage', async () => {
+    const root = makeWorkspaceRoot()
+    const calls: RunCall[] = []
+    const token = await makeToken()
+    const provider = createScriptedLlm('token-budget-limit')
+    const app = buildTestApp(root, {
+      agentRoutes: { runClient: fakeRunClient(calls, {}), provider },
+    })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/stream',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        runId: 'run-token-budget',
+        appId: 1,
+        message: 'hello',
+        workspacePath: root,
+        intensity: 'fast',
+      },
+    })
+    const result = frames(response.body)
+
+    expect(types(result).at(-1)).toBe('done')
+    expect(
+      result.some(
+        (frame) => frame.event === 'ai_thinking' && frame.data.text === '已达本次生成 Token 预算，正在收尾',
+      ),
+    ).toBe(true)
+    const finalizationCalls = provider.records.filter((record) =>
+      record.system?.includes('累计 token 使用量已达到预算'),
+    )
+    expect(finalizationCalls).toHaveLength(1)
+    expect(finalizationCalls[0]?.hasToolResult).toBe(false)
+    expect(provider.records.filter((record) => record.modelId === 'scripted-fast')).toHaveLength(3)
+
+    const tokenUpdate = calls.find((call) => call.body.tokenUsage != null)
+    expect(tokenUpdate).toBeTruthy()
+    const usage = JSON.parse(String(tokenUpdate!.body.tokenUsage)) as { totalTokens: number }
+    expect(usage.totalTokens).toBeGreaterThanOrEqual(60_000)
+  })
+
   it('limit-length 剧本（输出达 max_output_tokens 被截断，finishReason=length）→ 同样优雅收尾 → done（审查整改 c4）', async () => {
     const root = makeWorkspaceRoot()
     const calls: RunCall[] = []

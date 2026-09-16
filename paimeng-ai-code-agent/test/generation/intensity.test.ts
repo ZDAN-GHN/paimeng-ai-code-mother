@@ -13,6 +13,7 @@ describe('三档推理强度（Issue #9）', () => {
       expect(tier.priceMultiplier).toBeGreaterThan(0)
       expect(tier.limits.maxTurns).toBeGreaterThan(0)
       expect(tier.limits.maxOutputTokens).toBeGreaterThan(0)
+      expect(tier.limits.maxTokenBudget).toBeGreaterThan(0)
       expect(tier.limits.maxToolCalls).toBeGreaterThan(0)
       expect(tier.limits.maxImages).toBeGreaterThan(0)
     }
@@ -26,6 +27,8 @@ describe('三档推理强度（Issue #9）', () => {
     expect(standard.maxTurns).toBeLessThan(deep.maxTurns)
     expect(fast.maxOutputTokens).toBeLessThan(standard.maxOutputTokens)
     expect(standard.maxOutputTokens).toBeLessThan(deep.maxOutputTokens)
+    expect(fast.maxTokenBudget).toBeLessThan(standard.maxTokenBudget)
+    expect(standard.maxTokenBudget).toBeLessThan(deep.maxTokenBudget)
     expect(fast.maxToolCalls).toBeLessThan(standard.maxToolCalls)
     expect(standard.maxToolCalls).toBeLessThan(deep.maxToolCalls)
     expect(fast.maxImages).toBeLessThan(standard.maxImages)
@@ -36,6 +39,30 @@ describe('三档推理强度（Issue #9）', () => {
     expect(INTENSITY_TIERS.standard.priceMultiplier).toBe(1)
     expect(INTENSITY_TIERS.fast.priceMultiplier).toBe(0.5)
     expect(INTENSITY_TIERS.deep.priceMultiplier).toBe(2)
+  })
+
+  it('冻结 token 预算与次级 maxTurns：fast / standard / deep', () => {
+    expect(INTENSITY_TIERS.fast.limits).toMatchObject({
+      maxTurns: 8,
+      maxToolCalls: 20,
+      maxOutputTokens: 3000,
+      maxTokenBudget: 60_000,
+      maxImages: 2,
+    })
+    expect(INTENSITY_TIERS.standard.limits).toMatchObject({
+      maxTurns: 16,
+      maxToolCalls: 50,
+      maxOutputTokens: 8000,
+      maxTokenBudget: 200_000,
+      maxImages: 4,
+    })
+    expect(INTENSITY_TIERS.deep.limits).toMatchObject({
+      maxTurns: 32,
+      maxToolCalls: 100,
+      maxOutputTokens: 16000,
+      maxTokenBudget: 600_000,
+      maxImages: 8,
+    })
   })
 
   it('标准档护栏与历史先例一致：max_tool_calls=50、max_images=4（架构 §3.1/§3.3）', () => {

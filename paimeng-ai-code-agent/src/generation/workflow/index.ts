@@ -423,65 +423,77 @@ export async function* runGenerationWorkflow(
 
       const modelId = resolveModelId(tier, options.modelOverrides)
 
-      const result = streamText(
-        withAbort(
-          {
-            model: provider.languageModel(modelId),
-            system: codegenSystem,
-            messages,
-
-            maxRetries: 0,
-            maxOutputTokens: budget.maxOutputTokens,
-            stopWhen: [isStepCount(budget.maxTurns), stopWhenToolCalls(budget.maxToolCalls)],
-            tools: buildTools({ files: files!, images }),
-          },
-          options.abortSignal,
-        ),
-      )
-
       let truncatedByLimit = false
-      for await (const part of result.fullStream) {
-        switch (part.type) {
-          case 'text-delta':
-            pageContent += part.text
-            yield { type: 'ai_response', data: part.text }
-            break
-          case 'tool-call':
-            yield {
-              type: 'tool_request',
-              id: part.toolCallId,
-              name: part.toolName,
-              arguments: json(part.input),
-            }
-            break
-          case 'tool-result':
-            yield {
-              type: 'tool_executed',
-              id: part.toolCallId,
-              name: part.toolName,
-              arguments: json(part.input),
-              result: json(part.output),
-            }
-            break
-          case 'error':
-            if (isAbortError(part.error)) {
-              throw new GenerationAborted()
-            }
+      let reachedTokenBudget = tokenUsage.totalTokens >= budget.maxTokenBudget
+      if (!reachedTokenBudget) {
+        const result = streamText(
+          withAbort(
+            {
+              model: provider.languageModel(modelId),
+              system: codegenSystem,
+              messages,
 
-            throw part.error instanceof Error ? part.error : new Error(String(part.error))
+              maxRetries: 0,
+              maxOutputTokens: budget.maxOutputTokens,
+              stopWhen: [isStepCount(budget.maxTurns), stopWhenToolCalls(budget.maxToolCalls)],
+              tools: buildTools({ files: files!, images }),
+            },
+            options.abortSignal,
+          ),
+        )
+
+        for await (const part of result.fullStream) {
+          switch (part.type) {
+            case 'text-delta':
+              pageContent += part.text
+              yield { type: 'ai_response', data: part.text }
+              break
+            case 'tool-call':
+              yield {
+                type: 'tool_request',
+                id: part.toolCallId,
+                name: part.toolName,
+                arguments: json(part.input),
+              }
+              break
+            case 'tool-result':
+              yield {
+                type: 'tool_executed',
+                id: part.toolCallId,
+                name: part.toolName,
+                arguments: json(part.input),
+                result: json(part.output),
+              }
+              break
+            case 'error':
+              if (isAbortError(part.error)) {
+                throw new GenerationAborted()
+              }
+
+              throw part.error instanceof Error ? part.error : new Error(String(part.error))
+          }
         }
-      }
-      const finishReason = await result.finishReason
+        const finishReason = await result.finishReason
 
-      truncatedByLimit = finishReason === 'tool-calls' || finishReason === 'length'
-      accumulateUsage(tokenUsage, await result.usage)
-      if (truncatedByLimit) {
-        yield { type: 'ai_thinking', text: '已达本次生成硬上限，正在收尾' }
+        truncatedByLimit = finishReason === 'tool-calls' || finishReason === 'length'
+        accumulateUsage(tokenUsage, await result.usage)
+        reachedTokenBudget = tokenUsage.totalTokens >= budget.maxTokenBudget
+      }
+
+      const requiresFinalization = truncatedByLimit || reachedTokenBudget
+      if (requiresFinalization) {
+        const finalizationNotice = reachedTokenBudget
+          ? '已达本次生成 Token 预算，正在收尾'
+          : '已达本次生成硬上限，正在收尾'
+        const finalizationInstruction = reachedTokenBudget
+          ? '累计 token 使用量已达到预算'
+          : '已达本次生成硬上限（工具调用/生成步数/输出长度上限）'
+        yield { type: 'ai_thinking', text: finalizationNotice }
         const wrapUp = await generateText(
           withAbort(
             {
               model: provider.languageModel(modelId),
-              system: `${codegenSystem}\n\n已达本次生成硬上限（工具调用/生成步数/输出长度上限）。请不要再调用工具，基于以下已生成内容立即输出最终完整交代：\n${pageContent}`,
+              system: `${codegenSystem}\n\n${finalizationInstruction}。请不要再调用工具，基于以下已生成内容立即输出最终完整交代：\n${pageContent}`,
               messages,
 
               maxRetries: SHORT_CALL_MAX_RETRIES,
@@ -501,12 +513,12 @@ export async function* runGenerationWorkflow(
       yield* sync()
       const verdict = await runReview()
       const attempts = actor.getSnapshot().context.qualityAttempts
-      const finalization = truncatedByLimit || attempts >= MAX_QUALITY_ATTEMPTS
+      const finalizingAttempt = requiresFinalization || attempts >= MAX_QUALITY_ATTEMPTS
       const deterministicFailure = verdict.deterministicFailures.length > 0
       const canAcceptHeuristicFailure =
         !deterministicFailure &&
         verdict.heuristicFailures.length > 0 &&
-        finalization &&
+        finalizingAttempt &&
         options.sessionStore !== undefined &&
         request.turnId !== undefined &&
         request.userId != null
@@ -516,10 +528,10 @@ export async function* runGenerationWorkflow(
           ? 'failed'
           : canAcceptHeuristicFailure
             ? 'accepted-heuristic'
-            : finalization
+            : finalizingAttempt
               ? 'failed'
               : 'retry'
-      await persistVerdict(verdict, outcome, truncatedByLimit)
+      await persistVerdict(verdict, outcome, requiresFinalization)
       yield verdictEvent(verdict, outcome)
 
       if (verdict.passed || outcome === 'accepted-heuristic') break

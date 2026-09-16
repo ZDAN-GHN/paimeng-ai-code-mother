@@ -62,6 +62,7 @@ export function resolveBudgetLimits(limits: IntensityLimits, scale: BudgetScale)
       MAX_OUTPUT_TOKENS,
       Math.round(limits.maxOutputTokens * scale.outputTokens),
     ),
+    maxTokenBudget: limits.maxTokenBudget,
     maxToolCalls: Math.round(limits.maxToolCalls * scale.toolCalls),
     maxImages: limits.maxImages,
   }
