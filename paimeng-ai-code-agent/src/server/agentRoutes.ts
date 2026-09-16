@@ -199,6 +199,7 @@ export function buildAgentRoutes(
           workspaceRoot: config.workspaceRoot,
           provider: llmProvider,
           runClient,
+          sessionStore: options.sessionStore,
           imageTools: options.imageTools as ImageTools | undefined,
           reviewGates: options.reviewGates,
           modelOverrides: {

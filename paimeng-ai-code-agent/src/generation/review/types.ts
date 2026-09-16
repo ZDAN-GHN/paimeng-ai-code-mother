@@ -12,6 +12,17 @@ export const GATE_NAMES = {
   visualDiff: 'visual-diff',
 } as const
 
+export type GateClassification = 'deterministic' | 'heuristic'
+
+export const DETERMINISTIC_GATE_NAMES = new Set<string>([
+  GATE_NAMES.build,
+  GATE_NAMES.visualDiff,
+])
+
+export function classifyGate(name: string): GateClassification {
+  return DETERMINISTIC_GATE_NAMES.has(name) ? 'deterministic' : 'heuristic'
+}
+
 export interface GateResult {
   name: string
   passed: boolean
@@ -31,6 +42,8 @@ export interface ReviewVerdict {
   gates: GateResult[]
   errors: string[]
   suggestions: string[]
+  deterministicFailures: GateResult[]
+  heuristicFailures: GateResult[]
 }
 
 export interface ReviewGate {
@@ -52,5 +65,9 @@ export async function runReviewGates(
   const errors = failed.map((r) => `【${r.name}】${r.detail}`)
 
   const suggestions = [...new Set(failed.map((r) => r.detail))]
-  return { passed, gates: results, errors, suggestions }
+  const deterministicFailures = failed.filter(
+    (result) => classifyGate(result.name) === 'deterministic',
+  )
+  const heuristicFailures = failed.filter((result) => classifyGate(result.name) === 'heuristic')
+  return { passed, gates: results, errors, suggestions, deterministicFailures, heuristicFailures }
 }

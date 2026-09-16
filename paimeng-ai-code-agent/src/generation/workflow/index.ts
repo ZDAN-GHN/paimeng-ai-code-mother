@@ -24,13 +24,20 @@ import { ImageTools, type ImageConfig } from '../tools/imageTools.js'
 import { buildTools } from '../tools/index.js'
 import { buildDefaultReviewGates, runReviewCycle, type ReviewGateSet } from '../review/index.js'
 import { resolveStackProfile, resolveBudgetLimits } from '../stackProfile.js'
-import { type CodeGenType, type ReviewVerdict, type TokenUsage } from '../review/types.js'
+import type { SessionStore } from '../../session/store.js'
+import {
+  classifyGate,
+  type CodeGenType,
+  type ReviewVerdict,
+  type TokenUsage,
+} from '../review/types.js'
 
 const HISTORY_WINDOW = 10
 
 export interface StreamRequest {
   runId: string
   appId: number | string
+  turnId?: string
   userId?: number | string
   message: string
   workspacePath?: string
@@ -48,6 +55,7 @@ export interface WorkflowLogger {
 export interface WorkflowOptions {
   provider?: LlmProvider
   runClient?: RunClient
+  sessionStore?: SessionStore
   workspaceRoot: string
   imageConfig?: ImageConfig
   imageTools?: ImageTools
@@ -208,6 +216,7 @@ export async function* runGenerationWorkflow(
   let lastPhase: RunPhase | null = PHASE_BY_STATE[String(actor.getSnapshot().value)] ?? 'failed'
 
   const tokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+  let nextVerdictBatchSeq = 3
 
   async function* sync(): AsyncGenerator<AgentEvent> {
     const snapshot = actor.getSnapshot()
@@ -284,6 +293,53 @@ export async function* runGenerationWorkflow(
       },
     )
     yield { type: 'error', message: '生成已中断' }
+  }
+
+  async function persistVerdict(
+    verdict: ReviewVerdict,
+    outcome: 'passed' | 'retry' | 'failed' | 'accepted-heuristic',
+    truncated: boolean,
+  ): Promise<boolean> {
+    if (!options.sessionStore || !request.turnId || request.userId == null) return false
+    await options.sessionStore.appendBatch({
+      appId: String(request.appId),
+      userId: String(request.userId),
+      turnId: request.turnId,
+      batchSeq: nextVerdictBatchSeq++,
+      events: [
+        {
+          kind: 'gate/verdict',
+          source: 'system',
+          runId: request.runId,
+          payload: {
+            attempt: actor.getSnapshot().context.qualityAttempts,
+            outcome,
+            truncated,
+            gates: verdict.gates.map((gate) => ({
+              name: gate.name,
+              classification: classifyGate(gate.name),
+              passed: gate.passed,
+              detail: gate.detail,
+            })),
+          },
+        },
+      ],
+    })
+    return true
+  }
+
+  function verdictEvent(
+    verdict: ReviewVerdict,
+    outcome: 'passed' | 'retry' | 'failed' | 'accepted-heuristic',
+  ): AgentEvent {
+    const failures = verdict.gates
+      .filter((gate) => !gate.passed)
+      .map((gate) => `${classifyGate(gate.name)}:${gate.name}`)
+    return {
+      type: 'milestone',
+      title: '门禁判决',
+      detail: `结果=${outcome}；失败=${failures.length > 0 ? failures.join(', ') : '无'}`,
+    }
   }
 
   async function runReview(): Promise<ReviewVerdict> {
@@ -441,28 +497,47 @@ export async function* runGenerationWorkflow(
         accumulateUsage(tokenUsage, wrapUp.usage)
       }
 
-      if (truncatedByLimit) {
-        actor.send({ type: 'PROCEED' })
-        yield* sync()
-        break
-      }
       actor.send({ type: 'PROCEED' })
       yield* sync()
       const verdict = await runReview()
-      if (verdict.passed) {
-        break
-      }
-
       const attempts = actor.getSnapshot().context.qualityAttempts
-      if (attempts < MAX_QUALITY_ATTEMPTS) {
+      const finalization = truncatedByLimit || attempts >= MAX_QUALITY_ATTEMPTS
+      const deterministicFailure = verdict.deterministicFailures.length > 0
+      const canAcceptHeuristicFailure =
+        !deterministicFailure &&
+        verdict.heuristicFailures.length > 0 &&
+        finalization &&
+        options.sessionStore !== undefined &&
+        request.turnId !== undefined &&
+        request.userId != null
+      const outcome = verdict.passed
+        ? 'passed'
+        : deterministicFailure
+          ? 'failed'
+          : canAcceptHeuristicFailure
+            ? 'accepted-heuristic'
+            : finalization
+              ? 'failed'
+              : 'retry'
+      await persistVerdict(verdict, outcome, truncatedByLimit)
+      yield verdictEvent(verdict, outcome)
+
+      if (verdict.passed || outcome === 'accepted-heuristic') break
+      if (deterministicFailure) {
+        yield* fail(
+          '确定性门禁未通过，无法完成生成：' + verdict.deterministicFailures.map((gate) => `【${gate.name}】${gate.detail}`).join('；'),
+          'quality-gate-exhausted',
+        )
+        return
+      }
+      if (outcome === 'retry') {
         qualityOpinions = verdict.suggestions
         actor.send({ type: 'RETRY' })
         yield* sync()
         continue
       }
-
       yield* fail(
-        '重试次数已用尽，生成结果仍未能通过质量门禁：' + verdict.errors.join('；'),
+        '重试次数已用尽，生成结果仍未能通过启发式质量门禁：' + verdict.errors.join('；'),
         'quality-gate-exhausted',
       )
       return

@@ -49,10 +49,17 @@ describe('POST /agent/stream（成功剧本）', () => {
       'ai_response',
       'milestone',
       'milestone',
+      'milestone',
       'done',
     ])
 
-    expect(milestones(result)).toEqual(['开始生成', '规划页面结构', '检查生成结果', '生成完成'])
+    expect(milestones(result)).toEqual([
+      '开始生成',
+      '规划页面结构',
+      '检查生成结果',
+      '门禁判决',
+      '生成完成',
+    ])
 
     const request = result.find((frame) => frame.event === 'tool_request')!
     const executed = result.find((frame) => frame.event === 'tool_executed')!

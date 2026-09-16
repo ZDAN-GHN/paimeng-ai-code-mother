@@ -284,6 +284,7 @@ describe('Issue #9：硬上限优雅收尾（绝不硬杀）', () => {
       .filter((f) => f.event === 'milestone')
       .map((f) => String(f.data.title))
     expect(milestoneTitles).toContain('生成完成')
+    expect(milestoneTitles).toContain('门禁判决')
   })
 
   it('limit-length 剧本（输出达 max_output_tokens 被截断，finishReason=length）→ 同样优雅收尾 → done（审查整改 c4）', async () => {
@@ -324,6 +325,54 @@ describe('Issue #9：硬上限优雅收尾（绝不硬杀）', () => {
     expect(phases).toContain('coding')
     expect(phases).toContain('review')
     expect(phases).toContain('done')
+  })
+
+  it('截断收尾仍执行所有确定性门禁，构建失败时 failed 且不发 done', async () => {
+    const root = makeWorkspaceRoot()
+    const calls: RunCall[] = []
+    const token = await makeToken()
+    let buildCalls = 0
+    let visualDiffCalls = 0
+    const gates: ReviewGateSet = {
+      quality: { score: async () => ({ isValid: true, grade: 100, errors: [], suggestions: [] }) },
+      build: {
+        name: 'build',
+        verify: async () => {
+          buildCalls += 1
+          return { name: 'build', passed: false, detail: '缺少截断后必要产物' }
+        },
+      },
+      visualDiff: {
+        name: 'visual-diff',
+        verify: async () => {
+          visualDiffCalls += 1
+          return { name: 'visual-diff', passed: true, detail: 'ok' }
+        },
+      },
+    }
+    const app = buildTestApp(root, {
+      agentRoutes: {
+        runClient: fakeRunClient(calls, {}),
+        reviewGates: gates,
+        provider: createScriptedLlm('limit-length'),
+      },
+    })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/stream',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { runId: 'run-limit-deterministic-fail', appId: 1, message: 'hello', workspacePath: root },
+    })
+    const result = frames(response.body)
+
+    expect(buildCalls).toBe(1)
+    expect(visualDiffCalls).toBe(1)
+    expect(types(result).at(-1)).toBe('error')
+    expect(result.some((frame) => frame.event === 'done')).toBe(false)
+    expect(String(result.at(-1)?.data.message)).toContain('确定性门禁未通过')
+    expect(
+      calls.some((call) => call.url.endsWith('/complete') && call.body.status === 'failed'),
+    ).toBe(true)
   })
 })
 

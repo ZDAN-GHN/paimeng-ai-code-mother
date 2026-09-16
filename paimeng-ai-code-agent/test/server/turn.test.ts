@@ -12,6 +12,7 @@ import type { SessionStore } from '../../src/session/store.js'
 import type { SessionEventRecord } from '../../src/session/events.js'
 import type { FileTools } from '../../src/generation/tools/fileTools.js'
 import type { ImageTools } from '../../src/generation/tools/imageTools.js'
+import type { ReviewGateSet } from '../../src/generation/review/index.js'
 import type { LlmProvider } from '../../src/llm/index.js'
 import type { RunClient } from '../../src/runs/runClient.js'
 
@@ -238,6 +239,75 @@ describe('POST /agent/turn', () => {
       true,
     )
     expect(store.events.some((event) => event.kind === 'run/start')).toBe(true)
+    expect(store.events.some((event) => event.kind === 'gate/verdict')).toBe(true)
+  })
+
+  it('confirm_generation 最终启发式失败仅在持久化判决后 done', async () => {
+    const store = memorySessionStore({ approval: true })
+    const root = makeWorkspaceRoot()
+    const gates: ReviewGateSet = {
+      quality: {
+        score: async () => ({
+          isValid: false,
+          grade: 60,
+          errors: ['布局质量仍需人工复核'],
+          suggestions: ['优化信息层级'],
+        }),
+      },
+      build: { name: 'build', verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
+      visualDiff: {
+        name: 'visual-diff',
+        verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }),
+      },
+    }
+    const app = buildTestApp(root, {
+      agentRoutes: {
+        sessionStore: store,
+        runClient: fakeRunClient([]),
+        reviewGates: gates,
+        provider: createScriptedLlm('success'),
+        imageTools: fakeImageTools(),
+      },
+    })
+    const token = await makeToken()
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/turn',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        appId: '1001',
+        turnId: 'turn-heuristic-final',
+        action: 'confirm_generation',
+        approvalId: 'ap-heuristic',
+        codeGenType: 'html',
+        workspacePath: root,
+      },
+    })
+    const output = frames(response.body)
+    const verdicts = store.events.filter((event) => event.kind === 'gate/verdict')
+    const finalPayload = verdicts.at(-1)?.payload as {
+      outcome: string
+      gates: Array<{ name: string; classification: string; passed: boolean }>
+    }
+
+    expect(output.at(-1)?.data.type).toBe('done')
+    expect(
+      output.some(
+        (frame) =>
+          frame.data.type === 'milestone' &&
+          frame.data.title === '门禁判决' &&
+          String(frame.data.detail).includes('accepted-heuristic'),
+      ),
+    ).toBe(true)
+    expect(verdicts.map((event) => event.batchSeq)).toEqual([3, 4, 5])
+    expect(finalPayload.outcome).toBe('accepted-heuristic')
+    expect(finalPayload.gates).toContainEqual(
+      expect.objectContaining({
+        name: 'quality-score',
+        classification: 'heuristic',
+        passed: false,
+      }),
+    )
   })
 
   it('confirm_generation 冻结失败时不调用模型且收敛已创建 run', async () => {

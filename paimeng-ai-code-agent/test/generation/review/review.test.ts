@@ -14,6 +14,7 @@ import {
   type VisualDiffVerifier,
 } from '../../../src/generation/review/index.js'
 import {
+  GATE_NAMES,
   runReviewGates,
   type ReviewContext,
   type ReviewGate,
@@ -532,6 +533,33 @@ describe('门禁汇总（Issue #9）', () => {
     expect(oneFail.passed).toBe(false)
     expect(oneFail.errors).toEqual(['【b】b 失败'])
     expect(oneFail.suggestions).toEqual(['b 失败'])
+  })
+
+  it('按两级地板将 build/visual diff 归为确定性，quality score 归为启发式', async () => {
+    const context = makeContext()
+    const verdict = await runReviewGates(
+      [
+        {
+          name: GATE_NAMES.qualityScore,
+          verify: async () => ({ name: GATE_NAMES.qualityScore, passed: false, detail: '质量不足' }),
+        },
+        {
+          name: GATE_NAMES.build,
+          verify: async () => ({ name: GATE_NAMES.build, passed: false, detail: '缺少入口' }),
+        },
+        {
+          name: GATE_NAMES.visualDiff,
+          verify: async () => ({ name: GATE_NAMES.visualDiff, passed: false, detail: '缺少页面区段' }),
+        },
+      ],
+      context,
+    )
+
+    expect(verdict.heuristicFailures.map((gate) => gate.name)).toEqual([GATE_NAMES.qualityScore])
+    expect(verdict.deterministicFailures.map((gate) => gate.name)).toEqual([
+      GATE_NAMES.build,
+      GATE_NAMES.visualDiff,
+    ])
   })
 })
 
