@@ -61,7 +61,7 @@ async function appendConfirmationFailure(
   request: ApprovedGenerationRequest,
   sessionStore: SessionStore,
   message: string,
-  options: { alert?: boolean; failureStage?: string; runId?: string } = {},
+  options: { alert?: boolean; failureStage?: string; runId?: string; batchSeq?: number } = {},
 ): Promise<void> {
   const events = [] as Array<{
     kind: 'run/end' | 'turn/terminal'
@@ -92,7 +92,7 @@ async function appendConfirmationFailure(
     appId: request.appId,
     userId: request.userId,
     turnId: request.turnId,
-    batchSeq: options.alert ? 3 : 1,
+    batchSeq: options.batchSeq ?? (options.alert ? 3 : 1),
     events,
   })
 }
@@ -206,6 +206,7 @@ export async function prepareApprovedGeneration(
       alert: !compensated,
       failureStage: 'complete-run-after-run-start-persist',
       runId: prepared.runId,
+      batchSeq: 3,
     })
     throw new ApprovedGenerationError(message)
   }

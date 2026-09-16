@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
-import { buildTestApp, frames, makeWorkspaceRoot, makeToken } from '../helpers.js'
+import {
+  buildTestApp,
+  fakeRunClient,
+  frames,
+  makeWorkspaceRoot,
+  makeToken,
+  type RunCall,
+} from '../helpers.js'
+import { createScriptedLlm } from '../../src/llm/index.js'
 import type { SessionStore } from '../../src/session/store.js'
 import type { SessionEventRecord } from '../../src/session/events.js'
 import type { FileTools } from '../../src/generation/tools/fileTools.js'
@@ -8,12 +16,13 @@ import type { LlmProvider } from '../../src/llm/index.js'
 import type { RunClient } from '../../src/runs/runClient.js'
 
 function memorySessionStore(
-  options: { failOnAppend?: number } = {},
+  options: { failOnAppend?: number; approval?: boolean } = {},
 ): SessionStore & { batches: unknown[]; events: SessionEventRecord[] } {
   const batches: unknown[] = []
   const events: SessionEventRecord[] = []
   let nextSeq = 1
   let appendCalls = 0
+  let approvalConsumed = false
   return {
     batches,
     events,
@@ -63,10 +72,15 @@ function memorySessionStore(
       return { events: filtered, lastSeq }
     },
     async assertHumanApproved() {
-      return { ok: false, reason: 'not implemented in #38' }
+      return options.approval && !approvalConsumed
+        ? { ok: true as const }
+        : { ok: false as const, reason: approvalConsumed ? '审批已消费' : '未找到人类批准' }
     },
     async consumeHumanApproval() {
-      return { ok: false, reason: 'not implemented in #39' }
+      if (!options.approval || approvalConsumed)
+        return { ok: false as const, reason: '审批已消费' }
+      approvalConsumed = true
+      return { ok: true as const }
     },
   }
 }
@@ -184,6 +198,90 @@ describe('POST /agent/turn', () => {
     expect(runClient.createRun).not.toHaveBeenCalled()
     expect(runClient.freezeCredit).not.toHaveBeenCalled()
     expect(runClient.completeRun).not.toHaveBeenCalled()
+  })
+
+  it('confirm_generation 完成审批、run 与积分准备后进入既有生成工作流', async () => {
+    const store = memorySessionStore({ approval: true })
+    const root = makeWorkspaceRoot()
+    const calls: RunCall[] = []
+    const provider = createScriptedLlm('success')
+    const app = buildTestApp(root, {
+      agentRoutes: {
+        sessionStore: store,
+        runClient: fakeRunClient(calls),
+        provider,
+        imageTools: fakeImageTools(),
+      },
+    })
+    const token = await makeToken()
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/turn',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        appId: '1001',
+        action: 'confirm_generation',
+        approvalId: 'ap-1',
+        message: '生成预约主页',
+        intensity: 'standard',
+        codeGenType: 'html',
+        workspacePath: root,
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(frames(response.body).at(-1)?.data.type).toBe('done')
+    expect(provider.records).not.toHaveLength(0)
+    expect(calls[0]?.url).toBe('http://java.invalid/internal/runs')
+    expect(calls[1]?.url).toMatch(/\/credit\/freeze$/)
+    expect(calls.some((call) => call.url.endsWith('/complete') && call.body.status === 'success')).toBe(
+      true,
+    )
+    expect(store.events.some((event) => event.kind === 'run/start')).toBe(true)
+  })
+
+  it('confirm_generation 冻结失败时不调用模型且收敛已创建 run', async () => {
+    const store = memorySessionStore({ approval: true })
+    const root = makeWorkspaceRoot()
+    const provider = { languageModel: vi.fn() } as unknown as LlmProvider
+    const runClient = {
+      createRun: vi.fn(async () => ({ phase: 'wireframe_confirmed' })),
+      freezeCredit: vi.fn(async () => {
+        throw new Error('积分不足')
+      }),
+      completeRun: vi.fn(async () => null),
+    } as unknown as RunClient
+    const app = buildTestApp(root, {
+      agentRoutes: {
+        sessionStore: store,
+        runClient,
+        provider,
+        imageTools: fakeImageTools(),
+      },
+    })
+    const token = await makeToken()
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/turn',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        appId: '1001',
+        action: 'confirm_generation',
+        approvalId: 'ap-1',
+        codeGenType: 'html',
+        workspacePath: root,
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(frames(response.body)[0]?.data.message).toContain('冻结积分失败')
+    expect(provider.languageModel).not.toHaveBeenCalled()
+    expect(runClient.createRun).toHaveBeenCalledOnce()
+    expect(runClient.freezeCredit).toHaveBeenCalledOnce()
+    expect(runClient.completeRun).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ status: 'failed' }),
+    )
   })
 
   it('缺少 fileTools 时返回 503', async () => {

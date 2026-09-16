@@ -11,11 +11,17 @@ function fakeSessionStore(
   options: { approval?: boolean; consume?: boolean; failRunStart?: boolean } = {},
 ): SessionStore {
   let consumed = false
+  let consumedTurnId: string | undefined
   return {
-    appendBatch: vi.fn(async (input: {
-      events: Array<{ kind: string }>
-    }) => {
+    appendBatch: vi.fn(async (input: Parameters<SessionStore['appendBatch']>[0]) => {
       calls.push(`append:${input.events.map((event: { kind: string }) => event.kind).join(',')}`)
+      if (
+        input.turnId === consumedTurnId &&
+        input.batchSeq === 1 &&
+        input.events.some((event) => event.kind === 'turn/terminal')
+      ) {
+        throw new Error('批次重放事件内容不一致')
+      }
       if (options.failRunStart && input.events.some((event: { kind: string }) => event.kind === 'run/start')) {
         throw new Error('run/start unavailable')
       }
@@ -29,10 +35,11 @@ function fakeSessionStore(
         ? { ok: false as const, reason: consumed ? '审批已消费' : '未找到人类批准' }
         : { ok: true as const }
     }),
-    consumeHumanApproval: vi.fn(async () => {
+    consumeHumanApproval: vi.fn(async (input) => {
       calls.push('consume')
       if (options.consume === false || consumed) return { ok: false as const, reason: '审批已消费' }
       consumed = true
+      consumedTurnId = input.turnId
       return { ok: true as const }
     }),
   }
@@ -201,9 +208,10 @@ describe('prepareApprovedGeneration', () => {
 
   it('run/start 写入失败时已创建 run 收敛为 failed', async () => {
     const calls: string[] = []
+    const sessionStore = fakeSessionStore(calls, { failRunStart: true })
     await expect(
       prepareApprovedGeneration(request(), {
-        sessionStore: fakeSessionStore(calls, { failRunStart: true }),
+        sessionStore,
         runClient: fakeRunClient(calls),
       }),
     ).rejects.toThrow('写入生成启动事件失败')
@@ -216,6 +224,9 @@ describe('prepareApprovedGeneration', () => {
       'complete:failed',
       'append:turn/terminal',
     ])
+    expect(sessionStore.appendBatch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ batchSeq: 3 }),
+    )
   })
 
   it('run/start 持久化失败且补偿失败时记录可重放告警', async () => {
