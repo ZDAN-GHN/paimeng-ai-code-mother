@@ -78,3 +78,16 @@ Optional capture adapters may return the metric evidence fields alongside the re
 | Multi-message memory | `homepage-memory`, `portfolio-memory` | fake_llm |
 
 The matrix contains 25 journeys across five product categories. The validator requires all 25 journeys, and each journey declares whether it is fake-LLM-only or real-model validated.
+
+## Refund Anchor Audit
+
+`../scripts/verify-refund-anchor.mjs` is a read-only comparator for a PG `session_event` export. It accepts either a JSON event array or the raw CSV form produced by this controlled export command:
+
+```sh
+psql "$PG_DSN" -c "COPY (SELECT app_id, run_id, kind, payload FROM session_event WHERE run_id IS NOT NULL ORDER BY app_id, seq) TO STDOUT WITH CSV HEADER" > refund-samples.csv
+node scripts/verify-refund-anchor.mjs refund-samples.csv
+```
+
+The export must provide `run/end` with `status` and `filesWritten`; the audit derives milestone counts from `run/milestone`, successful write paths from `tool/call` plus `tool/result`, deterministic gate evidence from `gate/verdict`, and retry counts from verdict outcomes. Invalid, incomplete, or ambiguous per-run input fails closed without a conclusion.
+
+The command writes only its Markdown comparison to stdout. It never writes the input, contacts a database, or changes credits. Exit `0` means all observed existing milestone anchors and audit-only tool-fact anchors agree; exit `2` means at least one difference requires human review; exit `1` means malformed input. Neither conclusion changes the existing Java 70%/50%/full-refund rules. The synthetic [sample](fixtures/refund-samples.json) and [zero-difference report](fixtures/refund-anchor-report.md) are committed solely as reproducible audit fixtures.

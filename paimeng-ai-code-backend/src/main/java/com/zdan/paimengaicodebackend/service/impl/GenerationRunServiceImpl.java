@@ -432,13 +432,17 @@ public class GenerationRunServiceImpl
 
     private Integer resolveMilestoneCount(String runId) {
         GenerationRun run = this.getById(runId);
-        if (run == null || StrUtil.isBlank(run.getMilestones())) {
+        if (run == null) {
+            return null;
+        }
+        if (StrUtil.isBlank(run.getMilestones())) {
+            log.warn("run.milestones 缺失，按基础退款锚处理，runId: {}", runId);
             return null;
         }
         try {
             return JSONUtil.parseArray(run.getMilestones()).size();
         } catch (Exception e) {
-            log.warn("run.milestones 解析失败，runId: {}", runId);
+            log.warn("run.milestones 解析失败，按基础退款锚处理，runId: {}", runId);
             return null;
         }
     }

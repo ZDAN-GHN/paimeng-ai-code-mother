@@ -1,5 +1,8 @@
 package com.zdan.paimengaicodebackend.service;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -33,6 +36,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RRateLimiter;
 import org.redisson.api.RedissonClient;
+import org.slf4j.LoggerFactory;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class GenerationRunServiceImplTest {
@@ -405,6 +409,22 @@ class GenerationRunServiceImplTest {
         verify(redissonClient, never()).getRateLimiter(anyString());
     }
 
+    private List<String> captureServiceWarnings(Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(GenerationRunServiceImpl.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+            return appender.list.stream()
+                .map(ILoggingEvent::getFormattedMessage)
+                .toList();
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
+
     private GenerationRun terminalRunEntity(String runId, String phase) {
         return run(runId, 1L, phase);
     }
@@ -590,6 +610,61 @@ class GenerationRunServiceImplTest {
             eq(AgentCompleteStatusEnum.ABORTED),
             eq(1),
             eq(2)
+        );
+    }
+
+    @Test
+    void completeRunWarnsWhenMilestonesMissing() {
+        App app = new App();
+        app.setId(1L);
+        when(appService.getById(1L)).thenReturn(app);
+        GenerationRun coding = run("run-missing-milestones", 1L, "coding");
+        when(mapper.selectOneById("run-missing-milestones")).thenReturn(coding);
+
+        AgentCompleteRequest request = completeRequest("run-missing-milestones", "aborted", null);
+        request.setFilesWritten(1);
+        List<String> warnings = captureServiceWarnings(() ->
+            service.completeRun("run-missing-milestones", request)
+        );
+
+        assertTrue(
+            warnings.stream().anyMatch(message ->
+                message.contains("run.milestones 缺失") && message.contains("run-missing-milestones")
+            )
+        );
+        verify(creditService).refundRun(
+            eq("run-missing-milestones"),
+            eq(AgentCompleteStatusEnum.ABORTED),
+            eq(1),
+            isNull()
+        );
+    }
+
+    @Test
+    void completeRunWarnsWhenMilestonesInvalid() {
+        App app = new App();
+        app.setId(1L);
+        when(appService.getById(1L)).thenReturn(app);
+        GenerationRun coding = run("run-invalid-milestones", 1L, "coding");
+        coding.setMilestones("not-json");
+        when(mapper.selectOneById("run-invalid-milestones")).thenReturn(coding);
+
+        AgentCompleteRequest request = completeRequest("run-invalid-milestones", "aborted", null);
+        request.setFilesWritten(1);
+        List<String> warnings = captureServiceWarnings(() ->
+            service.completeRun("run-invalid-milestones", request)
+        );
+
+        assertTrue(
+            warnings.stream().anyMatch(message ->
+                message.contains("run.milestones 解析失败") && message.contains("run-invalid-milestones")
+            )
+        );
+        verify(creditService).refundRun(
+            eq("run-invalid-milestones"),
+            eq(AgentCompleteStatusEnum.ABORTED),
+            eq(1),
+            isNull()
         );
     }
 
