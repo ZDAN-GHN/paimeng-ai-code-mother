@@ -27,6 +27,7 @@ function makeContext() {
     replay: vi.fn(async () => ({ events: [], lastSeq: 0, hasMore: false })),
     replayTurn: vi.fn(async () => ({ events: [], lastSeq: 0 })),
     assertHumanApproved: vi.fn(async () => ({ ok: false as const, reason: '未找到人类批准' })),
+    approveHumanApproval: vi.fn(async () => ({ ok: false as const, reason: '未找到人类批准' })),
     consumeHumanApproval: vi.fn(async () => ({ ok: false as const, reason: '未找到人类批准' })),
   }
   return {

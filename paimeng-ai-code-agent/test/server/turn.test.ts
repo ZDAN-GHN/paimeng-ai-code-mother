@@ -24,6 +24,7 @@ function memorySessionStore(
   let nextSeq = 1
   let appendCalls = 0
   let approvalConsumed = false
+  let approved = options.approval ?? false
   return {
     batches,
     events,
@@ -72,15 +73,46 @@ function memorySessionStore(
       const lastSeq = filtered.at(-1)?.seq ?? (input.afterSeq ?? 0)
       return { events: filtered, lastSeq }
     },
+    async approveHumanApproval(input) {
+      if (approvalConsumed) return { ok: false as const, reason: '审批已消费' }
+      approved = true
+      await this.appendBatch({
+        appId: input.appId,
+        userId: input.userId,
+        turnId: input.turnId,
+        batchSeq: input.batchSeq,
+        events: [
+          {
+            kind: 'approval/decided',
+            source: 'human',
+            payload: { approvalId: input.approvalId, decision: 'allowed' },
+          },
+        ],
+      })
+      return { ok: true as const }
+    },
     async assertHumanApproved() {
-      return options.approval && !approvalConsumed
+      return approved && !approvalConsumed
         ? { ok: true as const }
         : { ok: false as const, reason: approvalConsumed ? '审批已消费' : '未找到人类批准' }
     },
-    async consumeHumanApproval() {
-      if (!options.approval || approvalConsumed)
+    async consumeHumanApproval(input) {
+      if (!approved || approvalConsumed)
         return { ok: false as const, reason: '审批已消费' }
       approvalConsumed = true
+      await this.appendBatch({
+        appId: input.appId,
+        userId: input.userId,
+        turnId: input.turnId,
+        batchSeq: input.batchSeq ?? 1,
+        events: [
+          {
+            kind: 'approval/consumed',
+            source: 'system',
+            payload: { approvalId: input.approvalId },
+          },
+        ],
+      })
       return { ok: true as const }
     },
   }
@@ -134,6 +166,73 @@ describe('POST /agent/turn', () => {
     expect(store.batches.length).toBeGreaterThanOrEqual(2)
   })
 
+  it('replays approval awaiting terminal with the public approval payload', async () => {
+    const store = memorySessionStore()
+    const turnId = 'turn-awaiting-approval'
+    const base = {
+      appId: '1001',
+      userId: '1',
+      runId: null,
+      turnId,
+      batchSeq: 1,
+      version: 1,
+      ignorable: false,
+      createdAt: new Date().toISOString(),
+    }
+    store.events.push(
+      {
+        ...base,
+        id: '1',
+        seq: 1,
+        eventIndex: 0,
+        kind: 'generation/proposed',
+        source: 'model',
+        payload: { reason: '线框已确认', estimatedCredits: 100 },
+      },
+      {
+        ...base,
+        id: '2',
+        seq: 2,
+        eventIndex: 1,
+        kind: 'approval/asked',
+        source: 'system',
+        payload: { approvalId: 'ap-turn-generation-1', action: 'start_generation' },
+      },
+      {
+        ...base,
+        id: '3',
+        seq: 3,
+        eventIndex: 2,
+        kind: 'turn/terminal',
+        source: 'system',
+        payload: { type: 'awaiting_user', reason: 'approval' },
+      },
+    )
+    const root = makeWorkspaceRoot()
+    const app = buildTestApp(root, {
+      agentRoutes: {
+        sessionStore: store,
+        fileTools: fakeFileTools(),
+        imageTools: fakeImageTools(),
+      },
+    })
+    const token = await makeToken()
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent/turn',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { ...validPayload(root), turnId },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(frames(response.body).at(-1)?.data).toMatchObject({
+      type: 'awaiting_user',
+      approval: {
+        approvalId: 'ap-turn-generation-1',
+        proposal: { reason: '线框已确认', estimatedCredits: 100 },
+      },
+    })
+  })
+
   it('confirm_generation 缺少 Java RunClient 时 fail-closed', async () => {
     const store = memorySessionStore()
     const root = makeWorkspaceRoot()
@@ -162,8 +261,12 @@ describe('POST /agent/turn', () => {
     expect(store.batches).toHaveLength(0)
   })
 
-  it('confirm_generation 未消费审批时不调用 provider 或 RunClient', async () => {
+  it('confirm_generation 审批写入失败时不调用 provider 或 RunClient', async () => {
     const store = memorySessionStore()
+    store.approveHumanApproval = vi.fn(async () => ({
+      ok: false as const,
+      reason: '审批存储不可用',
+    }))
     const root = makeWorkspaceRoot()
     const provider = { languageModel: vi.fn() } as unknown as LlmProvider
     const runClient = {
@@ -194,7 +297,7 @@ describe('POST /agent/turn', () => {
       },
     })
     expect(response.statusCode).toBe(200)
-    expect(frames(response.body)[0]!.data.message).toContain('审批不可用于生成')
+    expect(frames(response.body)[0]!.data.message).toContain('审批存储不可用')
     expect(provider.languageModel).not.toHaveBeenCalled()
     expect(runClient.createRun).not.toHaveBeenCalled()
     expect(runClient.freezeCredit).not.toHaveBeenCalled()
@@ -238,8 +341,10 @@ describe('POST /agent/turn', () => {
     expect(calls.some((call) => call.url.endsWith('/complete') && call.body.status === 'success')).toBe(
       true,
     )
-    expect(store.events.some((event) => event.kind === 'run/start')).toBe(true)
-    expect(store.events.some((event) => event.kind === 'gate/verdict')).toBe(true)
+    expect(store.events.some((event) => event.kind === 'approval/decided' && event.source === 'human' && event.batchSeq === 1)).toBe(true)
+    expect(store.events.some((event) => event.kind === 'approval/consumed' && event.batchSeq === 2)).toBe(true)
+    expect(store.events.some((event) => event.kind === 'run/start' && event.batchSeq === 3)).toBe(true)
+    expect(store.events.some((event) => event.kind === 'gate/verdict' && event.batchSeq === 4)).toBe(true)
   })
 
   it('confirm_generation 最终启发式失败仅在持久化判决后 done', async () => {
@@ -299,7 +404,7 @@ describe('POST /agent/turn', () => {
           String(frame.data.detail).includes('accepted-heuristic'),
       ),
     ).toBe(true)
-    expect(verdicts.map((event) => event.batchSeq)).toEqual([3, 4, 5])
+    expect(verdicts.map((event) => event.batchSeq)).toEqual([4, 5, 6])
     expect(finalPayload.outcome).toBe('accepted-heuristic')
     expect(finalPayload.gates).toContainEqual(
       expect.objectContaining({

@@ -56,6 +56,7 @@ export interface WorkflowOptions {
   provider?: LlmProvider
   runClient?: RunClient
   sessionStore?: SessionStore
+  sessionBatchSeqStart?: number
   workspaceRoot: string
   imageConfig?: ImageConfig
   imageTools?: ImageTools
@@ -216,7 +217,7 @@ export async function* runGenerationWorkflow(
   let lastPhase: RunPhase | null = PHASE_BY_STATE[String(actor.getSnapshot().value)] ?? 'failed'
 
   const tokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
-  let nextVerdictBatchSeq = 3
+  let nextVerdictBatchSeq = options.sessionBatchSeqStart ?? 3
 
   async function* sync(): AsyncGenerator<AgentEvent> {
     const snapshot = actor.getSnapshot()

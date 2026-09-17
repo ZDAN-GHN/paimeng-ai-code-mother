@@ -29,11 +29,19 @@ export interface SessionStore {
     appId: string
     approvalId: string
   }): Promise<{ ok: true } | { ok: false; reason: string }>
+  approveHumanApproval(input: {
+    appId: string
+    userId: string
+    turnId: string
+    approvalId: string
+    batchSeq: number
+  }): Promise<{ ok: true } | { ok: false; reason: string }>
   consumeHumanApproval(input: {
     appId: string
     userId: string
     turnId: string
     approvalId: string
+    batchSeq?: number
   }): Promise<{ ok: true } | { ok: false; reason: string }>
 }
 
@@ -237,11 +245,96 @@ export class PgSessionStore implements SessionStore {
     if (!asked.rowCount) return { ok: false, reason: '未找到审批请求' }
     const consumed = await this.pool.query(
       `SELECT 1 FROM session_event
-       WHERE app_id = $1 AND kind = 'approval/consumed' AND payload->>'approvalId' = $2 AND seq > $3 LIMIT 1`,
-      [input.appId, input.approvalId, latest.seq],
+       WHERE app_id = $1 AND kind = 'approval/consumed' AND payload->>'approvalId' = $2 LIMIT 1`,
+      [input.appId, input.approvalId],
     )
     if (consumed.rowCount) return { ok: false, reason: '审批已消费' }
     return { ok: true }
+  }
+
+  async approveHumanApproval(input: {
+    appId: string
+    userId: string
+    turnId: string
+    approvalId: string
+    batchSeq: number
+  }): Promise<{ ok: true } | { ok: false; reason: string }> {
+    if (!Number.isInteger(input.batchSeq) || input.batchSeq < 1)
+      return { ok: false, reason: '审批批次无效' }
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [input.appId])
+      const asked = await client.query(
+        `SELECT 1 FROM session_event
+         WHERE app_id = $1 AND user_id = $2 AND kind = 'approval/asked' AND source = 'system'
+           AND payload->>'approvalId' = $3 AND payload->>'action' = 'start_generation' LIMIT 1`,
+        [input.appId, input.userId, input.approvalId],
+      )
+      if (!asked.rowCount) {
+        await client.query('ROLLBACK')
+        return { ok: false, reason: '未找到审批请求' }
+      }
+      const consumed = await client.query(
+        `SELECT 1 FROM session_event
+         WHERE app_id = $1 AND kind = 'approval/consumed' AND payload->>'approvalId' = $2 LIMIT 1`,
+        [input.appId, input.approvalId],
+      )
+      if (consumed.rowCount) {
+        await client.query('ROLLBACK')
+        return { ok: false, reason: '审批已消费' }
+      }
+      const existingDecision = await client.query<{ decision: unknown }>(
+        `SELECT payload->>'decision' AS decision FROM session_event
+         WHERE app_id = $1 AND kind = 'approval/decided' AND source = 'human'
+           AND payload->>'approvalId' = $2 ORDER BY seq DESC LIMIT 1`,
+        [input.appId, input.approvalId],
+      )
+      if (existingDecision.rowCount) {
+        await client.query(existingDecision.rows[0]?.decision === 'allowed' ? 'COMMIT' : 'ROLLBACK')
+        return existingDecision.rows[0]?.decision === 'allowed'
+          ? { ok: true }
+          : { ok: false, reason: '审批已被拒绝' }
+      }
+      const existingBatch = await client.query<EventRow>(
+        `SELECT id, app_id, user_id, run_id, seq, turn_id, batch_seq, event_index, kind, version, ignorable, source, payload, created_at
+         FROM session_event WHERE app_id = $1 AND turn_id = $2 AND batch_seq = $3 ORDER BY event_index`,
+        [input.appId, input.turnId, input.batchSeq],
+      )
+      const event: SessionEventInput = {
+        kind: 'approval/decided',
+        source: 'human',
+        payload: { approvalId: input.approvalId, decision: 'allowed' },
+      }
+      if (existingBatch.rowCount) {
+        if (existingBatch.rowCount !== 1 || !sameEvent(existingBatch.rows[0]!, event, 0)) {
+          await client.query('ROLLBACK')
+          return { ok: false, reason: '审批确认与已有回合事件冲突' }
+        }
+        await client.query('COMMIT')
+        return { ok: true }
+      }
+      await client.query(
+        `INSERT INTO session_event
+           (app_id, user_id, run_id, seq, turn_id, batch_seq, event_index, kind, version, ignorable, source, payload)
+         SELECT $1, $2, NULL, COALESCE(MAX(seq), 0) + 1, $3, $4, 0, 'approval/decided', 1, false, 'human', $5::jsonb
+         FROM session_event WHERE app_id = $1`,
+        [
+          input.appId,
+          input.userId,
+          input.turnId,
+          input.batchSeq,
+          JSON.stringify(event.payload),
+        ],
+      )
+      await client.query('COMMIT')
+      return { ok: true }
+    } catch {
+      await client.query('ROLLBACK').catch(() => undefined)
+      return { ok: false, reason: '审批存储不可用' }
+    } finally {
+      client.release()
+    }
   }
 
   async consumeHumanApproval(input: {
@@ -249,6 +342,7 @@ export class PgSessionStore implements SessionStore {
     userId: string
     turnId: string
     approvalId: string
+    batchSeq?: number
   }): Promise<{ ok: true } | { ok: false; reason: string }> {
     let client: PoolClient | undefined
     try {
@@ -278,8 +372,8 @@ export class PgSessionStore implements SessionStore {
       }
       const consumed = await client.query(
         `SELECT 1 FROM session_event
-         WHERE app_id = $1 AND kind = 'approval/consumed' AND payload->>'approvalId' = $2 AND seq > $3 LIMIT 1`,
-        [input.appId, input.approvalId, latest.seq],
+         WHERE app_id = $1 AND kind = 'approval/consumed' AND payload->>'approvalId' = $2 LIMIT 1`,
+        [input.appId, input.approvalId],
       )
       if (consumed.rowCount) {
         await client.query('ROLLBACK')
@@ -288,9 +382,15 @@ export class PgSessionStore implements SessionStore {
       await client.query(
         `INSERT INTO session_event
            (app_id, user_id, run_id, seq, turn_id, batch_seq, event_index, kind, version, ignorable, source, payload)
-         SELECT $1, $2, NULL, COALESCE(MAX(seq), 0) + 1, $3, 1, 0, 'approval/consumed', 1, false, 'system', $4::jsonb
+         SELECT $1, $2, NULL, COALESCE(MAX(seq), 0) + 1, $3, $4, 0, 'approval/consumed', 1, false, 'system', $5::jsonb
            FROM session_event WHERE app_id = $1`,
-        [input.appId, input.userId, input.turnId, JSON.stringify({ approvalId: input.approvalId })],
+        [
+          input.appId,
+          input.userId,
+          input.turnId,
+          input.batchSeq ?? 1,
+          JSON.stringify({ approvalId: input.approvalId }),
+        ],
       )
       await client.query('COMMIT')
       return { ok: true }

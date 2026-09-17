@@ -35,6 +35,7 @@ function fakeSessionStore(
         ? { ok: false as const, reason: consumed ? '审批已消费' : '未找到人类批准' }
         : { ok: true as const }
     }),
+    approveHumanApproval: vi.fn(async () => ({ ok: true as const })),
     consumeHumanApproval: vi.fn(async (input) => {
       calls.push('consume')
       if (options.consume === false || consumed) return { ok: false as const, reason: '审批已消费' }

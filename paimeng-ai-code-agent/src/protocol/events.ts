@@ -53,6 +53,13 @@ export interface WireframeEvent extends AgentEventBase {
 export interface AwaitingUserEvent extends AgentEventBase {
   type: 'awaiting_user'
   reason: 'answered' | 'asked' | 'wireframe' | 'approval'
+  approval?: {
+    approvalId: string
+    proposal: {
+      reason: string
+      estimatedCredits: number
+    }
+  }
 }
 
 export interface DoneEvent extends AgentEventBase {

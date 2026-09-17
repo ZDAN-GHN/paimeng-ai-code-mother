@@ -167,6 +167,7 @@ describe('session context reconstruction', () => {
       },
       replayTurn: async () => ({ events: [], lastSeq: 0 }),
       assertHumanApproved: async () => ({ ok: false, reason: '未找到人类批准' }),
+      approveHumanApproval: async () => ({ ok: false, reason: 'not applicable' }),
       consumeHumanApproval: async () => ({ ok: false, reason: '未找到人类批准' }),
     }
     const result = await loadSessionContext(store, {
@@ -188,6 +189,7 @@ describe('session context reconstruction', () => {
       },
       replayTurn: async () => ({ events: [], lastSeq: 0 }),
       assertHumanApproved: async () => ({ ok: false, reason: '未找到人类批准' }),
+      approveHumanApproval: async () => ({ ok: false, reason: 'not applicable' }),
       consumeHumanApproval: async () => ({ ok: false, reason: '未找到人类批准' }),
     }
     const result = await loadSessionContext(store, {
@@ -205,6 +207,7 @@ describe('session context reconstruction', () => {
       replay: async () => ({ events: [], lastSeq: 0, hasMore: true }),
       replayTurn: async () => ({ events: [], lastSeq: 0 }),
       assertHumanApproved: async () => ({ ok: false, reason: '未找到人类批准' }),
+      approveHumanApproval: async () => ({ ok: false, reason: 'not applicable' }),
       consumeHumanApproval: async () => ({ ok: false, reason: '未找到人类批准' }),
     }
     await expect(loadSessionContext(store, { appId: 'app-1', userId: 'user-1' })).rejects.toThrow(
@@ -222,6 +225,7 @@ describe('session context reconstruction', () => {
       },
       replayTurn: async () => ({ events: [], lastSeq: 0 }),
       assertHumanApproved: async () => ({ ok: false, reason: '未找到人类批准' }),
+      approveHumanApproval: async () => ({ ok: false, reason: 'not applicable' }),
       consumeHumanApproval: async () => ({ ok: false, reason: '未找到人类批准' }),
     }
     const result = await loadSessionContext(store, {

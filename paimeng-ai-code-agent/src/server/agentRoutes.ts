@@ -167,6 +167,22 @@ export function buildAgentRoutes(
     if (action === 'confirm_generation') {
       const runClient = resolveRunClient()
       if (!runClient) throw httpError(503, 'Java 内部 API 未配置，无法确认生成')
+      const approval = await options.sessionStore.approveHumanApproval({
+        appId: String(input.appId),
+        userId,
+        turnId,
+        approvalId: input.approvalId!,
+        batchSeq: 1,
+      })
+      if (!approval.ok) {
+        const terminal: AgentTurnEvent = {
+          type: 'error',
+          seq: 1,
+          message: `审批不可用于生成：${approval.reason}`,
+        }
+        validateAgentTurnEvents([terminal])
+        return reply.headers(SSE_HEADERS).send(encodeEventStream([terminal]))
+      }
       let prepared: Awaited<ReturnType<typeof prepareApprovedGeneration>>
       try {
         prepared = await prepareApprovedGeneration(
@@ -180,7 +196,7 @@ export function buildAgentRoutes(
             codeGenType: input.codeGenType!,
             workspacePath: input.workspacePath!,
           },
-          { sessionStore: options.sessionStore, runClient },
+          { sessionStore: options.sessionStore, runClient, consumeBatchSeq: 2 },
         )
       } catch (error) {
         const message = error instanceof Error ? error.message : '确认生成失败'
@@ -200,6 +216,7 @@ export function buildAgentRoutes(
           provider: llmProvider,
           runClient,
           sessionStore: options.sessionStore,
+          sessionBatchSeqStart: 4,
           imageTools: options.imageTools as ImageTools | undefined,
           reviewGates: options.reviewGates,
           modelOverrides: {

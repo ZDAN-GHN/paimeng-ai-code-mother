@@ -110,14 +110,41 @@ describe('PgSessionStore deterministic boundaries', () => {
     expect(calls[3]).toMatchObject({ params: ['app', 'ap-1', '2'] })
     expect(calls[3]?.sql).toContain("kind = 'approval/asked' AND source = 'system'")
     expect(calls[3]?.sql).toContain("payload->>'action' = 'start_generation' AND seq < $3")
-    expect(calls[4]).toMatchObject({ params: ['app', 'ap-1', '2'] })
+    expect(calls[4]).toMatchObject({ params: ['app', 'ap-1'] })
     expect(calls[4]?.sql).toContain("kind = 'approval/consumed'")
-    expect(calls[4]?.sql).toContain('seq > $3')
+    expect(calls[4]?.sql).not.toContain('seq > $3')
     expect(calls[5]).toMatchObject({
-      params: ['app', 'user', 'consume', JSON.stringify({ approvalId: 'ap-1' })],
+      params: ['app', 'user', 'consume', 1, JSON.stringify({ approvalId: 'ap-1' })],
     })
     expect(calls[5]?.sql).toContain("'approval/consumed'")
     expect(calls[6]?.sql).toBe('COMMIT')
+  })
+
+  it('records an unconsumed requested approval atomically before generation preparation', async () => {
+    const { client, calls } = approvalClient({ decisionRows: [], askedRows: [{ seq: '1' }] })
+    const store = new PgSessionStore({ connect: vi.fn(async () => client) } as any)
+    await expect(
+      store.approveHumanApproval({
+        appId: 'app',
+        userId: 'user',
+        turnId: 'turn-confirm',
+        approvalId: 'ap-1',
+        batchSeq: 1,
+      }),
+    ).resolves.toEqual({ ok: true })
+    expect(calls[0]?.sql).toBe('BEGIN')
+    expect(calls[1]?.sql).toContain('pg_advisory_xact_lock')
+    expect(calls[2]).toMatchObject({ params: ['app', 'user', 'ap-1'] })
+    expect(calls[2]?.sql).toContain("kind = 'approval/asked'")
+    expect(calls[3]).toMatchObject({ params: ['app', 'ap-1'] })
+    expect(calls[3]?.sql).toContain("kind = 'approval/consumed'")
+    expect(calls[4]).toMatchObject({ params: ['app', 'ap-1'] })
+    expect(calls[4]?.sql).toContain("kind = 'approval/decided'")
+    expect(calls[6]).toMatchObject({
+      params: ['app', 'user', 'turn-confirm', 1, JSON.stringify({ approvalId: 'ap-1', decision: 'allowed' })],
+    })
+    expect(calls[6]?.sql).toContain("'approval/decided'")
+    expect(calls[7]?.sql).toBe('COMMIT')
   })
 
   it('rolls back rejected or consumed decisions without appending', async () => {

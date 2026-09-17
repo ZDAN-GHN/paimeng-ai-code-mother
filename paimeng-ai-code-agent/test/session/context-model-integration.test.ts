@@ -61,6 +61,9 @@ function memorySessionStore(): SessionStore & { events: SessionEventRecord[] } {
     async assertHumanApproved() {
       return { ok: false, reason: 'not applicable' }
     },
+    async approveHumanApproval() {
+      return { ok: false, reason: 'not applicable' }
+    },
     async consumeHumanApproval() {
       return { ok: false, reason: 'not applicable' }
     },

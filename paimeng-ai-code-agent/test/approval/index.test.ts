@@ -95,10 +95,59 @@ class MemorySessionStore implements SessionStore {
       (event) =>
         event.appId === input.appId &&
         event.kind === 'approval/consumed' &&
-        event.payload.approvalId === input.approvalId &&
-        event.seq > latest.seq,
+        event.payload.approvalId === input.approvalId,
     )
     if (consumed) return { ok: false as const, reason: '审批已消费' }
+    return { ok: true as const }
+  }
+
+  async approveHumanApproval(input: {
+    appId: string
+    userId: string
+    turnId: string
+    approvalId: string
+    batchSeq: number
+  }) {
+    const requested = this.events.some(
+      (event) =>
+        event.appId === input.appId &&
+        event.userId === input.userId &&
+        event.kind === 'approval/asked' &&
+        event.source === 'system' &&
+        event.payload.approvalId === input.approvalId &&
+        event.payload.action === 'start_generation',
+    )
+    if (!requested) return { ok: false as const, reason: '未找到审批请求' }
+    if (
+      this.events.some(
+        (event) => event.kind === 'approval/consumed' && event.payload.approvalId === input.approvalId,
+      )
+    )
+      return { ok: false as const, reason: '审批已消费' }
+    const decision = this.events.find(
+      (event) =>
+        event.kind === 'approval/decided' &&
+        event.source === 'human' &&
+        event.payload.approvalId === input.approvalId,
+    )
+    if (decision) {
+      return decision.payload.decision === 'allowed'
+        ? { ok: true as const }
+        : { ok: false as const, reason: '审批已被拒绝' }
+    }
+    await this.appendBatch({
+      appId: input.appId,
+      userId: input.userId,
+      turnId: input.turnId,
+      batchSeq: input.batchSeq,
+      events: [
+        {
+          kind: 'approval/decided',
+          source: 'human',
+          payload: { approvalId: input.approvalId, decision: 'allowed' },
+        },
+      ],
+    })
     return { ok: true as const }
   }
 
@@ -107,6 +156,7 @@ class MemorySessionStore implements SessionStore {
     userId: string
     turnId: string
     approvalId: string
+    batchSeq?: number
   }) {
     const previous = this.appLocks.get(input.appId) ?? Promise.resolve()
     let release!: () => void
@@ -122,7 +172,7 @@ class MemorySessionStore implements SessionStore {
         appId: input.appId,
         userId: input.userId,
         turnId: input.turnId,
-        batchSeq: 1,
+        batchSeq: input.batchSeq ?? 1,
         events: [
           {
             kind: 'approval/consumed',
@@ -309,7 +359,7 @@ describe('approval service', () => {
     ).rejects.toThrow('审批不可消费')
   })
 
-  it('uses latest decision and allows a later request decision to be consumed again', async () => {
+  it('does not allow a later decision to reset a consumed approval', async () => {
     const store = new MemorySessionStore()
     const service = createApprovalService(store)
     await request(service, 'ap-1', 'ask-1')
@@ -322,15 +372,18 @@ describe('approval service', () => {
     })
     await service.decide(decisionInput({ turnId: 'turn-allowed-2' }))
     expect(await service.assertHumanApproved({ appId: 'app-1', approvalId: 'ap-1' })).toEqual({
-      ok: true,
+      ok: false,
+      reason: '审批已消费',
     })
-    await service.consume({
-      appId: 'app-1',
-      userId: 'user-1',
-      turnId: 'turn-consume-2',
-      approvalId: 'ap-1',
-    })
-    expect(store.all().filter((event) => event.kind === 'approval/consumed')).toHaveLength(2)
+    await expect(
+      service.consume({
+        appId: 'app-1',
+        userId: 'user-1',
+        turnId: 'turn-consume-2',
+        approvalId: 'ap-1',
+      }),
+    ).rejects.toThrow('审批不可消费')
+    expect(store.all().filter((event) => event.kind === 'approval/consumed')).toHaveLength(1)
   })
 
   it('allows only one concurrent consumer for an approval', async () => {

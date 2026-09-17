@@ -48,6 +48,7 @@ export interface ApprovedGenerationOptions {
   sessionStore: SessionStore
   runClient: Pick<RunClient, 'createRun' | 'freezeCredit' | 'completeRun'>
   runIdFactory?: () => string
+  consumeBatchSeq?: number
 }
 
 export class ApprovedGenerationError extends Error {
@@ -126,13 +127,17 @@ export async function prepareApprovedGeneration(
   request: Omit<ApprovedGenerationRequest, 'runId'>,
   options: ApprovedGenerationOptions,
 ): Promise<ApprovedGenerationRequest> {
+  const consumeBatchSeq = options.consumeBatchSeq ?? 1
+  const runStartBatchSeq = consumeBatchSeq + 1
   const approval = await options.sessionStore.assertHumanApproved({
     appId: request.appId,
     approvalId: request.approvalId,
   })
   if (!approval.ok) {
     const message = `审批不可用于生成：${approval.reason}`
-    await appendConfirmationFailure({ ...request, runId: '' }, options.sessionStore, message)
+    await appendConfirmationFailure({ ...request, runId: '' }, options.sessionStore, message, {
+      batchSeq: consumeBatchSeq,
+    })
     throw new ApprovedGenerationError(message)
   }
 
@@ -163,6 +168,7 @@ export async function prepareApprovedGeneration(
       alert: !compensated,
       failureStage: 'freeze-credit',
       runId: prepared.runId,
+      batchSeq: consumeBatchSeq,
     })
     throw new ApprovedGenerationError(message)
   }
@@ -172,6 +178,7 @@ export async function prepareApprovedGeneration(
     userId: prepared.userId,
     turnId: prepared.turnId,
     approvalId: prepared.approvalId,
+    batchSeq: consumeBatchSeq,
   })
   if (!consumed.ok) {
     const message = `消费审批失败：${consumed.reason}`
@@ -180,6 +187,7 @@ export async function prepareApprovedGeneration(
       alert: true,
       failureStage: compensated ? 'consume-approval' : 'complete-run-after-consume-approval',
       runId: prepared.runId,
+      batchSeq: consumeBatchSeq,
     })
     throw new ApprovedGenerationError(message)
   }
@@ -189,7 +197,7 @@ export async function prepareApprovedGeneration(
       appId: prepared.appId,
       userId: prepared.userId,
       turnId: prepared.turnId,
-      batchSeq: 2,
+      batchSeq: runStartBatchSeq,
       events: [
         {
           kind: 'run/start',
@@ -206,7 +214,7 @@ export async function prepareApprovedGeneration(
       alert: !compensated,
       failureStage: 'complete-run-after-run-start-persist',
       runId: prepared.runId,
-      batchSeq: 3,
+      batchSeq: runStartBatchSeq + 1,
     })
     throw new ApprovedGenerationError(message)
   }
@@ -220,6 +228,7 @@ function deriveApprovalId(turnId: string): string {
 function mapEventToSse(
   event: SessionEventRecord,
   seq: number,
+  precedingEvents: readonly SessionEventRecord[] = [],
 ): AgentTurnEvent | null {
   switch (event.kind) {
     case 'clarify/asked':
@@ -244,10 +253,25 @@ function mapEventToSse(
     case 'turn/terminal': {
       const terminalType = event.payload.type as 'awaiting_user' | 'done' | 'error'
       if (terminalType === 'awaiting_user') {
+        const approvalAsked = [...precedingEvents]
+          .reverse()
+          .find((candidate) => candidate.kind === 'approval/asked')
+        const proposal = [...precedingEvents]
+          .reverse()
+          .find((candidate) => candidate.kind === 'generation/proposed')
+        const approvalId = approvalAsked?.payload.approvalId
+        const proposalReason = proposal?.payload.reason
+        const estimatedCredits = proposal?.payload.estimatedCredits
         return {
           type: 'awaiting_user',
           seq,
           reason: event.payload.reason as 'asked' | 'wireframe' | 'approval',
+          ...(event.payload.reason === 'approval' &&
+          typeof approvalId === 'string' &&
+          typeof proposalReason === 'string' &&
+          typeof estimatedCredits === 'number'
+            ? { approval: { approvalId, proposal: { reason: proposalReason, estimatedCredits } } }
+            : {}),
         }
       }
       if (terminalType === 'error') {
@@ -357,8 +381,8 @@ export async function executeSessionTurn(
   if (hasTerminal) {
     const events: AgentTurnEvent[] = []
     let seq = 1
-    for (const event of existingTurn.events) {
-      const mapped = mapEventToSse(event, seq)
+    for (const [eventIndex, event] of existingTurn.events.entries()) {
+      const mapped = mapEventToSse(event, seq, existingTurn.events.slice(0, eventIndex))
       if (mapped) {
         events.push(mapped)
         seq++
@@ -441,8 +465,8 @@ export async function executeSessionTurn(
     const updatedTurn = await sessionStore.replayTurn({ appId, turnId })
     const events: AgentTurnEvent[] = []
     let seq = 1
-    for (const event of updatedTurn.events) {
-      const mapped = mapEventToSse(event, seq)
+    for (const [eventIndex, event] of updatedTurn.events.entries()) {
+      const mapped = mapEventToSse(event, seq, updatedTurn.events.slice(0, eventIndex))
       if (mapped) {
         events.push(mapped)
         seq++
@@ -506,8 +530,8 @@ export async function executeSessionTurn(
   const updatedTurn = await sessionStore.replayTurn({ appId, turnId })
   const events: AgentTurnEvent[] = []
   let seq = 1
-  for (const event of updatedTurn.events) {
-    const mapped = mapEventToSse(event, seq)
+  for (const [eventIndex, event] of updatedTurn.events.entries()) {
+    const mapped = mapEventToSse(event, seq, updatedTurn.events.slice(0, eventIndex))
     if (mapped) {
       events.push(mapped)
       seq++
