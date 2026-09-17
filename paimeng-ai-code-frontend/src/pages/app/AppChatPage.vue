@@ -82,7 +82,21 @@
                   :loading="message.loading"
                   @confirm="onWireframeConfirm(index)"
                   @regenerate="onWireframeRegenerate(index)"
-                  @reinterview="onWireframeReinterview(index)"
+                />
+              </div>
+            </div>
+
+            <div v-else-if="message.type === 'approval'" class="ai-message">
+              <div class="message-avatar">
+                <a-avatar :src="aiAvatar" />
+              </div>
+              <div class="message-content">
+                <GenerationApprovalCard
+                  :reason="message.reason"
+                  :estimated-credits="message.estimatedCredits"
+                  :disabled="message.settled"
+                  :loading="message.loading"
+                  @confirm="onApprovalConfirm(index)"
                 />
               </div>
             </div>
@@ -176,7 +190,7 @@
                 :rows="4"
                 :maxlength="1000"
                 @keydown.enter.prevent="sendMessage"
-                :disabled="journeyLocked || isGenerating || !isOwner"
+                :disabled="isGenerating || !isOwner"
               />
             </a-tooltip>
             <a-textarea
@@ -186,7 +200,7 @@
               :rows="4"
               :maxlength="1000"
               @keydown.enter.prevent="sendMessage"
-              :disabled="journeyLocked || isGenerating"
+              :disabled="isGenerating"
             />
             <div class="input-actions">
               <IntensitySelector
@@ -291,17 +305,12 @@ import { listAppChatHistory } from '@/api/chatHistoryController'
 import { getAgentToken } from '@/api/agentToken'
 import { CodeGenTypeEnum, formatCodeGenType } from '@/utils/codeGenTypes'
 import {
-  streamAgentEvents,
-  requestInterview,
-  requestWireframe,
-  confirmWireframe,
-  createRunId,
+  streamAgentTurn,
   AgentStreamHttpError,
   type AgentStreamEvent,
   type Intensity,
-  type InterviewQuestion,
+  type AgentQuestion,
   type InterviewAnswer,
-  type InterviewSummary,
 } from '@/utils/agentSse'
 import request from '@/request'
 
@@ -310,6 +319,7 @@ import AppDetailModal from '@/components/AppDetailModal.vue'
 import DeploySuccessModal from '@/components/DeploySuccessModal.vue'
 import InterviewQuestionsCard from '@/components/InterviewQuestionsCard.vue'
 import WireframeReviewCard from '@/components/WireframeReviewCard.vue'
+import GenerationApprovalCard from '@/components/GenerationApprovalCard.vue'
 import IntensitySelector from '@/components/IntensitySelector.vue'
 import aiAvatar from '@/assets/aiAvatar.png'
 import { getStaticPreviewUrl, STATIC_BASE_URL } from '@/config/env'
@@ -363,7 +373,7 @@ interface AiMessage extends BaseMessage {
 
 interface InterviewCardMessage extends BaseMessage {
   type: 'interview'
-  questions: InterviewQuestion[]
+  questions: AgentQuestion[]
   round: number
   answered?: boolean
 }
@@ -375,25 +385,19 @@ interface WireframeCardMessage extends BaseMessage {
   settled?: boolean
 }
 
-type Message = UserMessage | AiMessage | InterviewCardMessage | WireframeCardMessage
+interface ApprovalCardMessage extends BaseMessage {
+  type: 'approval'
+  approvalId: string
+  reason: string
+  estimatedCredits: number
+  settled?: boolean
+}
 
-type JourneyPhase = 'idle' | 'interviewing' | 'wireframe_pending' | 'wireframe_confirmed'
+type Message = UserMessage | AiMessage | InterviewCardMessage | WireframeCardMessage | ApprovalCardMessage
 
 const messages = ref<Message[]>([])
 const userInput = ref('')
 const isGenerating = ref(false)
-
-const journeyPhase = ref<JourneyPhase>('idle')
-
-const journeyLocked = computed(
-  () => journeyPhase.value === 'interviewing' || journeyPhase.value === 'wireframe_pending',
-)
-
-const journeyRunId = ref('')
-
-const journeyMessage = ref('')
-
-const journeySummary = ref<InterviewSummary>()
 
 const intensity = ref<Intensity>('standard')
 
@@ -536,7 +540,7 @@ const sendInitialMessage = async (prompt: string) => {
   })
   await nextTick()
   scrollToBottom()
-  await startJourney(prompt)
+  await submitTurn(prompt)
 }
 
 const ensureAgentToken = async () => {
@@ -560,19 +564,9 @@ const loadCreditBalance = async () => {
 }
 
 const sendMessage = async () => {
-  if (isGenerating.value) {
-    return
-  }
-  if (journeyPhase.value === 'interviewing' || journeyPhase.value === 'wireframe_pending') {
-    message.info('请先完成访谈与线框确认，再继续生成')
-    return
-  }
-  if (journeyPhase.value !== 'wireframe_confirmed' && !userInput.value.trim()) {
-    return
-  }
+  if (isGenerating.value || !userInput.value.trim()) return
 
   let finalMessage = userInput.value.trim()
-
   if (selectedElementInfo.value) {
     let elementContext = `\n\n选中元素信息：`
     if (selectedElementInfo.value.pagePath) {
@@ -583,31 +577,17 @@ const sendMessage = async () => {
       elementContext += `\n- 当前内容: ${selectedElementInfo.value.textContent.substring(0, 100)}`
     }
     finalMessage += elementContext
+    clearSelectedElement()
+    if (isEditMode.value) toggleEditMode()
   }
   userInput.value = ''
-
-  if (selectedElementInfo.value) {
-    clearSelectedElement()
-    if (isEditMode.value) {
-      toggleEditMode()
-    }
-  }
-
-  messages.value.push({
-    type: 'user',
-    content: finalMessage,
-  })
+  messages.value.push({ type: 'user', content: finalMessage })
   await nextTick()
   scrollToBottom()
-  if (journeyPhase.value === 'wireframe_confirmed') {
-    await startGeneration(finalMessage || journeyMessage.value)
-    return
-  }
-
-  await startJourney(finalMessage)
+  await submitTurn(finalMessage)
 }
 
-const makeInterviewCard = (questions: InterviewQuestion[], round: number): Message => ({
+const makeInterviewCard = (questions: AgentQuestion[], round: number): InterviewCardMessage => ({
   type: 'interview',
   content: '',
   questions,
@@ -615,104 +595,33 @@ const makeInterviewCard = (questions: InterviewQuestion[], round: number): Messa
   answered: false,
 })
 
-const requestInterviewRound = async (options?: {
-  message?: string
-  answers?: InterviewAnswer[]
-}) => {
-  const aiMessageIndex = messages.value.length
-  messages.value.push({ type: 'ai', content: '', loading: true })
-  await nextTick()
-  scrollToBottom()
-  const { token } = await ensureAgentToken()
-  const result = await requestInterview({
-    token,
-    runId: journeyRunId.value,
-    appId: String(appId.value),
-    message: options?.message,
-    answers: options?.answers,
-  })
-  return { aiMessageIndex, result }
-}
-
-const startJourney = async (userMessage: string) => {
-  if (!appId.value) return
-  try {
-    journeyRunId.value = createRunId()
-    journeyMessage.value = userMessage
-    journeyPhase.value = 'interviewing'
-    const { aiMessageIndex, result } = await requestInterviewRound({ message: userMessage })
-    if (result.complete) {
-      journeySummary.value = result.summary
-      await generateWireframe(aiMessageIndex)
-      return
-    }
-    messages.value[aiMessageIndex] = makeInterviewCard(result.questions ?? [], result.round)
-  } catch (error) {
-    journeyPhase.value = 'idle'
-    handleJourneyError(error, messages.value.length - 1)
-  }
+const formatInterviewAnswers = (answers: InterviewAnswer[], questions: AgentQuestion[]) => {
+  const selected = answers
+    .map((answer) => {
+      const question = questions.find((item) => item.key === answer.key)
+      const option = question?.options.find((item) => item.id === answer.optionId)
+      return question && option ? `${question.question}\n${option.text}` : null
+    })
+    .filter((value): value is string => value !== null)
+  return selected.length > 0 ? selected.join('\n\n') : '本轮没有补充信息，请继续。'
 }
 
 const onInterviewSubmit = async (answers: InterviewAnswer[], messageIndex: number) => {
-  if (!appId.value) return
-  ;(messages.value[messageIndex] as InterviewCardMessage).answered = true
-  try {
-    const { aiMessageIndex, result } = await requestInterviewRound({ answers })
-    if (!result.complete) {
-      messages.value[aiMessageIndex] = makeInterviewCard(result.questions ?? [], result.round)
-      return
-    }
-    journeySummary.value = result.summary
-
-    messages.value[aiMessageIndex] = {
-      type: 'ai',
-      content: `✅ 需求已收束：${summarizeInterview(result.summary)}`,
-    }
-    await generateWireframe()
-  } catch (error) {
-    journeyPhase.value = 'idle'
-    handleJourneyError(error, messages.value.length - 1)
-  }
+  const card = messages.value[messageIndex]
+  if (!card || card.type !== 'interview' || card.answered) return
+  card.answered = true
+  const content = formatInterviewAnswers(answers, card.questions)
+  messages.value.push({ type: 'user', content })
+  await nextTick()
+  scrollToBottom()
+  await submitTurn(content)
 }
 
-const summarizeInterview = (summary?: InterviewSummary) => {
-  if (!summary) return '需求访谈完成'
-  return `受众 ${summary.audience}｜风格 ${summary.style}｜页面 ${(summary.pages ?? []).length} 个`
-}
-
-const generateWireframe = async (messageIndex?: number) => {
-  if (!appId.value) return
-  journeyPhase.value = 'wireframe_pending'
-  const aiMessageIndex = messageIndex ?? messages.value.length
-  if (messageIndex == null) {
-    messages.value.push({ type: 'ai', content: '', loading: true })
-    await nextTick()
-    scrollToBottom()
-  }
-  try {
-    const { token, workspacePath } = await ensureAgentToken()
-    const result = await requestWireframe({
-      token,
-      runId: journeyRunId.value,
-      appId: String(appId.value),
-      workspacePath,
-    })
-
-    const url = buildWireframeUrl(result.wireframe?.relativeUrl ?? 'wireframe/wireframe.html')
-    messages.value[aiMessageIndex] = {
-      type: 'wireframe',
-      content: '',
-      wireframeUrl: url,
-      pageCount: result.wireframe?.pageCount ?? 0,
-      settled: false,
-    }
-
-    wireframePreviewUrl.value = url
-    scrollToBottom()
-  } catch (error) {
-    journeyPhase.value = 'idle'
-    handleJourneyError(error, aiMessageIndex)
-  }
+const getAgentCodeGenType = (): 'html' | 'multi_file' | 'vue_project' | undefined => {
+  const codeGenType = appInfo.value?.codeGenType
+  return codeGenType === 'html' || codeGenType === 'multi_file' || codeGenType === 'vue_project'
+    ? codeGenType
+    : undefined
 }
 
 const buildWireframeUrl = (relativeUrl: string) => {
@@ -721,41 +630,38 @@ const buildWireframeUrl = (relativeUrl: string) => {
 }
 
 const onWireframeConfirm = async (messageIndex: number) => {
-  if (!appId.value) return
-  const card = messages.value[messageIndex] as WireframeCardMessage
+  const card = messages.value[messageIndex]
+  if (!card || card.type !== 'wireframe' || card.settled) return
   card.settled = true
-  try {
-    const { token } = await ensureAgentToken()
-    await confirmWireframe({ token, runId: journeyRunId.value, appId: String(appId.value) })
-    journeyPhase.value = 'wireframe_confirmed'
-    messages.value.push({
-      type: 'ai',
-      content: '✅ 线框已确认。请在输入框旁选择推理强度，点击发送开始生成（生成将冻结积分）。',
-    })
-    await nextTick()
-    scrollToBottom()
-  } catch (error) {
-    card.settled = false
-    handleJourneyError(error, messageIndex)
-  }
+  const content = '线框已确认，请继续推进生成审批。'
+  messages.value.push({ type: 'user', content })
+  await nextTick()
+  scrollToBottom()
+  if (!(await submitTurn(content))) card.settled = false
 }
 
 const onWireframeRegenerate = async (messageIndex: number) => {
-  ;(messages.value[messageIndex] as WireframeCardMessage).settled = true
-  await generateWireframe()
+  const card = messages.value[messageIndex]
+  if (!card || card.type !== 'wireframe' || card.settled) return
+  card.settled = true
+  wireframePreviewUrl.value = ''
+  const content = '请重新生成线框。'
+  messages.value.push({ type: 'user', content })
+  await nextTick()
+  scrollToBottom()
+  if (!(await submitTurn(content))) card.settled = false
 }
 
-const onWireframeReinterview = async (messageIndex: number) => {
-  if (!appId.value) return
-  ;(messages.value[messageIndex] as WireframeCardMessage).settled = true
-  wireframePreviewUrl.value = ''
-  try {
-    journeyPhase.value = 'interviewing'
-    const { aiMessageIndex, result } = await requestInterviewRound()
-    messages.value[aiMessageIndex] = makeInterviewCard(result.questions ?? [], result.round)
-  } catch (error) {
-    journeyPhase.value = 'idle'
-    handleJourneyError(error, messages.value.length - 1)
+const onApprovalConfirm = async (messageIndex: number) => {
+  const card = messages.value[messageIndex]
+  if (!card || card.type !== 'approval' || card.settled) return
+  card.settled = true
+  const content = '确认并开始生成。'
+  messages.value.push({ type: 'user', content })
+  await nextTick()
+  scrollToBottom()
+  if (!(await submitTurn(content, { action: 'confirm_generation', approvalId: card.approvalId }))) {
+    card.settled = false
   }
 }
 
@@ -765,125 +671,87 @@ const redirectToLogin = () => {
   }, 1000)
 }
 
-const JOURNEY_ERROR_HINTS: Record<number, string> = {
-  429: '今日线框生成次数已用完，请明天再试',
-  409: '当前有进行中的任务，请稍后再试',
-}
-
-const handleJourneyError = (error: unknown, messageIndex: number) => {
-  console.error('需求工程流程失败：', error)
+const handleTurnError = (error: unknown, messageIndex: number) => {
+  console.error('统一回合请求失败：', error)
   const msg = messages.value[messageIndex]
+  if (!msg || msg.type !== 'ai') return
+  msg.loading = false
   if (error instanceof AgentStreamHttpError) {
     if (error.status === 401) {
-      if (msg) {
-        msg.loading = false
-        msg.content = '登录已过期，请重新登录后继续。'
-      }
+      msg.content = '登录已过期，请重新登录后继续。'
       message.error('登录已过期，请重新登录')
       redirectToLogin()
       return
     }
-
-    const hint = error.message || JOURNEY_ERROR_HINTS[error.status]
+    const hints: Record<number, string> = {
+      402: '积分余额不足，请充值后再试',
+      409: '当前回合暂不可执行，请稍后再试',
+      503: '生成服务暂不可用，请稍后再试',
+    }
+    const hint = error.message || hints[error.status]
     if (hint) {
-      if (msg) {
-        msg.loading = false
-        msg.content = `❌ ${hint}。`
-      }
+      msg.content = `❌ ${hint}`
       message.warning(hint)
       return
     }
   }
-  if (msg) {
-    msg.loading = false
-    msg.content = '抱歉，流程出现了错误，请重试。'
+  if ((error as { name?: string })?.name === 'AbortError') {
+    msg.content = '⏹ 生成已中断。已写入的文件将保留，积分按生成进度折算退回。'
+    return
   }
+  msg.content = '抱歉，流程出现了错误，请重试。'
   message.error('操作失败，请重试')
 }
 
-const startGeneration = async (userMessage: string) => {
+const submitTurn = async (
+  turnMessage: string,
+  options: { action?: 'chat' | 'confirm_generation'; approvalId?: string } = {},
+): Promise<boolean> => {
+  if (!appId.value || isGenerating.value) return false
   isGenerating.value = true
+  let turnAccepted = false
   const aiMessageIndex = messages.value.length
   messages.value.push({ type: 'ai', content: '', loading: true })
   await nextTick()
   scrollToBottom()
-  await generateCode(userMessage, aiMessageIndex)
-}
-
-const generateCode = async (userMessage: string, aiMessageIndex: number) => {
-  if (!appId.value) return
   streamAbortController.value = new AbortController()
   try {
     const { token, workspacePath } = await ensureAgentToken()
-
-    const terminal = await streamAgentEvents(
+    const terminal = await streamAgentTurn(
       {
         token,
-        runId: journeyRunId.value,
         appId: String(appId.value),
-        message: userMessage,
+        message: turnMessage,
         workspacePath,
+        action: options.action ?? 'chat',
+        approvalId: options.approvalId,
+        codeGenType: getAgentCodeGenType(),
         intensity: intensity.value,
         signal: streamAbortController.value.signal,
       },
       (event) => handleAgentEvent(event, aiMessageIndex),
     )
-
-    isGenerating.value = false
-    journeyPhase.value = 'idle'
-    if (terminal?.type === 'done') {
-      await fetchAppInfo()
-      updatePreview()
-    } else if (!terminal) {
-      handleError(new Error('连接中断'), aiMessageIndex)
+    if (!terminal) {
+      handleTurnError(new Error('连接中断'), aiMessageIndex)
+    } else {
+      turnAccepted = terminal.type !== 'error'
+      if (terminal.type === 'done') {
+        wireframePreviewUrl.value = ''
+        await fetchAppInfo()
+        updatePreview()
+      }
     }
   } catch (error) {
-    if (error instanceof AgentStreamHttpError && error.status === 401) {
-      console.error('Agent 令牌无效或已过期：', error)
-      messages.value[aiMessageIndex].content = '登录已过期，请重新登录后继续生成。'
-      messages.value[aiMessageIndex].loading = false
-      message.error('登录已过期，请重新登录')
-      isGenerating.value = false
-      streamAbortController.value = null
-      redirectToLogin()
-      return
-    }
-
-    if (
-      error instanceof AgentStreamHttpError &&
-      (error.status === 402 || error.status === 409 || error.status === 503)
-    ) {
-      const FALLBACK_HINTS: Record<number, string> = {
-        402: '积分余额不足，请充值后再试',
-        409: '需求尚未确认，请先完成访谈并确认线框后重新生成',
-        503: '生成服务暂不可用，请稍后再试',
-      }
-      const hint = error.message || FALLBACK_HINTS[error.status]!
-      messages.value[aiMessageIndex].content = `❌ ${hint}`
-      messages.value[aiMessageIndex].loading = false
-      message.warning(hint)
-      isGenerating.value = false
-      return
-    }
-    if ((error as { name?: string })?.name === 'AbortError') {
-      messages.value[aiMessageIndex].content =
-        '⏹ 生成已中断。已写入的文件将保留，积分按生成进度折算退回。'
-      messages.value[aiMessageIndex].loading = false
-      isGenerating.value = false
-      journeyPhase.value = 'idle'
-      return
-    }
-    handleError(error, aiMessageIndex)
-    return
+    handleTurnError(error, aiMessageIndex)
   } finally {
+    isGenerating.value = false
     streamAbortController.value = null
-
-    wireframePreviewUrl.value = ''
     await loadCreditBalance()
-    setTimeout(() => {
-      void loadCreditBalance()
-    }, 2000)
+    setTimeout(() => void loadCreditBalance(), 2000)
+    await nextTick()
+    scrollToBottom()
   }
+  return turnAccepted
 }
 
 const stopGeneration = () => {
@@ -891,21 +759,72 @@ const stopGeneration = () => {
 }
 
 const handleAgentEvent = (event: AgentStreamEvent, aiMessageIndex: number) => {
-  const msg = messages.value[aiMessageIndex] as AiMessage
-  if (!msg) return
+  const current = messages.value[aiMessageIndex]
+  if (!current) return
+
+  if (event.type === 'questions') {
+    messages.value[aiMessageIndex] = makeInterviewCard(
+      event.items ?? [],
+      messages.value.filter((item) => item.type === 'interview').length + 1,
+    )
+    scrollToBottom()
+    return
+  }
+  if (event.type === 'wireframe') {
+    const url = buildWireframeUrl(event.relativeUrl ?? 'wireframe/wireframe.html')
+    messages.value[aiMessageIndex] = {
+      type: 'wireframe',
+      content: '',
+      wireframeUrl: url,
+      pageCount: event.pageCount ?? 0,
+      settled: false,
+    }
+    wireframePreviewUrl.value = url
+    scrollToBottom()
+    return
+  }
+  if (event.type === 'awaiting_user') {
+    if (event.reason === 'approval' && event.approval) {
+      messages.value[aiMessageIndex] = {
+        type: 'approval',
+        content: '',
+        approvalId: event.approval.approvalId,
+        reason: event.approval.proposal.reason,
+        estimatedCredits: event.approval.proposal.estimatedCredits,
+        settled: false,
+      }
+    } else if (current.type === 'ai') {
+      current.loading = false
+      if (!current.content) current.content = '等待你的下一步操作。'
+    }
+    scrollToBottom()
+    return
+  }
+
+  if (event.type === 'error' && current.type !== 'ai') {
+    messages.value.push({
+      type: 'ai',
+      content: `❌ ${event.message || '生成过程中出现错误'}`,
+    })
+    message.error(event.message || '生成过程中出现错误')
+    scrollToBottom()
+    return
+  }
+
+  if (current.type !== 'ai') return
   switch (event.type) {
     case 'ai_thinking':
-      msg.thinking = (msg.thinking ?? '') + (event.text ?? '')
-      msg.loading = false
+      current.thinking = (current.thinking ?? '') + (event.text ?? '')
+      current.loading = false
       break
     case 'ai_response':
-      msg.content += event.data ?? ''
-      msg.loading = false
+      current.content += event.data ?? ''
+      current.loading = false
       break
     case 'tool_request':
-      msg.toolSteps = msg.toolSteps ?? []
-      if (event.id && !msg.toolSteps.some((step) => step.id === event.id)) {
-        msg.toolSteps.push({
+      current.toolSteps = current.toolSteps ?? []
+      if (event.id && !current.toolSteps.some((step) => step.id === event.id)) {
+        current.toolSteps.push({
           id: event.id,
           name: event.name ?? '',
           arguments: event.arguments,
@@ -913,36 +832,34 @@ const handleAgentEvent = (event: AgentStreamEvent, aiMessageIndex: number) => {
         })
       }
       break
-    case 'tool_executed':
-      msg.toolSteps = msg.toolSteps ?? []
-      {
-        const existing = event.id ? msg.toolSteps.find((step) => step.id === event.id) : undefined
-        if (existing) {
-          existing.status = 'executed'
-        } else {
-          msg.toolSteps.push({
-            id: event.id ?? `${event.name}-${msg.toolSteps.length}`,
-            name: event.name ?? '',
-            arguments: event.arguments,
-            status: 'executed',
-          })
-        }
+    case 'tool_executed': {
+      current.toolSteps = current.toolSteps ?? []
+      const existing = event.id ? current.toolSteps.find((step) => step.id === event.id) : undefined
+      if (existing) {
+        existing.status = 'executed'
+      } else {
+        current.toolSteps.push({
+          id: event.id ?? `${event.name}-${current.toolSteps.length}`,
+          name: event.name ?? '',
+          arguments: event.arguments,
+          status: 'executed',
+        })
       }
       break
+    }
     case 'milestone':
-      msg.milestones = msg.milestones ?? []
-      if (event.title) {
-        msg.milestones.push(event.title)
-      }
+      current.milestones = current.milestones ?? []
+      if (event.title) current.milestones.push(event.detail ? `${event.title}：${event.detail}` : event.title)
+      current.loading = false
       break
     case 'error':
-      msg.content = `❌ ${event.message || '生成过程中出现错误'}`
-      msg.loading = false
+      current.content = `❌ ${event.message || '生成过程中出现错误'}`
+      current.loading = false
       message.error(event.message || '生成过程中出现错误')
-
-      void loadCreditBalance()
       break
     case 'done':
+      current.loading = false
+      if (!current.content && !current.milestones?.length) current.content = '本轮已完成。'
       break
   }
   scrollToBottom()
@@ -968,14 +885,6 @@ const toolTarget = (step: ToolStep) => {
   } catch {
     return step.arguments.length > 30 ? `${step.arguments.slice(0, 30)}…` : step.arguments
   }
-}
-
-const handleError = (error: unknown, aiMessageIndex: number) => {
-  console.error('生成代码失败：', error)
-  messages.value[aiMessageIndex].content = '抱歉，生成过程中出现了错误，请重试。'
-  messages.value[aiMessageIndex].loading = false
-  message.error('生成失败，请重试')
-  isGenerating.value = false
 }
 
 const updatePreview = () => {
@@ -1123,15 +1032,6 @@ const clearSelectedElement = () => {
 }
 
 const getInputPlaceholder = () => {
-  if (journeyPhase.value === 'interviewing') {
-    return '访谈进行中：请在上方卡片中选择答案...'
-  }
-  if (journeyPhase.value === 'wireframe_pending') {
-    return '线框待确认：请先在上方确认或重新生成...'
-  }
-  if (journeyPhase.value === 'wireframe_confirmed') {
-    return '线框已确认：补充生成要求（可留空），选择强度后点击发送'
-  }
   if (selectedElementInfo.value) {
     return `正在编辑 ${selectedElementInfo.value.tagName.toLowerCase()} 元素，描述您想要的修改...`
   }

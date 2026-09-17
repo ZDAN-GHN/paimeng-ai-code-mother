@@ -2,15 +2,14 @@
   <div class="wireframe-card">
     <div class="wireframe-header">
       <LayoutOutlined class="wireframe-icon" />
-      <span>线框已生成（{{ pageCount }} 页，免费）</span>
+      <span>线框已生成（{{ pageCount }} 页）</span>
     </div>
-    <p class="wireframe-hint">线框确认后将锁定为代码生成的布局契约与视觉基准。请预览后选择：</p>
+    <p class="wireframe-hint">请预览线框后确认继续，或要求服务端重新生成。</p>
     <div class="wireframe-actions">
       <a-button type="primary" :loading="loading" :disabled="disabled" @click="emit('confirm')">
-        确认线框，开始生成
+        确认线框
       </a-button>
       <a-button :disabled="disabled" @click="emit('regenerate')">重新生成线框</a-button>
-      <a-button :disabled="disabled" @click="emit('reinterview')">重新访谈</a-button>
     </div>
   </div>
 </template>
@@ -27,7 +26,6 @@ defineProps<{
 const emit = defineEmits<{
   confirm: []
   regenerate: []
-  reinterview: []
 }>()
 </script>
 

@@ -12,8 +12,24 @@ export type AgentEventType =
   | 'questions'
   | 'wireframe'
 
+export interface AgentApproval {
+  approvalId: string
+  proposal: {
+    reason: string
+    estimatedCredits: number
+  }
+}
+
+export interface AgentQuestion {
+  key: string
+  dimension: string
+  question: string
+  options: Array<{ id: string; text: string }>
+}
+
 export interface AgentStreamEvent {
   type: AgentEventType
+  seq?: number
   text?: string
   data?: string
   id?: string
@@ -23,6 +39,12 @@ export interface AgentStreamEvent {
   title?: string
   detail?: string
   message?: string
+  items?: AgentQuestion[]
+  relativeUrl?: string
+  pageCount?: number
+  version?: string
+  reason?: 'answered' | 'asked' | 'wireframe' | 'approval'
+  approval?: AgentApproval
 }
 
 export type Intensity = 'fast' | 'standard' | 'deep'
@@ -47,6 +69,7 @@ export interface AgentTurnParams {
   action?: 'chat' | 'confirm_generation'
   approvalId?: string
   codeGenType?: 'html' | 'multi_file' | 'vue_project'
+  intensity?: Intensity
   signal?: AbortSignal
 }
 
@@ -278,6 +301,7 @@ export async function streamAgentTurn(
       action: params.action ?? 'chat',
       approvalId: params.approvalId,
       codeGenType: params.codeGenType,
+      intensity: params.intensity,
     }),
     signal: params.signal,
   })
