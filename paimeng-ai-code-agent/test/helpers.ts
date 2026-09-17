@@ -91,9 +91,16 @@ export function makePassingReviewGates(): ReviewGateSet {
 }
 
 export async function makeToken(
-  overrides: { expiresIn?: string | number; sub?: string } = {},
+  overrides: {
+    expiresIn?: string | number
+    sub?: string
+    appId?: string
+    workspacePath?: string
+  } = {},
 ): Promise<string> {
-  return new SignJWT({ appId: 1 })
+  const claims: Record<string, string> = { appId: overrides.appId ?? '1001' }
+  if (overrides.workspacePath) claims.workspacePath = overrides.workspacePath
+  return new SignJWT(claims)
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(overrides.sub ?? '42')
     .setIssuedAt()

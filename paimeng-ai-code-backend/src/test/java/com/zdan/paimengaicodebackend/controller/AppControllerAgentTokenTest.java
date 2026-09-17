@@ -131,7 +131,10 @@ class AppControllerAgentTokenTest {
         JSONObject data = body.getJSONObject("data");
         String token = data.getStr("token");
         assertTrue(JWTUtil.verify(token, SECRET_BYTES));
-        assertEquals(String.valueOf(OWNER_ID), JWT.of(token).getPayload("sub"));
+        JWT jwt = JWT.of(token);
+        assertEquals(String.valueOf(OWNER_ID), jwt.getPayload("sub"));
+        assertEquals(String.valueOf(APP_ID), jwt.getPayload("appId"));
+        assertEquals(data.getStr("workspacePath"), jwt.getPayload("workspacePath"));
         assertTrue(data.getStr("workspacePath").endsWith("tmp/code_output/html_" + APP_ID));
         assertTrue(data.getLong("expiresAt") > System.currentTimeMillis());
     }

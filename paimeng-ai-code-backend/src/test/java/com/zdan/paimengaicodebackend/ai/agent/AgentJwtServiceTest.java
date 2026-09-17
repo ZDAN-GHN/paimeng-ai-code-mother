@@ -33,18 +33,20 @@ class AgentJwtServiceTest {
 
     @Test
     void issueTokenVerifiesWithSharedKey() {
-        String token = agentJwtService.issueToken(123L);
+        String token = agentJwtService.issueToken(123L, 456L, "/tmp/code_output/html_456");
         assertTrue(JWTUtil.verify(token, SECRET_BYTES));
         assertEquals("HS256", JWT.of(token).getAlgorithm());
     }
 
     @Test
-    void issueTokenCarriesSubIatExp() {
+    void issueTokenCarriesAuthorizedIdentityIatExp() {
         properties.setTtlMinutes(10);
         long before = System.currentTimeMillis() / 1000 - 1;
-        String token = agentJwtService.issueToken(123L);
+        String token = agentJwtService.issueToken(123L, 456L, "/tmp/code_output/html_456");
         JWT jwt = JWT.of(token);
         assertEquals("123", jwt.getPayload("sub"));
+        assertEquals("456", jwt.getPayload("appId"));
+        assertEquals("/tmp/code_output/html_456", jwt.getPayload("workspacePath"));
         Number iat = (Number) jwt.getPayload("iat");
         Number exp = (Number) jwt.getPayload("exp");
         assertNotNull(iat);
@@ -54,15 +56,20 @@ class AgentJwtServiceTest {
     }
 
     @Test
-    void issueTokenEncodesLongIdAsString() {
-        String token = agentJwtService.issueToken(453132478241230849L);
+    void issueTokenEncodesLongIdsAsStrings() {
+        String token = agentJwtService.issueToken(
+            453132478241230849L,
+            453132478241230850L,
+            "/tmp/code_output/html_453132478241230850"
+        );
         assertEquals("453132478241230849", JWT.of(token).getPayload("sub"));
+        assertEquals("453132478241230850", JWT.of(token).getPayload("appId"));
     }
 
     @Test
     void expiredTokenFailsDateValidation() {
         properties.setTtlMinutes(0);
-        String token = agentJwtService.issueToken(123L);
+        String token = agentJwtService.issueToken(123L, 456L, "/tmp/code_output/html_456");
 
         long nowSeconds = System.currentTimeMillis() / 1000 + 1;
         assertThrows(ValidateException.class, () ->
@@ -72,13 +79,16 @@ class AgentJwtServiceTest {
 
     @Test
     void wrongKeyFailsVerification() {
-        String token = agentJwtService.issueToken(123L);
+        String token = agentJwtService.issueToken(123L, 456L, "/tmp/code_output/html_456");
         assertFalse(JWTUtil.verify(token, "wrong-secret".getBytes(StandardCharsets.UTF_8)));
     }
 
     @Test
     void blankSecretRejected() {
         properties.setSecret("");
-        assertThrows(BusinessException.class, () -> agentJwtService.issueToken(123L));
+        assertThrows(
+            BusinessException.class,
+            () -> agentJwtService.issueToken(123L, 456L, "/tmp/code_output/html_456")
+        );
     }
 }

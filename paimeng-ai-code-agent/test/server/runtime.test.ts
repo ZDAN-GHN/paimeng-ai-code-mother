@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import type { Pool } from 'pg'
+import type { FileTools } from '../../src/generation/tools/fileTools.js'
+import type { ImageTools } from '../../src/generation/tools/imageTools.js'
+import type { AppOverrides } from '../../src/server/app.js'
 import { loadConfig, type AgentConfig } from '../../src/server/config.js'
 import { startProductionServer } from '../../src/server/runtime.js'
 
@@ -26,22 +29,42 @@ describe('production server wiring', () => {
     const pool = fakePool()
     const store = {} as InstanceType<typeof import('../../src/session/store.js').PgSessionStore>
     const app = fakeApp(async () => undefined)
-    const buildApp = vi.fn(() => app)
+    let appOverrides: AppOverrides | undefined
+    const buildApp = vi.fn((overrides: AppOverrides = {}) => {
+      appOverrides = overrides
+      return app
+    })
     const createSessionStore = vi.fn(() => store)
+    const fileTools = {} as Pick<FileTools, 'writeFile' | 'readFile' | 'readDir'>
+    const imageTools = {} as Pick<ImageTools, 'searchContentImages'>
+    const createFileTools = vi.fn(() => fileTools)
+    const createImageTools = vi.fn(() => imageTools)
     const exit = vi.fn()
 
     const server = await startProductionServer(testConfig(), {
       buildApp,
       createSessionPool: () => pool,
       createSessionStore,
+      createFileTools,
+      createImageTools,
       exit,
     })
 
     expect(buildApp).toHaveBeenCalledWith(
       expect.objectContaining({
-        agentRoutes: { sessionStore: store },
+        agentRoutes: expect.objectContaining({ sessionStore: store }),
       }),
     )
+    const agentRoutes = appOverrides?.agentRoutes
+    expect(agentRoutes).toBeDefined()
+    expect(agentRoutes?.createFileTools?.('/tmp/workspace/app-1001')).toBe(fileTools)
+    expect(createFileTools).toHaveBeenCalledWith('/tmp/workspace/app-1001', testConfig().workspaceRoot)
+    expect(agentRoutes?.createImageTools?.()).toBe(imageTools)
+    expect(createImageTools).toHaveBeenCalledWith({
+      pexelsApiKey: testConfig().pexelsApiKey,
+      dashscopeApiKey: testConfig().dashscopeApiKey,
+      imageModel: testConfig().imageModel,
+    })
     expect(createSessionStore).toHaveBeenCalledWith(pool)
     await server.stop()
     await server.stop()

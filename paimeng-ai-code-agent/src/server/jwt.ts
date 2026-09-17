@@ -2,6 +2,8 @@ import { jwtVerify } from 'jose'
 
 export interface AgentJwtPayload {
   sub: string
+  appId?: string
+  workspacePath?: string
   [key: string]: unknown
 }
 

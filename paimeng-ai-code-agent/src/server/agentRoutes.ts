@@ -24,6 +24,8 @@ export interface AgentRouteOptions {
   provider?: LlmProvider
   imageTools?: Pick<ImageTools, 'searchContentImages'>
   fileTools?: Pick<FileTools, 'writeFile' | 'readFile' | 'readDir'>
+  createImageTools?: () => Pick<ImageTools, 'searchContentImages'>
+  createFileTools?: (workspacePath: string) => Pick<FileTools, 'writeFile' | 'readFile' | 'readDir'>
   reviewGates?: ReviewGateSet
   sessionStore?: SessionStore
   turnIdFactory?: () => string
@@ -89,10 +91,28 @@ export function buildAgentRoutes(
     }
     if (!input.codeGenType || !input.workspacePath)
       throw httpError(400, 'codeGenType、workspacePath 必填')
+    let workspacePath: string
     try {
-      validateWorkspacePath(input.workspacePath, config.workspaceRoot)
+      workspacePath = validateWorkspacePath(input.workspacePath, config.workspaceRoot)
     } catch (error) {
       if (error instanceof WorkspacePathError) throw httpError(400, error.message)
+      throw error
+    }
+    const tokenAppId = request.user?.appId
+    const tokenWorkspacePath = request.user?.workspacePath
+    if (
+      typeof tokenAppId !== 'string' ||
+      typeof tokenWorkspacePath !== 'string' ||
+      tokenAppId !== String(input.appId)
+    ) {
+      throw httpError(403, '令牌未授权访问该应用')
+    }
+    try {
+      if (validateWorkspacePath(tokenWorkspacePath, config.workspaceRoot) !== workspacePath) {
+        throw httpError(403, '令牌未授权访问该工作区')
+      }
+    } catch (error) {
+      if (error instanceof WorkspacePathError) throw httpError(403, '令牌未授权访问该工作区')
       throw error
     }
     if (!options.sessionStore) throw httpError(503, '会话存储未配置，无法处理统一回合')
@@ -129,7 +149,7 @@ export function buildAgentRoutes(
             message: input.message?.trim() || '用户已确认开始生成',
             intensity: input.intensity,
             codeGenType: input.codeGenType!,
-            workspacePath: input.workspacePath!,
+            workspacePath,
           },
           { sessionStore: options.sessionStore, runClient, consumeBatchSeq: 2 },
         )
@@ -183,8 +203,10 @@ export function buildAgentRoutes(
       return reply
     }
 
-    if (!options.fileTools) throw httpError(503, '文件工具未配置，无法处理会话回合')
-    if (!options.imageTools) throw httpError(503, '图片工具未配置，无法处理会话回合')
+    const fileTools = options.createFileTools?.(workspacePath) ?? options.fileTools
+    const imageTools = options.createImageTools?.() ?? options.imageTools
+    if (!fileTools) throw httpError(503, '文件工具未配置，无法处理会话回合')
+    if (!imageTools) throw httpError(503, '图片工具未配置，无法处理会话回合')
 
     try {
       const result = await executeSessionTurn(
@@ -199,8 +221,8 @@ export function buildAgentRoutes(
           provider: llmProvider ?? createScriptedLlm('success'),
           modelId: 'scripted-standard',
           sessionStore: options.sessionStore,
-          files: options.fileTools,
-          images: options.imageTools,
+          files: fileTools,
+          images: imageTools,
         },
       )
       validateAgentTurnEvents(result.events)

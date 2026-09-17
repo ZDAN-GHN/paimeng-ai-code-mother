@@ -3,12 +3,19 @@ import type { Pool } from 'pg'
 import { buildApp } from './app.js'
 import { createSessionPool } from '../session/pg.js'
 import { PgSessionStore } from '../session/store.js'
+import { FileTools } from '../generation/tools/fileTools.js'
+import { ImageTools, type ImageConfig } from '../generation/tools/imageTools.js'
 import type { AgentConfig } from './config.js'
 
 export interface ProductionServerDeps {
   buildApp: typeof buildApp
   createSessionPool: typeof createSessionPool
   createSessionStore: (pool: Pool) => PgSessionStore
+  createFileTools: (
+    workspacePath: string,
+    workspaceRoot: string,
+  ) => Pick<FileTools, 'writeFile' | 'readFile' | 'readDir'>
+  createImageTools: (config: ImageConfig) => Pick<ImageTools, 'searchContentImages'>
   exit: (code: number) => void
 }
 
@@ -16,6 +23,8 @@ const defaultDeps: ProductionServerDeps = {
   buildApp,
   createSessionPool,
   createSessionStore: (pool) => new PgSessionStore(pool),
+  createFileTools: (workspacePath, workspaceRoot) => new FileTools(workspacePath, workspaceRoot),
+  createImageTools: (config) => new ImageTools(config),
   exit: (code) => process.exit(code),
 }
 
@@ -31,9 +40,23 @@ export async function startProductionServer(
 ): Promise<ProductionServer> {
   const deps = { ...defaultDeps, ...overrides }
   const pool = deps.createSessionPool()
+  const sessionStore = deps.createSessionStore(pool)
   let app: FastifyInstance
   try {
-    app = deps.buildApp({ ...config, agentRoutes: { sessionStore: deps.createSessionStore(pool) } })
+    app = deps.buildApp({
+      ...config,
+      agentRoutes: {
+        sessionStore,
+        createFileTools: (workspacePath) =>
+          deps.createFileTools(workspacePath, config.workspaceRoot),
+        createImageTools: () =>
+          deps.createImageTools({
+            pexelsApiKey: config.pexelsApiKey,
+            dashscopeApiKey: config.dashscopeApiKey,
+            imageModel: config.imageModel,
+          }),
+      },
+    })
   } catch (error) {
     await pool.end().catch(() => undefined)
     throw error

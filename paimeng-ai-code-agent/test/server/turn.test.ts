@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   buildTestApp,
@@ -140,6 +141,9 @@ const validPayload = (root: string) => ({
   workspacePath: root,
 })
 
+const makeTurnToken = (workspacePath: string, appId = '1001') =>
+  makeToken({ appId, workspacePath })
+
 describe('POST /agent/turn', () => {
   it('chat action 执行会话回合并返回终态', async () => {
     const store = memorySessionStore()
@@ -151,7 +155,7 @@ describe('POST /agent/turn', () => {
         imageTools: fakeImageTools(),
       },
     })
-    const token = await makeToken()
+    const token = await makeTurnToken(root)
     const response = await app.inject({
       method: 'POST',
       url: '/agent/turn',
@@ -216,7 +220,7 @@ describe('POST /agent/turn', () => {
         imageTools: fakeImageTools(),
       },
     })
-    const token = await makeToken()
+    const token = await makeTurnToken(root)
     const response = await app.inject({
       method: 'POST',
       url: '/agent/turn',
@@ -243,7 +247,7 @@ describe('POST /agent/turn', () => {
         imageTools: fakeImageTools(),
       },
     })
-    const token = await makeToken()
+    const token = await makeTurnToken(root)
     const response = await app.inject({
       method: 'POST',
       url: '/agent/turn',
@@ -283,7 +287,7 @@ describe('POST /agent/turn', () => {
         imageTools: fakeImageTools(),
       },
     })
-    const token = await makeToken()
+    const token = await makeTurnToken(root)
     const response = await app.inject({
       method: 'POST',
       url: '/agent/turn',
@@ -317,7 +321,7 @@ describe('POST /agent/turn', () => {
         imageTools: fakeImageTools(),
       },
     })
-    const token = await makeToken()
+    const token = await makeTurnToken(root)
     const response = await app.inject({
       method: 'POST',
       url: '/agent/turn',
@@ -374,7 +378,7 @@ describe('POST /agent/turn', () => {
         imageTools: fakeImageTools(),
       },
     })
-    const token = await makeToken()
+    const token = await makeTurnToken(root)
     const response = await app.inject({
       method: 'POST',
       url: '/agent/turn',
@@ -434,7 +438,7 @@ describe('POST /agent/turn', () => {
         imageTools: fakeImageTools(),
       },
     })
-    const token = await makeToken()
+    const token = await makeTurnToken(root)
     const response = await app.inject({
       method: 'POST',
       url: '/agent/turn',
@@ -459,6 +463,41 @@ describe('POST /agent/turn', () => {
     )
   })
 
+  it('拒绝未绑定或与令牌不匹配的应用工作区，且不产生副作用', async () => {
+    const store = memorySessionStore()
+    const root = makeWorkspaceRoot()
+    const otherWorkspace = path.join(root, 'html_1002')
+    const createFileTools = vi.fn(fakeFileTools)
+    const createImageTools = vi.fn(fakeImageTools)
+    const app = buildTestApp(root, {
+      agentRoutes: {
+        sessionStore: store,
+        createFileTools,
+        createImageTools,
+      },
+    })
+    const missingBinding = await makeToken()
+    const token = await makeTurnToken(root)
+
+    for (const request of [
+      { token: missingBinding, payload: validPayload(root) },
+      { token, payload: { ...validPayload(root), appId: '1002' } },
+      { token, payload: validPayload(otherWorkspace) },
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/agent/turn',
+        headers: { authorization: `Bearer ${request.token}` },
+        payload: request.payload,
+      })
+      expect(response.statusCode).toBe(403)
+    }
+
+    expect(store.batches).toHaveLength(0)
+    expect(createFileTools).not.toHaveBeenCalled()
+    expect(createImageTools).not.toHaveBeenCalled()
+  })
+
   it('缺少 fileTools 时返回 503', async () => {
     const store = memorySessionStore()
     const root = makeWorkspaceRoot()
@@ -468,7 +507,7 @@ describe('POST /agent/turn', () => {
         imageTools: fakeImageTools(),
       },
     })
-    const token = await makeToken()
+    const token = await makeTurnToken(root)
     const response = await app.inject({
       method: 'POST',
       url: '/agent/turn',
@@ -488,7 +527,7 @@ describe('POST /agent/turn', () => {
         fileTools: fakeFileTools(),
       },
     })
-    const token = await makeToken()
+    const token = await makeTurnToken(root)
     const response = await app.inject({
       method: 'POST',
       url: '/agent/turn',
@@ -507,7 +546,7 @@ describe('POST /agent/turn', () => {
         imageTools: fakeImageTools(),
       },
     })
-    const token = await makeToken()
+    const token = await makeTurnToken(root)
     const response = await app.inject({
       method: 'POST',
       url: '/agent/turn',
@@ -527,7 +566,7 @@ describe('POST /agent/turn', () => {
         imageTools: fakeImageTools(),
       },
     })
-    const token = await makeToken()
+    const token = await makeTurnToken(root)
     const turnId = 'turn-test-replay'
 
     const first = await app.inject({
@@ -564,14 +603,15 @@ describe('POST /agent/turn', () => {
     [{ ...validPayload('/tmp'), workspacePath: undefined }, 'workspacePath'],
   ])('非法输入返回 400', async (payload, _title) => {
     const store = memorySessionStore()
-    const app = buildTestApp(makeWorkspaceRoot(), {
+    const root = makeWorkspaceRoot()
+    const app = buildTestApp(root, {
       agentRoutes: {
         sessionStore: store,
         fileTools: fakeFileTools(),
         imageTools: fakeImageTools(),
       },
     })
-    const token = await makeToken()
+    const token = await makeTurnToken(root)
     const response = await app.inject({
       method: 'POST',
       url: '/agent/turn',

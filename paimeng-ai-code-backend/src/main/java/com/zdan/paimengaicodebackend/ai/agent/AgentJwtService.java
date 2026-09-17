@@ -17,7 +17,7 @@ public class AgentJwtService {
         this.properties = properties;
     }
 
-    public String issueToken(long userId) {
+    public String issueToken(long userId, long appId, String workspacePath) {
         if (StrUtil.isBlank(properties.getSecret())) {
             throw new BusinessException(
                 ErrorCode.SYSTEM_ERROR,
@@ -30,6 +30,8 @@ public class AgentJwtService {
         return JWT.create()
             .setKey(properties.getSecret().getBytes(StandardCharsets.UTF_8))
             .setPayload("sub", String.valueOf(userId))
+            .setPayload("appId", String.valueOf(appId))
+            .setPayload("workspacePath", workspacePath)
             .setIssuedAt(new Date(nowSeconds * 1000))
             .setExpiresAt(new Date(expSeconds * 1000))
             .sign();

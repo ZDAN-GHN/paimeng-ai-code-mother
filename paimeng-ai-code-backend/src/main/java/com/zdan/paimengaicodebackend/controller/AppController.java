@@ -145,7 +145,9 @@ public class AppController {
         );
 
         AgentTokenVO agentTokenVO = new AgentTokenVO();
-        agentTokenVO.setToken(agentJwtService.issueToken(loginUser.getId()));
+        agentTokenVO.setToken(
+            agentJwtService.issueToken(loginUser.getId(), appId, workspacePath)
+        );
         agentTokenVO.setWorkspacePath(workspacePath);
         agentTokenVO.setExpiresAt(
             System.currentTimeMillis() + agentJwtProperties.getTtlMinutes() * 60 * 1000
