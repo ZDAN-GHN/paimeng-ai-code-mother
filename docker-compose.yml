@@ -16,7 +16,7 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
       # 首次启动（数据卷为空）时自动建库建表，之后不会重复执行
-      - ./infra/sql/create_table.sql:/docker-entrypoint-initdb.d/01-create_table.sql:ro
+      - ./infra/sql/mysql/create_table.sql:/docker-entrypoint-initdb.d/01-create_table.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\""]
       interval: 10s
