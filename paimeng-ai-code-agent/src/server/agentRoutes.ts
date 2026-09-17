@@ -43,7 +43,7 @@ const turnBodySchema = tolerantBody({
   appId: z.union([z.string(), z.number()]).catch(''),
   turnId: z.string().optional().catch(undefined),
   message: z.string().optional().catch(undefined),
-  action: z.enum(['chat', 'confirm_generation']).optional().catch(undefined),
+  action: z.enum(['chat', 'confirm_generation', 'abort']).optional().catch(undefined),
   approvalId: z.string().optional().catch(undefined),
   intensity: z.enum(['fast', 'standard', 'deep']).optional().catch(undefined),
   codeGenType: z.enum(['html', 'multi_file', 'vue_project']).optional().catch(undefined),
@@ -64,6 +64,13 @@ export function buildAgentRoutes(
   config: AgentConfig,
   options: AgentRouteOptions = {},
 ): void {
+  const activeGenerations = new Map<
+    string,
+    { runId: string; userId: string; workspacePath: string; abortController: AbortController }
+  >()
+  const activeGenerationKey = (appId: string, userId: string, workspacePath: string): string =>
+    JSON.stringify([userId, appId, workspacePath])
+
   const llmProvider: LlmProvider | undefined =
     options.provider ?? (isRealLlmConfigured(config) ? createRealLlm(config) : undefined)
 
@@ -82,15 +89,16 @@ export function buildAgentRoutes(
     const userId = request.user?.sub ?? ''
     if (input.appId === '' || userId === '') throw httpError(400, 'appId 必填')
     const action = input.action
-    if (!action) throw httpError(400, 'action 必填且必须为 chat 或 confirm_generation')
+    if (!action) throw httpError(400, 'action 必填且必须为 chat、confirm_generation 或 abort')
     if (action === 'chat') {
       const message = input.message?.trim()
       if (!message) throw httpError(400, 'chat action 必须提供非空 message')
-    } else if (!input.approvalId) {
+    } else if (action === 'confirm_generation' && !input.approvalId) {
       throw httpError(400, 'confirm_generation 必须提供 approvalId')
     }
-    if (!input.codeGenType || !input.workspacePath)
-      throw httpError(400, 'codeGenType、workspacePath 必填')
+    if ((action === 'chat' || action === 'confirm_generation') && !input.codeGenType)
+      throw httpError(400, 'codeGenType 必填')
+    if (!input.workspacePath) throw httpError(400, 'workspacePath 必填')
     let workspacePath: string
     try {
       workspacePath = validateWorkspacePath(input.workspacePath, config.workspaceRoot)
@@ -117,26 +125,40 @@ export function buildAgentRoutes(
     }
     if (!options.sessionStore) throw httpError(503, '会话存储未配置，无法处理统一回合')
 
+    if (action === 'abort') {
+      const active = activeGenerations.get(
+        activeGenerationKey(String(input.appId), userId, workspacePath),
+      )
+      if (
+        !active ||
+        active.userId !== userId ||
+        active.workspacePath !== workspacePath ||
+        active.abortController.signal.aborted
+      ) {
+        throw httpError(404, '当前应用没有可中断的生成')
+      }
+      active.abortController.abort()
+      return reply.code(202).send({ runId: active.runId, status: 'aborting' })
+    }
+
     const turnId = input.turnId ?? `turn-${(options.turnIdFactory ?? randomUUID)()}`
 
     if (action === 'confirm_generation') {
+      const approvalId = input.approvalId
+      const codeGenType = input.codeGenType
+      if (!approvalId) throw httpError(400, 'confirm_generation 必须提供 approvalId')
+      if (!codeGenType) throw httpError(400, 'codeGenType 必填')
       const runClient = resolveRunClient()
       if (!runClient) throw httpError(503, 'Java 内部 API 未配置，无法确认生成')
       const approval = await options.sessionStore.approveHumanApproval({
         appId: String(input.appId),
         userId,
         turnId,
-        approvalId: input.approvalId!,
+        approvalId,
         batchSeq: 1,
       })
       if (!approval.ok) {
-        const terminal: AgentTurnEvent = {
-          type: 'error',
-          seq: 1,
-          message: `审批不可用于生成：${approval.reason}`,
-        }
-        validateAgentTurnEvents([terminal])
-        return reply.headers(SSE_HEADERS).send(encodeEventStream([terminal]))
+        throw httpError(403, `审批不可用于生成：${approval.reason}`)
       }
       let prepared: Awaited<ReturnType<typeof prepareApprovedGeneration>>
       try {
@@ -145,10 +167,10 @@ export function buildAgentRoutes(
             appId: String(input.appId),
             userId,
             turnId,
-            approvalId: input.approvalId!,
+            approvalId,
             message: input.message?.trim() || '用户已确认开始生成',
             intensity: input.intensity,
-            codeGenType: input.codeGenType!,
+            codeGenType,
             workspacePath,
           },
           { sessionStore: options.sessionStore, runClient, consumeBatchSeq: 2 },
@@ -159,6 +181,18 @@ export function buildAgentRoutes(
         validateAgentTurnEvents([terminal])
         return reply.headers(SSE_HEADERS).send(encodeEventStream([terminal]))
       }
+
+      const abortController = new AbortController()
+      const activeGeneration = {
+        runId: prepared.runId,
+        userId,
+        workspacePath,
+        abortController,
+      }
+      activeGenerations.set(
+        activeGenerationKey(String(input.appId), userId, workspacePath),
+        activeGeneration,
+      )
 
       reply.hijack()
       reply.raw.writeHead(200, SSE_HEADERS)
@@ -188,6 +222,7 @@ export function buildAgentRoutes(
             dashscopeApiKey: config.dashscopeApiKey,
             imageModel: config.imageModel,
           },
+          abortSignal: abortController.signal,
           logger: request.log,
         })) {
           await options.observer?.event(prepared.runId, event)
@@ -197,6 +232,12 @@ export function buildAgentRoutes(
       } catch (error) {
         await writeFrame({ type: 'error', message: error instanceof Error ? error.message : '生成失败' })
       } finally {
+        if (
+          activeGenerations.get(activeGenerationKey(String(input.appId), userId, workspacePath)) ===
+          activeGeneration
+        ) {
+          activeGenerations.delete(activeGenerationKey(String(input.appId), userId, workspacePath))
+        }
         await options.observer?.close(prepared.runId)
         if (!reply.raw.writableEnded && !reply.raw.destroyed) reply.raw.end()
       }

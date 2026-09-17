@@ -238,7 +238,7 @@ describe('POST /agent/turn', () => {
   })
 
   it('confirm_generation 缺少 Java RunClient 时 fail-closed', async () => {
-    const store = memorySessionStore()
+    const store = memorySessionStore({ approval: true })
     const root = makeWorkspaceRoot()
     const app = buildTestApp(root, {
       agentRoutes: {
@@ -265,11 +265,11 @@ describe('POST /agent/turn', () => {
     expect(store.batches).toHaveLength(0)
   })
 
-  it('confirm_generation 审批写入失败时不调用 provider 或 RunClient', async () => {
+  it('无服务端审批时返回 403，且不产生 run、积分或审批事件副作用', async () => {
     const store = memorySessionStore()
     store.approveHumanApproval = vi.fn(async () => ({
       ok: false as const,
-      reason: '审批存储不可用',
+      reason: '未找到审批请求',
     }))
     const root = makeWorkspaceRoot()
     const provider = { languageModel: vi.fn() } as unknown as LlmProvider
@@ -295,13 +295,14 @@ describe('POST /agent/turn', () => {
       payload: {
         appId: '1001',
         action: 'confirm_generation',
-        approvalId: 'ap-1',
+        approvalId: 'fabricated-approval',
         codeGenType: 'html',
         workspacePath: root,
       },
     })
-    expect(response.statusCode).toBe(200)
-    expect(frames(response.body)[0]!.data.message).toContain('审批存储不可用')
+    expect(response.statusCode).toBe(403)
+    expect(response.body).toContain('未找到审批请求')
+    expect(store.batches).toHaveLength(0)
     expect(provider.languageModel).not.toHaveBeenCalled()
     expect(runClient.createRun).not.toHaveBeenCalled()
     expect(runClient.freezeCredit).not.toHaveBeenCalled()
@@ -349,6 +350,80 @@ describe('POST /agent/turn', () => {
     expect(store.events.some((event) => event.kind === 'approval/consumed' && event.batchSeq === 2)).toBe(true)
     expect(store.events.some((event) => event.kind === 'run/start' && event.batchSeq === 3)).toBe(true)
     expect(store.events.some((event) => event.kind === 'gate/verdict' && event.batchSeq === 4)).toBe(true)
+  })
+
+  it('abort 仅取消 JWT 绑定应用的活动 run，并由原 SSE 流输出 aborted 终态', async () => {
+    const store = memorySessionStore({ approval: true })
+    const root = makeWorkspaceRoot()
+    const calls: RunCall[] = []
+    let reviewStarted!: () => void
+    const reviewStartedPromise = new Promise<void>((resolve) => {
+      reviewStarted = resolve
+    })
+    const gates: ReviewGateSet = {
+      quality: {
+        score: async (_codeContent, signal) =>
+          new Promise((_, reject) => {
+            reviewStarted()
+            signal?.addEventListener(
+              'abort',
+              () => {
+                const error = new Error('aborted')
+                error.name = 'AbortError'
+                reject(error)
+              },
+              { once: true },
+            )
+          }),
+      },
+      build: { name: 'build', verify: async () => ({ name: 'build', passed: true, detail: 'ok' }) },
+      visualDiff: {
+        name: 'visual-diff',
+        verify: async () => ({ name: 'visual-diff', passed: true, detail: 'ok' }),
+      },
+    }
+    const app = buildTestApp(root, {
+      agentRoutes: {
+        sessionStore: store,
+        runClient: fakeRunClient(calls),
+        provider: createScriptedLlm('success'),
+        reviewGates: gates,
+        imageTools: fakeImageTools(),
+      },
+    })
+    const token = await makeTurnToken(root)
+    const generation = app.inject({
+      method: 'POST',
+      url: '/agent/turn',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        appId: '1001',
+        action: 'confirm_generation',
+        approvalId: 'ap-abort',
+        codeGenType: 'html',
+        workspacePath: root,
+      },
+    })
+    await reviewStartedPromise
+
+    const abort = await app.inject({
+      method: 'POST',
+      url: '/agent/turn',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { appId: '1001', action: 'abort', workspacePath: root },
+    })
+    const generationResponse = await generation
+
+    expect(abort.statusCode).toBe(202)
+    expect(abort.json()).toMatchObject({ status: 'aborting', runId: expect.any(String) })
+    expect(frames(generationResponse.body).at(-1)?.data).toMatchObject({
+      type: 'error',
+      message: '生成已中断',
+    })
+    expect(calls.some((call) => call.body.phase === 'aborted')).toBe(true)
+    expect(calls.some((call) => call.url.endsWith('/complete') && call.body.status === 'aborted')).toBe(
+      true,
+    )
   })
 
   it('confirm_generation 最终启发式失败仅在持久化判决后 done', async () => {
