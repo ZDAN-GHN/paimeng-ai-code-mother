@@ -1,12 +1,10 @@
 # paimeng-ai-code-rag
 
-Python RAG 服务的 P4 骨架。当前目录保留退役 Python Agent 的代码以供后续精简复用，不参与过渡期代码生成链路，也不会修改 `python-agent.enabled`。
+Python RAG 服务的配置与依赖占位目录。旧 Python Agent、LangGraph 代码生成链路、SSE/API、工具、提示词和测试已清理，不再作为代码生成或 Agent 运行时。
 
-## 本地环境
+当前保留内容：
 
-```bash
-uv sync
-uv run pytest
-# P4 实施后才启动服务：
-uv run uvicorn app.main:app --port 8091
-```
+- `.env.example`、`pyproject.toml`、`uv.lock`、`.python-version`：配置、依赖与 Python 版本声明
+- `app/core/config.py`：现有配置模型，供后续 RAG 实现复用
+
+后续 RAG 能力应根据实际产品需求重新设计和实现，不以已删除的 Python Agent 代码作为迁移基线。

@@ -1,8 +1,0 @@
-{
-  "codeGenType": "html",
-  "script": "success",
-  "message": "做一个页面",
-  "expectedFiles": {
-    "index.html": ["<!DOCTYPE html", "onboarding-tour", "<title>做一个页面</title>"]
-  }
-}

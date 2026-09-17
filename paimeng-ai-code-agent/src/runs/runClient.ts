@@ -1,5 +1,3 @@
-import type { ObservationSink } from '../eval/observer.js'
-
 export const FAILURE_CODES = [
   'guardrail-rejected',
   'quality-gate-exhausted',
@@ -109,24 +107,16 @@ export interface RunClientOptions {
   baseUrl: string
   token: string
   fetchImpl?: typeof fetch
-  observer?: ObservationSink
-}
-
-export function observedRunId(path: string): string | undefined {
-  const match = /^\/internal\/(?:agent\/)?runs\/([^/]+)/.exec(path)
-  return match ? decodeURIComponent(match[1]!) : undefined
 }
 
 export class RunClient {
   private readonly baseUrl: string
   private readonly token: string
   private readonly fetchImpl: typeof fetch
-  private readonly observer?: ObservationSink
   constructor(options: RunClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '')
     this.token = options.token
     this.fetchImpl = options.fetchImpl ?? fetch
-    this.observer = options.observer
   }
 
   async createRun(request: RunCreateRequest): Promise<Run> {
@@ -190,15 +180,6 @@ export class RunClient {
     try {
       payload = (await response.json()) as JavaResponse<T>
     } catch {}
-    const observedId = this.observer?.enabled ? observedRunId(path) : undefined
-    if (observedId) {
-      await this.observer!.callback(observedId, {
-        method,
-        path,
-        status: response.status,
-        ok: response.ok,
-      })
-    }
     const message = payload?.message ?? `HTTP ${response.status}`
     if (response.status === 409) {
       throw new RunConflictError(message)
