@@ -24,12 +24,9 @@ npm run type-check
 | 路由 | 鉴权 | 说明 |
 |---|---|---|
 | `GET /healthz` | 无 | 健康检查，`{"status":"ok"}` |
-| `POST /agent/workspace/validate` | JWT | body `{"workspacePath":"<绝对路径>"}`；不逃逸 `WORKSPACE_ROOT` → 200，否则 400 |
-| `POST /agent/interview` | JWT | 五维访谈（受众/风格/页面清单/数据需求/交互，每维 2-4 选项选择题），最多 2 轮、信息足够跳过；状态持久化于 run context |
-| `POST /agent/wireframe` | JWT | 快速档线框：单文件 HTML（灰块/占位图/可点击跳转/站点地图，≤5 页），存 `{workspace}/wireframe/`，run → wireframe_pending；免费 + 每用户每日限频（超限 429） |
-| `POST /agent/wireframe/confirm` | JWT | 确认线框 → run → wireframe_confirmed（codegen 布局契约；幂等） |
-| `POST /agent/stream` | JWT | 生成流：XState 线性工作流 + Vercel AI SDK 假 LLM（provider + 工具循环）+ SSE；**线框闸门**——非 wireframe_confirmed 的请求在开流前被预检拒绝（400/409/503/402/502 错误 JSON，开流后失败仍以 error 事件收尾，见 contract.md「错误双轨」）；#8 起含 Guardrail 输入校验（拒绝→failed）、文件六工具 + 图片四工具（**图片配额 4 张/run**）、写盘前代码块解析、产物含应用内导览组件 |
-| `GET /agent/smoke/sse` | JWT | 兼容性冒烟端点：按新 SSE 格式输出脚本化事件 |
+| `POST /agent/turn` | JWT | 统一回合 SSE：`chat` 产生澄清问题、线框或生成审批请求；`confirm_generation` 必须携带服务端下发的 `approvalId`，经人工审批、run 创建和积分冻结后启动生成。 |
+| `POST /agent/workspace/validate` | JWT | 校验工作区路径位于 `WORKSPACE_ROOT` 内。 |
+| `GET /agent/smoke/sse` | JWT | 按当前 SSE 格式输出脚本化冒烟事件。 |
 
 ## 鉴权约定
 

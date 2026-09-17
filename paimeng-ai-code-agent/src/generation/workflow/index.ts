@@ -12,12 +12,9 @@ import { createScriptedLlm, type LlmProvider } from '../../llm/index.js'
 import { DEFAULT_IMAGE_MODEL } from '../../server/config.js'
 import { resolveIntensity, type Intensity, type IntensityConfig } from '../intensity.js'
 import { SHORT_CALL_MAX_RETRIES } from '../retryPolicy.js'
-import { windowHistory, type HistoryTurn, type WindowedHistory } from './history.js'
 import { RunClient, type FailureCode, type RunPhase } from '../../runs/runClient.js'
 import { validateWorkspacePath } from '../workspace.js'
 import { validatePrompt } from '../../interview/guardrails.js'
-import type { InterviewSummary } from '../../interview/index.js'
-import type { PlanningArtifact } from '../../interview/context.js'
 import { loadPrompt } from '../prompts/index.js'
 import { FileTools } from '../tools/fileTools.js'
 import { ImageTools, type ImageConfig } from '../tools/imageTools.js'
@@ -32,8 +29,6 @@ import {
   type TokenUsage,
 } from '../review/types.js'
 
-const HISTORY_WINDOW = 10
-
 export interface StreamRequest {
   runId: string
   appId: number | string
@@ -42,10 +37,7 @@ export interface StreamRequest {
   message: string
   workspacePath?: string
   intensity?: Intensity
-  history?: HistoryTurn[]
   codeGenType?: CodeGenType
-  sessionConclusion?: InterviewSummary
-  planningArtifact?: PlanningArtifact
 }
 
 export interface WorkflowLogger {
@@ -63,8 +55,6 @@ export interface WorkflowOptions {
   reviewGates?: ReviewGateSet
   wireframePath?: string
   wireframeRelativePath?: string
-  sessionConclusion?: InterviewSummary
-  planningArtifact?: PlanningArtifact
   modelOverrides?: Partial<Record<Intensity, string>>
   abortSignal?: AbortSignal
   logger?: WorkflowLogger
@@ -178,22 +168,6 @@ function stopWhenToolCalls<TOOLS extends ToolSet>(maxToolCalls: number) {
     const total = steps.reduce((sum, step) => sum + step.toolCalls.length, 0)
     return total >= maxToolCalls
   }
-}
-
-function windowedHistoryOf(request: StreamRequest): WindowedHistory {
-  return windowHistory(request.history ?? [], HISTORY_WINDOW)
-}
-
-function buildModelMessages(
-  request: StreamRequest,
-  history: WindowedHistory,
-): Array<{ role: 'user' | 'assistant'; content: string }> {
-  const messages: Array<{ role: 'user' | 'assistant'; content: string }> = []
-  for (const turn of history.recent) {
-    messages.push({ role: turn.role, content: turn.content })
-  }
-  messages.push({ role: 'user', content: request.message })
-  return messages
 }
 
 export async function* runGenerationWorkflow(
@@ -397,15 +371,9 @@ export async function* runGenerationWorkflow(
     for (;;) {
       throwIfAborted(options.abortSignal)
 
-      const windowed = windowedHistoryOf(request)
       const codegenSystem = [
         loadPrompt(stackProfile.promptName),
 
-        ...(options.sessionConclusion
-          ? [`\n会话结论（服务端重建）：\n${json(options.sessionConclusion)}`]
-          : []),
-
-        ...(options.planningArtifact ? [`\n规划产物：\n${json(options.planningArtifact)}`] : []),
         ...(options.wireframeRelativePath
           ? [`\n线框文件相对路径：${options.wireframeRelativePath}`]
           : []),
@@ -418,9 +386,8 @@ export async function* runGenerationWorkflow(
 
         `\n本次生成推理强度档位：${tier.label}（模型 ${tier.modelId}）。`,
 
-        ...(windowed.earlierSummary ? [`\n更早对话摘要：\n${windowed.earlierSummary}`] : []),
       ].join('')
-      const messages = buildModelMessages(request, windowed)
+      const messages = [{ role: 'user' as const, content: request.message }]
 
       const modelId = resolveModelId(tier, options.modelOverrides)
 
