@@ -1,12 +1,15 @@
 # 项目边界
 
-| 模块 | 负责 | 不负责 |
-| --- | --- | --- |
-| `paimeng-ai-code-backend/` | Java REST 业务、鉴权、积分、历史、构建部署 | Agent 编排、生成流中转、直接暴露数据库给 Node |
-| `paimeng-ai-code-agent/` | Fastify、JWT 校验、生成工作流、工具、工作区、SSE | 直连 MySQL；业务账务通过 Java 回调 |
-| `paimeng-ai-code-frontend/` | Vue 页面、路由、Pinia、API 调用和 SSE 展示 | 自行推断后端响应字段 |
-| `paimeng-ai-code-rag/` | P4 检索服务 | 当前开发阶段的主生成链路 |
+| 服务 | 职责 | 禁区 |
+|---|---|---|
+| **Java 后端**<br>`paimeng-ai-code-backend/` | REST API、登录鉴权、积分/充值、聊天历史、构建部署 | 不实现 Agent 编排、不中转生成流、不暴露数据库给 Node |
+| **TS Agent**<br>`paimeng-ai-code-agent/` | Fastify、JWT 验签、生成工作流、工具调用、工作区、SSE 推送 | 不直连 MySQL；业务数据通过 Java 回调 |
+| **Vue 前端**<br>`paimeng-ai-code-frontend/` | 页面、路由、Pinia 状态、API/SSE 调用 | 不手写后端类型 |
+| **Python RAG**<br>`paimeng-ai-code-rag/` | P4 检索服务（未启用） | 不参与当前主生成链路 |
 
-生产拓扑、端口、鉴权和工作区约束以 `docs/ts_agent/architecture.md` 为准。废弃的 `archive/paimeng-ai-code-microservice/` 不作为实现或迁移前提。
+## 约束
 
-跨模块改动要先确认协议和调用方向，再分别在受影响模块验证；不要通过复制 DTO、绕过 Java 或新增隐式回退来“修复”接口不一致。
+- 拓扑、端口、鉴权见 `docs/ts_agent/architecture.md`
+- `archive/paimeng-ai-code-microservice/` 已废弃，不作为参考
+- 跨服务改动需在各模块独立验证
+- 不通过复制 DTO、绕过 Java、隐式回退来"修复"接口不一致

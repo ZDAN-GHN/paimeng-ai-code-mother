@@ -2,14 +2,49 @@
 
 ## 通用
 
-Node TS Agent 和 Vue 前端均使用 TypeScript 严格模式。避免 `any`、类型断言和非空断言；确需使用时在边界处验证原因。优先使用 `unknown` 加窄化、判别联合和推导类型。保持现有 ESM、`@/*`（前端）路径别名和 `verbatimModuleSyntax` 约定。
+严格模式，避免 `any`、类型断言、非空断言。优先 `unknown` + 类型窄化、判别联合、类型推导。
 
-## TS Agent
+保持 ESM、`verbatimModuleSyntax`。
 
-源代码按领域位于 `src/generation`、`src/interview`、`src/llm`、`src/protocol`、`src/runs`、`src/server`。输入输出协议用 Zod schema 校验，状态流转遵循 XState 现有模型。不得让 HTTP handler 重复实现领域状态机。
+## 路径别名
 
-## Vue
+前端使用 `@/*` 指向 `src/*`：
 
-组件使用 `<script setup lang="ts">` 和 Vue 推导类型；响应式状态使用 `ref`/`computed`，跨页面状态进入 Pinia。API 类型来自 `src/api/` 生成或既有契约，不在页面中重新声明同名后端 DTO。
+```ts
+import { someUtil } from '@/utils/helper'
+```
 
-修改类型后至少运行对应模块的 type-check；不要把 `skipLibCheck` 当作业务类型错误的解决方案。
+## TS Agent（目前为空）
+
+预期结构：
+
+- `src/generation/` 生成流程
+- `src/llm/` LLM 调用
+- `src/protocol/` 协议定义（Zod schema）
+- `src/server/` Fastify HTTP
+
+输入输出用 Zod 校验，状态机用 XState。
+
+## Vue 前端
+
+使用 `<script setup lang="ts">`，类型靠 Vue 推导：
+
+```vue
+<script setup lang="ts">
+import { ref, computed } from 'vue'
+import type { AppInfo } from '@/api/typings'
+
+const app = ref<AppInfo>()
+</script>
+```
+
+API 类型来自 `src/api/`（OpenAPI 生成），不重新声明。
+
+## 验证
+
+```bash
+cd paimeng-ai-code-frontend && npm run type-check
+cd paimeng-ai-code-agent && npm run type-check
+```
+
+不用 `skipLibCheck` 掩盖业务类型错误。
