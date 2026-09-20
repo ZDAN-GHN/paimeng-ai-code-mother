@@ -1,8 +1,8 @@
 # MVP 实施任务清单（待 `to-tickets` 发布）
 
-- 来源：[实施计划](plan.md)、[MVP 工程规格](../specs/mvp-engineering-spec.md)、[GitHub Issue #65](https://github.com/ZDAN-GHN/paimeng-ai-code-mother/issues/65)
-- 当前状态：`blocked`。D-06 和 D-07 是 Task/Run 状态机与 Application 删除的核心业务契约；在写入工程规格并获维护者决定前，T-01 至 T-03 不可开始。其余任务仍受对应的 Phase 0 决策门和上游任务约束。
-- 追踪说明：此文件是维护者要求保存在 `docs/tasks/` 的本地任务草案，不是 GitHub 原生依赖图。执行前必须由 `to-tickets` 为每项实施任务创建独立 Issue，并使用 GitHub 原生依赖关系表达阻塞。
+- 来源：[实施计划](mvp-plan.md)、[MVP 工程规格](../specs/mvp-engineering-spec.md)、[GitHub Issue #65](https://github.com/ZDAN-GHN/paimeng-ai-code-mother/issues/65)
+- 当前状态：`published; blocked`。决策 Issue #66 至 #72 与实施/验收 Issue #73 至 #84 已发布为 #65 的原生子 Issue；D-06 和 D-07 是 Task/Run 状态机与 Application 删除的核心业务契约，在维护者决定并同步工程规格前阻塞相应实施。
+- 追踪说明：此文件是维护者要求保存在 `docs/tasks/` 的本地 Ticket Graph 快照。GitHub Issue #65 的子 Issue 与原生依赖关系是执行时的权威图；本文件不得被用来覆盖 GitHub blocker 状态。
 
 ## Phase 0：决策门
 
@@ -41,13 +41,13 @@
 ## Phase 3：验证与发布闭环
 
 - [ ] T-07：权威 Validation、兼容 Migration Gate 与版本晋升。依赖：D-01、D-02、T-05、T-06。规格：`R-004`、`R-005`。
-- [ ] T-08：Requirement 到受控 Run 的执行闭环。依赖：D-06、T-02 至 T-07。此任务形成 `ready`/`blocked` Task，并按矩阵重新归一化。规格：`R-002`、`R-003`、`R-004`、`R-005`。
-- [ ] T-09：首次 Release、Deployment 与健康公开入口。依赖：D-02、D-03、T-06 至 T-08。规格：`R-006`。
-- [ ] T-10：后续发布确认、Production 状态与 Owner 可见性。依赖：T-03、T-08、T-09。规格：`R-001`、`R-006`。
+- [ ] T-08：Requirement 到受控 Run 的执行闭环与 Owner 进度状态。依赖：D-06、T-02 至 T-07。形成 `ready`/`blocked` Task 并按矩阵重新归一化；交付 Owner 对 `ready`、`executing`、`blocked`、验证失败/成功的 API/OpenAPI/Vue/SSE 状态展示、唯一阻断问题答复入口与权限验证。规格：`R-002`、`R-003`、`R-004`、`R-005`。
+- [ ] T-09：首次 Release、Deployment、健康公开入口与失败未上线状态。依赖：D-02、D-03、T-06 至 T-08。隔离验证必须证明失败时无健康公开 URL、Owner 显示未上线且诊断脱敏。规格：`R-006`。
+- [ ] T-10：后续发布确认、Production 状态与 Owner 可见性。依赖：T-03、T-08、T-09。隔离验证确认前 Production/健康 Deployment 不变，确认后部署固定 Release，失败/回滚不撤销目标基线/Profile/数据库。规格：`R-001`、`R-006`。
 
 ## 检查点 C：首次托管与受控更新
 
-- [ ] 首次自动发布、后续待确认发布、确认发布、健康失败和回滚在隔离环境均有证据；SourceRevision 只能在任务 7 的权威 Validation 成功后创建。
+- [ ] 首次自动发布、首次失败未上线、后续待确认发布、确认发布、健康失败和回滚在隔离环境均有证据；确认前 Production 与健康 Deployment 引用不变，SourceRevision 只能在任务 7 的权威 Validation 成功后创建。
 - [ ] Release/Deployment 证据链不能由 Workspace、Agent Session 或外部 Git 绕过。
 - [ ] 维护者审查公开 URL、TLS、健康检查和失败回滚。
 
@@ -58,7 +58,7 @@
 
 ## 检查点 D：MVP 交付评审
 
-- [ ] `AC-001` 至 `AC-025` 和 `SAC-001` 至 `SAC-003` 均有实际验证证据；其中包含 Owner 对有效运行、宽限、已停服和已恢复状态的前端可见性与权限证据。
+- [ ] `AC-001` 至 `AC-025` 和 `SAC-001` 至 `SAC-003` 均有实际验证证据；其中包含 Owner 对 Requirement `ready`、`executing`、`blocked`、验证失败/成功及订阅四种状态的前端可见性与权限证据。
 - [ ] 已完成 `$code-review`；TS Agent 代码已完成 `$clean-code-reviewer`。
 - [ ] Issue #65 交付记录、风险、回滚和 GitHub Issue 验收复选框已逐项更新。
 - [ ] 维护者确认可交付后，才允许进入 Production 发布流程。

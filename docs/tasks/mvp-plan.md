@@ -2,8 +2,8 @@
 
 - 计划状态：`T-01 至 T-03 待 D-06/D-07 决策完成；受 OQ 影响的后续任务待对应决策完成`
 - 规格基线：[GitHub Issue #65](https://github.com/ZDAN-GHN/paimeng-ai-code-mother/issues/65) 与 [MVP 工程规格](../specs/mvp-engineering-spec.md)
-- 任务清单草案：[todo.md](todo.md)
-- 任务追踪策略：本文件和 `todo.md` 是按维护者要求保存于 `docs/tasks/` 的审查草案。后续使用 `to-tickets` 时，应以本计划为输入创建 GitHub Issue，并用 GitHub 原生依赖关系表达阻塞；本轮不创建、认领或修改实现任务 Issue。
+- 任务清单草案：[mvp-todo.md](mvp-todo.md)
+- 任务追踪策略：本文件和 `mvp-todo.md` 是按维护者要求保存于 `docs/tasks/` 的审查草案。已使用 `to-tickets` 创建 GitHub Issue #66 至 #84、将其作为 Issue #65 的原生子 Issue，并以 GitHub 原生依赖关系表达 blocker；本轮不认领或修改实现工作。
 
 ## 概述
 
@@ -284,17 +284,18 @@ D-04 订阅运营参数 ──────────────────�
 
 **关联规格：** `R-002`、`R-003`、`R-004`、`R-005`、`AC-004` 至 `AC-018`、`CT-002`、`CT-003`。
 
-**说明：** 在 D-06 已批准的状态矩阵内，将 Requirement 归一化、单一业务澄清、Task 基线、Run 启动、Pi Adapter Event、Snapshot、Validation 和 Task 结果串为单一受控闭环。Phase 1 接收的“等待归一化” Requirement 仅在此任务由 Pi Agent 处理；只有 Platform 依据任务 7 的 Validation 结果转换到 `validated`。此任务不执行 Production Deployment。
+**说明：** 在 D-06 已批准的状态矩阵内，将 Requirement 归一化、单一业务澄清、Task 基线、Run 启动、Pi Adapter Event、Snapshot、Validation 和 Task 结果串为单一受控闭环，并交付 Owner 状态 API、OpenAPI 类型、Vue/SSE 状态投影和唯一阻断问题答复入口。Phase 1 接收的“等待归一化” Requirement 仅在此任务由 Pi Agent 处理；只有 Platform 依据任务 7 的 Validation 结果转换到 `validated`。此任务不执行 Production Deployment。
 
 **验收标准：**
 - [ ] 明确 Requirement 经 Pi 归一化后形成符合 D-06 的 `ready` Task，并在受控 Run 中产生可查询的 Run/Task 状态、Snapshot 与 Validation 结果。
-- [ ] 决定性业务歧义经 Pi 归一化后形成符合 D-06 的 `blocked` Task；Owner 答复后仅按矩阵允许的路径重新归一化，在答复前不启动 Sandbox 写入或版本晋升。
-- [ ] Agent 的文本完成或自检成功不能替代 Platform Validation 的 `validated` 裁决。
+- [ ] Owner 仅通过 Product Layer 可见其 Application 的 `ready`、`executing`、`blocked`、验证失败和验证成功状态；该投影不暴露 Pi Session、工具细节、Sandbox 或生产信息。
+- [ ] 决定性业务歧义经 Pi 归一化后形成符合 D-06 的 `blocked` Task；Owner 可见唯一问题并提交答复，之后仅按矩阵允许的路径重新归一化，在答复前不启动 Sandbox 写入或版本晋升。
+- [ ] 非 Owner、非 System Administrator 无法读取同一 Application 的管理状态或提交答复；Agent 的文本完成或自检成功不能替代 Platform Validation 的 `validated` 裁决。
 
 **验证：**
-- [ ] 跨服务集成测试覆盖“等待归一化 -> ready -> executing”、`blocked` 与答复后重新归一化、Validation 失败和 Validation 成功四条路径，并逐条断言 D-06 边。
-- [ ] `cd paimeng-ai-code-backend && ./mvnw verify` 与 `cd paimeng-ai-code-agent && npm run type-check && npm run test && npm run build` 通过。
-- [ ] 手动查看 Owner 状态，确认事件可理解且不暴露 Pi Session、工具细节或生产信息。
+- [ ] 跨服务集成测试覆盖“等待归一化 -> ready -> executing”、`blocked` 与答复后重新归一化、Validation 失败和成功，以及状态读取/答复的授权拒绝，并逐条断言 D-06 边。
+- [ ] `cd paimeng-ai-code-backend && ./mvnw verify`、`cd paimeng-ai-code-agent && npm run type-check && npm run test && npm run build` 与 `cd paimeng-ai-code-frontend && npm run openapi2ts && npm run type-check && npm run build` 通过。
+- [ ] 手动查看 Owner 状态和答复入口，确认事件可理解且不暴露 Pi Session、工具细节或生产信息。
 
 **依赖：** D-06、任务 2、任务 3、任务 4、任务 5、任务 6、任务 7。
 
@@ -311,10 +312,10 @@ D-04 订阅运营参数 ──────────────────�
 **验收标准：**
 - [ ] 首次 validated 版本自动创建固定 Release 并发起 Deployment；健康通过后才提供公开 URL。
 - [ ] Agent 不能访问生产密钥、数据库、构建、迁移、流量或回滚操作；仅 Platform Controller 拥有这些能力。
-- [ ] 首次部署失败不会标记为已上线，不存在上一健康版本时保持未上线；诊断不泄露敏感配置。
+- [ ] 首次部署失败时不存在健康公开 URL，Application 对 Owner 显示未上线，且受控诊断不泄露敏感配置。
 
 **验证：**
-- [ ] 使用隔离的非生产环境端到端验证首次 Release、健康检查、公开 URL 和失败状态。
+- [ ] 使用隔离的非生产环境端到端验证首次 Release、健康检查、公开 URL，以及失败后的未上线状态和受控诊断。
 - [ ] `docker compose config`（或 D-02 定义的等价配置验证）通过；后端 `./mvnw verify` 通过。
 - [ ] 权限测试断言 Agent Token 不可调用 Deployment/Production 内部操作。
 
@@ -331,14 +332,14 @@ D-04 订阅运营参数 ──────────────────�
 **说明：** 为已上线 Application 区分目标基线与当前健康 Deployment，并提供 Owner 可读的更新摘要、受控预览入口（若已实现）和明确的发布确认。待发布版本不创建新 Task 状态，未确认时绝不改变公众访问的 Production。
 
 **验收标准：**
-- [ ] 后续 validated 版本可显示目标 SourceRevision/Profile 与当前健康 Deployment 的关系，未确认时 Production 保持不变。
-- [ ] 只有 Owner/System Administrator 的显式确认才触发后续 Release/Deployment。
-- [ ] 部署失败或回滚不撤销已验证目标基线、Trusted Profile 或数据库；修复需形成新的受控版本并再次确认。
+- [ ] 后续 validated 版本可显示目标 SourceRevision/Profile 与当前健康 Deployment 的关系；未确认时公众可见内容和当前健康 Deployment 的 Release 引用保持不变。
+- [ ] 只有 Owner/System Administrator 的显式确认才创建并部署固定 Release，健康检查通过前不得表述为已上线。
+- [ ] 部署失败或回滚后，上一健康 Deployment 保持或恢复，且已验证目标基线、Trusted Profile 与数据库不被撤销、反向迁移或改写。
 
 **验证：**
 - [ ] 后端测试覆盖未确认、确认、无权限确认、部署失败与回滚状态。
 - [ ] `cd paimeng-ai-code-frontend && npm run openapi2ts && npm run type-check && npm run build` 通过。
-- [ ] 手动验证 Owner 在已有健康应用上看到“待发布”，确认前后公开应用内容变化符合预期。
+- [ ] 在隔离环境手动验证确认前公开内容/健康 Deployment 引用不变，确认后部署固定 Release，以及失败/回滚后 Production 与目标基线/数据库边界符合预期。
 
 **依赖：** 任务 3、任务 8、任务 9。
 
