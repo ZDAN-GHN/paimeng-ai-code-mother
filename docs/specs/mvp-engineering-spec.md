@@ -43,8 +43,8 @@ Platform Layer
   + 写入 Lease、Sandbox、构建、生产迁移、健康检查、日志、回滚、订阅生命周期
 ```
 
-- 关键已锁定决策：`AD-001` 至 `AD-012`。
-- 关键未决问题：`OQ-001` 至 `OQ-005`；均不阻塞当前工程规格审查，但在对应实现开始前必须决定。
+- 关键已锁定决策：`AD-001` 至 `AD-015`。
+- 关键未决问题：`OQ-002` 至 `OQ-005`；均不阻塞当前工程规格审查，但在对应实现开始前必须决定。
 
 ## 需求
 
@@ -52,15 +52,15 @@ Platform Layer
 
 - 状态：`Confirmed`
 - 来源：维护者在需求确认阶段明确 Owner/System Administrator 的 Platform 管理权；MVP Contract“Application Creation and Management”。
-- 目标：让 Owner 以 Platform 为唯一受控入口创建、管理、发布和删除 Application。
-- 行为：系统创建 Application 并关联 Owner；仅 Owner 与 System Administrator 可以管理、发布或删除；健康 Deployment 后提供公共运行入口。
-- 前置条件：管理主体已通过 Platform 身份识别。
-- 输入：创建、管理、发布或删除 Application 的 Platform 操作。
-- 输出：Application 生命周期状态、管理操作结果、公开运行入口。
-- 成功条件：Owner 能管理其 Application；其他平台用户不能修改或删除；公众不能因访问运行入口获得管理权限。
-- 失败 / 异常条件：非授权管理操作被拒绝；未健康 Deployment 不被表述为已上线。
+- 目标：让 Owner 以 Platform 为唯一受控入口创建、管理、发布和归档 Application。
+- 行为：系统创建 Application 并关联 Owner；仅 Owner 与 System Administrator 可以管理、发布或归档；归档立即停止公开运行，但保留 Application 及其关联事实。
+- 前置条件：管理主体已通过 Platform 身份识别；归档前不存在活跃写入型 Run。
+- 输入：创建、管理、发布或归档 Application 的 Platform 操作。
+- 输出：Application 生命周期状态、管理操作结果、公开运行入口或归档结果。
+- 成功条件：Owner 能管理其 Application；其他平台用户不能修改或归档；归档 Application 不再提供公开运行入口；公众不能因访问运行入口获得管理权限。
+- 失败 / 异常条件：非授权管理操作被拒绝；存在活跃写入型 Run 时归档被拒绝；未健康 Deployment 不被表述为已上线。
 - 关联约束：`CST-001`、`CST-008`
-- 关联决策：`AD-001`、`AD-010`
+- 关联决策：`AD-001`、`AD-010`、`AD-015`
 - 关联契约：`CT-001`、`CT-005`
 
 验收标准：
@@ -68,6 +68,7 @@ Platform Layer
 - `AC-001`：Owner 创建 Application 后，可以提交需求并查看其生命周期状态。
 - `AC-002`：非 Owner、非 System Administrator 的平台用户请求修改或删除同一 Application 时，系统拒绝该操作。
 - `AC-003`：健康 Deployment 后，未注册 Platform 账号的访问者可以访问该 Application 的公开运行入口，但不能执行 Platform 管理操作。
+- `AC-026`：Owner/System Administrator 归档 Application 后，公开运行立即不可用，Requirement、Task、Run、SourceRevision、Release、Deployment、数据库和审计证据仍保留；MVP 不提供物理删除或恢复 API/UI。
 
 ### R-002：Requirement 归一化与受控 Task
 
@@ -542,6 +543,31 @@ Requirement + Trusted Profile + Task Baseline
 - 迁移：旧积分实现与历史台账在新 Platform MVP 中隔离，不能作为新链路依赖；物理删除或数据迁移必须通过独立退役任务和数据影响评估。
 - 关联需求：`R-003`、`CT-002`、`CST-001`、`CST-006`。
 
+### AD-014：固定 TypeScript 全栈模板与兼容 Migration 工具
+
+- 状态：`Locked Decision`，维护者已明确决定。
+- 来源：维护者对 Issue #66 的批准；当前仓库 Node/Vue/Vite 基线与官方供应链元数据。
+- 决定：MVP 生成 Application 使用唯一组合：Node.js `24.20.0`、Vue `3.5.17`、Vite `7.0.4`、Fastify `5.12.3`、Prisma/`@prisma/client` `7.10.0` 和 MySQL `8`。生产构建由同一个 Fastify HTTP 服务提供 Vite 静态资源和 `/api`；模板必须提交 `package-lock.json` 与 SQL migration；不得引入第二种 Web framework、ORM 或 migration 工具。
+- 验证命令：模板提供 `npm ci`、`npm run type-check`、`npm test`、`npm run build`、`npm run db:migrate:status`（`prisma migrate status`）和 `npm run db:migrate:deploy`（`prisma migrate deploy`）。后者只由 Platform Deployment Controller 在隔离或 Production 环境执行，禁止 Agent 直连 Production 数据库。
+- Migration 规则：`prisma migrate deploy` 只应用已提交 migration，不承担 schema drift 或 `CST-009` 兼容性裁决；T-07 必须在部署前审查 SQL 并拒绝破坏性变更。不得在已存在数据环境执行 `migrate reset`。
+- 原因：复用当前 Vue/Vite 和 Node 基线，同时提供单 HTTP 服务、可锁定依赖和提交式 SQL migration。
+- 许可证/维护状态：Vue、Vite、Fastify 为 MIT；Prisma/Client 为 Apache-2.0；版本在决策时可从 npm 官方元数据获取，后续升级必须经独立依赖评估。
+- 关联需求：`R-003`、`R-005`
+- 关联约束：`CST-009`、`CST-010`
+- 关联未决问题：`OQ-002`、`OQ-003`
+
+### AD-015：Application 逻辑归档与保留
+
+- 状态：`Locked Decision`，维护者已明确决定。
+- 来源：维护者对 Issue #72 的批准；`R-001`、`AD-012`、`CST-011`。
+- 决定：Application 的“删除”语义为逻辑归档，不执行物理删除、数据清理或自动恢复。归档由 Owner 或 System Administrator 发起；非授权主体被拒绝。归档前不得存在活跃写入型 Run，须先完成取消并释放 Lease。
+- 公开与关联事实：归档立即停止关联 Deployment 的公开可用性；Application、Requirement、Task、Run、Profile、Snapshot、SourceRevision、Release、Deployment、数据库、日志和归档审计证据均保留且不再接受 Requirement、Task、Run、发布或恢复公开运行请求。公开 URL 的具体撤流方式留待 `OQ-004`，但归档后的可观察结果必须为不可用。
+- 恢复边界：MVP 不提供恢复 API/UI；重新激活、最终物理删除和保留期治理须经独立维护者决策，不能由管理员脚本或旧 `App` 删除接口绕过。
+- 原因：保持 Application 长期事实、证据链和未来治理选择，避免与 `AD-012` 的保留约束冲突。
+- 关联需求：`R-001`、`R-006`、`R-007`
+- 关联约束：`CST-001`、`CST-008`、`CST-011`
+- 关联未决问题：`OQ-004`、`OQ-005`
+
 ## 系统边界
 
 ### Product Layer Boundary
@@ -551,7 +577,7 @@ Requirement + Trusted Profile + Task Baseline
 - 允许：Owner 以业务语言提交需求、回答澄清、确认更新发布。
 - 禁止：普通平台用户管理他人 Application；公众访问运行入口后执行 Platform 管理操作。
 - 权威方：Platform Domain。
-- 关联需求 / 决策 / 约束：`R-001`、`R-002`、`R-006`、`R-007`；`AD-001`、`AD-011`；`CST-008`
+- 关联需求 / 决策 / 约束：`R-001`、`R-002`、`R-006`、`R-007`；`AD-001`、`AD-011`、`AD-015`；`CST-008`
 
 ### Agent Boundary
 
@@ -587,7 +613,7 @@ Requirement + Trusted Profile + Task Baseline
 - 允许：Platform 在确认发布后部署 validated Release；对暂态故障重试或保持上一健康版本。
 - 禁止：Agent 直接操作实例、读取生产密钥、直接连接生产数据库、执行生产迁移或切换流量；自动反向迁移数据库。
 - 权威方：Platform Deployment Controller。
-- 关联需求 / 决策 / 约束：`R-006`、`R-007`；`AD-010`、`AD-011`、`AD-012`；`CST-008`、`CST-009`、`CST-010`、`CST-011`
+- 关联需求 / 决策 / 约束：`R-006`、`R-007`；`AD-010`、`AD-011`、`AD-012`、`AD-015`；`CST-008`、`CST-009`、`CST-010`、`CST-011`
 
 ## 接口与契约
 
@@ -600,10 +626,10 @@ Requirement + Trusted Profile + Task Baseline
 - 职责：创建/管理 Application；保存 Requirement 原文；创建或阻断 Task。
 - 输入：已识别的管理主体、Application 标识、自然语言 Requirement、必要澄清回答。
 - 输出：Application 状态、Requirement 标识、Task 标识或 `blockingReason`。
-- 约束：仅 Owner/System Administrator 管理；Requirement 原文不可由 Agent 改写；阻断时仅一个决定性问题。
-- 错误条件：无管理权、Application 不存在或 Requirement 无法形成明确 Task。
+- 约束：仅 Owner/System Administrator 可以归档；Requirement 原文不可由 Agent 改写；归档 Application 拒绝新的 Requirement、Task、Run 和发布请求；归档前所有写入型 Run 必须终态且 Lease 已释放；阻断时仅一个决定性问题。
+- 错误条件：无管理权、Application 不存在、存在活跃写入型 Run 或 Requirement 无法形成明确 Task。
 - 关联需求：`R-001`、`R-002`
-- 关联决策：`AD-001`、`AD-003`、`AD-004`
+- 关联决策：`AD-001`、`AD-003`、`AD-004`、`AD-015`
 
 ### CT-002：Run Context 与 Agent Engine Adapter 契约
 
@@ -656,10 +682,10 @@ Requirement + Trusted Profile + Task Baseline
 - 职责：部署 Release、执行生产控制操作、报告健康状态，并依据订阅状态公开运行、停服或恢复。
 - 输入：Release、发布确认（仅后续更新）、订阅事件、上一健康 Deployment 引用。
 - 输出：Deployment、健康状态、公开运行入口、回滚/停服/恢复结果和受控诊断。
-- 约束：首次 validated 版本自动部署；后续更新需 Owner 确认；Deployment rollback 不回退 Profile/SourceRevision/数据库；停服不删除应用事实或数据。
+- 约束：首次 validated 版本自动部署；后续更新需 Owner 确认；归档立即停止公开运行；Deployment rollback 不回退 Profile/SourceRevision/数据库；订阅停服不删除应用事实或数据。
 - 错误条件：Release 不可部署、健康检查失败、Migration 失败、订阅无效且宽限期结束。
 - 关联需求：`R-001`、`R-006`、`R-007`
-- 关联决策：`AD-010`、`AD-011`、`AD-012`
+- 关联决策：`AD-010`、`AD-011`、`AD-012`、`AD-015`
 
 ## 约束
 
@@ -809,7 +835,7 @@ Requirement + Trusted Profile + Task Baseline
 
 ## 现有状态与变更边界
 
-- 现有行为：当前系统为新建系统，不存在需要兼容的既有实现。当前仓库含 `paimeng-ai-code-agent` 的旧 Agent SSE 协议、Workspace 路径校验和文件工具，可作为迁移评估输入，但不构成本规格需要兼容的 Application 生命周期实现；`paimeng-ai-code-agent/package.json` 当前使用 AI SDK 和 XState。
+- 现有行为：当前系统为新建系统，不存在需要兼容的既有实现。`paimeng-ai-code-agent/` 当前为空目录；README 中关于旧 TS Agent SSE、Workspace/FileTools、Fastify、AI SDK 和 XState 的描述仅可作为历史迁移评估输入，不能作为当前可复现基线。
 - 当前架构：当前 Agent 实现尚未接入 Pi SDK；当前 Workspace/FileTools 不是容器级 Sandbox；尚未发现本规格定义的 Application/Task/Run/Snapshot/Release/Deployment 权威领域模型。
 - 当前接口：现有 SSE 事件和旧代码生成接口可作为迁移评估输入，但不能被假定为满足本规格的 Run Event 或 Platform Contract。
 - 需要改变的部分：新增 Platform Domain、Agent Runtime、Pi Adapter、隔离 Sandbox、Snapshot/Validation、版本晋升、Release/Deployment、订阅生命周期和对应 Product Layer。
@@ -819,12 +845,9 @@ Requirement + Trusted Profile + Task Baseline
 
 ### OQ-001：固定 TypeScript 全栈模板与 Migration 工具
 
-- 状态：`Open Question`
-- 问题：首个固定模板采用何种前端、服务端、ORM 和 Migration 工具组合？
-- 为什么尚未解决：维护者只确定 TypeScript 全栈形态，未选择具体工具。
-- 影响：影响模板验证命令、兼容 Migration Gate 的实现方式和生成约束；不改变 MVP 产品边界。
-- 需要的决策方：维护者。
-- 阻塞的需求 / 决策 / 契约：实现 `R-003`、`R-005`、`CST-009` 前必须决定。
+- 状态：`Resolved by AD-014`
+- 决定：Node.js `24.20.0`、Vue `3.5.17`、Vite `7.0.4`、Fastify `5.12.3`、Prisma/`@prisma/client` `7.10.0` 和 MySQL `8`；验证及兼容 Migration 边界以 `AD-014` 为准。
+- 已解除阻塞：`T-04` 可在 `T-01` 基线上启动；`T-05`、`T-07` 仍分别等待 `OQ-003` 和其既有上游依赖。
 
 ### OQ-002：Snapshot 与 SourceRevision 的物理存储
 
@@ -883,8 +906,10 @@ Requirement + Trusted Profile + Task Baseline
 | `AD-011` | Architecture Decision | `Locked Decision` | Grill Me Q18 | `R-006` | 首次自动发布，后续确认发布。 |
 | `AD-012` | Architecture Decision | `Locked Decision` | 维护者确认 Migration/订阅策略 | `R-005`、`R-007` | 兼容 Migration 与停服保留。 |
 | `AD-013` | Architecture Decision | `Locked Decision` | 维护者批准 TS Agent 用量计量边界 | `R-003` | TS Agent 负责 Agent 调用与 Usage Evidence；MVP 不接入旧积分链路。 |
+| `AD-014` | Architecture Decision | `Locked Decision` | 维护者批准 Issue #66 | `R-003`、`R-005` | 固定 Vue/Vite/Fastify/Prisma/MySQL 模板、版本与验证命令。 |
+| `AD-015` | Architecture Decision | `Locked Decision` | 维护者批准 Issue #72 | `R-001`、`R-006`、`R-007` | Application 逻辑归档、停用公开入口并保留事实，无 MVP 恢复。 |
 | `CST-005` | Constraint | `Confirmed` | Grill Me Q14 | `R-003` | Sandbox 真实隔离边界。 |
 | `CST-009` | Constraint | `Confirmed` | 维护者确认 Migration Safety | `R-005` | 仅兼容的 Production Schema Evolution。 |
-| `OQ-001` | Open Question | `Open Question` | 当前未确认 | `R-003`、`R-005` | 固定技术栈和 Migration 工具。 |
+| `OQ-001` | Open Question | `Resolved by AD-014` | 维护者批准 Issue #66 | `R-003`、`R-005` | 固定技术栈和 Migration 工具。 |
 | `OQ-003` | Open Question | `Open Question` | 当前未确认 | `R-003`、`R-006` | Sandbox 与 Deployment 执行后端。 |
 | `OQ-005` | Open Question | `Open Question` | 当前未确认 | `R-007` | 订阅运营参数与最终保留策略。 |
