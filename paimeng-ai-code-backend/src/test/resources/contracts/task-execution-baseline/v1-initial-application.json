@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "baseProfileVersion": null,
+  "baseSourceRevision": null,
+  "requestedOutcome": "Create an appointment intake workflow",
+  "acceptanceTarget": "An owner can submit an appointment request and view its status"
+}

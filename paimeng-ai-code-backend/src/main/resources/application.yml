@@ -12,6 +12,11 @@ spring:
     url: jdbc:mysql://localhost:3306/paimeng_ai_code_mother
     username: root
     password: root
+  flyway:
+    # 既有环境由初始化 SQL 建表；以版本 0 建立历史后只应用新增 Platform migration。
+    baseline-on-migrate: true
+    baseline-version: 0
+    locations: classpath:db/migration
   # redis
   data:
     redis:

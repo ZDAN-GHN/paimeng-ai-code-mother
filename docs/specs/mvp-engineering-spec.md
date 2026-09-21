@@ -533,6 +533,15 @@ Requirement + Trusted Profile + Task Baseline
 - 关联约束：`CST-009`、`CST-011`
 - 关联未决问题：`OQ-005`
 
+### AD-013：TS Agent 负责 Agent 交互与用量计量
+
+- 状态：`Locked Decision`，维护者已明确决定。
+- 决定：Pi SDK、模型与工具调用、调用前后 Hook、Token/调用次数采集、用量聚合和未来价格计算均在 TS Agent 内实现。每次调用产生幂等 Usage Evidence，至少关联 `runId`、`invocationId`、`requestId`、模型标识、开始/结束时间、结果及引擎可用 usage 字段。
+- 当前 MVP：Usage Evidence 只用于调试、诊断和未来计量；不冻结、扣减、退款、展示积分余额，不因余额阻断生成，也不包含货币、价格或余额裁决。
+- Java 边界：Java Platform 仍权威保存 Application/Task/Run/Validation/Release/Deployment 状态；未来独立账务可消费经受控边界提交的 Evidence，但新链路不得调用旧 `CreditService`、`/credit` 或旧 `credit/freeze`。
+- 迁移：旧积分实现与历史台账在新 Platform MVP 中隔离，不能作为新链路依赖；物理删除或数据迁移必须通过独立退役任务和数据影响评估。
+- 关联需求：`R-003`、`CT-002`、`CST-001`、`CST-006`。
+
 ## 系统边界
 
 ### Product Layer Boundary
@@ -873,6 +882,7 @@ Requirement + Trusted Profile + Task Baseline
 | `AD-010` | Architecture Decision | `Locked Decision` | Grill Me Q16 | `R-006` | 目标基线与 Production 实际状态解耦。 |
 | `AD-011` | Architecture Decision | `Locked Decision` | Grill Me Q18 | `R-006` | 首次自动发布，后续确认发布。 |
 | `AD-012` | Architecture Decision | `Locked Decision` | 维护者确认 Migration/订阅策略 | `R-005`、`R-007` | 兼容 Migration 与停服保留。 |
+| `AD-013` | Architecture Decision | `Locked Decision` | 维护者批准 TS Agent 用量计量边界 | `R-003` | TS Agent 负责 Agent 调用与 Usage Evidence；MVP 不接入旧积分链路。 |
 | `CST-005` | Constraint | `Confirmed` | Grill Me Q14 | `R-003` | Sandbox 真实隔离边界。 |
 | `CST-009` | Constraint | `Confirmed` | 维护者确认 Migration Safety | `R-005` | 仅兼容的 Production Schema Evolution。 |
 | `OQ-001` | Open Question | `Open Question` | 当前未确认 | `R-003`、`R-005` | 固定技术栈和 Migration 工具。 |

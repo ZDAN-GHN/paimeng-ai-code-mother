@@ -16,7 +16,7 @@
 
 ## Phase 1：领域与 Owner 入口
 
-- [ ] T-01：Platform 核心领域、状态机与版本化 `TaskExecutionBaseline`。依赖：D-06；由 Platform 冻结 `baseProfileVersion`、`baseSourceRevision`、`requestedOutcome`、`acceptanceTarget`，并提供 Java-to-TS 基线契约夹具。它不定义 Workspace、Sandbox Tool Contract、Execution Policy 或完整 Run Context。实施前需按项目流程完成 `task-evidence-analysis`。规格：`R-001`、`R-002`、`R-003`。
+- [x] T-01：Platform 核心领域、状态机与版本化 `TaskExecutionBaseline`。已交付独立 Flyway Platform 表、Task/Run 受控状态迁移与 Java-to-TS 基线夹具；不定义 Workspace、Sandbox Tool Contract、Execution Policy 或完整 Run Context。规格：`R-001`、`R-002`、`R-003`。
 - [ ] T-02：Owner 管理、删除与 Requirement 接收 API 契约。依赖：D-07、T-01。Phase 1 只保存“等待归一化”的 Requirement，不创建 Task 或 `blocked` 问题。规格：`R-001`、`R-002`。
 - [ ] T-03：Owner 初始 Application、删除与 Requirement 接收界面。依赖：D-07、T-02。规格：`R-001`、`R-002`。
 

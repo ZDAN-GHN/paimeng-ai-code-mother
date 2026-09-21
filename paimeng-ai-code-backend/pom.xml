@@ -114,6 +114,15 @@
             <artifactId>mybatis-flex-codegen</artifactId>
             <version>1.11.1</version>
         </dependency>
+        <!-- 受控 Platform Domain 的仅追加 MySQL schema migration。版本由 Spring Boot BOM 管理。 -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+        </dependency>
         <!-- 数据库连接池 -->
         <dependency>
             <groupId>com.zaxxer</groupId>

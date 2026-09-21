@@ -1,6 +1,6 @@
 # 实施计划：应用生成与托管平台 MVP
 
-- 计划状态：`D-06 已批准；T-01 可在本任务取证后启动。T-02/T-03 仍待 D-07；受 OQ 影响的后续任务待对应决策完成`
+- 计划状态：`D-06 与 T-01 已交付；T-02/T-03 仍待 D-07；受 OQ 影响的后续任务待对应决策完成`
 - 规格基线：[GitHub Issue #65](https://github.com/ZDAN-GHN/paimeng-ai-code-mother/issues/65) 与 [MVP 工程规格](../specs/mvp-engineering-spec.md)
 - 任务清单草案：[mvp-todo.md](mvp-todo.md)
 - 任务追踪策略：本文件和 `mvp-todo.md` 是按维护者要求保存于 `docs/tasks/` 的审查草案。已使用 `to-tickets` 创建 GitHub Issue #66 至 #84、将其作为 Issue #65 的原生子 Issue，并以 GitHub 原生依赖关系表达 blocker；本轮不认领或修改实现工作。
@@ -193,6 +193,7 @@ D-04 订阅运营参数 ──────────────────�
 - [ ] 依赖锁文件、启动/类型检查/测试/构建脚本可复现，且只包含 Pi SDK 作为 Agent Engine。
 - [ ] Adapter 仅接受任务 1 已声明版本的 `TaskExecutionBaseline`，完整映射冻结基线并输出不泄漏 Pi Session 细节的统一 Run Event；未知版本或缺失字段被拒绝。
 - [ ] Adapter 没有 Production、宿主机、数据库、Workspace、Sandbox Tool、Execution Policy、Lease 或 Sandbox 清理能力，且不声明 Task/Release/Deployment 已完成。
+- [ ] Adapter 在每次 Agent 调用前后产生版本化、幂等的 Usage Evidence；它不计算或执行业务扣费，不调用旧 Java `CreditService`、`/credit` 或旧 `credit/freeze`。
 
 **验证：**
 - [ ] `cd paimeng-ai-code-agent && npm run type-check && npm run test && npm run build` 通过。
