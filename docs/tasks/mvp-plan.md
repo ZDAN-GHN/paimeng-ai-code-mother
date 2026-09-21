@@ -1,6 +1,6 @@
 # 实施计划：应用生成与托管平台 MVP
 
-- 计划状态：`T-01 至 T-03 待 D-06/D-07 决策完成；受 OQ 影响的后续任务待对应决策完成`
+- 计划状态：`D-06 已批准；T-01 可在本任务取证后启动。T-02/T-03 仍待 D-07；受 OQ 影响的后续任务待对应决策完成`
 - 规格基线：[GitHub Issue #65](https://github.com/ZDAN-GHN/paimeng-ai-code-mother/issues/65) 与 [MVP 工程规格](../specs/mvp-engineering-spec.md)
 - 任务清单草案：[mvp-todo.md](mvp-todo.md)
 - 任务追踪策略：本文件和 `mvp-todo.md` 是按维护者要求保存于 `docs/tasks/` 的审查草案。已使用 `to-tickets` 创建 GitHub Issue #66 至 #84、将其作为 Issue #65 的原生子 Issue，并以 GitHub 原生依赖关系表达 blocker；本轮不认领或修改实现工作。
@@ -88,6 +88,8 @@ D-04 订阅运营参数 ──────────────────�
 - 验收：选择能证明不可变性、来源可追溯、内容可恢复和不绕过 `Task -> Run -> Workspace -> CandidateSourceSnapshot -> Validation -> SourceRevision` 路径的方案。
 
 ### D-06：Task 与 Run 状态转换矩阵
+
+- 状态：`Approved`。维护者已批准的矩阵写入工程规格与 Issue #65；实现和测试以该矩阵为唯一状态契约。
 
 - 对应：审查发现 P1；补充工程规格的状态契约。
 - 需要决定：Task/Run 的完整状态集、每条允许转换的触发者和前置条件、取消后的 Task/Run 终态、`blocked` 回答后的重新归一化、失败后的重试/新 Task 规则，以及 Run 终态与 Lease 释放的关系。

@@ -224,6 +224,44 @@ Owner 创建 Application
 - 参与方及其行为关系：Owner 提交需求和管理发布；Agent 提出和执行变更；Platform 负责状态、验证、发布、Production 操作；公众只使用健康 Deployment 的运行入口。
 - 关联需求：`R-001`、`R-002`、`R-003`、`R-004`、`R-005`、`R-006`
 
+### D-06：Task 与 Run 状态转换矩阵
+
+- 状态：`Locked Decision`；维护者已批准，实施不得自行扩展状态或改变边的语义。
+- 权威性：Platform Domain 是 Task/Run 状态的唯一裁决方。Runtime 只能申请或报告 Lease、Sandbox 和规范化 Run Event；Agent 只能提出阻断或 Platform Request，不能自行完成状态转换。
+
+#### Task 状态与允许转换
+
+| 来源 | 目标 | 触发者 / 前置条件 | 不可达或拒绝条件 |
+| --- | --- | --- | --- |
+| `created` | `ready` | Platform 接受无决定性歧义的归一化结果并冻结 `TaskExecutionBaseline` | 基线缺失、字段未知或存在阻断问题 |
+| `created` | `blocked` | Platform 持久化 Agent 提出的唯一决定性业务问题 | 多个问题、Agent 自行补全业务规则 |
+| `blocked`（尚未冻结基线） | `created` | Owner 提交答复；Platform 保留不可变答复记录并重新归一化 | 未授权主体、未答复当前唯一问题 |
+| `blocked`（已有冻结基线） | 原 Task 保持 `blocked`；新 Task 为 `created` | Owner 答复执行中发现的业务歧义；Platform 保留原 Task/基线，并为重新归一化结果创建新 Task | 试图修改原 Task 的 `TaskExecutionBaseline`、由 Agent 直接恢复执行 |
+| `ready` | `executing` | Platform 创建 Run 并授予 fenced Lease；Runtime 已获得受控执行上下文 | 另一个写入型 Run 持有 Application Lease、基线或能力不兼容 |
+| `executing` | `blocked` | Platform 接受 Agent 的阻断请求，Run 已停止且不再持有 Lease | Agent 文本直接改写 Task、存在可继续执行的未解决副作用 |
+| `executing` | `failed` | Platform 记录不可恢复的 Run、Validation 或安全失败；不得晋升 | Agent 自述失败但证据或 Run 终态未确认 |
+| `failed` | `ready` | Owner 显式请求重试；Platform 创建新 Run，Requirement 与冻结基线不变 | 改变业务目标、基线或验收目标时，必须创建新 Requirement/Task |
+| `executing` | `validated` | 同一 CandidateSourceSnapshot 的全部必需 Validation/Evidence 通过 | Agent 自检、可写 Workspace、失败或缺失的验证 |
+| `validated` | `released` | Platform 创建固定 Release；首次版本自动触发，后续版本要求 Owner/System Administrator 确认发布 | Release 输入未固定，或后续版本缺少确认 |
+| `created`、`ready`、`blocked`、`executing` | `cancelled` | Owner 请求取消；`executing` 需先让 Runtime 停止、清理 Sandbox 并确认 Run 终态 | 非 Owner/System Administrator；`validated` 或 `released` 的稳定事实不得通过取消撤销 |
+
+`released` 表示固定 Release 已创建；Deployment 是否健康、是否公开运行和回滚均由独立 Deployment 状态表达，不得等同于 Task `released`。
+
+#### Run、Lease 与恢复
+
+| 来源 | 目标 | 触发者 / 前置条件 |
+| --- | --- | --- |
+| `created` | `failed` | Platform 拒绝 Lease 请求或拒绝不兼容的执行能力；未获得 Sandbox 写入权 |
+| `created` | `leased` | Platform 授予 fenced Lease；同一 Application 没有其他活跃写入 Lease |
+| `leased` | `executing` | Runtime 已建立可信 Sandbox、Workspace 和完整 Run Context |
+| `executing` | `succeeded` | Runtime 已停止写入并提交受控 Snapshot/Validation 请求；这本身不裁决 Task `validated` |
+| `leased`、`executing` | `failed` | Platform 确认 Runtime、Sandbox、安全或不可恢复的执行失败 |
+| `leased`、`executing` | `cancelled` | Owner 取消已被 Platform 接受，Runtime 已停止 |
+
+- Run 终态、Sandbox 清理、Lease 释放及相应 Task 迁移由 Platform 以可恢复的顺序协调；取消后不得自动恢复。
+- Runtime 崩溃时，只有 Lease fencing、Workspace 归属与完整性、Sandbox 边界和外部副作用状态都可确认，新的 Runtime 才能接管同一活跃 Run；否则 Run 进入 `failed`。
+- 所有未列转换、错误触发者、缺失前置条件和过期 Lease 均被拒绝，并留下可审计原因。
+
 ### 后续修改、发布与恢复
 
 ```text
@@ -826,6 +864,7 @@ Requirement + Trusted Profile + Task Baseline
 | `R-005` | Requirement | `Confirmed` | Grill Me 关于 Validation/Migration | `R-005` | 权威验证与兼容 Migration。 |
 | `R-006` | Requirement | `Confirmed` | Grill Me 关于 Release/Deployment | `R-006` | 发布、部署、回滚和确认上线。 |
 | `R-007` | Requirement | `Confirmed` | 维护者确认订阅策略 | `R-007` | 宽限、停服保留和续费恢复。 |
+| `D-06` | Delivery Decision | `Locked Decision` | 维护者批准 Issue #71 | `R-002`、`R-003`、`R-005`、`R-006` | Task/Run 状态、取消、重试、Lease 与 Release 边界。 |
 | `AD-005` | Architecture Decision | `Locked Decision` | Grill Me Q13 | `R-003` | Runtime 只协调 Run，Platform 持有真相。 |
 | `AD-006` | Architecture Decision | `Locked Decision` | Grill Me Q14 | `R-003` | Pi 通过 Adapter 和 Sandbox Tool Contract 接入。 |
 | `AD-007` | Architecture Decision | `Locked Decision` | Grill Me Q15 | `R-003` | MVP 不做 Subagent/Multi-Agent Framework。 |

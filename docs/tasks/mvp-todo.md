@@ -1,7 +1,7 @@
 # MVP 实施任务清单（待 `to-tickets` 发布）
 
 - 来源：[实施计划](mvp-plan.md)、[MVP 工程规格](../specs/mvp-engineering-spec.md)、[GitHub Issue #65](https://github.com/ZDAN-GHN/paimeng-ai-code-mother/issues/65)
-- 当前状态：`published; blocked`。决策 Issue #66 至 #72 与实施/验收 Issue #73 至 #84 已发布为 #65 的原生子 Issue；D-06 和 D-07 是 Task/Run 状态机与 Application 删除的核心业务契约，在维护者决定并同步工程规格前阻塞相应实施。
+- 当前状态：`published; partially unblocked`。决策 Issue #66 至 #72 与实施/验收 Issue #73 至 #84 已发布为 #65 的原生子 Issue；D-06 已批准并同步工程规格，T-01 可在任务取证后启动；D-07 仍阻塞 T-02/T-03。
 - 追踪说明：此文件是维护者要求保存在 `docs/tasks/` 的本地 Ticket Graph 快照。GitHub Issue #65 的子 Issue 与原生依赖关系是执行时的权威图；本文件不得被用来覆盖 GitHub blocker 状态。
 
 ## Phase 0：决策门
@@ -11,7 +11,7 @@
 - [ ] D-03：决定公共 URL、域名与 TLS 最小策略（`OQ-004`）。
 - [ ] D-04：决定订阅宽限、通知、事件来源与最终保留策略（`OQ-005`）。
 - [ ] D-05：在 Task 6 前记录 Snapshot/SourceRevision 物理存储选择（`OQ-002`）。
-- [ ] D-06：决定并将 Task/Run 状态转换矩阵写入工程规格与 Issue #65，包括取消、失败、阻断答复、重试和 Lease 释放（审查 P1）。
+- [x] D-06：已批准并将 Task/Run 状态转换矩阵写入工程规格与 Issue #65，包括取消、失败、阻断答复、重试和 Lease 释放（审查 P1）。
 - [ ] D-07：决定并将 Application 删除、公开入口、关联事实/数据保留与恢复语义写入工程规格与 Issue #65（审查 P4）。
 
 ## Phase 1：领域与 Owner 入口
