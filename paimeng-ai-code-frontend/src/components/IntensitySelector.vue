@@ -13,7 +13,6 @@
           <span class="tier-head">
             <span class="tier-name">{{ option.name }}</span>
             <span class="tier-multiplier">{{ option.multiplierLabel }}</span>
-            <span class="tier-credit">预计 {{ creditOf(option.value) }} 积分</span>
           </span>
           <span class="tier-desc">{{ option.desc }}</span>
         </button>
@@ -21,7 +20,6 @@
     </template>
     <a-button size="small" :disabled="disabled" class="tier-trigger">
       {{ currentOption.name }}
-      <span class="trigger-credit">{{ estimatedCredit }} 积分</span>
       <span class="trigger-caret">▾</span>
     </a-button>
   </a-popover>
@@ -32,22 +30,7 @@ import { computed, ref } from 'vue'
 
 type Intensity = 'fast' | 'standard' | 'deep'
 
-const TIER_MULTIPLIERS: Record<Intensity, number> = {
-  fast: 0.5,
-  standard: 1,
-  deep: 2,
-}
-
-const TYPE_MULTIPLIERS: Record<string, number> = {
-  html: 1,
-  multi_file: 2,
-  vue_project: 3,
-}
-
-const BASE_PRICE = 100
-
-const props = defineProps<{
-  codeGenType?: string
+defineProps<{
   disabled?: boolean
 }>()
 
@@ -74,13 +57,6 @@ const open = ref(false)
 const currentOption = computed(
   () => tierOptions.find((option) => option.value === intensity.value) ?? tierOptions[1],
 )
-
-const creditOf = (value: Intensity) => {
-  const typeMultiplier = TYPE_MULTIPLIERS[props.codeGenType ?? 'html'] ?? 1
-  return Math.round(BASE_PRICE * typeMultiplier * TIER_MULTIPLIERS[value])
-}
-
-const estimatedCredit = computed(() => creditOf(intensity.value))
 
 const select = (value: Intensity) => {
   intensity.value = value
@@ -135,20 +111,9 @@ const select = (value: Intensity) => {
   color: #8c8c8c;
 }
 
-.tier-credit {
-  margin-left: auto;
-  font-size: 12px;
-  color: #fa8c16;
-}
-
 .tier-desc {
   font-size: 12px;
   color: #8c8c8c;
-}
-
-.tier-trigger .trigger-credit {
-  margin-left: 4px;
-  color: #fa8c16;
 }
 
 .tier-trigger .trigger-caret {

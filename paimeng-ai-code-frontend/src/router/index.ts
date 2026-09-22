@@ -7,6 +7,7 @@ import AppManagePage from '@/pages/admin/AppManagePage.vue'
 import AppChatPage from '@/pages/app/AppChatPage.vue'
 import AppEditPage from '@/pages/app/AppEditPage.vue'
 import ChatManagePage from '@/pages/admin/ChatManagePage.vue'
+import PlatformApplicationWorkspacePage from '@/pages/platform/PlatformApplicationWorkspacePage.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -50,6 +51,12 @@ const router = createRouter({
       path: '/app/edit/:id',
       name: '编辑应用',
       component: AppEditPage,
+    },
+    {
+      path: '/platform/applications/:applicationId',
+      name: 'Application 工作台',
+      component: PlatformApplicationWorkspacePage,
+      meta: { requiresLogin: true },
     },
   ],
 })

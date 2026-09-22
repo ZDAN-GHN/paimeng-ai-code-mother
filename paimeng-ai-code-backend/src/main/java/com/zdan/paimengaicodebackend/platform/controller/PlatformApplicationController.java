@@ -6,11 +6,14 @@ import com.zdan.paimengaicodebackend.exception.BusinessException;
 import com.zdan.paimengaicodebackend.exception.ErrorCode;
 import com.zdan.paimengaicodebackend.model.entity.User;
 import com.zdan.paimengaicodebackend.platform.dto.PlatformApplicationCreateRequest;
+import com.zdan.paimengaicodebackend.platform.dto.PlatformApplicationInitialRequirementRequest;
 import com.zdan.paimengaicodebackend.platform.dto.PlatformRequirementCreateRequest;
 import com.zdan.paimengaicodebackend.platform.service.PlatformApplicationManagementService;
+import com.zdan.paimengaicodebackend.platform.vo.PlatformApplicationInitialRequirementVO;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformApplicationVO;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformRequirementVO;
 import com.zdan.paimengaicodebackend.service.UserService;
+import com.mybatisflex.core.paginate.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -19,6 +22,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -48,6 +52,37 @@ public class PlatformApplicationController {
         }
         return ResultUtils.success(
             applicationManagementService.createApplication(loginUser(servletRequest), request.getName())
+        );
+    }
+
+    @PostMapping("/initial-requirement")
+    @Operation(summary = "从首页对话创建 Application 并提交首条 Requirement")
+    public BaseResponse<PlatformApplicationInitialRequirementVO> createApplicationWithInitialRequirement(
+        @RequestBody PlatformApplicationInitialRequirementRequest request,
+        HttpServletRequest servletRequest
+    ) {
+        if (request == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR);
+        }
+        return ResultUtils.success(
+            applicationManagementService.createApplicationWithInitialRequirement(
+                loginUser(servletRequest),
+                request.getName(),
+                request.getOriginalText()
+            )
+        );
+    }
+
+    @GetMapping
+    @Operation(summary = "分页读取当前 Owner 创建的 Application")
+    public BaseResponse<Page<PlatformApplicationVO>> listMyApplications(
+        @RequestParam(defaultValue = "1") long pageNum,
+        @RequestParam(defaultValue = "12") long pageSize,
+        HttpServletRequest servletRequest
+    ) {
+        validatePage(pageNum, pageSize);
+        return ResultUtils.success(
+            applicationManagementService.listMyApplications(loginUser(servletRequest), pageNum, pageSize)
         );
     }
 
@@ -81,6 +116,25 @@ public class PlatformApplicationController {
         );
     }
 
+    @GetMapping("/{applicationId}/requirements")
+    @Operation(summary = "分页读取 Application 的不可变 Requirement 历史")
+    public BaseResponse<Page<PlatformRequirementVO>> listRequirements(
+        @PathVariable Long applicationId,
+        @RequestParam(defaultValue = "1") long pageNum,
+        @RequestParam(defaultValue = "20") long pageSize,
+        HttpServletRequest servletRequest
+    ) {
+        validatePage(pageNum, pageSize);
+        return ResultUtils.success(
+            applicationManagementService.listRequirements(
+                applicationId,
+                loginUser(servletRequest),
+                pageNum,
+                pageSize
+            )
+        );
+    }
+
     @GetMapping("/{applicationId}/requirements/{requirementId}")
     @Operation(summary = "读取 Requirement 等待归一化状态")
     public BaseResponse<PlatformRequirementVO> getRequirement(
@@ -110,5 +164,11 @@ public class PlatformApplicationController {
 
     private User loginUser(HttpServletRequest request) {
         return userService.getLoginUser(request);
+    }
+
+    private void validatePage(long pageNum, long pageSize) {
+        if (pageNum <= 0 || pageSize <= 0 || pageSize > 20) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "分页参数无效");
+        }
     }
 }

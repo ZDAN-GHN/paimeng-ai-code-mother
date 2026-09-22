@@ -28,7 +28,4 @@ public interface UserService extends IService<User> {
 
     long userRegister(String userAccount, String userPassword, String checkPassword);
 
-    int deductCredits(Long userId, int amount);
-
-    int addCredits(Long userId, int amount);
 }

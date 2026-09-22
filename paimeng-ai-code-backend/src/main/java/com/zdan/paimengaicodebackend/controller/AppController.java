@@ -40,6 +40,8 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/app")
 public class AppController {
 
+    private static final String ACTIVE_LIFECYCLE_STATUS = "ACTIVE";
+
     private final AppService appService;
     private final UserService userService;
     private final ProjectDownloadService projectDownloadService;
@@ -71,8 +73,7 @@ public class AppController {
     ) {
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用ID无效");
 
-        App app = appService.getById(appId);
-        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        App app = requireActiveApp(appId);
 
         User loginUser = userService.getLoginUser(request);
         if (!app.getUserId().equals(loginUser.getId())) {
@@ -118,9 +119,7 @@ public class AppController {
         ThrowUtils.throwIf(appId == null || appId <= 0, ErrorCode.PARAMS_ERROR, "应用 id 错误");
 
         User loginUser = userService.getLoginUser(request);
-        App app = Optional.ofNullable(appService.getById(appId)).orElseThrow(() ->
-            new BusinessException(ErrorCode.NOT_FOUND_ERROR, "应用不存在")
-        );
+        App app = requireActiveApp(appId);
         if (!app.getUserId().equals(loginUser.getId())) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "无权限生成代码");
         }
@@ -179,8 +178,7 @@ public class AppController {
         User loginUser = userService.getLoginUser(request);
         long id = appUpdateRequest.getId();
 
-        App oldApp = appService.getById(id);
-        ThrowUtils.throwIf(oldApp == null, ErrorCode.NOT_FOUND_ERROR);
+        App oldApp = requireActiveApp(id);
 
         if (!oldApp.getUserId().equals(loginUser.getId())) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
@@ -206,8 +204,7 @@ public class AppController {
         User loginUser = userService.getLoginUser(request);
         long id = deleteRequest.getId();
 
-        App oldApp = appService.getById(id);
-        ThrowUtils.throwIf(oldApp == null, ErrorCode.NOT_FOUND_ERROR);
+        App oldApp = requireActiveApp(id);
 
         if (
             !oldApp.getUserId().equals(loginUser.getId()) &&
@@ -223,8 +220,7 @@ public class AppController {
     public BaseResponse<AppVO> getAppVOById(long id) {
         ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
 
-        App app = appService.getById(id);
-        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR);
+        App app = requireActiveApp(id);
 
         return ResultUtils.success(appService.getAppVO(app));
     }
@@ -287,8 +283,7 @@ public class AppController {
         }
         long id = deleteRequest.getId();
 
-        App oldApp = appService.getById(id);
-        ThrowUtils.throwIf(oldApp == null, ErrorCode.NOT_FOUND_ERROR);
+        requireActiveApp(id);
         boolean result = appService.removeById(id);
         return ResultUtils.success(result);
     }
@@ -303,8 +298,7 @@ public class AppController {
         }
         long id = appAdminUpdateRequest.getId();
 
-        App oldApp = appService.getById(id);
-        ThrowUtils.throwIf(oldApp == null, ErrorCode.NOT_FOUND_ERROR);
+        requireActiveApp(id);
         App app = new App();
         BeanUtil.copyProperties(appAdminUpdateRequest, app);
 
@@ -337,9 +331,19 @@ public class AppController {
     public BaseResponse<AppVO> getAppVOByIdByAdmin(long id) {
         ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
 
-        App app = appService.getById(id);
-        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR);
+        App app = requireActiveApp(id);
 
         return ResultUtils.success(appService.getAppVO(app));
+    }
+
+    private App requireActiveApp(long appId) {
+        App app = appService.getById(appId);
+        ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        ThrowUtils.throwIf(
+            !ACTIVE_LIFECYCLE_STATUS.equals(app.getLifecycleStatus()),
+            ErrorCode.NOT_FOUND_ERROR,
+            "应用不存在"
+        );
+        return app;
     }
 }

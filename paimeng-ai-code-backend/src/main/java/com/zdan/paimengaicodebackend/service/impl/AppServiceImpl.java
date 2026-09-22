@@ -38,6 +38,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppService {
 
+    private static final String ACTIVE_LIFECYCLE_STATUS = "ACTIVE";
+
     private final UserService userService;
     private final ChatHistoryService chatHistoryService;
     private final ScreenshotService screenshotService;
@@ -69,6 +71,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
         CodeGenTypeEnum selectedCodeGenType = CodeGenTypeEnum.HTML;
         app.setCodeGenType(selectedCodeGenType.getValue());
+        app.setLifecycleStatus(ACTIVE_LIFECYCLE_STATUS);
 
         boolean result = this.save(app);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
@@ -106,6 +109,11 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
 
         App app = Optional.ofNullable(this.getById(appId)).orElseThrow(() ->
             new BusinessException(ErrorCode.PARAMS_ERROR, "应用不存在")
+        );
+        ThrowUtils.throwIf(
+            !ACTIVE_LIFECYCLE_STATUS.equals(app.getLifecycleStatus()),
+            ErrorCode.NOT_FOUND_ERROR,
+            "应用不存在"
         );
         if (!app.getUserId().equals(loginUser.getId())) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "无权限部署应用");
@@ -251,6 +259,7 @@ public class AppServiceImpl extends ServiceImpl<AppMapper, App> implements AppSe
             .eq("deployKey", deployKey)
             .eq("priority", priority)
             .eq("userId", userId)
+            .eq("lifecycleStatus", ACTIVE_LIFECYCLE_STATUS)
             .orderBy(sortField, "ascend".equals(sortOrder));
     }
 }

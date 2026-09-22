@@ -3,40 +3,43 @@ package com.zdan.paimengaicodebackend.platform.domain;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.zdan.paimengaicodebackend.exception.BusinessException;
 import com.zdan.paimengaicodebackend.exception.ErrorCode;
-import com.zdan.paimengaicodebackend.mapper.platform.PlatformApplicationMapper;
+import com.zdan.paimengaicodebackend.mapper.AppMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformRequirementMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformRunMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformTaskMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformTrustedProfileVersionMapper;
-import com.zdan.paimengaicodebackend.platform.entity.PlatformApplication;
+import com.zdan.paimengaicodebackend.model.entity.App;
 import org.springframework.stereotype.Component;
 
 @Component
 public class PlatformLogicalRelationValidator {
 
-    private final PlatformApplicationMapper applicationMapper;
+    private final AppMapper appMapper;
     private final PlatformRequirementMapper requirementMapper;
     private final PlatformTaskMapper taskMapper;
     private final PlatformRunMapper runMapper;
     private final PlatformTrustedProfileVersionMapper profileVersionMapper;
 
     public PlatformLogicalRelationValidator(
-        PlatformApplicationMapper applicationMapper,
+        AppMapper appMapper,
         PlatformRequirementMapper requirementMapper,
         PlatformTaskMapper taskMapper,
         PlatformRunMapper runMapper,
         PlatformTrustedProfileVersionMapper profileVersionMapper
     ) {
-        this.applicationMapper = applicationMapper;
+        this.appMapper = appMapper;
         this.requirementMapper = requirementMapper;
         this.taskMapper = taskMapper;
         this.runMapper = runMapper;
         this.profileVersionMapper = profileVersionMapper;
     }
 
-    public PlatformApplication requireActiveApplication(Long applicationId) {
-        PlatformApplication application = applicationMapper.selectOneByQuery(
-            QueryWrapper.create().eq("id", applicationId).eq("is_deleted", 0)
+    public App requireActiveApplication(Long applicationId) {
+        App application = appMapper.selectOneByQuery(
+            QueryWrapper.create()
+                .eq("id", applicationId)
+                .eq("isDelete", 0)
+                .eq("lifecycleStatus", "ACTIVE")
         );
         if (application == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "Application 不存在或已归档");
@@ -47,7 +50,7 @@ public class PlatformLogicalRelationValidator {
     public void requireRequirementBelongsToApplication(Long applicationId, Long requirementId) {
         requireBelongs(
             requirementMapper.selectCountByQuery(
-                QueryWrapper.create().eq("id", requirementId).eq("application_id", applicationId)
+                QueryWrapper.create().eq("id", requirementId).eq("appId", applicationId)
             ),
             "Requirement 不属于 Application"
         );
@@ -56,7 +59,7 @@ public class PlatformLogicalRelationValidator {
     public void requireTaskBelongsToApplication(Long applicationId, Long taskId) {
         requireBelongs(
             taskMapper.selectCountByQuery(
-                QueryWrapper.create().eq("id", taskId).eq("application_id", applicationId)
+                QueryWrapper.create().eq("id", taskId).eq("appId", applicationId)
             ),
             "Task 不属于 Application"
         );
@@ -65,7 +68,7 @@ public class PlatformLogicalRelationValidator {
     public void requireRunBelongsToApplication(Long applicationId, String runId) {
         requireBelongs(
             runMapper.selectCountByQuery(
-                QueryWrapper.create().eq("id", runId).eq("application_id", applicationId)
+                QueryWrapper.create().eq("id", runId).eq("appId", applicationId)
             ),
             "Run 不属于 Application"
         );
@@ -75,8 +78,8 @@ public class PlatformLogicalRelationValidator {
         requireBelongs(
             profileVersionMapper.selectCountByQuery(
                 QueryWrapper.create()
-                    .eq("application_id", applicationId)
-                    .eq("version_number", versionNumber)
+                    .eq("appId", applicationId)
+                    .eq("versionNumber", versionNumber)
             ),
             "Trusted Profile Version 不属于 Application"
         );

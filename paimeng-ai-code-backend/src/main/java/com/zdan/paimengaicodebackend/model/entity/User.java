@@ -44,9 +44,6 @@ public class User implements Serializable {
     @Column("userRole")
     private String userRole;
 
-    @Column("credits")
-    private Integer credits;
-
     @Column("editTime")
     private LocalDateTime editTime;
 

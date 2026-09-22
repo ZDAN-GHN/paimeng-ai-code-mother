@@ -4,20 +4,24 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.zdan.paimengaicodebackend.exception.BusinessException;
-import com.zdan.paimengaicodebackend.mapper.platform.PlatformApplicationMapper;
+import com.zdan.paimengaicodebackend.mapper.AppMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformRequirementMapper;
+import com.zdan.paimengaicodebackend.model.entity.App;
 import com.zdan.paimengaicodebackend.model.entity.User;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformActor;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformApplicationArchiveService;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformLogicalRelationValidator;
-import com.zdan.paimengaicodebackend.platform.entity.PlatformApplication;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRequirement;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformApplicationVO;
+import com.zdan.paimengaicodebackend.platform.vo.PlatformApplicationInitialRequirementVO;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformRequirementVO;
+import com.mybatisflex.core.paginate.Page;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,7 +36,7 @@ class PlatformApplicationManagementServiceTest {
     private static final long OWNER_ID = 201L;
 
     @Mock
-    private PlatformApplicationMapper applicationMapper;
+    private AppMapper appMapper;
 
     @Mock
     private PlatformRequirementMapper requirementMapper;
@@ -48,7 +52,7 @@ class PlatformApplicationManagementServiceTest {
     @BeforeEach
     void setUp() {
         managementService = new PlatformApplicationManagementService(
-            applicationMapper,
+            appMapper,
             requirementMapper,
             relationValidator,
             archiveService
@@ -61,18 +65,18 @@ class PlatformApplicationManagementServiceTest {
 
         PlatformApplicationVO result = managementService.createApplication(owner, "  Product  ");
 
-        ArgumentCaptor<PlatformApplication> applicationCaptor = ArgumentCaptor.forClass(
-            PlatformApplication.class
+        ArgumentCaptor<App> applicationCaptor = ArgumentCaptor.forClass(
+            App.class
         );
-        verify(applicationMapper).insertSelective(applicationCaptor.capture());
-        assertEquals(OWNER_ID, applicationCaptor.getValue().getOwnerId());
-        assertEquals("Product", applicationCaptor.getValue().getName());
+        verify(appMapper).insertSelective(applicationCaptor.capture());
+        assertEquals(OWNER_ID, applicationCaptor.getValue().getUserId());
+        assertEquals("Product", applicationCaptor.getValue().getAppName());
         assertEquals("ACTIVE", result.getLifecycleStatus());
     }
 
     @Test
     void ownerSubmitsUnchangedRequirementWithPendingNormalizationStatus() {
-        PlatformApplication application = application();
+        App application = application();
         when(relationValidator.requireActiveApplication(APPLICATION_ID)).thenReturn(application);
         User owner = user(OWNER_ID, "user");
         String originalText = "  保留这段原文  ";
@@ -93,6 +97,68 @@ class PlatformApplicationManagementServiceTest {
     }
 
     @Test
+    void homepageCreationPersistsApplicationAndInitialRequirementInOneServiceOperation() {
+        User owner = user(OWNER_ID, "user");
+        doAnswer(invocation -> {
+            invocation.getArgument(0, App.class).setId(APPLICATION_ID);
+            return 1;
+        })
+            .when(appMapper)
+            .insertSelective(any(App.class));
+        when(relationValidator.requireActiveApplication(APPLICATION_ID)).thenReturn(application());
+
+        PlatformApplicationInitialRequirementVO result = managementService.createApplicationWithInitialRequirement(
+            owner,
+            "Product",
+            "Build it"
+        );
+
+        verify(appMapper).insertSelective(any(App.class));
+        verify(requirementMapper).insertSelective(any(PlatformRequirement.class));
+        assertEquals(APPLICATION_ID, result.getApplication().getId());
+        assertEquals("Build it", result.getRequirement().getOriginalText());
+        assertEquals("PENDING_NORMALIZATION", result.getRequirement().getNormalizationStatus());
+    }
+
+    @Test
+    void ownerListsOnlyActiveApplicationsTheyCreated() {
+        Page<App> applications = new Page<>(1, 12, 1);
+        applications.setRecords(List.of(application()));
+        when(appMapper.paginate(any(Page.class), any())).thenReturn(applications);
+
+        Page<PlatformApplicationVO> result = managementService.listMyApplications(
+            user(OWNER_ID, "user"),
+            1,
+            12
+        );
+
+        assertEquals(1, result.getRecords().size());
+        assertEquals(APPLICATION_ID, result.getRecords().getFirst().getId());
+    }
+
+    @Test
+    void ownerListsRequirementHistoryForTheirApplication() {
+        Page<PlatformRequirement> requirements = new Page<>(1, 20, 1);
+        PlatformRequirement requirement = new PlatformRequirement();
+        requirement.setId(301L);
+        requirement.setApplicationId(APPLICATION_ID);
+        requirement.setOriginalText("Build it");
+        requirements.setRecords(List.of(requirement));
+        when(relationValidator.requireActiveApplication(APPLICATION_ID)).thenReturn(application());
+        when(requirementMapper.paginate(any(Page.class), any())).thenReturn(requirements);
+
+        Page<PlatformRequirementVO> result = managementService.listRequirements(
+            APPLICATION_ID,
+            user(OWNER_ID, "user"),
+            1,
+            20
+        );
+
+        assertEquals(1, result.getRecords().size());
+        assertEquals("Build it", result.getRecords().getFirst().getOriginalText());
+    }
+
+    @Test
     void rejectsBlankApplicationNameAndRequirementText() {
         User owner = user(OWNER_ID, "user");
 
@@ -108,7 +174,7 @@ class PlatformApplicationManagementServiceTest {
 
     @Test
     void rejectsNonOwnerButAllowsSystemAdministratorToRead() {
-        PlatformApplication application = application();
+        App application = application();
         when(relationValidator.requireActiveApplication(APPLICATION_ID)).thenReturn(application);
 
         assertThrows(
@@ -125,8 +191,8 @@ class PlatformApplicationManagementServiceTest {
 
     @Test
     void archivesThroughDomainServiceAndReturnsRetentionBoundary() {
-        PlatformApplication application = application();
-        application.setIsDeleted(1);
+        App application = application();
+        application.setLifecycleStatus("ARCHIVED");
         when(relationValidator.requireActiveApplication(APPLICATION_ID)).thenReturn(application);
         when(archiveService.archive(
             eq(APPLICATION_ID),
@@ -147,12 +213,13 @@ class PlatformApplicationManagementServiceTest {
         assertEquals(false, result.isRecoverySupported());
     }
 
-    private PlatformApplication application() {
-        PlatformApplication application = new PlatformApplication();
+    private App application() {
+        App application = new App();
         application.setId(APPLICATION_ID);
-        application.setOwnerId(OWNER_ID);
-        application.setName("Product");
-        application.setIsDeleted(0);
+        application.setUserId(OWNER_ID);
+        application.setAppName("Product");
+        application.setIsDelete(0);
+        application.setLifecycleStatus("ACTIVE");
         return application;
     }
 

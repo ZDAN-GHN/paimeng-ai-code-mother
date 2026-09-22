@@ -15,30 +15,30 @@ public class PlatformRunTransitionEvent {
     @Id(keyType = KeyType.Generator, value = KeyGenerators.snowFlakeId)
     private Long id;
 
-    @Column("application_id")
+    @Column("appId")
     private Long applicationId;
 
-    @Column("run_id")
+    @Column("runId")
     private String runId;
 
-    @Column("from_state")
+    @Column("fromState")
     private String fromState;
 
-    @Column("to_state")
+    @Column("toState")
     private String toState;
 
-    @Column("actor_type")
+    @Column("actorType")
     private String actorType;
 
-    @Column("reason_code")
+    @Column("reasonCode")
     private String reasonCode;
 
-    @Column("evidence_ref")
+    @Column("evidenceRef")
     private String evidenceRef;
 
-    @Column("request_id")
+    @Column("requestId")
     private String requestId;
 
-    @Column("occurred_at")
+    @Column("occurredTime")
     private LocalDateTime occurredAt;
 }

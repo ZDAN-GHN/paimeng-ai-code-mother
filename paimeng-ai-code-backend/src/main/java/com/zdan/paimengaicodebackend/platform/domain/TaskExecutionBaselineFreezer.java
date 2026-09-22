@@ -47,7 +47,7 @@ public class TaskExecutionBaselineFreezer {
         QueryWrapper condition = QueryWrapper
             .create()
             .eq("id", task.getId())
-            .isNull("baseline_json");
+            .isNull("baselineJson");
         if (taskMapper.updateByQuery(update, true, condition) != 1) {
             throw new BusinessException(ErrorCode.FORBIDDEN_ERROR, "TaskExecutionBaseline 已冻结或 Task 不存在");
         }

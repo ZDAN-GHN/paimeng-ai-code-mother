@@ -23,7 +23,5 @@ public class LoginUserVO implements Serializable {
 
     private String userRole;
 
-    private Integer credits;
-
     private LocalDateTime createTime;
 }

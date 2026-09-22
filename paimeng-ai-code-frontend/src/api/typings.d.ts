@@ -337,4 +337,54 @@ declare namespace API {
     userProfile?: string
     userRole?: string
   }
+  type BaseResponsePagePlatformApplicationVO = {
+    code?: number
+    data?: PagePlatformApplicationVO
+    message?: string
+  }
+  type BaseResponsePagePlatformRequirementVO = {
+    code?: number
+    data?: PagePlatformRequirementVO
+    message?: string
+  }
+  type BaseResponsePlatformApplicationInitialRequirementVO = {
+    code?: number
+    data?: PlatformApplicationInitialRequirementVO
+    message?: string
+  }
+  type listMyApplicationsParams = {
+    pageNum?: number
+    pageSize?: number
+  }
+  type listRequirementsParams = {
+    applicationId: number
+    pageNum?: number
+    pageSize?: number
+  }
+  type PagePlatformApplicationVO = {
+    records?: PlatformApplicationVO[]
+    pageNumber?: number
+    pageSize?: number
+    totalPage?: number
+    totalRow?: number
+    optimizeCountQuery?: boolean
+  }
+  type PagePlatformRequirementVO = {
+    records?: PlatformRequirementVO[]
+    pageNumber?: number
+    pageSize?: number
+    totalPage?: number
+    totalRow?: number
+    optimizeCountQuery?: boolean
+  }
+  type PlatformApplicationInitialRequirementRequest = {
+    /** Application 名称 */
+    name?: string
+    /** Owner 输入的首条原始自然语言需求 */
+    originalText?: string
+  }
+  type PlatformApplicationInitialRequirementVO = {
+    application?: PlatformApplicationVO
+    requirement?: PlatformRequirementVO
+  }
 }

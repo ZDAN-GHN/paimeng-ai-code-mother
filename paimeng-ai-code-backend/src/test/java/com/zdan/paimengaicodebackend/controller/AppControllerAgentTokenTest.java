@@ -72,6 +72,7 @@ class AppControllerAgentTokenTest {
         app.setId(APP_ID);
         app.setUserId(ownerId);
         app.setCodeGenType("html");
+        app.setLifecycleStatus("ACTIVE");
         when(appService.getById(APP_ID)).thenReturn(app);
         return app;
     }
@@ -106,6 +107,16 @@ class AppControllerAgentTokenTest {
             .perform(get("/app/agent/token").param("appId", String.valueOf(APP_ID)))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.code").value(40101));
+    }
+
+    @Test
+    void archivedAppDoesNotIssueAgentToken() throws Exception {
+        App app = mockOwnedApp(OWNER_ID);
+        app.setLifecycleStatus("ARCHIVED");
+        mockMvc
+            .perform(get("/app/agent/token").param("appId", String.valueOf(APP_ID)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value(40400));
     }
 
     @Test

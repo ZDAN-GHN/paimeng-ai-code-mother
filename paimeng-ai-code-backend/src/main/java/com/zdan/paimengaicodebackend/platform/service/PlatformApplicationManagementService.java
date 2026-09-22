@@ -1,18 +1,21 @@
 package com.zdan.paimengaicodebackend.platform.service;
 
 import com.mybatisflex.core.query.QueryWrapper;
+import com.mybatisflex.core.paginate.Page;
 import com.zdan.paimengaicodebackend.constant.UserConstant;
 import com.zdan.paimengaicodebackend.exception.BusinessException;
 import com.zdan.paimengaicodebackend.exception.ErrorCode;
-import com.zdan.paimengaicodebackend.mapper.platform.PlatformApplicationMapper;
+import com.zdan.paimengaicodebackend.ai.enums.CodeGenTypeEnum;
+import com.zdan.paimengaicodebackend.mapper.AppMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformRequirementMapper;
+import com.zdan.paimengaicodebackend.model.entity.App;
 import com.zdan.paimengaicodebackend.model.entity.User;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformActor;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformApplicationArchiveService;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformLogicalRelationValidator;
-import com.zdan.paimengaicodebackend.platform.entity.PlatformApplication;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRequirement;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformApplicationVO;
+import com.zdan.paimengaicodebackend.platform.vo.PlatformApplicationInitialRequirementVO;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformRequirementVO;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -23,18 +26,18 @@ public class PlatformApplicationManagementService {
 
     private static final String PENDING_NORMALIZATION = "PENDING_NORMALIZATION";
 
-    private final PlatformApplicationMapper applicationMapper;
+    private final AppMapper appMapper;
     private final PlatformRequirementMapper requirementMapper;
     private final PlatformLogicalRelationValidator relationValidator;
     private final PlatformApplicationArchiveService archiveService;
 
     public PlatformApplicationManagementService(
-        PlatformApplicationMapper applicationMapper,
+        AppMapper appMapper,
         PlatformRequirementMapper requirementMapper,
         PlatformLogicalRelationValidator relationValidator,
         PlatformApplicationArchiveService archiveService
     ) {
-        this.applicationMapper = applicationMapper;
+        this.appMapper = appMapper;
         this.requirementMapper = requirementMapper;
         this.relationValidator = relationValidator;
         this.archiveService = archiveService;
@@ -45,12 +48,45 @@ public class PlatformApplicationManagementService {
         requireText(name, "Application 名称不能为空");
         Long actorId = requireActorId(actor);
 
-        PlatformApplication application = new PlatformApplication();
-        application.setOwnerId(actorId);
-        application.setName(name.trim());
-        application.setIsDeleted(0);
-        applicationMapper.insertSelective(application);
+        App application = new App();
+        application.setUserId(actorId);
+        application.setAppName(name.trim());
+        application.setCodeGenType(CodeGenTypeEnum.HTML.getValue());
+        application.setIsDelete(0);
+        application.setLifecycleStatus("ACTIVE");
+        appMapper.insertSelective(application);
         return toApplicationVO(application, false);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public PlatformApplicationInitialRequirementVO createApplicationWithInitialRequirement(
+        User actor,
+        String name,
+        String originalText
+    ) {
+        PlatformApplicationVO application = createApplication(actor, name);
+        PlatformRequirementVO requirement = submitRequirement(application.getId(), actor, originalText);
+        PlatformApplicationInitialRequirementVO response = new PlatformApplicationInitialRequirementVO();
+        response.setApplication(application);
+        response.setRequirement(requirement);
+        return response;
+    }
+
+    public Page<PlatformApplicationVO> listMyApplications(User actor, long pageNum, long pageSize) {
+        Long actorId = requireActorId(actor);
+        Page<App> applications = appMapper.paginate(
+            Page.of(pageNum, pageSize),
+            QueryWrapper.create()
+                .eq("userId", actorId)
+                .eq("isDelete", 0)
+                .eq("lifecycleStatus", "ACTIVE")
+                .orderBy(App::getCreateTime, false)
+        );
+        Page<PlatformApplicationVO> response = new Page<>(pageNum, pageSize, applications.getTotalRow());
+        response.setRecords(
+            applications.getRecords().stream().map(application -> toApplicationVO(application, false)).toList()
+        );
+        return response;
     }
 
     public PlatformApplicationVO getApplication(Long applicationId, User actor) {
@@ -77,7 +113,7 @@ public class PlatformApplicationManagementService {
     public PlatformRequirementVO getRequirement(Long applicationId, Long requirementId, User actor) {
         requireAuthorizedActiveApplication(applicationId, actor);
         PlatformRequirement requirement = requirementMapper.selectOneByQuery(
-            QueryWrapper.create().eq("id", requirementId).eq("application_id", applicationId)
+            QueryWrapper.create().eq("id", requirementId).eq("appId", applicationId)
         );
         if (requirement == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "Requirement 不存在");
@@ -85,10 +121,28 @@ public class PlatformApplicationManagementService {
         return toRequirementVO(requirement);
     }
 
+    public Page<PlatformRequirementVO> listRequirements(
+        Long applicationId,
+        User actor,
+        long pageNum,
+        long pageSize
+    ) {
+        requireAuthorizedActiveApplication(applicationId, actor);
+        Page<PlatformRequirement> requirements = requirementMapper.paginate(
+            Page.of(pageNum, pageSize),
+            QueryWrapper.create()
+                .eq("appId", applicationId)
+                .orderBy(PlatformRequirement::getCreatedAt, false)
+        );
+        Page<PlatformRequirementVO> response = new Page<>(pageNum, pageSize, requirements.getTotalRow());
+        response.setRecords(requirements.getRecords().stream().map(this::toRequirementVO).toList());
+        return response;
+    }
+
     public PlatformApplicationVO archiveApplication(Long applicationId, User actor) {
-        PlatformApplication application = requireAuthorizedActiveApplication(applicationId, actor);
+        App application = requireAuthorizedActiveApplication(applicationId, actor);
         Long actorId = requireActorId(actor);
-        PlatformApplication archivedApplication = archiveService.archive(
+        App archivedApplication = archiveService.archive(
             applicationId,
             actorId,
             actorFor(actor),
@@ -98,14 +152,14 @@ public class PlatformApplicationManagementService {
         return toApplicationVO(archivedApplication, true);
     }
 
-    private PlatformApplication requireAuthorizedActiveApplication(Long applicationId, User actor) {
+    private App requireAuthorizedActiveApplication(Long applicationId, User actor) {
         if (applicationId == null || applicationId <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "Application ID 无效");
         }
-        PlatformApplication application = relationValidator.requireActiveApplication(applicationId);
+        App application = relationValidator.requireActiveApplication(applicationId);
         if (
             actorFor(actor) == PlatformActor.OWNER &&
-            !requireActorId(actor).equals(application.getOwnerId())
+            !requireActorId(actor).equals(application.getUserId())
         ) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "无权管理该 Application");
         }
@@ -133,20 +187,20 @@ public class PlatformApplicationManagementService {
     }
 
     private PlatformApplicationVO toApplicationVO(
-        PlatformApplication application,
+        App application,
         boolean archived
     ) {
         PlatformApplicationVO response = new PlatformApplicationVO();
         response.setId(application.getId());
-        response.setName(application.getName());
-        response.setOwnerId(application.getOwnerId());
-        response.setLifecycleStatus(archived ? "ARCHIVED" : "ACTIVE");
+        response.setName(application.getAppName());
+        response.setOwnerId(application.getUserId());
+        response.setLifecycleStatus(application.getLifecycleStatus());
         response.setPublicAvailability(archived ? "UNAVAILABLE" : "NOT_PROVISIONED");
         response.setRetained(true);
         response.setRecoverySupported(false);
-        if (archived) {
+        if (archived || "ARCHIVED".equals(application.getLifecycleStatus())) {
             response.setArchivedBy(application.getArchivedBy());
-            response.setArchivedAt(application.getArchivedAt());
+            response.setArchivedAt(application.getArchivedTime());
         }
         return response;
     }

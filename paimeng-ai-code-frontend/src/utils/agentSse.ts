@@ -16,7 +16,6 @@ export interface AgentApproval {
   approvalId: string
   proposal: {
     reason: string
-    estimatedCredits: number
   }
 }
 

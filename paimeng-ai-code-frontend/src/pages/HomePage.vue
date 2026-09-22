@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { useLoginUserStore } from '@/stores/loginUser'
-import { addApp, listMyAppVoByPage, listGoodAppVoByPage } from '@/api/appController'
+import { listGoodAppVoByPage } from '@/api/appController'
+import {
+  createApplicationWithInitialRequirement,
+  listMyApplications,
+} from '@/api/platformApplication'
 import { getDeployUrl } from '@/config/env'
 import AppCard from '@/components/AppCard.vue'
 
@@ -13,7 +17,7 @@ const loginUserStore = useLoginUserStore()
 const userPrompt = ref('')
 const creating = ref(false)
 
-const myApps = ref<API.AppVO[]>([])
+const myApplications = ref<API.PlatformApplicationVO[]>([])
 const myAppsPage = reactive({
   current: 1,
   pageSize: 6,
@@ -31,6 +35,11 @@ const setPrompt = (prompt: string) => {
   userPrompt.value = prompt
 }
 
+const applicationNameFromRequirement = (requirement: string) => {
+  const firstLine = requirement.split('\n').find((line) => line.trim())?.trim() || ''
+  return firstLine.slice(0, 80) || '未命名 Application'
+}
+
 const createApp = async () => {
   if (!userPrompt.value.trim()) {
     message.warning('请输入应用描述')
@@ -45,15 +54,15 @@ const createApp = async () => {
 
   creating.value = true
   try {
-    const res = await addApp({
-      initPrompt: userPrompt.value.trim(),
+    const requirement = userPrompt.value.trim()
+    const res = await createApplicationWithInitialRequirement({
+      name: applicationNameFromRequirement(requirement),
+      originalText: requirement,
     })
 
-    if (res.data.code === 0 && res.data.data) {
-      message.success('应用创建成功')
-
-      const appId = String(res.data.data)
-      await router.push(`/app/chat/${appId}`)
+    if (res.data.code === 0 && res.data.data?.application?.id) {
+      message.success('Application 已创建，Requirement 等待归一化')
+      await router.push(`/platform/applications/${res.data.data.application.id}`)
     } else {
       message.error('创建失败：' + res.data.message)
     }
@@ -71,15 +80,13 @@ const loadMyApps = async () => {
   }
 
   try {
-    const res = await listMyAppVoByPage({
+    const res = await listMyApplications({
       pageNum: myAppsPage.current,
       pageSize: myAppsPage.pageSize,
-      sortField: 'createTime',
-      sortOrder: 'desc',
     })
 
     if (res.data.code === 0 && res.data.data) {
-      myApps.value = res.data.data.records || []
+      myApplications.value = res.data.data.records || []
       myAppsPage.total = res.data.data.totalRow || 0
     }
   } catch (error) {
@@ -105,9 +112,15 @@ const loadFeaturedApps = async () => {
   }
 }
 
-const viewChat = (appId: string | number | undefined) => {
+const viewLegacyChat = (appId: string | number | undefined) => {
   if (appId) {
     router.push(`/app/chat/${appId}?view=1`)
+  }
+}
+
+const viewApplicationWorkspace = (applicationId: number | undefined) => {
+  if (applicationId) {
+    router.push(`/platform/applications/${applicationId}`)
   }
 }
 
@@ -118,8 +131,20 @@ const viewWork = (app: API.AppVO) => {
   }
 }
 
+watch(
+  () => loginUserStore.loginUser.id,
+  (userId) => {
+    if (userId) {
+      loadMyApps()
+      return
+    }
+    myApplications.value = []
+    myAppsPage.total = 0
+  },
+  { immediate: true },
+)
+
 onMounted(() => {
-  loadMyApps()
   loadFeaturedApps()
 
   const handleMouseMove = (e: MouseEvent) => {
@@ -205,16 +230,24 @@ onMounted(() => {
       </div>
 
       <div class="section">
-        <h2 class="section-title">我的作品</h2>
-        <div class="app-grid">
-          <AppCard
-            v-for="app in myApps"
-            :key="app.id"
-            :app="app"
-            @view-chat="viewChat"
-            @view-work="viewWork"
-          />
+        <h2 class="section-title">我的 Applications</h2>
+        <div v-if="myApplications.length" class="app-grid">
+          <a-card
+            v-for="application in myApplications"
+            :key="application.id"
+            class="platform-application-card"
+            hoverable
+            @click="viewApplicationWorkspace(application.id)"
+          >
+            <template #title>{{ application.name }}</template>
+            <a-tag color="processing">{{ application.lifecycleStatus || 'ACTIVE' }}</a-tag>
+            <p>Requirement 已保存后，将在工作台中等待归一化与全栈实现。</p>
+            <a-button type="link" @click.stop="viewApplicationWorkspace(application.id)">
+              打开工作台
+            </a-button>
+          </a-card>
         </div>
+        <a-empty v-else description="从上方对话框开始创建你的第一个 Application" />
         <div class="pagination-wrapper">
           <a-pagination
             v-model:current="myAppsPage.current"
@@ -235,7 +268,7 @@ onMounted(() => {
             :key="app.id"
             :app="app"
             :featured="true"
-            @view-chat="viewChat"
+            @view-chat="viewLegacyChat"
             @view-work="viewWork"
           />
         </div>
@@ -507,6 +540,16 @@ onMounted(() => {
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 24px;
   margin-bottom: 32px;
+}
+
+.platform-application-card {
+  min-height: 190px;
+}
+
+.platform-application-card p {
+  margin: 16px 0;
+  color: #64748b;
+  line-height: 1.7;
 }
 
 .featured-grid {

@@ -7,9 +7,6 @@
           {{ formatCodeGenType(appInfo.codeGenType) }}
         </a-tag>
 
-        <a-tag v-if="creditBalance !== undefined" color="gold" class="credit-tag">
-          <WalletOutlined /> 积分 {{ creditBalance }}
-        </a-tag>
       </div>
       <div class="header-right">
         <a-button type="default" @click="showAppDetail">
@@ -93,7 +90,6 @@
               <div class="message-content">
                 <GenerationApprovalCard
                   :reason="message.reason"
-                  :estimated-credits="message.estimatedCredits"
                   :disabled="message.settled"
                   :loading="message.loading"
                   @confirm="onApprovalConfirm(index)"
@@ -205,7 +201,6 @@
             <div class="input-actions">
               <IntensitySelector
                 v-model="intensity"
-                :code-gen-type="appInfo?.codeGenType"
                 :disabled="isGenerating"
               />
 
@@ -323,7 +318,6 @@ import GenerationApprovalCard from '@/components/GenerationApprovalCard.vue'
 import IntensitySelector from '@/components/IntensitySelector.vue'
 import aiAvatar from '@/assets/aiAvatar.png'
 import { getStaticPreviewUrl, STATIC_BASE_URL } from '@/config/env'
-import { getCreditBalance } from '@/api/creditController'
 import { VisualEditor, type ElementInfo } from '@/utils/visualEditor'
 
 import {
@@ -336,7 +330,6 @@ import {
   CheckCircleOutlined,
   LoadingOutlined,
   PauseCircleOutlined,
-  WalletOutlined,
 } from '@ant-design/icons-vue'
 
 const route = useRoute()
@@ -389,7 +382,6 @@ interface ApprovalCardMessage extends BaseMessage {
   type: 'approval'
   approvalId: string
   reason: string
-  estimatedCredits: number
   settled?: boolean
 }
 
@@ -400,8 +392,6 @@ const userInput = ref('')
 const isGenerating = ref(false)
 
 const intensity = ref<Intensity>('standard')
-
-const creditBalance = ref<number>()
 
 const wireframePreviewUrl = ref('')
 const messagesContainer = ref<HTMLElement>()
@@ -550,17 +540,6 @@ const ensureAgentToken = async () => {
     throw new Error(tokenRes.data.message || '获取生成凭据失败')
   }
   return tokenRes.data.data
-}
-
-const loadCreditBalance = async () => {
-  try {
-    const res = await getCreditBalance()
-    if (res.data.code === 0) {
-      creditBalance.value = res.data.data
-    }
-  } catch (error) {
-    console.error('获取积分余额失败：', error)
-  }
 }
 
 const sendMessage = async () => {
@@ -746,8 +725,6 @@ const submitTurn = async (
   } finally {
     isGenerating.value = false
     streamAbortController.value = null
-    await loadCreditBalance()
-    setTimeout(() => void loadCreditBalance(), 2000)
     await nextTick()
     scrollToBottom()
   }
@@ -790,7 +767,6 @@ const handleAgentEvent = (event: AgentStreamEvent, aiMessageIndex: number) => {
         content: '',
         approvalId: event.approval.approvalId,
         reason: event.approval.proposal.reason,
-        estimatedCredits: event.approval.proposal.estimatedCredits,
         settled: false,
       }
     } else if (current.type === 'ai') {
@@ -1040,8 +1016,6 @@ const getInputPlaceholder = () => {
 
 onMounted(() => {
   fetchAppInfo()
-  loadCreditBalance()
-
   window.addEventListener('message', (event) => {
     visualEditor.handleIframeMessage(event)
   })

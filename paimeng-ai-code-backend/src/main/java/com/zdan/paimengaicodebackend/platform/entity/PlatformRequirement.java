@@ -15,17 +15,17 @@ public class PlatformRequirement {
     @Id(keyType = KeyType.Generator, value = KeyGenerators.snowFlakeId)
     private Long id;
 
-    @Column("application_id")
+    @Column("appId")
     private Long applicationId;
 
-    @Column("parent_requirement_id")
+    @Column("parentRequirementId")
     private Long parentRequirementId;
 
     private String kind;
 
-    @Column("original_text")
+    @Column("originalText")
     private String originalText;
 
-    @Column(value = "created_at", onInsertValue = "CURRENT_TIMESTAMP")
+    @Column(value = "createdTime", onInsertValue = "CURRENT_TIMESTAMP")
     private LocalDateTime createdAt;
 }

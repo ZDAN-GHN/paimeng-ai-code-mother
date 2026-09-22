@@ -14,26 +14,26 @@ public class PlatformRun {
     @Id(keyType = KeyType.None)
     private String id;
 
-    @Column("application_id")
+    @Column("appId")
     private Long applicationId;
 
-    @Column("task_id")
+    @Column("taskId")
     private Long taskId;
 
     private String state;
 
-    @Column("attempt_number")
+    @Column("attemptNumber")
     private Integer attemptNumber;
 
-    @Column("started_at")
+    @Column("startedTime")
     private LocalDateTime startedAt;
 
-    @Column("finished_at")
+    @Column("finishedTime")
     private LocalDateTime finishedAt;
 
-    @Column(value = "created_at", onInsertValue = "CURRENT_TIMESTAMP")
+    @Column(value = "createdTime", onInsertValue = "CURRENT_TIMESTAMP")
     private LocalDateTime createdAt;
 
-    @Column(value = "updated_at", onInsertValue = "CURRENT_TIMESTAMP", onUpdateValue = "CURRENT_TIMESTAMP")
+    @Column(value = "updatedTime", onInsertValue = "CURRENT_TIMESTAMP", onUpdateValue = "CURRENT_TIMESTAMP")
     private LocalDateTime updatedAt;
 }

@@ -15,44 +15,44 @@ public class PlatformTask {
     @Id(keyType = KeyType.Generator, value = KeyGenerators.snowFlakeId)
     private Long id;
 
-    @Column("application_id")
+    @Column("appId")
     private Long applicationId;
 
-    @Column("requirement_id")
+    @Column("requirementId")
     private Long requirementId;
 
-    @Column("parent_task_id")
+    @Column("parentTaskId")
     private Long parentTaskId;
 
     private String state;
 
-    @Column("blocked_question")
+    @Column("blockedQuestion")
     private String blockedQuestion;
 
-    @Column("baseline_schema_version")
+    @Column("baselineSchemaVersion")
     private Integer baselineSchemaVersion;
 
-    @Column("base_profile_version")
+    @Column("baseProfileVersion")
     private Long baseProfileVersion;
 
-    @Column("base_source_revision")
+    @Column("baseSourceRevision")
     private String baseSourceRevision;
 
-    @Column("requested_outcome")
+    @Column("requestedOutcome")
     private String requestedOutcome;
 
-    @Column("acceptance_target")
+    @Column("acceptanceTarget")
     private String acceptanceTarget;
 
-    @Column("baseline_json")
+    @Column("baselineJson")
     private String baselineJson;
 
-    @Column("failure_code")
+    @Column("failureCode")
     private String failureCode;
 
-    @Column(value = "created_at", onInsertValue = "CURRENT_TIMESTAMP")
+    @Column(value = "createdTime", onInsertValue = "CURRENT_TIMESTAMP")
     private LocalDateTime createdAt;
 
-    @Column(value = "updated_at", onInsertValue = "CURRENT_TIMESTAMP", onUpdateValue = "CURRENT_TIMESTAMP")
+    @Column(value = "updatedTime", onInsertValue = "CURRENT_TIMESTAMP", onUpdateValue = "CURRENT_TIMESTAMP")
     private LocalDateTime updatedAt;
 }

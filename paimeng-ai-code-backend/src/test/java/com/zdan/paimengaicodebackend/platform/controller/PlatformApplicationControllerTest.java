@@ -14,9 +14,12 @@ import com.zdan.paimengaicodebackend.exception.ErrorCode;
 import com.zdan.paimengaicodebackend.exception.GlobalExceptionHandler;
 import com.zdan.paimengaicodebackend.model.entity.User;
 import com.zdan.paimengaicodebackend.platform.service.PlatformApplicationManagementService;
+import com.zdan.paimengaicodebackend.platform.vo.PlatformApplicationInitialRequirementVO;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformApplicationVO;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformRequirementVO;
 import com.zdan.paimengaicodebackend.service.UserService;
+import com.mybatisflex.core.paginate.Page;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -68,6 +71,45 @@ class PlatformApplicationControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.code").value(0))
             .andExpect(jsonPath("$.data.normalizationStatus").value("PENDING_NORMALIZATION"));
+    }
+
+    @Test
+    void ownerCanStartApplicationFromHomepageAndListIt() throws Exception {
+        User owner = user(OWNER_ID, "user");
+        PlatformApplicationInitialRequirementVO startResult = new PlatformApplicationInitialRequirementVO();
+        startResult.setApplication(application());
+        startResult.setRequirement(requirement());
+        Page<PlatformApplicationVO> applications = new Page<>(1, 12, 1);
+        applications.setRecords(List.of(application()));
+        Page<PlatformRequirementVO> requirements = new Page<>(1, 20, 1);
+        requirements.setRecords(List.of(requirement()));
+        when(userService.getLoginUser(any())).thenReturn(owner);
+        when(managementService.createApplicationWithInitialRequirement(eq(owner), eq("Product"), eq("Build it")))
+            .thenReturn(startResult);
+        when(managementService.listMyApplications(eq(owner), eq(1L), eq(12L))).thenReturn(applications);
+        when(managementService.listRequirements(eq(APPLICATION_ID), eq(owner), eq(1L), eq(20L)))
+            .thenReturn(requirements);
+
+        mockMvc
+            .perform(
+                post("/platform/applications/initial-requirement")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"name\":\"Product\",\"originalText\":\"Build it\"}")
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value(0))
+            .andExpect(jsonPath("$.data.application.id").value(APPLICATION_ID))
+            .andExpect(jsonPath("$.data.requirement.normalizationStatus").value("PENDING_NORMALIZATION"));
+        mockMvc
+            .perform(get("/platform/applications?pageNum=1&pageSize=12"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value(0))
+            .andExpect(jsonPath("$.data.records[0].id").value(APPLICATION_ID));
+        mockMvc
+            .perform(get("/platform/applications/{applicationId}/requirements?pageNum=1&pageSize=20", APPLICATION_ID))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value(0))
+            .andExpect(jsonPath("$.data.records[0].id").value(301L));
     }
 
     @Test

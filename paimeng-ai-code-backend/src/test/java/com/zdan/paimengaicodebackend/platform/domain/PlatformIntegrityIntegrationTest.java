@@ -7,14 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.mybatisflex.core.query.QueryWrapper;
 import com.zdan.paimengaicodebackend.exception.BusinessException;
+import com.zdan.paimengaicodebackend.mapper.AppMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformApplicationLifecycleEventMapper;
-import com.zdan.paimengaicodebackend.mapper.platform.PlatformApplicationMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformRequirementMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformRunMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformRunTransitionEventMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformTaskMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformTaskTransitionEventMapper;
-import com.zdan.paimengaicodebackend.platform.entity.PlatformApplication;
+import com.zdan.paimengaicodebackend.model.entity.App;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformApplicationLifecycleEvent;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRequirement;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRun;
@@ -32,7 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 class PlatformIntegrityIntegrationTest {
 
     @Autowired
-    private PlatformApplicationMapper applicationMapper;
+    private AppMapper appMapper;
 
     @Autowired
     private PlatformRequirementMapper requirementMapper;
@@ -73,15 +73,18 @@ class PlatformIntegrityIntegrationTest {
 
         archiveService.archive(
             graph.application().getId(),
-            graph.application().getOwnerId(),
+            graph.application().getUserId(),
             PlatformActor.OWNER,
             "OWNER_REQUEST",
             "archive-request"
         );
 
-        assertNull(applicationMapper.selectOneByQuery(byId(graph.application().getId())));
+        assertEquals(
+            "ARCHIVED",
+            appMapper.selectOneByQuery(byId(graph.application().getId())).getLifecycleStatus()
+        );
         assertEquals(1, lifecycleEventMapper.selectCountByQuery(
-            QueryWrapper.create().eq("application_id", graph.application().getId()).eq("event_type", "ARCHIVED")
+            QueryWrapper.create().eq("appId", graph.application().getId()).eq("eventType", "ARCHIVED")
         ));
     }
 
@@ -97,7 +100,7 @@ class PlatformIntegrityIntegrationTest {
 
         assertThrows(BusinessException.class, () -> archiveService.archive(
             graph.application().getId(),
-            graph.application().getOwnerId(),
+            graph.application().getUserId(),
             PlatformActor.OWNER,
             "OWNER_REQUEST",
             "archive-active-run"
@@ -107,8 +110,8 @@ class PlatformIntegrityIntegrationTest {
     @Test
     void enforcesLogicalApplicationOwnership() {
         Graph graph = createGraph();
-        PlatformApplication otherApplication = application(99L);
-        applicationMapper.insertSelective(otherApplication);
+        App otherApplication = application(99L);
+        appMapper.insertSelective(otherApplication);
 
         assertThrows(BusinessException.class, () -> relationValidator.requireRequirementBelongsToApplication(
             otherApplication.getId(),
@@ -136,13 +139,13 @@ class PlatformIntegrityIntegrationTest {
         Graph archiveGraph = createGraph();
         archiveService.archive(
             archiveGraph.application().getId(),
-            archiveGraph.application().getOwnerId(),
+            archiveGraph.application().getUserId(),
             PlatformActor.OWNER,
             "OWNER_REQUEST",
             "append-only-archive"
         );
         PlatformApplicationLifecycleEvent lifecycleEvent = lifecycleEventMapper.selectOneByQuery(
-            QueryWrapper.create().eq("application_id", archiveGraph.application().getId())
+            QueryWrapper.create().eq("appId", archiveGraph.application().getId())
         );
         PlatformApplicationLifecycleEvent lifecycleUpdate = new PlatformApplicationLifecycleEvent();
         lifecycleUpdate.setReasonCode("changed");
@@ -176,7 +179,7 @@ class PlatformIntegrityIntegrationTest {
         );
 
         PlatformTaskTransitionEvent taskEvent = taskTransitionEventMapper.selectOneByQuery(
-            QueryWrapper.create().eq("task_id", transitionGraph.task().getId())
+            QueryWrapper.create().eq("taskId", transitionGraph.task().getId())
         );
         PlatformTaskTransitionEvent taskUpdate = new PlatformTaskTransitionEvent();
         taskUpdate.setReasonCode("changed");
@@ -188,7 +191,7 @@ class PlatformIntegrityIntegrationTest {
         assertThrows(DataAccessException.class, () -> taskTransitionEventMapper.deleteById(taskEvent.getId()));
 
         PlatformRunTransitionEvent runEvent = runTransitionEventMapper.selectOneByQuery(
-            QueryWrapper.create().eq("run_id", transitionGraph.run().getId())
+            QueryWrapper.create().eq("runId", transitionGraph.run().getId())
         );
         PlatformRunTransitionEvent runUpdate = new PlatformRunTransitionEvent();
         runUpdate.setReasonCode("changed");
@@ -228,16 +231,16 @@ class PlatformIntegrityIntegrationTest {
         assertEquals("READY", taskMapper.selectOneByQuery(byId(graph.task().getId())).getState());
         assertEquals("LEASED", runMapper.selectOneByQuery(byId(graph.run().getId())).getState());
         assertEquals(1, taskTransitionEventMapper.selectCountByQuery(
-            QueryWrapper.create().eq("task_id", graph.task().getId())
+            QueryWrapper.create().eq("taskId", graph.task().getId())
         ));
         assertEquals(1, runTransitionEventMapper.selectCountByQuery(
-            QueryWrapper.create().eq("run_id", graph.run().getId())
+            QueryWrapper.create().eq("runId", graph.run().getId())
         ));
     }
 
     private Graph createGraph() {
-        PlatformApplication application = application(1L);
-        applicationMapper.insertSelective(application);
+        App application = application(1L);
+        appMapper.insertSelective(application);
 
         PlatformRequirement requirement = new PlatformRequirement();
         requirement.setApplicationId(application.getId());
@@ -262,11 +265,13 @@ class PlatformIntegrityIntegrationTest {
         return new Graph(application, requirement, task, run);
     }
 
-    private PlatformApplication application(long ownerId) {
-        PlatformApplication application = new PlatformApplication();
-        application.setOwnerId(ownerId);
-        application.setName("synthetic platform application");
-        application.setIsDeleted(0);
+    private App application(long ownerId) {
+        App application = new App();
+        application.setUserId(ownerId);
+        application.setAppName("synthetic platform application");
+        application.setCodeGenType("html");
+        application.setIsDelete(0);
+        application.setLifecycleStatus("ACTIVE");
         return application;
     }
 
@@ -279,7 +284,7 @@ class PlatformIntegrityIntegrationTest {
     }
 
     private record Graph(
-        PlatformApplication application,
+        App application,
         PlatformRequirement requirement,
         PlatformTask task,
         PlatformRun run

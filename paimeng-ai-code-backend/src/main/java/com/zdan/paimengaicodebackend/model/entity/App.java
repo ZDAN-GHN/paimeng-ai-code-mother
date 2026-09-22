@@ -62,4 +62,16 @@ public class App implements Serializable {
 
     @Column(value = "isDelete", isLogicDelete = true)
     private Integer isDelete;
+
+    @Column("lifecycleStatus")
+    private String lifecycleStatus;
+
+    @Column("archivedTime")
+    private LocalDateTime archivedTime;
+
+    @Column("archivedBy")
+    private Long archivedBy;
+
+    @Column("archiveReason")
+    private String archiveReason;
 }

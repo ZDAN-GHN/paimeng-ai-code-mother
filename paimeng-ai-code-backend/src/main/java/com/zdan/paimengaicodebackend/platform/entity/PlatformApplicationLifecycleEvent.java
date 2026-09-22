@@ -15,24 +15,24 @@ public class PlatformApplicationLifecycleEvent {
     @Id(keyType = KeyType.Generator, value = KeyGenerators.snowFlakeId)
     private Long id;
 
-    @Column("application_id")
+    @Column("appId")
     private Long applicationId;
 
-    @Column("event_type")
+    @Column("eventType")
     private String eventType;
 
-    @Column("actor_type")
+    @Column("actorType")
     private String actorType;
 
-    @Column("actor_id")
+    @Column("actorId")
     private Long actorId;
 
-    @Column("reason_code")
+    @Column("reasonCode")
     private String reasonCode;
 
-    @Column("request_id")
+    @Column("requestId")
     private String requestId;
 
-    @Column("occurred_at")
+    @Column("occurredTime")
     private LocalDateTime occurredAt;
 }

@@ -32,6 +32,8 @@ public class ChatHistoryServiceImpl
     implements ChatHistoryService
 {
 
+    private static final String ACTIVE_LIFECYCLE_STATUS = "ACTIVE";
+
     private final AppService appService;
 
     public ChatHistoryServiceImpl(@Lazy AppService appService) {
@@ -101,6 +103,11 @@ public class ChatHistoryServiceImpl
 
         App app = appService.getById(appId);
         ThrowUtils.throwIf(app == null, ErrorCode.NOT_FOUND_ERROR, "应用不存在");
+        ThrowUtils.throwIf(
+            !ACTIVE_LIFECYCLE_STATUS.equals(app.getLifecycleStatus()),
+            ErrorCode.NOT_FOUND_ERROR,
+            "应用不存在"
+        );
         boolean isAdmin = UserConstant.ADMIN_ROLE.equals(loginUser.getUserRole());
         boolean isCreator = app.getUserId().equals(loginUser.getId());
         ThrowUtils.throwIf(

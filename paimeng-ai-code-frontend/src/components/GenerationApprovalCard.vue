@@ -5,7 +5,6 @@
       <span>确认开始生成</span>
     </div>
     <p class="approval-reason">{{ reason }}</p>
-    <div class="approval-estimate">预计冻结 {{ estimatedCredits }} 积分</div>
     <div class="approval-actions">
       <a-button type="primary" :loading="loading" :disabled="disabled" @click="emit('confirm')">
         确认并开始生成
@@ -19,7 +18,6 @@ import { SafetyCertificateOutlined } from '@ant-design/icons-vue'
 
 defineProps<{
   reason: string
-  estimatedCredits: number
   disabled?: boolean
   loading?: boolean
 }>()
@@ -52,11 +50,6 @@ const emit = defineEmits<{
 .approval-reason {
   margin: 8px 0 4px;
   color: #595959;
-}
-
-.approval-estimate {
-  color: #8c8c8c;
-  font-size: 13px;
 }
 
 .approval-actions {
