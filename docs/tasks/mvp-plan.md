@@ -61,16 +61,17 @@ D-04 订阅运营参数 ──────────────────�
 
 - 状态：`Approved`。MVP 固定使用单机 Docker Engine，Platform 受控执行器独占 Docker API；TS Runtime、Pi Adapter 和 Sandbox 无 Docker Socket 或等价宿主机控制权。完整边界见 `AD-016`。
 - 隔离：每个写入型 Run 使用非 root、无特权、只读根文件系统的独立容器与独立 Workspace；固定上限为 2 vCPU、4 GiB 内存、256 PIDs、2 GiB Workspace tmpfs 和 512 MiB `/tmp` tmpfs。Sandbox 默认无外网、无宿主机挂载、无 Production 网络/凭据，且仅通过 Run 专属 internal network 访问短生命周期验证数据库。
-- Deployment：Platform Deployment Controller 从固定 Release 创建内部健康检查通过后才可公开的独立容器；公开 URL/TLS 仍由 D-03 决定。取消或终态 Run 以 10 秒优雅停止后强制清理 Sandbox、临时网络、验证数据库和 Workspace。
-- 已解除：`T-05`、`T-07`、`T-09` 的执行后端决策阻塞；`T-09` 仍等待 D-03，`T-06` 仍等待 D-05。
+- Deployment：Platform Deployment Controller 从固定 Release 创建内部健康检查通过后才可公开的独立容器；公开 URL/TLS 按 D-03 的共享路径入口执行。取消或终态 Run 以 10 秒优雅停止后强制清理 Sandbox、临时网络、验证数据库和 Workspace。
+- 已解除：`T-05`、`T-07`、`T-09` 的执行后端决策阻塞；`T-09` 仍等待任务 6 至任务 8，`T-06` 仍等待 D-05。
 - 验收：实现必须以容器 inspect 与隔离测试证明资源限制、无 Docker Socket/宿主机挂载、无外网、不可访问其他 Workspace/Production、取消清理和内部健康检查；`docker compose config` 是基础设施静态验证入口。
 
 ### D-03：公共 URL 与 TLS 最小策略
 
-- 对应：`OQ-004`。
-- 需要决定：Application URL 分配、DNS/TLS 所有权、URL 生命周期及健康检查失败时的行为。
-- 影响：阻塞 `T-09`、`T-10`。
-- 验收：决策记录给出 URL 格式、TLS 终止位置、健康路由和失败/回滚后的可观察行为。
+- 状态：`Approved`。MVP 不申请或分配 Application 独立域名；统一使用 Platform 服务器既有域名下的 `https://<platform-host>/apps/<application-id>/` 路径，本地开发使用 `http://localhost/apps/<application-id>/`。完整边界见 `AD-017`。
+- TLS 与健康：Production TLS 仅在统一 Nginx ingress 终止，Deployment 容器不发布宿主机端口。ingress 仅在内部 `GET /healthz` 成功后挂载路径；固定模板必须支持 Platform 注入的 path base。
+- 可观察行为：首次部署未健康时无公开路由并返回 `404`；后续版本健康前保留旧健康路由，失败时保持或恢复上一健康 Deployment；没有健康 Deployment 的已发布路径返回 `503`。归档或订阅停服移除路径并返回 `404`，恢复仅挂载上一健康 Deployment。
+- 已解除：`T-09`、`T-10` 的公开 URL/TLS 决策阻塞；它们仍受 Release、Validation 和部署上游任务约束。
+- 验收：实现必须验证稳定路径、内部健康检查、首次失败无公开路由、后续失败不改变旧健康路由、归档/停服撤流和恢复挂载；`docker compose config` 是静态验证入口。
 
 ### D-04：订阅运营参数与外部接入范围
 
@@ -98,7 +99,7 @@ D-04 订阅运营参数 ──────────────────�
 
 ### D-07：Application 删除与数据保留语义
 
-- 状态：`Approved`。删除是逻辑归档：仅 Owner/System Administrator 可发起；归档前无活跃写入型 Run；公开运行立即不可用，关联事实、证据、版本和数据库保留；MVP 不提供物理删除或恢复 API/UI。具体撤流机制仍待 D-03。
+- 状态：`Approved`。删除是逻辑归档：仅 Owner/System Administrator 可发起；归档前无活跃写入型 Run；公开运行立即不可用，关联事实、证据、版本和数据库保留；MVP 不提供物理删除或恢复 API/UI。D-03 已固定为移除共享路径入口并返回 `404`。
 - 对应：审查发现 P4；解决 `R-001` 的删除能力与 MVP 排除最终数据删除治理之间的语义缺口。
 - 已解除：`T-02`、`T-03` 的删除语义阻塞。
 
@@ -427,8 +428,8 @@ D-04 订阅运营参数 ──────────────────�
 | 风险 | 影响 | 缓解 |
 | --- | --- | --- |
 | 未定义 Task/Run 转换、取消、失败或重新归一化 | 高 | D-06 先写入工程规格和 Issue #65；任务 1、5、8 只按已批准矩阵实现与测试。 |
-| 未定义 Application 删除后的公开入口、证据链和数据处理 | 高 | D-07 已锁定逻辑归档：任务 2、3 按已批准的归档/停用公开入口语义实现授权成功、拒绝和后置行为；具体撤流机制仍等待 D-03。 |
-| 在剩余 OQ 或 D-03 至 D-05 未解决时自行选择域名、订阅或 Snapshot 行为 | 高 | 对应决策必须由维护者记录；相关任务在 `todo.md` 标注为阻塞。 |
+| 未定义 Application 删除后的公开入口、证据链和数据处理 | 高 | D-07/D-03 已锁定逻辑归档与共享路径撤流：任务 2、3 按已批准语义实现授权成功、拒绝和后置行为。 |
+| 在剩余 OQ 或 D-04 至 D-05 未解决时自行选择订阅或 Snapshot 行为 | 高 | 对应决策必须由维护者记录；相关任务在 `todo.md` 标注为阻塞。 |
 | Run Context 在 D-02 前被错误冻结，或基线/能力在不同服务中被各自定义 | 高 | 任务 1 仅冻结 `TaskExecutionBaseline`；任务 4 只解析该基线；任务 5 在 D-02 后版本化 `ExecutionCapabilities`、组装复合 Run Context，并以跨服务夹具验证完整 Adapter 映射和不兼容版本拒绝。 |
 | 订阅停服/恢复只在后端发生，Owner 无法读取状态 | 高 | 任务 11 同时交付状态 API、OpenAPI 类型、Vue 视图和四种状态的权限/手动验证。 |
 | 将旧 `App`/`GenerationRun` 或 Pi Session 当作新 Platform 真相 | 高 | 任务 1、4、6 的测试要求可追溯领域状态与 Engine 状态分离。 |
@@ -440,7 +441,7 @@ D-04 订阅运营参数 ──────────────────�
 
 ## 执行前检查
 
-- [ ] D-03、D-04 已在开始对应受阻任务前由维护者决定并记录；D-05 已在任务 6 前记录；D-01、D-02、D-06、D-07 已写入工程规格与对应 Issue。
+- [ ] D-04 已在开始对应受阻任务前由维护者决定并记录；D-05 已在任务 6 前记录；D-01、D-02、D-03、D-06、D-07 已写入工程规格与对应 Issue。
 - [ ] 每个实施任务已由 `to-tickets` 建为独立 GitHub Issue，并使用原生依赖关系表达上游阻塞。
 - [ ] 每个 Issue 保留本计划引用的 `R-`、`AC-`、`AD-`、`CST-`、`CT-` 与适用 `OQ-`。
 - [ ] 任务执行前调用 `task-evidence-analysis`，并按项目规则记录目标、范围、验证、风险和回滚。
@@ -455,5 +456,5 @@ D-04 订阅运营参数 ──────────────────�
 - 改动范围：新增 `docs/tasks/plan.md` 与 `docs/tasks/todo.md`，并根据审查修订任务依赖、验收与检查点；不修改代码、不创建 GitHub 任务 Issue、不执行基础设施或生产操作。
 - 实际验证：已检查计划包含 12 个实施任务、4 个检查点、7 个决策门，且覆盖 `R-001` 至 `R-007` 与 `SAC-001` 至 `SAC-003`；两份 Markdown 均通过空白错误检查和敏感信息赋值扫描。
 - 审查结论：P2 至 P7 已在计划层消除；D-06 状态和 D-07 删除语义已由维护者决定并锁定，后续实施只能按对应契约执行。
-- 未解决风险：D-03、D-04 必须在其对应受阻任务开始前由维护者决定，D-05 必须在任务 6 前记录；在此之前不得启动相关实现。
+- 未解决风险：D-04 必须在其对应受阻任务开始前由维护者决定，D-05 必须在任务 6 前记录；在此之前不得启动相关实现。
 - 回滚：删除本次新增的 `docs/tasks/` 目录；不影响已发布的规格 Issue #65。

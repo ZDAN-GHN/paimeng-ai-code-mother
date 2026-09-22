@@ -43,8 +43,8 @@ Platform Layer
   + 写入 Lease、Sandbox、构建、生产迁移、健康检查、日志、回滚、订阅生命周期
 ```
 
-- 关键已锁定决策：`AD-001` 至 `AD-016`。
-- 关键未决问题：`OQ-002`、`OQ-004`、`OQ-005`；均不阻塞当前工程规格审查，但在对应实现开始前必须决定。
+- 关键已锁定决策：`AD-001` 至 `AD-017`。
+- 关键未决问题：`OQ-002`、`OQ-005`；均不阻塞当前工程规格审查，但在对应实现开始前必须决定。
 
 ## 需求
 
@@ -60,7 +60,7 @@ Platform Layer
 - 成功条件：Owner 能管理其 Application；其他平台用户不能修改或归档；归档 Application 不再提供公开运行入口；公众不能因访问运行入口获得管理权限。
 - 失败 / 异常条件：非授权管理操作被拒绝；存在活跃写入型 Run 时归档被拒绝；未健康 Deployment 不被表述为已上线。
 - 关联约束：`CST-001`、`CST-008`
-- 关联决策：`AD-001`、`AD-010`、`AD-015`
+- 关联决策：`AD-001`、`AD-010`、`AD-015`、`AD-017`
 - 关联契约：`CT-001`、`CT-005`
 
 验收标准：
@@ -169,7 +169,7 @@ Platform Layer
 - 成功条件：Release 与 Deployment 可独立追溯；健康 Deployment 精确指向运行中的 Release；后续更新未确认前不改变 Production。
 - 失败 / 异常条件：平台暂态故障可以重试或保持上一健康版本；应用缺陷形成新的 Run 和新版本，不能自动连续推送。
 - 关联约束：`CST-008`、`CST-010`
-- 关联决策：`AD-010`、`AD-011`
+- 关联决策：`AD-010`、`AD-011`、`AD-017`
 - 关联契约：`CT-004`、`CT-005`
 
 验收标准：
@@ -561,12 +561,12 @@ Requirement + Trusted Profile + Task Baseline
 - 状态：`Locked Decision`，维护者已明确决定。
 - 来源：维护者对 Issue #72 的批准；`R-001`、`AD-012`、`CST-011`。
 - 决定：Application 的“删除”语义为逻辑归档，不执行物理删除、数据清理或自动恢复。归档由 Owner 或 System Administrator 发起；非授权主体被拒绝。归档前不得存在活跃写入型 Run，须先完成取消并释放 Lease。
-- 公开与关联事实：归档立即停止关联 Deployment 的公开可用性；Application、Requirement、Task、Run、Profile、Snapshot、SourceRevision、Release、Deployment、数据库、日志和归档审计证据均保留且不再接受 Requirement、Task、Run、发布或恢复公开运行请求。公开 URL 的具体撤流方式留待 `OQ-004`，但归档后的可观察结果必须为不可用。
+- 公开与关联事实：归档立即停止关联 Deployment 的公开可用性；Application、Requirement、Task、Run、Profile、Snapshot、SourceRevision、Release、Deployment、数据库、日志和归档审计证据均保留且不再接受 Requirement、Task、Run、发布或恢复公开运行请求。按 `AD-017` 从共享路径入口移除路由后，归档 Application 的公开请求统一返回 `404`。
 - 恢复边界：MVP 不提供恢复 API/UI；重新激活、最终物理删除和保留期治理须经独立维护者决策，不能由管理员脚本或旧 `App` 删除接口绕过。
 - 原因：保持 Application 长期事实、证据链和未来治理选择，避免与 `AD-012` 的保留约束冲突。
 - 关联需求：`R-001`、`R-006`、`R-007`
 - 关联约束：`CST-001`、`CST-008`、`CST-011`
-- 关联未决问题：`OQ-004`、`OQ-005`
+- 关联未决问题：`OQ-005`
 
 ### AD-016：单机 Docker Engine 作为受控执行后端
 
@@ -575,14 +575,29 @@ Requirement + Trusted Profile + Task Baseline
 - 决定：MVP 使用单机 Docker Engine 作为唯一 Sandbox、隔离验证和 Deployment 执行后端。Platform 受控执行器独占 Docker API 权限；TS Runtime、Pi Adapter 和 Sandbox 均不得持有 Docker Socket、Docker CLI 凭据或等价宿主机控制权。Kubernetes、托管容器平台和多节点调度不在 MVP 范围。
 - Sandbox：每个写入型 Run 创建独立、短生命周期容器和独立 Workspace。容器以非 root 用户运行，使用只读根文件系统、`cap-drop=ALL`、`no-new-privileges`、默认 seccomp/AppArmor，禁止 privileged、宿主机设备、宿主机目录和 Docker Socket 挂载。每个 Sandbox 固定限制为 2 vCPU、4 GiB 内存、256 PIDs、2 GiB Workspace tmpfs 和 512 MiB `/tmp` tmpfs；基础模板镜像预置锁定依赖，Sandbox 默认无外网，运行时不得任意下载依赖。
 - 网络与数据：Sandbox 和隔离验证数据库仅加入 Run 专属 internal Docker network。验证数据库使用短生命周期 MySQL 容器和仅对当前 Run 有效的非生产凭据；Production 网络、Production 数据库、Platform 管理 API 和其他 Run Workspace 一律不可达。Platform 在受信任边界提取 Snapshot、结构化 Evidence 和受限日志；Agent 不可直接读取或写入这些长期事实。
-- Deployment：Platform Deployment Controller 从固定 Release 创建独立应用容器及其持久化数据服务；Deployment 容器不发布宿主机端口，先在内部网络执行健康检查。公开路由、域名和 TLS 仍由 `OQ-004` / Issue #68 决定；Agent 永远不能创建、停止、检查或回滚 Deployment。
+- Deployment：Platform Deployment Controller 从固定 Release 创建独立应用容器及其持久化数据服务；Deployment 容器不发布宿主机端口，先在内部网络执行健康检查。公开路由、域名和 TLS 按 `AD-017` 的共享路径入口执行；Agent 永远不能创建、停止、检查或回滚 Deployment。
 - 清理与验证：取消或终态 Run 在 10 秒优雅停止期后强制终止；受信任 Snapshot 已提取或无需提取时，执行器删除 Sandbox、Run 专属网络、临时数据库和 Workspace。实现任务必须通过容器 inspect 与隔离测试证明资源限制、无 Docker Socket/宿主机挂载、无外网、不可访问其他 Workspace/Production、取消清理和内部健康检查；`docker compose config` 是基础设施静态验证入口。
 - 原因：复用当前已存在的 Docker/Compose 运维基础，在不把宿主机控制权暴露给 Agent 的前提下提供可测试的一 Run 一 Sandbox、隔离验证和固定 Release 执行路径。
-- 影响：`T-05`、`T-07`、`T-09` 可依据同一执行边界实现；`T-09` 仍等待公共 URL/TLS 决策，`T-06` 仍等待 Snapshot 物理存储决策。
+- 影响：`T-05`、`T-07`、`T-09` 可依据同一执行边界实现；`T-09` 按 `AD-017` 的共享路径入口执行，`T-06` 仍等待 Snapshot 物理存储决策。
 - 后果：单机容量和 Docker Engine 可用性是 MVP 运行约束；需要多节点调度、弹性扩缩、直接外网依赖安装或其他容器后端时，必须以新的架构决策替换本决定。
 - 关联需求：`R-003`、`R-005`、`R-006`。
 - 关联约束：`CST-004`、`CST-005`、`CST-006`、`CST-009`、`CST-010`。
-- 关联未决问题：`OQ-004`、`OQ-005`。
+- 关联未决问题：`OQ-005`。
+
+### AD-017：共享 Platform 域名的 Application 路径入口
+
+- 状态：`Locked Decision`，维护者已明确决定。
+- 来源：维护者对 Issue #68 的批准；当前 Docker/Nginx 本地入口、`R-001`、`R-006`、`AD-015` 和 `AD-016`。
+- 决定：MVP 不申请、分配或验证 Application 独立域名。所有 Application 使用 Platform 服务器既有域名下的稳定路径：Production 为 `https://<platform-host>/apps/<application-id>/`，本地开发为 `http://localhost/apps/<application-id>/`。`application-id` 是创建后不变的地址标识，Release、Deployment、回滚或 Application 名称变更均不得改变该路径。
+- TLS 与路由：Production TLS 仅在 Platform 统一 Nginx ingress 终止；证书和 `platform-host` 是部署环境配置，由 Platform 运维边界管理，不在代码、Agent 上下文或 Application 配置中硬编码。开发回环可使用 HTTP。Deployment 容器不发布宿主机端口，ingress 仅在内部健康检查通过后将对应 `/apps/<application-id>/` 前缀代理至当前健康 Deployment；固定模板必须支持由 Platform 注入的 path base，不能假定运行于域名根路径。
+- 健康、失败与回滚：健康探测只经内部 Deployment network 调用应用 `GET /healthz`。首次 Deployment 未健康时不创建公开路由，访问该路径返回 `404`；后续 Deployment 在新版本健康前保持旧健康路由不变，健康失败时继续或恢复上一健康 Deployment。没有任何健康 Deployment 的已发布路径返回 `503`，且不得泄露容器、版本、日志或基础设施细节。
+- 停用：Application 归档、订阅宽限结束停服或 Platform 明确撤流时移除公开路由并返回 `404`；这不删除 Application、Release、Deployment、数据库、日志或审计事实。恢复订阅时仅重新挂载上一健康 Deployment 到同一路径。
+- 非范围：Owner 自定义域名、通配子域、每 Application DNS 记录、自动证书签发、DNS 验证和多域名迁移均延期；需要这些能力时必须新增独立架构决策。
+- 原因：共享路径入口复用 Platform 现有服务器域名和统一 ingress，避免在开发阶段引入域名采购、DNS 生命周期或证书管理，同时保留稳定可验证的公开地址。
+- 影响：`T-09`、`T-10` 可实现相同域名下的固定路径路由；现有静态 `/{deployKey}` 本地演示路由不得成为新 Platform 公开入口，须在 `T-09` 由支持 path base 的 ingress 配置替换。
+- 关联需求：`R-001`、`R-006`、`R-007`。
+- 关联约束：`CST-008`、`CST-010`、`CST-011`。
+- 关联未决问题：`OQ-005`。
 
 ## 系统边界
 
@@ -593,7 +608,7 @@ Requirement + Trusted Profile + Task Baseline
 - 允许：Owner 以业务语言提交需求、回答澄清、确认更新发布。
 - 禁止：普通平台用户管理他人 Application；公众访问运行入口后执行 Platform 管理操作。
 - 权威方：Platform Domain。
-- 关联需求 / 决策 / 约束：`R-001`、`R-002`、`R-006`、`R-007`；`AD-001`、`AD-011`、`AD-015`；`CST-008`
+- 关联需求 / 决策 / 约束：`R-001`、`R-002`、`R-006`、`R-007`；`AD-001`、`AD-011`、`AD-015`、`AD-017`；`CST-008`
 
 ### Agent Boundary
 
@@ -629,7 +644,7 @@ Requirement + Trusted Profile + Task Baseline
 - 允许：Platform 在确认发布后部署 validated Release；对暂态故障重试或保持上一健康版本。
 - 禁止：Agent 直接操作实例、读取生产密钥、直接连接生产数据库、执行生产迁移或切换流量；自动反向迁移数据库。
 - 权威方：Platform Deployment Controller。
-- 关联需求 / 决策 / 约束：`R-006`、`R-007`；`AD-010`、`AD-011`、`AD-012`、`AD-015`；`CST-008`、`CST-009`、`CST-010`、`CST-011`
+- 关联需求 / 决策 / 约束：`R-006`、`R-007`；`AD-010`、`AD-011`、`AD-012`、`AD-015`、`AD-017`；`CST-008`、`CST-009`、`CST-010`、`CST-011`
 
 ## 接口与契约
 
@@ -701,7 +716,7 @@ Requirement + Trusted Profile + Task Baseline
 - 约束：首次 validated 版本自动部署；后续更新需 Owner 确认；归档立即停止公开运行；Deployment rollback 不回退 Profile/SourceRevision/数据库；订阅停服不删除应用事实或数据。
 - 错误条件：Release 不可部署、健康检查失败、Migration 失败、订阅无效且宽限期结束。
 - 关联需求：`R-001`、`R-006`、`R-007`
-- 关联决策：`AD-010`、`AD-011`、`AD-012`、`AD-015`
+- 关联决策：`AD-010`、`AD-011`、`AD-012`、`AD-015`、`AD-017`
 
 ## 约束
 
@@ -878,16 +893,13 @@ Requirement + Trusted Profile + Task Baseline
 
 - 状态：`Resolved by AD-016`
 - 决定：MVP 固定使用单机 Docker Engine 和 Platform 受控执行器；Sandbox、隔离验证和 Deployment 的权限、网络、资源与清理边界见 `AD-016`。
-- 已解除阻塞：`T-05`、`T-07`、`T-09` 的执行后端决策阻塞；它们仍受各自上游任务及 `OQ-004`、`OQ-002` 约束。
+- 已解除阻塞：`T-05`、`T-07`、`T-09` 的执行后端决策阻塞；它们仍受各自既有上游任务约束，Snapshot 相关工作仍等待 `OQ-002`。
 
 ### OQ-004：公共 URL、域名与 TLS 最小策略
 
-- 状态：`Open Question`
-- 问题：MVP 公共运行入口如何分配域名、绑定 TLS 和表示 URL 生命周期？
-- 为什么尚未解决：已确定公开运行入口，未确定具体地址策略。
-- 影响：影响 `R-001`、`R-006` 的公开入口实现，不改变公众可访问健康 Deployment 的行为。
-- 需要的决策方：维护者。
-- 阻塞的需求 / 决策 / 契约：实现 Production 公开入口前必须决定。
+- 状态：`Resolved by AD-017`
+- 决定：MVP 使用 Platform 既有域名的 `/apps/<application-id>/` 稳定路径；Production 统一 Nginx ingress 终止 TLS，本地回环允许 HTTP。Application 独立域名和 DNS/证书自动化不在 MVP 范围。
+- 已解除阻塞：`T-09`、`T-10` 的公开 URL/TLS 决策阻塞；它们仍受各自既有上游任务依赖约束。
 
 ### OQ-005：订阅宽限期、通知和最终保留期限
 
@@ -922,8 +934,10 @@ Requirement + Trusted Profile + Task Baseline
 | `AD-014` | Architecture Decision | `Locked Decision` | 维护者批准 Issue #66 | `R-003`、`R-005` | 固定 Vue/Vite/Fastify/Prisma/MySQL 模板、版本与验证命令。 |
 | `AD-015` | Architecture Decision | `Locked Decision` | 维护者批准 Issue #72 | `R-001`、`R-006`、`R-007` | Application 逻辑归档、停用公开入口并保留事实，无 MVP 恢复。 |
 | `AD-016` | Architecture Decision | `Locked Decision` | 维护者批准 Issue #67 | `R-003`、`R-005`、`R-006` | 单机 Docker Engine；Platform 独占 Docker 权限；受限 Sandbox、验证与 Deployment。 |
+| `AD-017` | Architecture Decision | `Locked Decision` | 维护者批准 Issue #68 | `R-001`、`R-006`、`R-007` | 共享 Platform 域名下的稳定 Application 路径与统一 TLS ingress。 |
 | `CST-005` | Constraint | `Confirmed` | Grill Me Q14 | `R-003` | Sandbox 真实隔离边界。 |
 | `CST-009` | Constraint | `Confirmed` | 维护者确认 Migration Safety | `R-005` | 仅兼容的 Production Schema Evolution。 |
 | `OQ-001` | Open Question | `Resolved by AD-014` | 维护者批准 Issue #66 | `R-003`、`R-005` | 固定技术栈和 Migration 工具。 |
 | `OQ-003` | Open Question | `Resolved by AD-016` | 维护者批准 Issue #67 | `R-003`、`R-005`、`R-006` | 单机 Docker Engine 与 Platform 受控执行器。 |
+| `OQ-004` | Open Question | `Resolved by AD-017` | 维护者批准 Issue #68 | `R-001`、`R-006` | 共享域名路径和统一 TLS ingress。 |
 | `OQ-005` | Open Question | `Open Question` | 当前未确认 | `R-007` | 订阅运营参数与最终保留策略。 |
