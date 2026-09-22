@@ -55,14 +55,15 @@ D-04 订阅运营参数 ──────────────────�
 
 - 状态：`Approved`。唯一组合为 Node.js `24.20.0`、Vue `3.5.17`、Vite `7.0.4`、Fastify `5.12.3`、Prisma/`@prisma/client` `7.10.0` 和 MySQL `8`；提交锁文件和 SQL migration，命令及兼容 Migration 边界见 `AD-014`。
 - 对应：`OQ-001`。
-- 已解除：`T-04` 的模板选择阻塞；`T-05`、`T-07` 仍受 D-02 和既有任务依赖约束。
+- 已解除：`T-04` 的模板选择阻塞；`T-05`、`T-07` 已按 D-02 固定执行边界，仍受各自既有任务依赖约束。
 
 ### D-02：Sandbox 与 Deployment 执行后端
 
-- 对应：`OQ-003`。
-- 需要决定：隔离容器/执行后端、网络隔离、资源上限、日志收集、验证环境和 Production Deployment 的最小实现。
-- 影响：阻塞 `T-05`、`T-07`、`T-09`；不阻塞仅解析 Platform Task 执行基线的 `T-04`。
-- 验收：决策记录定义宿主机隔离、其他 Workspace 隔离、Production/凭据隔离、清理策略和可复现的本地验证入口。
+- 状态：`Approved`。MVP 固定使用单机 Docker Engine，Platform 受控执行器独占 Docker API；TS Runtime、Pi Adapter 和 Sandbox 无 Docker Socket 或等价宿主机控制权。完整边界见 `AD-016`。
+- 隔离：每个写入型 Run 使用非 root、无特权、只读根文件系统的独立容器与独立 Workspace；固定上限为 2 vCPU、4 GiB 内存、256 PIDs、2 GiB Workspace tmpfs 和 512 MiB `/tmp` tmpfs。Sandbox 默认无外网、无宿主机挂载、无 Production 网络/凭据，且仅通过 Run 专属 internal network 访问短生命周期验证数据库。
+- Deployment：Platform Deployment Controller 从固定 Release 创建内部健康检查通过后才可公开的独立容器；公开 URL/TLS 仍由 D-03 决定。取消或终态 Run 以 10 秒优雅停止后强制清理 Sandbox、临时网络、验证数据库和 Workspace。
+- 已解除：`T-05`、`T-07`、`T-09` 的执行后端决策阻塞；`T-09` 仍等待 D-03，`T-06` 仍等待 D-05。
+- 验收：实现必须以容器 inspect 与隔离测试证明资源限制、无 Docker Socket/宿主机挂载、无外网、不可访问其他 Workspace/Production、取消清理和内部健康检查；`docker compose config` 是基础设施静态验证入口。
 
 ### D-03：公共 URL 与 TLS 最小策略
 
@@ -208,7 +209,7 @@ D-04 订阅运营参数 ──────────────────�
 
 **关联规格：** `R-003`、`AC-007` 至 `AC-010`、`AD-003`、`AD-005`、`CST-004` 至 `CST-006`。
 
-**说明：** 按 D-02 选定的 Sandbox/Deployment 后端和 D-06 已批准的取消/终态规则，实现 Java Platform Domain 与 TS Runtime 之间的 Run Lease、取消和幂等 Platform Request 契约，并在已决定的执行后端上实现一 Run 一 Sandbox/Workspace 的物化、Lease 获取/续租/释放、资源清理和 Tool Contract。此任务定义并版本化 `ExecutionCapabilities`（Workspace 引用、Sandbox Tool Contract、Execution Policy），由 Runtime 将任务 1 的不可变 `TaskExecutionBaseline` 与该能力片段组装为复合 `Run Context`；新增能力只能通过 capability schema version 演进，不能改写 Task 基线 schema。该任务把隔离边界作为实际执行限制，而不是路径字符串校验。
+**说明：** 按 D-02 固定的单机 Docker Engine / Platform 受控执行器和 D-06 已批准的取消/终态规则，实现 Java Platform Domain 与 TS Runtime 之间的 Run Lease、取消和幂等 Platform Request 契约，并在已决定的执行后端上实现一 Run 一 Sandbox/Workspace 的物化、Lease 获取/续租/释放、资源清理和 Tool Contract。此任务定义并版本化 `ExecutionCapabilities`（Workspace 引用、Sandbox Tool Contract、Execution Policy），由 Runtime 将任务 1 的不可变 `TaskExecutionBaseline` 与该能力片段组装为复合 `Run Context`；新增能力只能通过 capability schema version 演进，不能改写 Task 基线 schema。该任务把隔离边界作为实际执行限制，而不是路径字符串校验。
 
 **验收标准：**
 - [ ] 同一 Application 的第二个写入型 Run 无法获取 Lease；取消后的 Run/Task 终态与 D-06 一致，且 Lease 释放、Sandbox 清理和后台不自动恢复均由本任务实际执行。
@@ -427,7 +428,7 @@ D-04 订阅运营参数 ──────────────────�
 | --- | --- | --- |
 | 未定义 Task/Run 转换、取消、失败或重新归一化 | 高 | D-06 先写入工程规格和 Issue #65；任务 1、5、8 只按已批准矩阵实现与测试。 |
 | 未定义 Application 删除后的公开入口、证据链和数据处理 | 高 | D-07 已锁定逻辑归档：任务 2、3 按已批准的归档/停用公开入口语义实现授权成功、拒绝和后置行为；具体撤流机制仍等待 D-03。 |
-| 在剩余 OQ 或 D-02 至 D-05 未解决时自行选择 Sandbox、域名、订阅、Snapshot 或执行后端行为 | 高 | 对应决策必须由维护者记录；相关任务在 `todo.md` 标注为阻塞。 |
+| 在剩余 OQ 或 D-03 至 D-05 未解决时自行选择域名、订阅或 Snapshot 行为 | 高 | 对应决策必须由维护者记录；相关任务在 `todo.md` 标注为阻塞。 |
 | Run Context 在 D-02 前被错误冻结，或基线/能力在不同服务中被各自定义 | 高 | 任务 1 仅冻结 `TaskExecutionBaseline`；任务 4 只解析该基线；任务 5 在 D-02 后版本化 `ExecutionCapabilities`、组装复合 Run Context，并以跨服务夹具验证完整 Adapter 映射和不兼容版本拒绝。 |
 | 订阅停服/恢复只在后端发生，Owner 无法读取状态 | 高 | 任务 11 同时交付状态 API、OpenAPI 类型、Vue 视图和四种状态的权限/手动验证。 |
 | 将旧 `App`/`GenerationRun` 或 Pi Session 当作新 Platform 真相 | 高 | 任务 1、4、6 的测试要求可追溯领域状态与 Engine 状态分离。 |
@@ -439,7 +440,7 @@ D-04 订阅运营参数 ──────────────────�
 
 ## 执行前检查
 
-- [ ] D-02 至 D-04 已在开始对应受阻任务前由维护者决定并记录；D-05 已在任务 6 前记录；D-01、D-06、D-07 已写入工程规格与对应 Issue。
+- [ ] D-03、D-04 已在开始对应受阻任务前由维护者决定并记录；D-05 已在任务 6 前记录；D-01、D-02、D-06、D-07 已写入工程规格与对应 Issue。
 - [ ] 每个实施任务已由 `to-tickets` 建为独立 GitHub Issue，并使用原生依赖关系表达上游阻塞。
 - [ ] 每个 Issue 保留本计划引用的 `R-`、`AC-`、`AD-`、`CST-`、`CT-` 与适用 `OQ-`。
 - [ ] 任务执行前调用 `task-evidence-analysis`，并按项目规则记录目标、范围、验证、风险和回滚。
@@ -454,5 +455,5 @@ D-04 订阅运营参数 ──────────────────�
 - 改动范围：新增 `docs/tasks/plan.md` 与 `docs/tasks/todo.md`，并根据审查修订任务依赖、验收与检查点；不修改代码、不创建 GitHub 任务 Issue、不执行基础设施或生产操作。
 - 实际验证：已检查计划包含 12 个实施任务、4 个检查点、7 个决策门，且覆盖 `R-001` 至 `R-007` 与 `SAC-001` 至 `SAC-003`；两份 Markdown 均通过空白错误检查和敏感信息赋值扫描。
 - 审查结论：P2 至 P7 已在计划层消除；D-06 状态和 D-07 删除语义已由维护者决定并锁定，后续实施只能按对应契约执行。
-- 未解决风险：D-02 至 D-04 必须在其对应受阻任务开始前由维护者决定，D-05 必须在任务 6 前记录；在此之前不得启动相关实现。
+- 未解决风险：D-03、D-04 必须在其对应受阻任务开始前由维护者决定，D-05 必须在任务 6 前记录；在此之前不得启动相关实现。
 - 回滚：删除本次新增的 `docs/tasks/` 目录；不影响已发布的规格 Issue #65。

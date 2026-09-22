@@ -43,8 +43,8 @@ Platform Layer
   + 写入 Lease、Sandbox、构建、生产迁移、健康检查、日志、回滚、订阅生命周期
 ```
 
-- 关键已锁定决策：`AD-001` 至 `AD-015`。
-- 关键未决问题：`OQ-002` 至 `OQ-005`；均不阻塞当前工程规格审查，但在对应实现开始前必须决定。
+- 关键已锁定决策：`AD-001` 至 `AD-016`。
+- 关键未决问题：`OQ-002`、`OQ-004`、`OQ-005`；均不阻塞当前工程规格审查，但在对应实现开始前必须决定。
 
 ## 需求
 
@@ -554,7 +554,7 @@ Requirement + Trusted Profile + Task Baseline
 - 许可证/维护状态：Vue、Vite、Fastify 为 MIT；Prisma/Client 为 Apache-2.0；版本在决策时可从 npm 官方元数据获取，后续升级必须经独立依赖评估。
 - 关联需求：`R-003`、`R-005`
 - 关联约束：`CST-009`、`CST-010`
-- 关联未决问题：`OQ-002`、`OQ-003`
+- 关联未决问题：`OQ-002`
 
 ### AD-015：Application 逻辑归档与保留
 
@@ -567,6 +567,22 @@ Requirement + Trusted Profile + Task Baseline
 - 关联需求：`R-001`、`R-006`、`R-007`
 - 关联约束：`CST-001`、`CST-008`、`CST-011`
 - 关联未决问题：`OQ-004`、`OQ-005`
+
+### AD-016：单机 Docker Engine 作为受控执行后端
+
+- 状态：`Locked Decision`，维护者已明确决定。
+- 来源：维护者对 Issue #67 的批准；当前本机 Docker Engine `29.8.1`、cgroup v2、Compose 基础设施及 `R-003`、`R-005`、`R-006` 约束。
+- 决定：MVP 使用单机 Docker Engine 作为唯一 Sandbox、隔离验证和 Deployment 执行后端。Platform 受控执行器独占 Docker API 权限；TS Runtime、Pi Adapter 和 Sandbox 均不得持有 Docker Socket、Docker CLI 凭据或等价宿主机控制权。Kubernetes、托管容器平台和多节点调度不在 MVP 范围。
+- Sandbox：每个写入型 Run 创建独立、短生命周期容器和独立 Workspace。容器以非 root 用户运行，使用只读根文件系统、`cap-drop=ALL`、`no-new-privileges`、默认 seccomp/AppArmor，禁止 privileged、宿主机设备、宿主机目录和 Docker Socket 挂载。每个 Sandbox 固定限制为 2 vCPU、4 GiB 内存、256 PIDs、2 GiB Workspace tmpfs 和 512 MiB `/tmp` tmpfs；基础模板镜像预置锁定依赖，Sandbox 默认无外网，运行时不得任意下载依赖。
+- 网络与数据：Sandbox 和隔离验证数据库仅加入 Run 专属 internal Docker network。验证数据库使用短生命周期 MySQL 容器和仅对当前 Run 有效的非生产凭据；Production 网络、Production 数据库、Platform 管理 API 和其他 Run Workspace 一律不可达。Platform 在受信任边界提取 Snapshot、结构化 Evidence 和受限日志；Agent 不可直接读取或写入这些长期事实。
+- Deployment：Platform Deployment Controller 从固定 Release 创建独立应用容器及其持久化数据服务；Deployment 容器不发布宿主机端口，先在内部网络执行健康检查。公开路由、域名和 TLS 仍由 `OQ-004` / Issue #68 决定；Agent 永远不能创建、停止、检查或回滚 Deployment。
+- 清理与验证：取消或终态 Run 在 10 秒优雅停止期后强制终止；受信任 Snapshot 已提取或无需提取时，执行器删除 Sandbox、Run 专属网络、临时数据库和 Workspace。实现任务必须通过容器 inspect 与隔离测试证明资源限制、无 Docker Socket/宿主机挂载、无外网、不可访问其他 Workspace/Production、取消清理和内部健康检查；`docker compose config` 是基础设施静态验证入口。
+- 原因：复用当前已存在的 Docker/Compose 运维基础，在不把宿主机控制权暴露给 Agent 的前提下提供可测试的一 Run 一 Sandbox、隔离验证和固定 Release 执行路径。
+- 影响：`T-05`、`T-07`、`T-09` 可依据同一执行边界实现；`T-09` 仍等待公共 URL/TLS 决策，`T-06` 仍等待 Snapshot 物理存储决策。
+- 后果：单机容量和 Docker Engine 可用性是 MVP 运行约束；需要多节点调度、弹性扩缩、直接外网依赖安装或其他容器后端时，必须以新的架构决策替换本决定。
+- 关联需求：`R-003`、`R-005`、`R-006`。
+- 关联约束：`CST-004`、`CST-005`、`CST-006`、`CST-009`、`CST-010`。
+- 关联未决问题：`OQ-004`、`OQ-005`。
 
 ## 系统边界
 
@@ -847,7 +863,7 @@ Requirement + Trusted Profile + Task Baseline
 
 - 状态：`Resolved by AD-014`
 - 决定：Node.js `24.20.0`、Vue `3.5.17`、Vite `7.0.4`、Fastify `5.12.3`、Prisma/`@prisma/client` `7.10.0` 和 MySQL `8`；验证及兼容 Migration 边界以 `AD-014` 为准。
-- 已解除阻塞：`T-04` 可在 `T-01` 基线上启动；`T-05`、`T-07` 仍分别等待 `OQ-003` 和其既有上游依赖。
+- 已解除阻塞：`T-04` 可在 `T-01` 基线上启动；`T-05`、`T-07` 已使用 `AD-016` 的执行边界，仍等待各自既有上游依赖。
 
 ### OQ-002：Snapshot 与 SourceRevision 的物理存储
 
@@ -860,12 +876,9 @@ Requirement + Trusted Profile + Task Baseline
 
 ### OQ-003：Sandbox 与 Deployment 执行后端
 
-- 状态：`Open Question`
-- 问题：MVP 使用何种容器/执行后端实现一 Run 一 Sandbox、验证环境和 Production Deployment？
-- 为什么尚未解决：只确定隔离、资源和网络边界，未锁定 Docker、Podman 或其他后端。
-- 影响：影响 `CST-005`、`CT-005` 的实施方式，不改变 Runtime/Production 权限边界。
-- 需要的决策方：维护者。
-- 阻塞的需求 / 决策 / 契约：实施 `R-003`、`R-005`、`R-006` 前必须决定。
+- 状态：`Resolved by AD-016`
+- 决定：MVP 固定使用单机 Docker Engine 和 Platform 受控执行器；Sandbox、隔离验证和 Deployment 的权限、网络、资源与清理边界见 `AD-016`。
+- 已解除阻塞：`T-05`、`T-07`、`T-09` 的执行后端决策阻塞；它们仍受各自上游任务及 `OQ-004`、`OQ-002` 约束。
 
 ### OQ-004：公共 URL、域名与 TLS 最小策略
 
@@ -908,8 +921,9 @@ Requirement + Trusted Profile + Task Baseline
 | `AD-013` | Architecture Decision | `Locked Decision` | 维护者批准 TS Agent 用量计量边界 | `R-003` | TS Agent 负责 Agent 调用与 Usage Evidence；MVP 不接入旧积分链路。 |
 | `AD-014` | Architecture Decision | `Locked Decision` | 维护者批准 Issue #66 | `R-003`、`R-005` | 固定 Vue/Vite/Fastify/Prisma/MySQL 模板、版本与验证命令。 |
 | `AD-015` | Architecture Decision | `Locked Decision` | 维护者批准 Issue #72 | `R-001`、`R-006`、`R-007` | Application 逻辑归档、停用公开入口并保留事实，无 MVP 恢复。 |
+| `AD-016` | Architecture Decision | `Locked Decision` | 维护者批准 Issue #67 | `R-003`、`R-005`、`R-006` | 单机 Docker Engine；Platform 独占 Docker 权限；受限 Sandbox、验证与 Deployment。 |
 | `CST-005` | Constraint | `Confirmed` | Grill Me Q14 | `R-003` | Sandbox 真实隔离边界。 |
 | `CST-009` | Constraint | `Confirmed` | 维护者确认 Migration Safety | `R-005` | 仅兼容的 Production Schema Evolution。 |
 | `OQ-001` | Open Question | `Resolved by AD-014` | 维护者批准 Issue #66 | `R-003`、`R-005` | 固定技术栈和 Migration 工具。 |
-| `OQ-003` | Open Question | `Open Question` | 当前未确认 | `R-003`、`R-006` | Sandbox 与 Deployment 执行后端。 |
+| `OQ-003` | Open Question | `Resolved by AD-016` | 维护者批准 Issue #67 | `R-003`、`R-005`、`R-006` | 单机 Docker Engine 与 Platform 受控执行器。 |
 | `OQ-005` | Open Question | `Open Question` | 当前未确认 | `R-007` | 订阅运营参数与最终保留策略。 |
