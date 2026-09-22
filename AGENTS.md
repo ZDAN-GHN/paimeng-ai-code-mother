@@ -83,6 +83,11 @@ When working on tasks matching these patterns, automatically use the correspondi
 ## Commit Attribution
 - AI-assisted commits must end with `Assisted-by: <agent-name>/<model-id>`; do not guess an unknown model ID
 
+## Issue Closure
+- Before closing a GitHub Issue, execute or otherwise verify every stated acceptance and validation item; record the actual evidence.
+- Update every Issue-body acceptance and validation checkbox individually from that evidence before posting the Delivery Record or closing the Issue.
+- Do not close an Issue with unchecked, skipped, failed, or scope-changed criteria; keep it open until the criterion is met or its approved replacement is documented in the Issue body.
+
 ## Subagent Model Selection
 
 If the Agent supports dynamic model selection for Subagents, follow the model selection guidelines in `MODELS.local.md`.
