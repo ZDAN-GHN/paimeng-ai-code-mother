@@ -38,7 +38,7 @@ public class PlatformApplicationArchiveService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public void archive(
+    public PlatformApplication archive(
         Long applicationId,
         Long actorId,
         PlatformActor actor,
@@ -55,7 +55,10 @@ public class PlatformApplicationArchiveService {
         if (lifecycleEventMapper.selectCountByQuery(
             QueryWrapper.create().eq("application_id", applicationId).eq("request_id", requestId)
         ) == 1) {
-            return;
+            PlatformApplication archivedApplication = new PlatformApplication();
+            archivedApplication.setId(applicationId);
+            archivedApplication.setIsDeleted(1);
+            return archivedApplication;
         }
 
         PlatformApplication application = relationValidator.requireActiveApplication(applicationId);
@@ -100,5 +103,10 @@ public class PlatformApplicationArchiveService {
             requestId,
             java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos)
         );
+        application.setIsDeleted(1);
+        application.setArchivedAt(update.getArchivedAt());
+        application.setArchivedBy(actorId);
+        application.setArchiveReason(reasonCode);
+        return application;
     }
 }

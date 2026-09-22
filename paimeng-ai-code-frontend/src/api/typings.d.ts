@@ -1,4 +1,8 @@
 declare namespace API {
+  type archiveApplicationParams = {
+    applicationId: number
+  }
+
   type AppAddRequest = {
     initPrompt?: string
   }
@@ -58,6 +62,18 @@ declare namespace API {
   type BaseResponseBoolean = {
     code?: number
     data?: boolean
+    message?: string
+  }
+
+  type BaseResponsePlatformApplicationVO = {
+    code?: number
+    data?: PlatformApplicationVO
+    message?: string
+  }
+
+  type BaseResponsePlatformRequirementVO = {
+    code?: number
+    data?: PlatformRequirementVO
     message?: string
   }
 
@@ -154,6 +170,15 @@ declare namespace API {
     id: number
   }
 
+  type getApplicationParams = {
+    applicationId: number
+  }
+
+  type getRequirementParams = {
+    applicationId: number
+    requirementId: number
+  }
+
   type getUserByIdParams = {
     id: number
   }
@@ -187,6 +212,50 @@ declare namespace API {
     optimizeCountQuery?: boolean
   }
 
+  type PlatformApplicationCreateRequest = {
+    /** Application 名称 */
+    name?: string
+  }
+
+  type PlatformApplicationVO = {
+    /** Application 标识 */
+    id?: number
+    /** Application 名称 */
+    name?: string
+    /** Owner 用户标识 */
+    ownerId?: number
+    /** 生命周期状态 */
+    lifecycleStatus?: string
+    /** 公开可用性 */
+    publicAvailability?: string
+    /** 关联事实是否保留 */
+    retained?: boolean
+    /** MVP 是否支持恢复 */
+    recoverySupported?: boolean
+    /** 归档时间 */
+    archivedAt?: string
+    /** 归档操作人 */
+    archivedBy?: number
+  }
+
+  type PlatformRequirementCreateRequest = {
+    /** Owner 提交的原始自然语言需求 */
+    originalText?: string
+  }
+
+  type PlatformRequirementVO = {
+    /** Requirement 标识 */
+    id?: number
+    /** 所属 Application 标识 */
+    applicationId?: number
+    /** 未经归一化的原文 */
+    originalText?: string
+    /** 归一化状态；本阶段固定为 PENDING_NORMALIZATION */
+    normalizationStatus?: string
+    /** 提交时间 */
+    createdAt?: string
+  }
+
   type PageChatHistory = {
     records?: ChatHistory[]
     pageNumber?: number
@@ -209,6 +278,10 @@ declare namespace API {
 
   type serveStaticResourceParams = {
     deployKey: string
+  }
+
+  type submitRequirementParams = {
+    applicationId: number
   }
 
   type User = {
