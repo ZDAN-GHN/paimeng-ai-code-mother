@@ -82,3 +82,7 @@ When working on tasks matching these patterns, automatically use the correspondi
 
 ## Commit Attribution
 - AI-assisted commits must end with `Assisted-by: <agent-name>/<model-id>`; do not guess an unknown model ID
+
+## Subagent Model Selection
+
+If the Agent supports dynamic model selection for Subagents, follow the model selection guidelines in `MODELS.local.md`.

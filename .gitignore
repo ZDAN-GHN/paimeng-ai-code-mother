@@ -54,3 +54,6 @@ runtime/
 ## ZCode ##
 .zcode/
 .mimosa/
+
+## Exclude local markdown files ##
+*.local.md
