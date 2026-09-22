@@ -1,7 +1,7 @@
 # MVP 实施任务清单（待 `to-tickets` 发布）
 
 - 来源：[实施计划](mvp-plan.md)、[MVP 工程规格](../specs/mvp-engineering-spec.md)、[GitHub Issue #65](https://github.com/ZDAN-GHN/paimeng-ai-code-mother/issues/65)
-- 当前状态：`published; partially unblocked`。决策 Issue #66 至 #72 与实施/验收 Issue #73 至 #84 已发布为 #65 的原生子 Issue；D-01、D-02、D-03、D-06、D-07 已批准并同步工程规格，T-01 已交付，T-02/T-03、T-04 可按其余既有依赖启动，T-05 已解除执行后端决策阻塞，T-09/T-10 已解除公开入口决策阻塞。
+- 当前状态：`published; partially unblocked`。决策 Issue #66 至 #72 与实施/验收 Issue #73 至 #84 已发布为 #65 的原生子 Issue；D-01、D-02、D-03、D-04、D-06、D-07 已批准并同步工程规格，T-01 已交付，T-02/T-03、T-04 可按其余既有依赖启动，T-05 已解除执行后端决策阻塞，T-09/T-10 已解除公开入口决策阻塞，T-11 已解除订阅运营参数决策阻塞。
 - 追踪说明：此文件是维护者要求保存在 `docs/tasks/` 的本地 Ticket Graph 快照。GitHub Issue #65 的子 Issue 与原生依赖关系是执行时的权威图；本文件不得被用来覆盖 GitHub blocker 状态。
 
 ## Phase 0：决策门
@@ -9,7 +9,7 @@
 - [x] D-01：固定 Node.js `24.20.0`、Vue `3.5.17`、Vite `7.0.4`、Fastify `5.12.3`、Prisma/`@prisma/client` `7.10.0`、MySQL `8` 与验证命令；详见 `AD-014` 和 Issue #66。
 - [x] D-02：固定单机 Docker Engine 与 Platform 受控执行器；Sandbox 默认无外网、无宿主机挂载，Platform 独占 Docker 权限。详见 `AD-016` 和 Issue #67。
 - [x] D-03：固定 Platform 既有域名下的 `/apps/<application-id>/` 路径和统一 TLS ingress；本地开发使用 localhost，Application 独立域名延期。详见 `AD-017` 和 Issue #68。
-- [ ] D-04：决定订阅宽限、通知、事件来源与最终保留策略（`OQ-005`）。
+- [x] D-04：固定从自动到期的 `activeUntil` 或运营事件的 `effectiveAt` 起连续 168 小时宽限、Platform 内状态提示、受限运营事件入口与 `eventId` 幂等；MVP 内无限期保留，不接入支付/外部通知或最终删除。详见 `AD-018` 和 Issue #69。
 - [ ] D-05：在 Task 6 前记录 Snapshot/SourceRevision 物理存储选择（`OQ-002`）。
 - [x] D-06：已批准并将 Task/Run 状态转换矩阵写入工程规格与 Issue #65，包括取消、失败、阻断答复、重试和 Lease 释放（审查 P1）。
 - [x] D-07：已确定 Application 逻辑归档、停止公开运行、保留关联事实/证据与无 MVP 恢复；详见 `AD-015` 和 Issue #72。
@@ -53,7 +53,7 @@
 
 ## Phase 4：订阅与交付加固
 
-- [ ] T-11：订阅生命周期、状态 API 与 Owner 可见性。依赖：D-04、T-09、T-10。交付有效运行、宽限、已停服、已恢复四种 Owner 状态的 API/OpenAPI/Vue 视图与权限验证。规格：`R-007`。
+- [ ] T-11：订阅生命周期、状态 API 与 Owner 可见性。依赖：D-04、T-09、T-10；D-04 决策阻塞已解除。交付有效运行、宽限、已停服、已恢复四种 Owner 状态的 API/OpenAPI/Vue 视图与权限验证。规格：`R-007`。
 - [ ] T-12：跨服务验收、运行安全与交付文档。依赖：T-01 至 T-11。规格：`SAC-001` 至 `SAC-003`。
 
 ## 检查点 D：MVP 交付评审

@@ -43,8 +43,8 @@ Platform Layer
   + 写入 Lease、Sandbox、构建、生产迁移、健康检查、日志、回滚、订阅生命周期
 ```
 
-- 关键已锁定决策：`AD-001` 至 `AD-017`。
-- 关键未决问题：`OQ-002`、`OQ-005`；均不阻塞当前工程规格审查，但在对应实现开始前必须决定。
+- 关键已锁定决策：`AD-001` 至 `AD-018`。
+- 关键未决问题：`OQ-002`；不阻塞当前工程规格审查，但在对应实现开始前必须决定。
 
 ## 需求
 
@@ -182,23 +182,23 @@ Platform Layer
 ### R-007：订阅驱动的运行生命周期
 
 - 状态：`Confirmed`
-- 来源：维护者确认“宽限期 -> 停止公开运行 -> 保留全部应用事实与数据 -> 续费恢复上一健康版本”。
+- 来源：维护者确认“宽限期 -> 停止公开运行 -> 保留全部应用事实与数据 -> 续费恢复上一健康版本”，以及维护者批准 Issue #69 的最小托管策略。
 - 目标：以周期订阅提供公开运行和基础运维服务，并在停服时保留可恢复的应用事实。
-- 行为：有效订阅下健康 Deployment 持续公开运行。支付失败或订阅到期后进入宽限期；结束后停止公开 Deployment，但保留 Application、Profile、源码版本、Release、数据库、日志和记录。续费后恢复上一健康 Release。
-- 前置条件：Application 已创建；恢复时存在上一健康 Release。
-- 输入：订阅状态、支付/到期事件、续费事件。
-- 输出：公开运行、宽限、停服或恢复状态。
+- 行为：有效订阅下健康 Deployment 持续公开运行。Platform 为每个 Application 保存 `activeUntil`；`activeUntil` 到达时由 Platform 定时器以该时刻进入宽限，受限运营入口的进入宽限事件则以其已接受的 `effectiveAt` 进入宽限。两种路径均从各自状态转换时刻起连续 168 小时，时间以 UTC 持久化和比较；至 `graceEndsAt` 时停止公开 Deployment，但保留 Application、Profile、源码版本、Release、数据库、日志和记录。续费后仅恢复上一健康 Release。
+- 前置条件：Application 已创建；恢复公开运行时 Application 未归档且存在上一健康 Release。
+- 输入：仅 System Administrator 或 Platform 内部运营身份可经受鉴权的运营命令写入订阅事件；不提供公开 Webhook、支付提供商接入或 Owner 自助订阅入口。每个事件包含不可变 `eventId`、Application、事件类型和 `effectiveAt`；相同 `eventId` 返回首次接受结果且不得改写当前状态、`activeUntil` 或 `graceEndsAt`，不同 `eventId` 的有效续费才可更新 `activeUntil`。早于最新已接受事件的事件被拒绝并保留审计原因。定时器只依据已持久化的 `activeUntil` 或 `graceEndsAt` 产生状态转换，并在重启或失败恢复后扫描已过期截止时间并追赶撤流。
+- 输出：公开运行、宽限、停服或恢复状态；Owner/System Administrator 可在 Platform 内读取当前状态、下一期限和公开可用性，不发送邮件、短信或其他外部通知。
 - 成功条件：停服只改变公开运行可用性；应用事实和数据不因订阅状态被改写或删除。
-- 失败 / 异常条件：最终数据删除、退款、账单争议和复杂保留期限不在 MVP 定义。
+- 失败 / 异常条件：归档 Application 的续费事件被拒绝并留下审计原因，归档优先于订阅状态；续费时若没有上一健康 Release，不创建 Release、不重新生成源码且不恢复公开路由，Owner 可读取已恢复订阅但公开不可用的状态；最终数据删除、退款、账单争议、支付提供商接入和复杂保留期限不在 MVP 定义。
 - 关联约束：`CST-011`
-- 关联决策：`AD-012`
+- 关联决策：`AD-012`、`AD-018`
 - 关联契约：`CT-005`
 
 验收标准：
 
-- `AC-023`：有效订阅且健康部署存在时，Application 公开运行。
-- `AC-024`：订阅到期且宽限期结束后，Platform 停止公开运行，但保留 Application、版本和数据库。
-- `AC-025`：Owner 续费后，Platform 恢复上一健康 Release，且不重新生成应用源码。
+- `AC-023`：有效订阅且健康部署存在时，Application 公开运行；Owner/System Administrator 可读取有效运行状态、下一期限和公开可用性。
+- `AC-024`：`activeUntil` 自动到期或运营事件进入宽限后，分别从 `activeUntil` 或 `effectiveAt` 起连续 168 小时保持公开运行；宽限结束后 Platform 停止公开运行并使共享路径返回 `404`，但保留 Application、版本和数据库。
+- `AC-025`：续费事件按 `eventId` 幂等，重复事件不改写状态或截止时间；宽限中的有效续费立即清除 `graceEndsAt` 并恢复有效运行。若 Application 未归档且存在停服前最近一次健康 Deployment 所指向的 Release，Platform 恢复该 Release；停服期间失败的后续 Deployment 不得覆盖该引用。续费不得重新生成应用源码或改写 SourceRevision/Profile；Owner/System Administrator 可读取已恢复状态及没有健康 Release 时的公开不可用状态。
 
 ## 功能行为
 
@@ -532,7 +532,7 @@ Requirement + Trusted Profile + Task Baseline
 - 后果：最终删除和复杂计费治理延期。
 - 关联需求：`R-005`、`R-007`
 - 关联约束：`CST-009`、`CST-011`
-- 关联未决问题：`OQ-005`
+- 关联未决问题：无
 
 ### AD-013：TS Agent 负责 Agent 交互与用量计量
 
@@ -566,7 +566,7 @@ Requirement + Trusted Profile + Task Baseline
 - 原因：保持 Application 长期事实、证据链和未来治理选择，避免与 `AD-012` 的保留约束冲突。
 - 关联需求：`R-001`、`R-006`、`R-007`
 - 关联约束：`CST-001`、`CST-008`、`CST-011`
-- 关联未决问题：`OQ-005`
+- 关联未决问题：无
 
 ### AD-016：单机 Docker Engine 作为受控执行后端
 
@@ -582,7 +582,7 @@ Requirement + Trusted Profile + Task Baseline
 - 后果：单机容量和 Docker Engine 可用性是 MVP 运行约束；需要多节点调度、弹性扩缩、直接外网依赖安装或其他容器后端时，必须以新的架构决策替换本决定。
 - 关联需求：`R-003`、`R-005`、`R-006`。
 - 关联约束：`CST-004`、`CST-005`、`CST-006`、`CST-009`、`CST-010`。
-- 关联未决问题：`OQ-005`。
+- 关联未决问题：无。
 
 ### AD-017：共享 Platform 域名的 Application 路径入口
 
@@ -597,7 +597,21 @@ Requirement + Trusted Profile + Task Baseline
 - 影响：`T-09`、`T-10` 可实现相同域名下的固定路径路由；现有静态 `/{deployKey}` 本地演示路由不得成为新 Platform 公开入口，须在 `T-09` 由支持 path base 的 ingress 配置替换。
 - 关联需求：`R-001`、`R-006`、`R-007`。
 - 关联约束：`CST-008`、`CST-010`、`CST-011`。
-- 关联未决问题：`OQ-005`。
+- 关联未决问题：无。
+
+### AD-018：最小托管订阅运营策略
+
+- 状态：`Locked Decision`，维护者已明确决定。
+- 来源：维护者对 Issue #69 的批准；`R-007`、`AD-012`、`AD-015`、`AD-017` 和 `CST-011`。
+- 决定：MVP 采用 Platform 托管运营订阅。`activeUntil` 自动到期或受限运营事件进入宽限后，分别从 `activeUntil` 或 `effectiveAt` 起连续 168 小时，时间以 UTC 持久化和比较；宽限内保留公开运行，`graceEndsAt` 到达后 Platform 仅撤流公开路径并返回 `404`。Application、Profile、SourceRevision、Release、Deployment、数据库、日志和审计事实无限期保留在 MVP 内；不执行自动或人工最终删除。
+- 事件与权限：订阅事件仅由 System Administrator 或 Platform 内部运营身份经受鉴权的运营命令产生，禁止公开 Webhook、支付提供商回调和 Owner 自助订阅写入。每个事件必须有不可变 `eventId`、Application、事件类型和 `effectiveAt`；重复 `eventId` 返回首次接受结果，且不得改写当前状态、`activeUntil` 或 `graceEndsAt`；不同 `eventId` 的有效续费才可更新 `activeUntil`。早于该 Application 最近已接受事件的 `effectiveAt` 被拒绝且不改变状态。Platform 保留事件与拒绝原因作为审计事实；定时器仅消费持久化截止时间，并在重启或失败恢复后扫描已到期但尚未撤流的 Application 并立即追赶。
+- 恢复与可见性：宽限中的有效续费立即清除 `graceEndsAt` 并恢复有效运行；停服后的续费只在 Application 未归档且存在停服前最近一次健康 Deployment 所指向的 Release 时重新挂载该 Release，停服期间失败的后续 Deployment 不得覆盖该引用。归档 Application 的续费事件被拒绝并记录审计原因。不得创建新 Release、重新生成源码或改写 SourceRevision/Profile。没有上一健康 Release 时记录订阅已恢复但公开不可用，交由正常 Release/Deployment 流程处理。Owner/System Administrator 仅在 Platform 内读取有效运行、宽限、已停服或已恢复状态、下一期限及公开可用性；MVP 不发送邮件、短信或其他外部通知。
+- 非范围：支付网关、计费/套餐、退款、账单争议、第三方订阅集成、公开回调、Owner 自助管理、最终数据删除、保留期自动清理和合规留存治理均延期；任何一项需要独立架构决策和外部接口/数据影响评估。
+- 原因：当前没有已批准的支付提供商契约或通知基础设施。受限运营入口与可审计幂等事件足以验证 `R-007`，同时不将旧积分链路或外部密钥带入新 Platform。
+- 影响：`T-11` 可实现 168 小时宽限、幂等事件、撤流/恢复和 Owner 状态 API；旧 `CreditService`、`/credit` 与生成 Run 的退款链路不得成为订阅事实来源或状态裁决方。
+- 关联需求：`R-001`、`R-006`、`R-007`。
+- 关联约束：`CST-006`、`CST-008`、`CST-011`。
+- 关联未决问题：无。
 
 ## 系统边界
 
@@ -608,7 +622,7 @@ Requirement + Trusted Profile + Task Baseline
 - 允许：Owner 以业务语言提交需求、回答澄清、确认更新发布。
 - 禁止：普通平台用户管理他人 Application；公众访问运行入口后执行 Platform 管理操作。
 - 权威方：Platform Domain。
-- 关联需求 / 决策 / 约束：`R-001`、`R-002`、`R-006`、`R-007`；`AD-001`、`AD-011`、`AD-015`、`AD-017`；`CST-008`
+- 关联需求 / 决策 / 约束：`R-001`、`R-002`、`R-006`、`R-007`；`AD-001`、`AD-011`、`AD-015`、`AD-017`、`AD-018`；`CST-008`
 
 ### Agent Boundary
 
@@ -903,12 +917,9 @@ Requirement + Trusted Profile + Task Baseline
 
 ### OQ-005：订阅宽限期、通知和最终保留期限
 
-- 状态：`Open Question`
-- 问题：宽限期长度、通知渠道、最终数据保留期限和计费接入细节是什么？
-- 为什么尚未解决：仅确定宽限、停服保留和续费恢复的状态语义。
-- 影响：影响 `R-007` 的具体运营参数，不改变 MVP 的停服不删除和续费恢复规则。
-- 需要的决策方：维护者。
-- 阻塞的需求 / 决策 / 契约：首次真实订阅接入和最终删除策略前必须决定。
+- 状态：`Resolved by AD-018`
+- 决定：MVP 固定从自动到期的 `activeUntil` 或运营事件的 `effectiveAt` 起连续 168 小时的宽限、Platform 内 Owner 状态提示、受限 Platform 运营事件入口与 `eventId` 幂等；MVP 内无限期保留事实和数据，不接入支付/通知提供商或最终删除。
+- 已解除阻塞：`T-11` 的运营参数决策阻塞；它仍受 `T-09`、`T-10` 的 Release/Deployment 上游依赖约束。
 
 ## 决策追溯
 
@@ -935,9 +946,10 @@ Requirement + Trusted Profile + Task Baseline
 | `AD-015` | Architecture Decision | `Locked Decision` | 维护者批准 Issue #72 | `R-001`、`R-006`、`R-007` | Application 逻辑归档、停用公开入口并保留事实，无 MVP 恢复。 |
 | `AD-016` | Architecture Decision | `Locked Decision` | 维护者批准 Issue #67 | `R-003`、`R-005`、`R-006` | 单机 Docker Engine；Platform 独占 Docker 权限；受限 Sandbox、验证与 Deployment。 |
 | `AD-017` | Architecture Decision | `Locked Decision` | 维护者批准 Issue #68 | `R-001`、`R-006`、`R-007` | 共享 Platform 域名下的稳定 Application 路径与统一 TLS ingress。 |
+| `AD-018` | Architecture Decision | `Locked Decision` | 维护者批准 Issue #69 | `R-001`、`R-006`、`R-007` | 168 小时宽限、受限运营事件、幂等恢复和 MVP 内无限期保留。 |
 | `CST-005` | Constraint | `Confirmed` | Grill Me Q14 | `R-003` | Sandbox 真实隔离边界。 |
 | `CST-009` | Constraint | `Confirmed` | 维护者确认 Migration Safety | `R-005` | 仅兼容的 Production Schema Evolution。 |
 | `OQ-001` | Open Question | `Resolved by AD-014` | 维护者批准 Issue #66 | `R-003`、`R-005` | 固定技术栈和 Migration 工具。 |
 | `OQ-003` | Open Question | `Resolved by AD-016` | 维护者批准 Issue #67 | `R-003`、`R-005`、`R-006` | 单机 Docker Engine 与 Platform 受控执行器。 |
 | `OQ-004` | Open Question | `Resolved by AD-017` | 维护者批准 Issue #68 | `R-001`、`R-006` | 共享域名路径和统一 TLS ingress。 |
-| `OQ-005` | Open Question | `Open Question` | 当前未确认 | `R-007` | 订阅运营参数与最终保留策略。 |
+| `OQ-005` | Open Question | `Resolved by AD-018` | 维护者批准 Issue #69 | `R-007` | 最小托管订阅运营策略与最终保留边界。 |
