@@ -26,6 +26,6 @@ public class PlatformRequirement {
     @Column("original_text")
     private String originalText;
 
-    @Column("created_at")
+    @Column(value = "created_at", onInsertValue = "CURRENT_TIMESTAMP")
     private LocalDateTime createdAt;
 }

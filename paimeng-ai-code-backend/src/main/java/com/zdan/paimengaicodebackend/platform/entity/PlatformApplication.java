@@ -20,9 +20,21 @@ public class PlatformApplication {
 
     private String name;
 
-    @Column("created_at")
+    @Column(value = "is_deleted", isLogicDelete = true)
+    private Integer isDeleted;
+
+    @Column(value = "created_at", onInsertValue = "CURRENT_TIMESTAMP")
     private LocalDateTime createdAt;
 
-    @Column("updated_at")
+    @Column(value = "updated_at", onInsertValue = "CURRENT_TIMESTAMP", onUpdateValue = "CURRENT_TIMESTAMP")
     private LocalDateTime updatedAt;
+
+    @Column("archived_at")
+    private LocalDateTime archivedAt;
+
+    @Column("archived_by")
+    private Long archivedBy;
+
+    @Column("archive_reason")
+    private String archiveReason;
 }

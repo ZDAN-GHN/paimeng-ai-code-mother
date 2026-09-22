@@ -50,9 +50,9 @@ public class PlatformTask {
     @Column("failure_code")
     private String failureCode;
 
-    @Column("created_at")
+    @Column(value = "created_at", onInsertValue = "CURRENT_TIMESTAMP")
     private LocalDateTime createdAt;
 
-    @Column("updated_at")
+    @Column(value = "updated_at", onInsertValue = "CURRENT_TIMESTAMP", onUpdateValue = "CURRENT_TIMESTAMP")
     private LocalDateTime updatedAt;
 }

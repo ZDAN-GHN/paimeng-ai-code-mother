@@ -44,11 +44,12 @@ public class PlatformTaskStateMachine {
                 (target == PlatformTaskState.READY && conditions.baselineFrozen()) ||
                 target == PlatformTaskState.BLOCKED;
             case BLOCKED -> target == PlatformTaskState.CREATED && !conditions.baselineFrozen();
-            case READY -> target == PlatformTaskState.EXECUTING;
+            case READY ->
+                target == PlatformTaskState.EXECUTING && conditions.runCreatedAndLeaseGranted();
             case EXECUTING ->
                 (target == PlatformTaskState.BLOCKED && conditions.runStoppedAndLeaseReleased()) ||
                 target == PlatformTaskState.FAILED ||
-                target == PlatformTaskState.VALIDATED;
+                (target == PlatformTaskState.VALIDATED && conditions.validationPassed());
             case FAILED -> target == PlatformTaskState.READY && conditions.retryRequestedByOwner();
             case VALIDATED ->
                 target == PlatformTaskState.RELEASED &&

@@ -22,7 +22,39 @@ class PlatformTaskStateMachineTest {
             PlatformTaskState.CREATED,
             PlatformTaskState.READY,
             PlatformActor.PLATFORM,
-            new TaskTransitionConditions(true, false, false, false, false)
+            conditions(true, false, false, false, false, false, false)
+        ));
+    }
+
+    @Test
+    void readyTaskRequiresCreatedRunAndLeaseBeforeExecuting() {
+        assertThrows(BusinessException.class, () -> transition(
+            PlatformTaskState.READY,
+            PlatformTaskState.EXECUTING,
+            PlatformActor.PLATFORM,
+            conditions(true, false, false, false, false, false, false)
+        ));
+        assertDoesNotThrow(() -> transition(
+            PlatformTaskState.READY,
+            PlatformTaskState.EXECUTING,
+            PlatformActor.PLATFORM,
+            conditions(true, false, false, false, false, true, false)
+        ));
+    }
+
+    @Test
+    void executingTaskRequiresValidationBeforeValidated() {
+        assertThrows(BusinessException.class, () -> transition(
+            PlatformTaskState.EXECUTING,
+            PlatformTaskState.VALIDATED,
+            PlatformActor.PLATFORM,
+            conditions(true, false, false, false, false, true, false)
+        ));
+        assertDoesNotThrow(() -> transition(
+            PlatformTaskState.EXECUTING,
+            PlatformTaskState.VALIDATED,
+            PlatformActor.PLATFORM,
+            conditions(true, false, false, false, false, true, true)
         ));
     }
 
@@ -38,7 +70,7 @@ class PlatformTaskStateMachineTest {
             PlatformTaskState.BLOCKED,
             PlatformTaskState.CREATED,
             PlatformActor.PLATFORM,
-            new TaskTransitionConditions(true, false, false, false, false)
+            conditions(true, false, false, false, false, false, false)
         ));
     }
 
@@ -54,7 +86,7 @@ class PlatformTaskStateMachineTest {
             PlatformTaskState.EXECUTING,
             PlatformTaskState.BLOCKED,
             PlatformActor.PLATFORM,
-            new TaskTransitionConditions(true, true, false, false, false)
+            conditions(true, true, false, false, false, false, false)
         ));
         assertThrows(BusinessException.class, () -> transition(
             PlatformTaskState.EXECUTING,
@@ -66,7 +98,7 @@ class PlatformTaskStateMachineTest {
             PlatformTaskState.EXECUTING,
             PlatformTaskState.CANCELLED,
             PlatformActor.OWNER,
-            new TaskTransitionConditions(true, true, false, false, false)
+            conditions(true, true, false, false, false, false, false)
         ));
     }
 
@@ -82,7 +114,7 @@ class PlatformTaskStateMachineTest {
             PlatformTaskState.FAILED,
             PlatformTaskState.READY,
             PlatformActor.PLATFORM,
-            new TaskTransitionConditions(true, false, true, false, false)
+            conditions(true, false, true, false, false, false, false)
         ));
     }
 
@@ -98,13 +130,13 @@ class PlatformTaskStateMachineTest {
             PlatformTaskState.VALIDATED,
             PlatformTaskState.RELEASED,
             PlatformActor.PLATFORM,
-            new TaskTransitionConditions(true, false, false, true, false)
+            conditions(true, false, false, true, false, false, false)
         ));
         assertDoesNotThrow(() -> transition(
             PlatformTaskState.VALIDATED,
             PlatformTaskState.RELEASED,
             PlatformActor.PLATFORM,
-            new TaskTransitionConditions(true, false, false, false, true)
+            conditions(true, false, false, false, true, false, false)
         ));
     }
 
@@ -114,7 +146,7 @@ class PlatformTaskStateMachineTest {
             PlatformTaskState.EXECUTING,
             PlatformTaskState.VALIDATED,
             PlatformActor.AGENT,
-            new TaskTransitionConditions(true, false, false, false, false)
+            conditions(true, false, false, false, false, true, true)
         ));
     }
 
@@ -140,6 +172,26 @@ class PlatformTaskStateMachineTest {
             PlatformRunState.EXECUTING,
             PlatformActor.PLATFORM
         ));
+    }
+
+    private TaskTransitionConditions conditions(
+        boolean baselineFrozen,
+        boolean runStoppedAndLeaseReleased,
+        boolean retryRequestedByOwner,
+        boolean firstRelease,
+        boolean ownerConfirmedPublish,
+        boolean runCreatedAndLeaseGranted,
+        boolean validationPassed
+    ) {
+        return new TaskTransitionConditions(
+            baselineFrozen,
+            runStoppedAndLeaseReleased,
+            retryRequestedByOwner,
+            firstRelease,
+            ownerConfirmedPublish,
+            runCreatedAndLeaseGranted,
+            validationPassed
+        );
     }
 
     private void transition(

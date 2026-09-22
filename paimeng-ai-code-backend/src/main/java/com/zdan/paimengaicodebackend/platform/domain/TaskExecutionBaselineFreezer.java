@@ -12,13 +12,16 @@ public class TaskExecutionBaselineFreezer {
 
     private final TaskExecutionBaselineCodec codec;
     private final PlatformTaskMapper taskMapper;
+    private final PlatformLogicalRelationValidator relationValidator;
 
     public TaskExecutionBaselineFreezer(
         TaskExecutionBaselineCodec codec,
-        PlatformTaskMapper taskMapper
+        PlatformTaskMapper taskMapper,
+        PlatformLogicalRelationValidator relationValidator
     ) {
         this.codec = codec;
         this.taskMapper = taskMapper;
+        this.relationValidator = relationValidator;
     }
 
     public void freeze(PlatformTask task, TaskExecutionBaseline baseline) {
@@ -28,6 +31,9 @@ public class TaskExecutionBaselineFreezer {
         if (task.getBaselineJson() != null) {
             throw new BusinessException(ErrorCode.FORBIDDEN_ERROR, "TaskExecutionBaseline 已冻结");
         }
+        relationValidator.requireActiveApplication(task.getApplicationId());
+        relationValidator.requireTaskBelongsToApplication(task.getApplicationId(), task.getId());
+        relationValidator.requireRequirementBelongsToApplication(task.getApplicationId(), task.getRequirementId());
 
         String serializedBaseline = codec.serialize(baseline);
         PlatformTask update = new PlatformTask();

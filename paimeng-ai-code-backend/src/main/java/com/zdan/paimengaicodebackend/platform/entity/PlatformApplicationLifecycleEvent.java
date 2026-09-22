@@ -9,8 +9,8 @@ import java.time.LocalDateTime;
 import lombok.Data;
 
 @Data
-@Table("platform_trusted_profile_version")
-public class PlatformTrustedProfileVersion {
+@Table("platform_application_lifecycle_event")
+public class PlatformApplicationLifecycleEvent {
 
     @Id(keyType = KeyType.Generator, value = KeyGenerators.snowFlakeId)
     private Long id;
@@ -18,12 +18,21 @@ public class PlatformTrustedProfileVersion {
     @Column("application_id")
     private Long applicationId;
 
-    @Column("version_number")
-    private Long versionNumber;
+    @Column("event_type")
+    private String eventType;
 
-    @Column("profile_json")
-    private String profileJson;
+    @Column("actor_type")
+    private String actorType;
 
-    @Column(value = "created_at", onInsertValue = "CURRENT_TIMESTAMP")
-    private LocalDateTime createdAt;
+    @Column("actor_id")
+    private Long actorId;
+
+    @Column("reason_code")
+    private String reasonCode;
+
+    @Column("request_id")
+    private String requestId;
+
+    @Column("occurred_at")
+    private LocalDateTime occurredAt;
 }

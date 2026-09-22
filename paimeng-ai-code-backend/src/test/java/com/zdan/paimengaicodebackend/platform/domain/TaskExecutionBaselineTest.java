@@ -21,9 +21,13 @@ class TaskExecutionBaselineTest {
 
     private final TaskExecutionBaselineCodec codec = new TaskExecutionBaselineCodec(new ObjectMapper());
     private final PlatformTaskMapper taskMapper = mock(PlatformTaskMapper.class);
+    private final PlatformLogicalRelationValidator relationValidator = mock(
+        PlatformLogicalRelationValidator.class
+    );
     private final TaskExecutionBaselineFreezer freezer = new TaskExecutionBaselineFreezer(
         codec,
-        taskMapper
+        taskMapper,
+        relationValidator
     );
 
     @Test
@@ -53,6 +57,8 @@ class TaskExecutionBaselineTest {
     void freezesBaselineExactlyOnceAndPersistsIt() {
         PlatformTask task = new PlatformTask();
         task.setId(1L);
+        task.setApplicationId(2L);
+        task.setRequirementId(3L);
         TaskExecutionBaseline baseline = new TaskExecutionBaseline(
             1,
             null,
@@ -74,6 +80,8 @@ class TaskExecutionBaselineTest {
     void rejectsBaselineWhenPersistenceFails() {
         PlatformTask task = new PlatformTask();
         task.setId(1L);
+        task.setApplicationId(2L);
+        task.setRequirementId(3L);
         when(taskMapper.updateByQuery(any(PlatformTask.class), eq(true), any())).thenReturn(0);
 
         assertThrows(BusinessException.class, () -> freezer.freeze(
