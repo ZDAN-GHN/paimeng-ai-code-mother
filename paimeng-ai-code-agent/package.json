@@ -1,0 +1,26 @@
+{
+  "name": "paimeng-ai-code-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.20.0"
+  },
+  "scripts": {
+    "start": "npm run build && node dist/server/index.js",
+    "dev": "tsx watch src/server/index.ts",
+    "type-check": "tsc --noEmit -p tsconfig.json",
+    "test": "tsx --test test/**/*.test.ts",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.87.0",
+    "fastify": "5.12.3",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}
