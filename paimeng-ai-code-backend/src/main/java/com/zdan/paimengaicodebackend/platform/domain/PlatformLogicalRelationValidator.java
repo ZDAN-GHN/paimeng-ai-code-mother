@@ -35,11 +35,16 @@ public class PlatformLogicalRelationValidator {
     }
 
     public App requireActiveApplication(Long applicationId) {
+        App application = requireApplication(applicationId);
+        if (!"ACTIVE".equals(application.getLifecycleStatus())) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "Application 不存在或已归档");
+        }
+        return application;
+    }
+
+    public App requireApplication(Long applicationId) {
         App application = appMapper.selectOneByQuery(
-            QueryWrapper.create()
-                .eq("id", applicationId)
-                .eq("isDelete", 0)
-                .eq("lifecycleStatus", "ACTIVE")
+            QueryWrapper.create().eq("id", applicationId).eq("isDelete", 0)
         );
         if (application == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "Application 不存在或已归档");

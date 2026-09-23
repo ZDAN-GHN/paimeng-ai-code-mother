@@ -15,6 +15,8 @@ import com.zdan.paimengaicodebackend.platform.vo.PlatformRequirementVO;
 import com.zdan.paimengaicodebackend.service.UserService;
 import com.mybatisflex.core.paginate.Page;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -89,7 +91,7 @@ public class PlatformApplicationController {
     @GetMapping("/{applicationId}")
     @Operation(summary = "读取 Application 管理状态")
     public BaseResponse<PlatformApplicationVO> getApplication(
-        @PathVariable Long applicationId,
+        @Parameter(description = "Application ID", schema = @Schema(type = "string")) @PathVariable Long applicationId,
         HttpServletRequest servletRequest
     ) {
         return ResultUtils.success(
@@ -100,7 +102,7 @@ public class PlatformApplicationController {
     @PostMapping("/{applicationId}/requirements")
     @Operation(summary = "接收不可变 Requirement")
     public BaseResponse<PlatformRequirementVO> submitRequirement(
-        @PathVariable Long applicationId,
+        @Parameter(description = "Application ID", schema = @Schema(type = "string")) @PathVariable Long applicationId,
         @RequestBody PlatformRequirementCreateRequest request,
         HttpServletRequest servletRequest
     ) {
@@ -119,7 +121,7 @@ public class PlatformApplicationController {
     @GetMapping("/{applicationId}/requirements")
     @Operation(summary = "分页读取 Application 的不可变 Requirement 历史")
     public BaseResponse<Page<PlatformRequirementVO>> listRequirements(
-        @PathVariable Long applicationId,
+        @Parameter(description = "Application ID", schema = @Schema(type = "string")) @PathVariable Long applicationId,
         @RequestParam(defaultValue = "1") long pageNum,
         @RequestParam(defaultValue = "20") long pageSize,
         HttpServletRequest servletRequest
@@ -138,8 +140,8 @@ public class PlatformApplicationController {
     @GetMapping("/{applicationId}/requirements/{requirementId}")
     @Operation(summary = "读取 Requirement 等待归一化状态")
     public BaseResponse<PlatformRequirementVO> getRequirement(
-        @PathVariable Long applicationId,
-        @PathVariable Long requirementId,
+        @Parameter(description = "Application ID", schema = @Schema(type = "string")) @PathVariable Long applicationId,
+        @Parameter(description = "Requirement ID", schema = @Schema(type = "string")) @PathVariable Long requirementId,
         HttpServletRequest servletRequest
     ) {
         return ResultUtils.success(
@@ -154,7 +156,7 @@ public class PlatformApplicationController {
     @PostMapping("/{applicationId}/archive")
     @Operation(summary = "归档 Application")
     public BaseResponse<PlatformApplicationVO> archiveApplication(
-        @PathVariable Long applicationId,
+        @Parameter(description = "Application ID", schema = @Schema(type = "string")) @PathVariable Long applicationId,
         HttpServletRequest servletRequest
     ) {
         return ResultUtils.success(

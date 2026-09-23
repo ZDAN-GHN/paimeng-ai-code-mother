@@ -28,8 +28,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 class PlatformApplicationControllerTest {
 
-    private static final long APPLICATION_ID = 101L;
-    private static final long OWNER_ID = 201L;
+    private static final long APPLICATION_ID = 460017668615995392L;
+    private static final long OWNER_ID = 377708067863715840L;
 
     private PlatformApplicationManagementService managementService;
     private UserService userService;
@@ -98,18 +98,18 @@ class PlatformApplicationControllerTest {
             )
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.code").value(0))
-            .andExpect(jsonPath("$.data.application.id").value(APPLICATION_ID))
+            .andExpect(jsonPath("$.data.application.id").value(String.valueOf(APPLICATION_ID)))
             .andExpect(jsonPath("$.data.requirement.normalizationStatus").value("PENDING_NORMALIZATION"));
         mockMvc
             .perform(get("/platform/applications?pageNum=1&pageSize=12"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.code").value(0))
-            .andExpect(jsonPath("$.data.records[0].id").value(APPLICATION_ID));
+            .andExpect(jsonPath("$.data.records[0].id").value(String.valueOf(APPLICATION_ID)));
         mockMvc
             .perform(get("/platform/applications/{applicationId}/requirements?pageNum=1&pageSize=20", APPLICATION_ID))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.code").value(0))
-            .andExpect(jsonPath("$.data.records[0].id").value(301L));
+            .andExpect(jsonPath("$.data.records[0].id").value("301"));
     }
 
     @Test
@@ -162,8 +162,8 @@ class PlatformApplicationControllerTest {
 
     private PlatformApplicationVO application() {
         PlatformApplicationVO application = new PlatformApplicationVO();
-        application.setId(APPLICATION_ID);
-        application.setOwnerId(OWNER_ID);
+        application.setId(String.valueOf(APPLICATION_ID));
+        application.setOwnerId(String.valueOf(OWNER_ID));
         application.setName("Product");
         application.setLifecycleStatus("ACTIVE");
         application.setPublicAvailability("NOT_PROVISIONED");
@@ -174,8 +174,8 @@ class PlatformApplicationControllerTest {
 
     private PlatformRequirementVO requirement() {
         PlatformRequirementVO requirement = new PlatformRequirementVO();
-        requirement.setId(301L);
-        requirement.setApplicationId(APPLICATION_ID);
+        requirement.setId("301");
+        requirement.setApplicationId(String.valueOf(APPLICATION_ID));
         requirement.setOriginalText("Build it");
         requirement.setNormalizationStatus("PENDING_NORMALIZATION");
         return requirement;

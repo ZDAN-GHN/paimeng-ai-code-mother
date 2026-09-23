@@ -8,14 +8,14 @@ import lombok.Data;
 @Schema(description = "Platform Application 管理视图")
 public class PlatformApplicationVO {
 
-    @Schema(description = "Application 标识")
-    private Long id;
+    @Schema(description = "Application 标识；以十进制字符串传输，避免 JavaScript 精度丢失", example = "460017668615995392")
+    private String id;
 
     @Schema(description = "Application 名称")
     private String name;
 
-    @Schema(description = "Owner 用户标识")
-    private Long ownerId;
+    @Schema(description = "Owner 用户标识；以十进制字符串传输，避免 JavaScript 精度丢失", example = "377708067863715840")
+    private String ownerId;
 
     @Schema(description = "生命周期状态", example = "ACTIVE")
     private String lifecycleStatus;
@@ -32,6 +32,6 @@ public class PlatformApplicationVO {
     @Schema(description = "归档时间")
     private LocalDateTime archivedAt;
 
-    @Schema(description = "归档操作人")
-    private Long archivedBy;
+    @Schema(description = "归档操作人；以十进制字符串传输，避免 JavaScript 精度丢失", example = "377708067863715840")
+    private String archivedBy;
 }

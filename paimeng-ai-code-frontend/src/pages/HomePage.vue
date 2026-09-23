@@ -118,7 +118,7 @@ const viewLegacyChat = (appId: string | number | undefined) => {
   }
 }
 
-const viewApplicationWorkspace = (applicationId: number | undefined) => {
+const viewApplicationWorkspace = (applicationId: string | undefined) => {
   if (applicationId) {
     router.push(`/platform/applications/${applicationId}`)
   }
@@ -240,8 +240,14 @@ onMounted(() => {
             @click="viewApplicationWorkspace(application.id)"
           >
             <template #title>{{ application.name }}</template>
-            <a-tag color="processing">{{ application.lifecycleStatus || 'ACTIVE' }}</a-tag>
-            <p>Requirement 已保存后，将在工作台中等待归一化与全栈实现。</p>
+            <a-tag :color="application.lifecycleStatus === 'ARCHIVED' ? 'default' : 'processing'">
+              {{ application.lifecycleStatus === 'ARCHIVED' ? '已归档' : application.lifecycleStatus || 'ACTIVE' }}
+            </a-tag>
+            <p>
+              {{ application.lifecycleStatus === 'ARCHIVED'
+                ? '关联 Requirement 与审计事实已保留，当前 MVP 不提供恢复。'
+                : 'Requirement 已保存后，将在工作台中等待归一化与全栈实现。' }}
+            </p>
             <a-button type="link" @click.stop="viewApplicationWorkspace(application.id)">
               打开工作台
             </a-button>

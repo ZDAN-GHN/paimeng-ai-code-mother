@@ -8,11 +8,11 @@ import lombok.Data;
 @Schema(description = "不可变 Requirement 视图")
 public class PlatformRequirementVO {
 
-    @Schema(description = "Requirement 标识")
-    private Long id;
+    @Schema(description = "Requirement 标识；以十进制字符串传输，避免 JavaScript 精度丢失", example = "460017668615995393")
+    private String id;
 
-    @Schema(description = "所属 Application 标识")
-    private Long applicationId;
+    @Schema(description = "所属 Application 标识；以十进制字符串传输，避免 JavaScript 精度丢失", example = "460017668615995392")
+    private String applicationId;
 
     @Schema(description = "未经归一化的原文")
     private String originalText;

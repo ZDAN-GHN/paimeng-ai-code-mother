@@ -65,7 +65,7 @@ public class PlatformApplicationManagementService {
         String originalText
     ) {
         PlatformApplicationVO application = createApplication(actor, name);
-        PlatformRequirementVO requirement = submitRequirement(application.getId(), actor, originalText);
+        PlatformRequirementVO requirement = submitRequirement(Long.valueOf(application.getId()), actor, originalText);
         PlatformApplicationInitialRequirementVO response = new PlatformApplicationInitialRequirementVO();
         response.setApplication(application);
         response.setRequirement(requirement);
@@ -76,11 +76,10 @@ public class PlatformApplicationManagementService {
         Long actorId = requireActorId(actor);
         Page<App> applications = appMapper.paginate(
             Page.of(pageNum, pageSize),
-            QueryWrapper.create()
-                .eq("userId", actorId)
-                .eq("isDelete", 0)
-                .eq("lifecycleStatus", "ACTIVE")
-                .orderBy(App::getCreateTime, false)
+                QueryWrapper.create()
+                    .eq("userId", actorId)
+                    .eq("isDelete", 0)
+                    .orderBy(App::getCreateTime, false)
         );
         Page<PlatformApplicationVO> response = new Page<>(pageNum, pageSize, applications.getTotalRow());
         response.setRecords(
@@ -90,7 +89,7 @@ public class PlatformApplicationManagementService {
     }
 
     public PlatformApplicationVO getApplication(Long applicationId, User actor) {
-        return toApplicationVO(requireAuthorizedActiveApplication(applicationId, actor), false);
+        return toApplicationVO(requireAuthorizedApplication(applicationId, actor), false);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -111,7 +110,7 @@ public class PlatformApplicationManagementService {
     }
 
     public PlatformRequirementVO getRequirement(Long applicationId, Long requirementId, User actor) {
-        requireAuthorizedActiveApplication(applicationId, actor);
+        requireAuthorizedApplication(applicationId, actor);
         PlatformRequirement requirement = requirementMapper.selectOneByQuery(
             QueryWrapper.create().eq("id", requirementId).eq("appId", applicationId)
         );
@@ -127,7 +126,7 @@ public class PlatformApplicationManagementService {
         long pageNum,
         long pageSize
     ) {
-        requireAuthorizedActiveApplication(applicationId, actor);
+        requireAuthorizedApplication(applicationId, actor);
         Page<PlatformRequirement> requirements = requirementMapper.paginate(
             Page.of(pageNum, pageSize),
             QueryWrapper.create()
@@ -153,10 +152,18 @@ public class PlatformApplicationManagementService {
     }
 
     private App requireAuthorizedActiveApplication(Long applicationId, User actor) {
+        App application = requireAuthorizedApplication(applicationId, actor);
+        if (!"ACTIVE".equals(application.getLifecycleStatus())) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "Application 不存在或已归档");
+        }
+        return application;
+    }
+
+    private App requireAuthorizedApplication(Long applicationId, User actor) {
         if (applicationId == null || applicationId <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "Application ID 无效");
         }
-        App application = relationValidator.requireActiveApplication(applicationId);
+        App application = relationValidator.requireApplication(applicationId);
         if (
             actorFor(actor) == PlatformActor.OWNER &&
             !requireActorId(actor).equals(application.getUserId())
@@ -191,15 +198,16 @@ public class PlatformApplicationManagementService {
         boolean archived
     ) {
         PlatformApplicationVO response = new PlatformApplicationVO();
-        response.setId(application.getId());
+        response.setId(identifierText(application.getId()));
         response.setName(application.getAppName());
-        response.setOwnerId(application.getUserId());
+        response.setOwnerId(identifierText(application.getUserId()));
         response.setLifecycleStatus(application.getLifecycleStatus());
-        response.setPublicAvailability(archived ? "UNAVAILABLE" : "NOT_PROVISIONED");
+        boolean isArchived = archived || "ARCHIVED".equals(application.getLifecycleStatus());
+        response.setPublicAvailability(isArchived ? "UNAVAILABLE" : "NOT_PROVISIONED");
         response.setRetained(true);
         response.setRecoverySupported(false);
-        if (archived || "ARCHIVED".equals(application.getLifecycleStatus())) {
-            response.setArchivedBy(application.getArchivedBy());
+        if (isArchived) {
+            response.setArchivedBy(identifierText(application.getArchivedBy()));
             response.setArchivedAt(application.getArchivedTime());
         }
         return response;
@@ -207,11 +215,15 @@ public class PlatformApplicationManagementService {
 
     private PlatformRequirementVO toRequirementVO(PlatformRequirement requirement) {
         PlatformRequirementVO response = new PlatformRequirementVO();
-        response.setId(requirement.getId());
-        response.setApplicationId(requirement.getApplicationId());
+        response.setId(identifierText(requirement.getId()));
+        response.setApplicationId(identifierText(requirement.getApplicationId()));
         response.setOriginalText(requirement.getOriginalText());
         response.setNormalizationStatus(PENDING_NORMALIZATION);
         response.setCreatedAt(requirement.getCreatedAt());
         return response;
+    }
+
+    private String identifierText(Long identifier) {
+        return identifier == null ? null : String.valueOf(identifier);
     }
 }

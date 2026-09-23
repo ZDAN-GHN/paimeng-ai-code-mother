@@ -1,6 +1,7 @@
 declare namespace API {
   type archiveApplicationParams = {
-    applicationId: number
+    /** Application ID */
+    applicationId: string
   }
 
   type AppAddRequest = {
@@ -171,12 +172,15 @@ declare namespace API {
   }
 
   type getApplicationParams = {
-    applicationId: number
+    /** Application ID */
+    applicationId: string
   }
 
   type getRequirementParams = {
-    applicationId: number
-    requirementId: number
+    /** Application ID */
+    applicationId: string
+    /** Requirement ID */
+    requirementId: string
   }
 
   type getUserByIdParams = {
@@ -218,12 +222,12 @@ declare namespace API {
   }
 
   type PlatformApplicationVO = {
-    /** Application 标识 */
-    id?: number
+    /** Application 标识；以十进制字符串传输，避免 JavaScript 精度丢失 */
+    id?: string
     /** Application 名称 */
     name?: string
-    /** Owner 用户标识 */
-    ownerId?: number
+    /** Owner 用户标识；以十进制字符串传输，避免 JavaScript 精度丢失 */
+    ownerId?: string
     /** 生命周期状态 */
     lifecycleStatus?: string
     /** 公开可用性 */
@@ -234,8 +238,8 @@ declare namespace API {
     recoverySupported?: boolean
     /** 归档时间 */
     archivedAt?: string
-    /** 归档操作人 */
-    archivedBy?: number
+    /** 归档操作人；以十进制字符串传输，避免 JavaScript 精度丢失 */
+    archivedBy?: string
   }
 
   type PlatformRequirementCreateRequest = {
@@ -244,10 +248,10 @@ declare namespace API {
   }
 
   type PlatformRequirementVO = {
-    /** Requirement 标识 */
-    id?: number
-    /** 所属 Application 标识 */
-    applicationId?: number
+    /** Requirement 标识；以十进制字符串传输，避免 JavaScript 精度丢失 */
+    id?: string
+    /** 所属 Application 标识；以十进制字符串传输，避免 JavaScript 精度丢失 */
+    applicationId?: string
     /** 未经归一化的原文 */
     originalText?: string
     /** 归一化状态；本阶段固定为 PENDING_NORMALIZATION */
@@ -281,7 +285,8 @@ declare namespace API {
   }
 
   type submitRequirementParams = {
-    applicationId: number
+    /** Application ID */
+    applicationId: string
   }
 
   type User = {
@@ -357,7 +362,8 @@ declare namespace API {
     pageSize?: number
   }
   type listRequirementsParams = {
-    applicationId: number
+    /** Application ID */
+    applicationId: string
     pageNum?: number
     pageSize?: number
   }

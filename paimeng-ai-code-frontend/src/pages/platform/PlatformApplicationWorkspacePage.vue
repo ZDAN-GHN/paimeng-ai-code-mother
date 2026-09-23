@@ -22,13 +22,15 @@ const archiving = ref(false)
 const loadError = ref('')
 
 const applicationId = computed(() => {
-  const value = Number(route.params.applicationId)
-  return Number.isInteger(value) && value > 0 ? value : undefined
+  const value = route.params.applicationId
+  return typeof value === 'string' && /^[1-9]\d*$/.test(value) ? value : undefined
 })
 const isArchived = computed(() => application.value?.lifecycleStatus === 'ARCHIVED')
 const canManage = computed(() => {
   const user = loginUserStore.loginUser
-  return Boolean(application.value && (user.userRole === 'admin' || user.id === application.value.ownerId))
+  return Boolean(
+    application.value && (user.userRole === 'admin' || String(user.id) === application.value.ownerId),
+  )
 })
 
 const formatDate = (value?: string) => {

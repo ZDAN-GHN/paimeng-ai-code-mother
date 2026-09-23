@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.zdan.paimengaicodebackend.exception.BusinessException;
@@ -32,8 +33,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class PlatformApplicationManagementServiceTest {
 
-    private static final long APPLICATION_ID = 101L;
-    private static final long OWNER_ID = 201L;
+    private static final long APPLICATION_ID = 460017668615995392L;
+    private static final long OWNER_ID = 377708067863715840L;
 
     @Mock
     private AppMapper appMapper;
@@ -77,7 +78,7 @@ class PlatformApplicationManagementServiceTest {
     @Test
     void ownerSubmitsUnchangedRequirementWithPendingNormalizationStatus() {
         App application = application();
-        when(relationValidator.requireActiveApplication(APPLICATION_ID)).thenReturn(application);
+        when(relationValidator.requireApplication(APPLICATION_ID)).thenReturn(application);
         User owner = user(OWNER_ID, "user");
         String originalText = "  保留这段原文  ";
 
@@ -105,7 +106,7 @@ class PlatformApplicationManagementServiceTest {
         })
             .when(appMapper)
             .insertSelective(any(App.class));
-        when(relationValidator.requireActiveApplication(APPLICATION_ID)).thenReturn(application());
+        when(relationValidator.requireApplication(APPLICATION_ID)).thenReturn(application());
 
         PlatformApplicationInitialRequirementVO result = managementService.createApplicationWithInitialRequirement(
             owner,
@@ -115,13 +116,13 @@ class PlatformApplicationManagementServiceTest {
 
         verify(appMapper).insertSelective(any(App.class));
         verify(requirementMapper).insertSelective(any(PlatformRequirement.class));
-        assertEquals(APPLICATION_ID, result.getApplication().getId());
+        assertEquals(String.valueOf(APPLICATION_ID), result.getApplication().getId());
         assertEquals("Build it", result.getRequirement().getOriginalText());
         assertEquals("PENDING_NORMALIZATION", result.getRequirement().getNormalizationStatus());
     }
 
     @Test
-    void ownerListsOnlyActiveApplicationsTheyCreated() {
+    void ownerListsApplicationsTheyCreatedForRetentionVisibility() {
         Page<App> applications = new Page<>(1, 12, 1);
         applications.setRecords(List.of(application()));
         when(appMapper.paginate(any(Page.class), any())).thenReturn(applications);
@@ -133,7 +134,27 @@ class PlatformApplicationManagementServiceTest {
         );
 
         assertEquals(1, result.getRecords().size());
-        assertEquals(APPLICATION_ID, result.getRecords().getFirst().getId());
+        assertEquals(String.valueOf(APPLICATION_ID), result.getRecords().getFirst().getId());
+    }
+
+    @Test
+    void ownerCanListArchivedApplicationWithUnavailableState() {
+        App archivedApplication = application();
+        archivedApplication.setLifecycleStatus("ARCHIVED");
+        Page<App> applications = new Page<>(1, 12, 1);
+        applications.setRecords(List.of(archivedApplication));
+        when(appMapper.paginate(any(Page.class), any())).thenReturn(applications);
+
+        PlatformApplicationVO result = managementService.listMyApplications(
+            user(OWNER_ID, "user"),
+            1,
+            12
+        ).getRecords().getFirst();
+
+        assertEquals("ARCHIVED", result.getLifecycleStatus());
+        assertEquals("UNAVAILABLE", result.getPublicAvailability());
+        assertEquals(true, result.isRetained());
+        assertEquals(false, result.isRecoverySupported());
     }
 
     @Test
@@ -144,7 +165,7 @@ class PlatformApplicationManagementServiceTest {
         requirement.setApplicationId(APPLICATION_ID);
         requirement.setOriginalText("Build it");
         requirements.setRecords(List.of(requirement));
-        when(relationValidator.requireActiveApplication(APPLICATION_ID)).thenReturn(application());
+        when(relationValidator.requireApplication(APPLICATION_ID)).thenReturn(application());
         when(requirementMapper.paginate(any(Page.class), any())).thenReturn(requirements);
 
         Page<PlatformRequirementVO> result = managementService.listRequirements(
@@ -175,7 +196,7 @@ class PlatformApplicationManagementServiceTest {
     @Test
     void rejectsNonOwnerButAllowsSystemAdministratorToRead() {
         App application = application();
-        when(relationValidator.requireActiveApplication(APPLICATION_ID)).thenReturn(application);
+        when(relationValidator.requireApplication(APPLICATION_ID)).thenReturn(application);
 
         assertThrows(
             BusinessException.class,
@@ -186,21 +207,44 @@ class PlatformApplicationManagementServiceTest {
             APPLICATION_ID,
             user(999L, "admin")
         );
-        assertEquals(APPLICATION_ID, result.getId());
+        assertEquals(String.valueOf(APPLICATION_ID), result.getId());
+    }
+
+    @Test
+    void archivedApplicationRemainsReadableButRejectsNewRequirement() {
+        App archivedApplication = application();
+        archivedApplication.setLifecycleStatus("ARCHIVED");
+        when(relationValidator.requireApplication(APPLICATION_ID)).thenReturn(archivedApplication);
+
+        PlatformApplicationVO result = managementService.getApplication(
+            APPLICATION_ID,
+            user(OWNER_ID, "user")
+        );
+
+        assertEquals("ARCHIVED", result.getLifecycleStatus());
+        assertEquals("UNAVAILABLE", result.getPublicAvailability());
+        assertEquals(true, result.isRetained());
+        assertEquals(false, result.isRecoverySupported());
+        assertThrows(
+            BusinessException.class,
+            () -> managementService.submitRequirement(APPLICATION_ID, user(OWNER_ID, "user"), "No longer active")
+        );
+        verifyNoInteractions(requirementMapper);
     }
 
     @Test
     void archivesThroughDomainServiceAndReturnsRetentionBoundary() {
         App application = application();
-        application.setLifecycleStatus("ARCHIVED");
-        when(relationValidator.requireActiveApplication(APPLICATION_ID)).thenReturn(application);
+        when(relationValidator.requireApplication(APPLICATION_ID)).thenReturn(application);
+        App archivedApplication = application();
+        archivedApplication.setLifecycleStatus("ARCHIVED");
         when(archiveService.archive(
             eq(APPLICATION_ID),
             eq(OWNER_ID),
             eq(PlatformActor.OWNER),
             eq("ARCHIVE_REQUEST"),
             any(String.class)
-        )).thenReturn(application);
+        )).thenReturn(archivedApplication);
 
         PlatformApplicationVO result = managementService.archiveApplication(
             APPLICATION_ID,
