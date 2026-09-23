@@ -75,11 +75,11 @@ See `.agents/rules/README.md` for the full index.
 When working on tasks matching these patterns, automatically use the corresponding skill:
 
 - 变更前分析影响范围、评估风险、确定验证入口时：使用 `task-evidence-analysis` 技能，勿手工重复其步骤
-- 工作已有明确、可执行的 spec、Ticket、验收标准或已授权修复目标，需要落实为可验证代码变更时：自动使用 `realize` 技能，勿手工重复其步骤
+- 实现功能、开发需求、编码、写代码、落地已明确的 spec/Ticket/验收标准或已授权修复目标时：自动使用 `realize` 技能，勿手工重复其步骤
 - 代码审查、PR 审查、分支合并前检查 Standards 和 Spec 合规性时：使用 `code-review` 技能，勿手工重复其步骤
 - 审查代码质量、检查代码坏味道、重构建议、TS Agent 生成代码质量检查时：使用 `clean-code-reviewer` 技能，勿手工重复其步骤
 - 故障诊断、Bug 定位、服务异常、接口报错、SSE 断连等问题分析时：使用 `incident-evidence-diagnosis` 技能，勿手工重复其步骤
-- 设计审查、方案评估、API 契约变更、跨服务调用设计、架构风险检查时：使用 `grilling` 技能，勿手工重复其步骤
+- 准备向用户提出需求、设计或技术选择问题时，以及明确的设计审查、方案评估、API 契约变更、跨服务调用设计、架构风险检查时：先使用 `grilling` 技能自主消解，勿直接提问或手工重复其步骤
 
 ## Commit Attribution
 - AI-assisted commits must end with `Assisted-by: <agent-name>/<model-id>`; do not guess an unknown model ID

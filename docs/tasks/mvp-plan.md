@@ -43,7 +43,7 @@ D-04 订阅运营参数 ──────────────────�
 ```
 
 - `T-01` 必须在 D-06 状态矩阵写入工程规格后开始；`T-02`、`T-03` 还依赖 D-07 删除语义，并按其依赖顺序进行。
-- `T-04` 在 D-01 与 `T-01` 的 Task 执行基线契约完成后进行，只实现基线解析与 Pi Adapter 受控基线；`T-05` 在 D-02 后组装完整 Run Context、实现 Runtime 能力、Lease 与 Sandbox。`T-06` 还依赖 D-05；`T-07` 在 `T-06` 的持久契约上执行验证并完成版本晋升。
+- `T-04` 在 D-01 与 `T-01` 的 Task 执行基线契约完成后进行，只实现基线解析与 Pi Adapter 受控基线；`T-05` 在 D-02 后组装完整 Run Context、实现 Runtime 能力、Lease 与 Sandbox。`T-06` 消费已批准的 D-05 Git 存储契约，负责实现持久契约；`T-07` 在 `T-06` 的持久契约上执行验证并完成版本晋升。
 - `T-08` 至 `T-11` 依赖上游稳定契约，必须顺序完成，避免在状态、Snapshot、Validation 或 Release 语义未冻结时并行实现。
 - `T-12` 只在所有前序任务完成后执行，作为跨服务验收与安全边界检查。
 
@@ -62,7 +62,7 @@ D-04 订阅运营参数 ──────────────────�
 - 状态：`Approved`。MVP 固定使用单机 Docker Engine，Platform 受控执行器独占 Docker API；TS Runtime、Pi Adapter 和 Sandbox 无 Docker Socket 或等价宿主机控制权。完整边界见 `AD-016`。
 - 隔离：每个写入型 Run 使用非 root、无特权、只读根文件系统的独立容器与独立 Workspace；固定上限为 2 vCPU、4 GiB 内存、256 PIDs、2 GiB Workspace tmpfs 和 512 MiB `/tmp` tmpfs。Sandbox 默认无外网、无宿主机挂载、无 Production 网络/凭据，且仅通过 Run 专属 internal network 访问短生命周期验证数据库。
 - Deployment：Platform Deployment Controller 从固定 Release 创建内部健康检查通过后才可公开的独立容器；公开 URL/TLS 按 D-03 的共享路径入口执行。取消或终态 Run 以 10 秒优雅停止后强制清理 Sandbox、临时网络、验证数据库和 Workspace。
-- 已解除：`T-05`、`T-07`、`T-09` 的执行后端决策阻塞；`T-09` 仍等待任务 6 至任务 8，`T-06` 仍等待 D-05。
+- 已解除：`T-05`、`T-07`、`T-09` 的执行后端决策阻塞，以及 `T-06` 的 D-05 存储选择阻塞；`T-06` 仍等待任务 1、任务 5 的实现契约。
 - 验收：实现必须以容器 inspect 与隔离测试证明资源限制、无 Docker Socket/宿主机挂载、无外网、不可访问其他 Workspace/Production、取消清理和内部健康检查；`docker compose config` 是基础设施静态验证入口。
 
 ### D-03：公共 URL 与 TLS 最小策略
@@ -84,10 +84,11 @@ D-04 订阅运营参数 ──────────────────�
 ### D-05：Snapshot 物理存储选择
 
 - 对应：`OQ-002`。
-- 状态：受 `CST-002` 约束的实现选择；可由实现任务提出并经维护者记录确认。
-- 需要决定：不可变 Snapshot/SourceRevision 使用内部 Git commit、内容寻址对象存储或其他方案。
-- 影响：阻塞 `T-06`。
-- 验收：选择能证明不可变性、来源可追溯、内容可恢复和不绕过 `Task -> Run -> Workspace -> CandidateSourceSnapshot -> Validation -> SourceRevision` 路径的方案。
+- 状态：`Approved`。MVP 使用每个 Application 一个 Platform 私有 Git 仓库；Workspace/worktree 是临时工作载体，Platform 创建的 Candidate commit 是冻结版本事实。完整决策见 `docs/tmp/tickets/05-snapshot-storage-decision-v2.md`。
+- 物理存储：Platform Executor 独占写入 Platform 控制的持久卷；Snapshot 记录完整 `commitHash`、`baseSourceRevision` 和 `treeHash/contentDigest`，SourceRevision 直接引用通过验证的 Candidate commit。
+- 封闭边界：Agent commit、Workspace、外部 Git、CI、管理员 API 和 Deployment 不能直接创建或修改稳定 SourceRevision；MVP 不提供并发分支自动 merge、rebase 或外部 Git 写回。
+- 影响：解除 `T-06` 的 Snapshot 物理存储选择阻塞；T-06 仍需实现冻结、恢复、Validation 绑定和 Platform 独占写入。
+- 验收：实现必须证明不可变性、来源可追溯、`git diff` 可比较、内容可恢复，并保持 `Task -> Run -> Workspace -> CandidateSourceSnapshot -> Validation -> SourceRevision` 路径。
 
 ### D-06：Task 与 Run 状态转换矩阵
 
@@ -112,10 +113,11 @@ D-04 订阅运营参数 ──────────────────�
 
 **关联规格：** `R-001`、`R-002`、`R-003`、`AD-001`、`AD-003`、`CST-001`、`CST-006`、`CT-001`、`CT-002`。
 
-**说明：** 在 D-06 已批准的状态转换矩阵基础上，在 Java 后端建立 Application、Requirement、Task、Run 与 Trusted Profile 的独立 Platform Domain 模型、迁移、Repository/Service 和受控状态转换。Task 在进入实施前由 Platform 冻结 `baseProfileVersion`、`baseSourceRevision`、`requestedOutcome`、`acceptanceTarget`，形成版本化 `TaskExecutionBaseline`；它是 `CT-002` 的 Platform 输入片段，而非包含 Workspace、Sandbox Tool Contract 或 Execution Policy 的完整 Run Context。旧 `App` 与 `GenerationRun` 只可作为现状评估输入，不得静默承接新对象的语义或成为权威基线。
+**说明：** 在 D-06 已批准的状态转换矩阵基础上，在 Java 后端以既有 `app` 作为唯一 Application 聚合根，建立 Requirement、Task、Run 与 Trusted Profile 的 Platform 从属模型、迁移、Repository/Service 和受控状态转换。Platform 不再创建 `platform_application` 根表或同义 Application 实体；所有从属对象统一通过 `app.id` 归属。Task 在进入实施前由 Platform 冻结 `baseProfileVersion`、`baseSourceRevision`、`requestedOutcome`、`acceptanceTarget`，形成版本化 `TaskExecutionBaseline`；它是 `CT-002` 的 Platform 输入片段，而非包含 Workspace、Sandbox Tool Contract 或 Execution Policy 的完整 Run Context。
 
 **验收标准：**
 - [ ] Platform Domain 持久化 Application、不可变 Requirement、Task、Run 和版本化 Trusted Profile，并保持完整 Application 归属关系。
+- [ ] Application 唯一持久化根为既有 `app`；Platform 从属表通过 `app.id` 关联，不创建 `platform_application`。
 - [ ] 进入实施的 Task 仅能由 Platform 冻结四项基线字段，并生成带 schema version 的 `TaskExecutionBaseline`；缺少字段、变更已冻结基线或使用未知 schema version 被拒绝。
 - [ ] 所有 Task/Run 逻辑状态转换、取消请求和重新归一化入口均严格符合 D-06 矩阵；非法边、错误触发者和缺失前置条件被拒绝。Workspace、Tool Contract、Execution Policy、Lease 与 Sandbox 清理由任务 5 在 D-02 后实现与验证。
 
@@ -135,11 +137,11 @@ D-04 订阅运营参数 ──────────────────�
 
 **关联规格：** `R-001`、`R-002`、`AC-001` 至 `AC-004`、`AC-026`、`CT-001`、`CST-001`。
 
-**说明：** 在 Java 后端实现 Owner/System Administrator 的 Application 创建、读取、按 D-07 的删除策略删除，以及不可变 Requirement 接收 API，并将鉴权和错误返回纳入现有 REST 模式。Phase 1 不创建 Task、不提出 `blocked` 问题、不启动 Agent Run；提交后的 Requirement 仅以“等待归一化”的可观察状态返回。
+**说明：** 在 Java 后端基于既有 `app` 聚合根实现 Owner/System Administrator 的 Application 创建、读取、按 D-07 的逻辑归档策略处理，以及不可变 Requirement 接收 API，并将鉴权和错误返回纳入现有 REST 模式。Phase 1 不创建 Task、不提出 `blocked` 问题、不启动 Agent Run；提交后的 Requirement 仅以“等待归一化”的可观察状态返回。
 
 **验收标准：**
 - [ ] Owner 可创建 Application、提交不可变 Requirement，并读取“等待归一化”的 Requirement 状态；此阶段不产生 Task、Sandbox 写入或 Agent 结论。
-- [ ] Owner/System Administrator 可按 D-07 的已批准语义删除 Application；删除后的公开入口、关联事实和恢复/不可恢复边界可观察。
+- [ ] Owner/System Administrator 可按 D-07 的已批准语义归档 Application；归档后的公开入口和旧 `/app` 链路不可用，关联事实和恢复/不可恢复边界可观察。
 - [ ] 非 Owner、非 System Administrator 的创建、删除或读取同一 Application 管理事实请求被拒绝。
 
 **验证：**
@@ -157,11 +159,11 @@ D-04 订阅运营参数 ──────────────────�
 
 **关联规格：** `R-001`、`R-002`、`AC-001`、`AC-004`、`AC-026`、`CT-001`。
 
-**说明：** 将任务 2 的 API 接入 Vue 前端，为 Owner 提供创建 Application、提交自然语言 Requirement、查看“等待归一化”状态和按 D-07 定义的删除操作。归一化、Task 状态和决定性业务问题属于任务 8，不能在本任务通过规则或伪造 Task 提前实现。
+**说明：** 将任务 2 的 API 接入 Vue 前端，为 Owner 提供基于既有 `app.id` 创建 Application、提交自然语言 Requirement、查看“等待归一化”状态和按 D-07 定义的归档操作。工作台与旧 `/app` 链路不得产生第二个 Application ID。归一化、Task 状态和决定性业务问题属于任务 8，不能在本任务通过规则或伪造 Task 提前实现。
 
 **验收标准：**
 - [ ] Owner 可在浏览器创建 Application、提交 Requirement 并看到等待归一化状态，不会看到虚构的 Task、Agent 结论或业务澄清问题。
-- [ ] Owner/System Administrator 可执行 D-07 定义的删除操作；非授权用户没有删除或其他管理操作入口。
+- [ ] Owner/System Administrator 可执行 D-07 定义的归档操作；归档后的事实保留状态可见，非授权用户没有归档或其他管理操作入口。
 - [ ] 前端不手写后端 DTO 类型，生成后的 API 类型覆盖新增接口。
 
 **验证：**
@@ -179,7 +181,7 @@ D-04 订阅运营参数 ──────────────────�
 
 - [ ] 任务 1 至 3 的 Java 与前端验证均通过。
 - [ ] 人工走通“Owner 创建 Application -> 提交 Requirement -> 等待归一化 -> 按 D-07 删除或查看删除后状态”的链路。
-- [ ] 复核旧 `App` / `GenerationRun` 没有成为新领域模型的隐式写入路径，也没有在 Pi Runtime 就绪前生成 Task 或业务澄清问题。
+- [ ] 复核不存在第二个 Application 根；Platform 从属模型统一归属 `app.id`，且没有在 Pi Runtime 就绪前生成 Task 或业务澄清问题。
 - [ ] 维护者审查 API 契约，再开始 Runtime 与 Sandbox 实施。
 
 ### Phase 2：单 Run 执行、隔离与不可变版本
@@ -235,7 +237,7 @@ D-04 订阅运营参数 ──────────────────�
 
 **关联规格：** `R-004`、`AC-011`、`AC-013`、`AD-002`、`AD-008`、`CT-003`、`CST-002`、`CST-003`、`CST-007`。
 
-**说明：** 根据 D-05 选定的不可变存储方案，实现 Workspace 冻结、CandidateSourceSnapshot、Candidate Profile Diff、`profileDisposition`，以及绑定 Snapshot 的不可变 Validation/Evidence 持久契约和 Platform 独占写入边界。本任务不执行权威验证，不能创建 SourceRevision 或 Trusted Profile Version；这些晋升仅由任务 7 在验证成功后完成。
+**说明：** 根据已批准的 D-05 Git-backed immutable Snapshot 方案，实现 Workspace 冻结、CandidateSourceSnapshot、Candidate Profile Diff、`profileDisposition`，以及绑定 Snapshot 的不可变 Validation/Evidence 持久契约和 Platform 独占写入边界。本任务不执行权威验证，不能创建 SourceRevision 或 Trusted Profile Version；这些晋升仅由任务 7 在验证成功后完成。
 
 **验收标准：**
 - [ ] 可写 Workspace 不能直接成为 Validation 或 Release 输入；冻结结果可恢复、不可变并引用其 Task/Run/基线。
@@ -442,7 +444,7 @@ D-04 订阅运营参数 ──────────────────�
 
 ## 执行前检查
 
-- [ ] D-05 已在任务 6 前记录；D-01、D-02、D-03、D-04、D-06、D-07 已写入工程规格与对应 Issue。
+- [x] D-05 已在任务 6 前记录；D-01、D-02、D-03、D-04、D-06、D-07 已写入工程规格与对应 Issue。
 - [ ] 每个实施任务已由 `to-tickets` 建为独立 GitHub Issue，并使用原生依赖关系表达上游阻塞。
 - [ ] 每个 Issue 保留本计划引用的 `R-`、`AC-`、`AD-`、`CST-`、`CT-` 与适用 `OQ-`。
 - [ ] 任务执行前调用 `task-evidence-analysis`，并按项目规则记录目标、范围、验证、风险和回滚。
@@ -457,5 +459,5 @@ D-04 订阅运营参数 ──────────────────�
 - 改动范围：新增 `docs/tasks/plan.md` 与 `docs/tasks/todo.md`，并根据审查修订任务依赖、验收与检查点；不修改代码、不创建 GitHub 任务 Issue、不执行基础设施或生产操作。
 - 实际验证：已检查计划包含 12 个实施任务、4 个检查点、7 个决策门，且覆盖 `R-001` 至 `R-007` 与 `SAC-001` 至 `SAC-003`；两份 Markdown 均通过空白错误检查和敏感信息赋值扫描。
 - 审查结论：P2 至 P7 已在计划层消除；D-06 状态和 D-07 删除语义已由维护者决定并锁定，后续实施只能按对应契约执行。
-- 未解决风险：D-05 必须在任务 6 前记录；在此之前不得启动相关实现。订阅实现不得超出 D-04 的最小托管边界。
+- 未解决风险：Git 仓库、Workspace/worktree、Snapshot 冻结和对象保留策略仍需在 T-06 实现与验证；订阅实现不得超出 D-04 的最小托管边界。
 - 回滚：删除本次新增的 `docs/tasks/` 目录；不影响已发布的规格 Issue #65。

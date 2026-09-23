@@ -450,6 +450,14 @@ Requirement -> Task -> Run -> Workspace -> CandidateSourceSnapshot -> Validation
 | 统一发布确认 | 已上线应用的所有新版本均需用户确认发布。 | 有可靠、确定性的低风险发布分类证据。 |
 | 封闭源码入口 | MVP 不接外部 Git/CI 作为写入路径。 | 真实用户需要导入或外部协作，且可实现受控 Import。 |
 
+### Snapshot Storage Decision
+
+- **当前决定：** MVP 使用每个 Application 一个 Platform 私有 Git 仓库作为 Snapshot/SourceRevision 的物理存储；仓库位于 Platform 控制的持久卷中，由 Platform Executor 独占写入。
+- **冻结语义：** Workspace 或 Git worktree 是临时可变工作载体；Platform 在冻结时审计文件树并创建 Candidate commit。Candidate commit 记录完整 `commitHash`、`baseSourceRevision` 和 `treeHash/contentDigest`，通过 Validation 后直接晋升为 SourceRevision。
+- **可信边界：** Agent 自己创建的 commit、branch 或 tag 不构成可信版本；外部 Git、CI、管理员 API、Workspace 和 Deployment 不得直接写入稳定 SourceRevision。读取和恢复时校验 Git 对象与内容摘要。
+- **并发边界：** MVP 同一 Application 只允许一个写入型 Run。Candidate 基线过期时标记 stale，要求基于最新 SourceRevision 创建新 Run；不自动 merge、rebase 或解决冲突。
+- **依据与范围：** 该决定解决 `OQ-002` / D-05，解除 T-06 的物理存储选择阻塞；不实现 Git 仓库、Worktree、Snapshot 或 Validation 持久化本身。
+
 ### Superseded Guidance
 
 本文件前文的“尚未决定：当前 Q13”与“下一位 Agent 应等待回答 Q13”已失效。Q13-Q19 均已由用户确认；后续审查应以本节为当前有效设计状态。
