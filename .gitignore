@@ -41,6 +41,9 @@ build/
 .vscode/*
 !.vscode/tasks.json
 
+## Pi
+.pi/
+
 ## Trae ##
 .trae/
 

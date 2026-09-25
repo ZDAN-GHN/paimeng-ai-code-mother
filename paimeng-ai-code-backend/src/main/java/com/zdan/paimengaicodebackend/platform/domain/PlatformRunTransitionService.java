@@ -20,17 +20,20 @@ public class PlatformRunTransitionService {
     private final PlatformRunMapper runMapper;
     private final PlatformRunTransitionEventMapper transitionEventMapper;
     private final PlatformLogicalRelationValidator relationValidator;
+    private final PlatformRunLeaseService leaseService;
 
     public PlatformRunTransitionService(
         PlatformTaskStateMachine stateMachine,
         PlatformRunMapper runMapper,
         PlatformRunTransitionEventMapper transitionEventMapper,
-        PlatformLogicalRelationValidator relationValidator
+        PlatformLogicalRelationValidator relationValidator,
+        PlatformRunLeaseService leaseService
     ) {
         this.stateMachine = stateMachine;
         this.runMapper = runMapper;
         this.transitionEventMapper = transitionEventMapper;
         this.relationValidator = relationValidator;
+        this.leaseService = leaseService;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -64,7 +67,13 @@ public class PlatformRunTransitionService {
         if (currentState != expectedState) {
             throw new BusinessException(ErrorCode.FORBIDDEN_ERROR, "Run 当前状态已变化");
         }
-        stateMachine.assertRunTransition(currentState, targetState, requestedBy);
+        stateMachine.assertRunTransition(
+            currentState,
+            targetState,
+            requestedBy,
+            leaseService.hasActiveLeaseForRun(runId),
+            leaseService.hasNoLeaseForRun(runId)
+        );
 
         PlatformRun update = new PlatformRun();
         update.setState(targetState.name());

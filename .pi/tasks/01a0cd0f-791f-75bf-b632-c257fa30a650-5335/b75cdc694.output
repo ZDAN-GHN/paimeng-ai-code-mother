@@ -1,0 +1,60 @@
+2026-09-25T15:12:54.294+08:00  INFO 43023 --- [paimeng-code-backend] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-09-25T15:12:54.387+08:00  INFO 43023 --- [paimeng-code-backend] [           main] i.opentelemetry.api.GlobalOpenTelemetry  : AutoConfiguredOpenTelemetrySdk found on classpath but automatic configuration is disabled. To enable, run your JVM with -Dotel.java.global-autoconfigure.enabled=true
+2026-09-25T15:12:54.677+08:00  INFO 43023 --- [paimeng-code-backend] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@5895c065
+2026-09-25T15:12:54.679+08:00  INFO 43023 --- [paimeng-code-backend] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-09-25T15:12:54.734+08:00  INFO 43023 --- [paimeng-code-backend] [           main] org.flywaydb.core.FlywayExecutor         : Database: jdbc:mysql://localhost:3306/paimeng_ai_code_mother (MySQL 8.0)
+2026-09-25T15:12:54.860+08:00  INFO 43023 --- [paimeng-code-backend] [           main] o.f.core.internal.command.DbValidate     : Successfully validated 9 migrations (execution time 00:00.071s)
+2026-09-25T15:12:54.889+08:00  INFO 43023 --- [paimeng-code-backend] [           main] o.f.core.internal.command.DbMigrate      : Current version of schema `paimeng_ai_code_mother`: 8
+2026-09-25T15:12:54.893+08:00  INFO 43023 --- [paimeng-code-backend] [           main] o.f.core.internal.command.DbMigrate      : Schema `paimeng_ai_code_mother` is up to date. No migration necessary.
+2026-09-25T15:12:56.532+08:00  INFO 43023 --- [paimeng-code-backend] [           main] i.g.bonigarcia.wdm.WebDriverManager      : Using chromedriver 154.0.8037.57 (resolved driver for Chrome 154)
+2026-09-25T15:12:56.540+08:00  INFO 43023 --- [paimeng-code-backend] [           main] i.g.bonigarcia.wdm.WebDriverManager      : Exporting webdriver.chrome.driver as /home/zdan/.cache/selenium/chromedriver/linux64/154.0.8037.57/chromedriver
+2026-09-25T15:12:57.227+08:00  WARN 43023 --- [paimeng-code-backend] [           main] o.o.selenium.devtools.CdpVersionFinder   : Unable to find CDP implementation matching 154
+2026-09-25T15:12:57.228+08:00  WARN 43023 --- [paimeng-code-backend] [           main] o.o.selenium.chromium.ChromiumDriver     : Unable to find version of CDP to use for 154.0.8037.57. You may need to include a dependency on a specific version of the CDP using something similar to `org.seleniumhq.selenium:selenium-devtools-v86:4.31.0` where the version ("v86") matches the version of the chromium-based browser you're using and the version number of the artifact is the same as Selenium's.
+2026-09-25T15:12:57.248+08:00  INFO 43023 --- [paimeng-code-backend] [           main] i.g.bonigarcia.wdm.WebDriverManager      : Using chromedriver 154.0.8037.57 (resolved driver for Chrome 154)
+2026-09-25T15:12:57.250+08:00  INFO 43023 --- [paimeng-code-backend] [           main] i.g.bonigarcia.wdm.WebDriverManager      : Exporting webdriver.chrome.driver as /home/zdan/.cache/selenium/chromedriver/linux64/154.0.8037.57/chromedriver
+2026-09-25T15:12:57.584+08:00  WARN 43023 --- [paimeng-code-backend] [           main] o.o.selenium.devtools.CdpVersionFinder   : Unable to find CDP implementation matching 154
+2026-09-25T15:12:57.584+08:00  WARN 43023 --- [paimeng-code-backend] [           main] o.o.selenium.chromium.ChromiumDriver     : Unable to find version of CDP to use for 154.0.8037.57. You may need to include a dependency on a specific version of the CDP using something similar to `org.seleniumhq.selenium:selenium-devtools-v86:4.31.0` where the version ("v86") matches the version of the chromium-based browser you're using and the version number of the artifact is the same as Selenium's.
+2026-09-25T15:12:58.201+08:00  INFO 43023 --- [paimeng-code-backend] [           main] org.redisson.Version                     : Redisson 3.50.0
+2026-09-25T15:12:58.390+08:00  INFO 43023 --- [paimeng-code-backend] [isson-netty-4-6] o.redisson.connection.ConnectionsHolder  : 1 connections initialized for localhost/127.0.0.1:6379
+2026-09-25T15:12:58.390+08:00  INFO 43023 --- [paimeng-code-backend] [isson-netty-4-5] o.redisson.connection.ConnectionsHolder  : 1 connections initialized for localhost/127.0.0.1:6379
+2026-09-25T15:12:58.548+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.s.PlatformSandboxDockerConfig    : Platform Sandbox docker client initialized, dockerHost: unix:///var/run/docker.sock, image: paimeng-ai-code-sandbox:0.1.0
+2026-09-25T15:12:58.853+08:00  INFO 43023 --- [paimeng-code-backend] [           main] o.s.v.b.OptionalValidatorFactoryBean     : Failed to set up a Bean Validation provider: jakarta.validation.NoProviderFoundException: Unable to create a Configuration, because no Jakarta Bean Validation provider could be found. Add a provider like Hibernate Validator (RI) to your classpath.
+2026-09-25T15:12:59.628+08:00  INFO 43023 --- [paimeng-code-backend] [           main] s.PlatformSandboxExecutorIntegrationTest : Started PlatformSandboxExecutorIntegrationTest in 8.144 seconds (process running for 9.033)
+2026-09-25T15:12:59.631+08:00  INFO 43023 --- [paimeng-code-backend] [           main] o.s.b.a.b.JobLauncherApplicationRunner   : Running default command line with: []
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+WARNING: A Java agent has been loaded dynamically (/home/zdan/.m2/repository/net/bytebuddy/byte-buddy-agent/1.17.6/byte-buddy-agent-1.17.6.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+2026-09-25T15:13:00.572+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox start completed, runId: 9900002, applicationId: 1, containerId: a6b145b7c057, user: 1000:1000, result: success, durationMs: 216
+2026-09-25T15:13:01.588+08:00 ERROR 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox exec timeout, runId: 9900002, containerId: a6b145b7c057, timeoutSeconds: 1, errorClass: timeout
+2026-09-25T15:13:01.666+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox stop completed, runId: 9900002, containerId: a6b145b7c057, result: success, durationMs: 76
+2026-09-25T15:13:01.866+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox start completed, runId: 9900003, applicationId: 1, containerId: aa22350b0cb1, user: 1000:1000, result: success, durationMs: 163
+2026-09-25T15:13:02.035+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox stop completed, runId: 9900003, containerId: aa22350b0cb1, result: success, durationMs: 86
+2026-09-25T15:13:02.235+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox start completed, runId: 9900004, applicationId: 1, containerId: 5d1d471eb3a3, user: 1000:1000, result: success, durationMs: 158
+2026-09-25T15:13:02.312+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox stop completed, runId: 9900004, containerId: 5d1d471eb3a3, result: success, durationMs: 71
+2026-09-25T15:13:02.527+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox start completed, runId: 9900005, applicationId: 1, containerId: f16873ea66f5, user: 1000:1000, result: success, durationMs: 169
+2026-09-25T15:13:02.588+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox exec completed, runId: 9900005, containerId: f16873ea66f5, exitCode: 0, stdoutBytes: 3, stderrBytes: 0, durationMs: 61
+2026-09-25T15:13:02.675+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox exec completed, runId: 9900005, containerId: f16873ea66f5, exitCode: 3, stdoutBytes: 0, stderrBytes: 0, durationMs: 86
+2026-09-25T15:13:02.751+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox stop completed, runId: 9900005, containerId: f16873ea66f5, result: success, durationMs: 75
+2026-09-25T15:13:02.951+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox start completed, runId: 9900006, applicationId: 1, containerId: fe16e0d682d8, user: 1000:1000, result: success, durationMs: 158
+2026-09-25T15:13:03.023+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox stop completed, runId: 9900006, containerId: fe16e0d682d8, result: success, durationMs: 71
+2026-09-25T15:13:03.207+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox start completed, runId: 9900007, applicationId: 1, containerId: 3a4b2dd74b12, user: 1000:1000, result: success, durationMs: 149
+2026-09-25T15:13:03.253+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox exec completed, runId: 9900007, containerId: 3a4b2dd74b12, exitCode: 7, stdoutBytes: 10, stderrBytes: 10, durationMs: 45
+2026-09-25T15:13:03.323+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox stop completed, runId: 9900007, containerId: 3a4b2dd74b12, result: success, durationMs: 68
+2026-09-25T15:13:03.511+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox start completed, runId: 9900008, applicationId: 1, containerId: 013bee2ed043, user: 1000:1000, result: success, durationMs: 151
+2026-09-25T15:13:03.557+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox exec completed, runId: 9900008, containerId: 013bee2ed043, exitCode: 143, stdoutBytes: 0, stderrBytes: 0, durationMs: 45
+2026-09-25T15:13:03.627+08:00  INFO 43023 --- [paimeng-code-backend] [           main] c.z.p.p.sandbox.PlatformSandboxExecutor  : Platform Sandbox stop completed, runId: 9900008, containerId: 013bee2ed043, result: success, durationMs: 69
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 12.53 s -- in com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxExecutorIntegrationTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  15.103 s
+[INFO] Finished at: 2026-09-25T15:13:04+08:00
+[INFO] ------------------------------------------------------------------------

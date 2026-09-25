@@ -67,6 +67,9 @@ class PlatformIntegrityIntegrationTest {
     @Autowired
     private PlatformRunTransitionService runTransitionService;
 
+    @Autowired
+    private PlatformRunLeaseService leaseService;
+
     @Test
     void archivesApplicationAndAppendsLifecycleEvidence() {
         Graph graph = createGraph();
@@ -119,6 +122,33 @@ class PlatformIntegrityIntegrationTest {
         ));
     }
 
+    /**
+     * Lease 在 {@code CREATED→LEASED} 之前授予，该窗口内 Run 仍是 CREATED。
+     * 只看 Run 状态的归档判据会放过这种「写入权已发出」的 Application。
+     */
+    @Test
+    void rejectsArchiveWhileLeaseIsHeldOnStillCreatedRun() {
+        Graph graph = createGraph();
+        leaseService.grant(
+            graph.run().getId(),
+            PlatformActor.RUNTIME,
+            "RUN_STARTED",
+            "archive-lease-window"
+        );
+
+        assertEquals(
+            PlatformRunState.CREATED.name(),
+            runMapper.selectOneByQuery(byId(graph.run().getId())).getState()
+        );
+        assertThrows(BusinessException.class, () -> archiveService.archive(
+            graph.application().getId(),
+            graph.application().getUserId(),
+            PlatformActor.OWNER,
+            "OWNER_REQUEST",
+            "archive-during-lease"
+        ));
+    }
+
     @Test
     void retainsRequirementAndFreezesTaskBaselineInDatabase() {
         Graph graph = createGraph();
@@ -167,6 +197,12 @@ class PlatformIntegrityIntegrationTest {
             "BASELINE_FROZEN",
             null,
             "append-only-task"
+        );
+        leaseService.grant(
+            transitionGraph.run().getId(),
+            PlatformActor.RUNTIME,
+            "RUN_STARTED",
+            "append-only-lease"
         );
         runTransitionService.transition(
             transitionGraph.run().getId(),
@@ -217,6 +253,12 @@ class PlatformIntegrityIntegrationTest {
             "BASELINE_FROZEN",
             null,
             "task-ready"
+        );
+        leaseService.grant(
+            graph.run().getId(),
+            PlatformActor.RUNTIME,
+            "RUN_STARTED",
+            "run-leased-lease"
         );
         runTransitionService.transition(
             graph.run().getId(),

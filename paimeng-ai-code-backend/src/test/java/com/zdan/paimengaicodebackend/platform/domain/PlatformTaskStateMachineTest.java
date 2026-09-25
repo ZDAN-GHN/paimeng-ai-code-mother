@@ -155,22 +155,77 @@ class PlatformTaskStateMachineTest {
         assertDoesNotThrow(() -> stateMachine.assertRunTransition(
             PlatformRunState.CREATED,
             PlatformRunState.FAILED,
-            PlatformActor.PLATFORM
+            PlatformActor.PLATFORM,
+            false,
+            true
         ));
         assertDoesNotThrow(() -> stateMachine.assertRunTransition(
             PlatformRunState.LEASED,
             PlatformRunState.EXECUTING,
-            PlatformActor.PLATFORM
+            PlatformActor.PLATFORM,
+            true,
+            false
         ));
         assertDoesNotThrow(() -> stateMachine.assertRunTransition(
             PlatformRunState.EXECUTING,
             PlatformRunState.SUCCEEDED,
-            PlatformActor.PLATFORM
+            PlatformActor.PLATFORM,
+            false,
+            true
         ));
         assertThrows(BusinessException.class, () -> stateMachine.assertRunTransition(
             PlatformRunState.SUCCEEDED,
             PlatformRunState.EXECUTING,
-            PlatformActor.PLATFORM
+            PlatformActor.PLATFORM,
+            true,
+            true
+        ));
+    }
+
+    @Test
+    void runCannotEnterLeasedWithoutActuallyHoldingLease() {
+        assertThrows(BusinessException.class, () -> stateMachine.assertRunTransition(
+            PlatformRunState.CREATED,
+            PlatformRunState.LEASED,
+            PlatformActor.PLATFORM,
+            false,
+            true
+        ));
+        assertDoesNotThrow(() -> stateMachine.assertRunTransition(
+            PlatformRunState.CREATED,
+            PlatformRunState.LEASED,
+            PlatformActor.PLATFORM,
+            true,
+            false
+        ));
+    }
+
+    @Test
+    void runCannotReachTerminalStateWhileLeaseStillHeld() {
+        assertThrows(BusinessException.class, () -> stateMachine.assertRunTransition(
+            PlatformRunState.EXECUTING,
+            PlatformRunState.SUCCEEDED,
+            PlatformActor.PLATFORM,
+            true,
+            false
+        ));
+        assertThrows(BusinessException.class, () -> stateMachine.assertRunTransition(
+            PlatformRunState.LEASED,
+            PlatformRunState.CANCELLED,
+            PlatformActor.PLATFORM,
+            true,
+            false
+        ));
+    }
+
+    @Test
+    void runStateAuthorityRemainsPlatformOnly() {
+        assertThrows(BusinessException.class, () -> stateMachine.assertRunTransition(
+            PlatformRunState.LEASED,
+            PlatformRunState.EXECUTING,
+            PlatformActor.RUNTIME,
+            true,
+            false
         ));
     }
 

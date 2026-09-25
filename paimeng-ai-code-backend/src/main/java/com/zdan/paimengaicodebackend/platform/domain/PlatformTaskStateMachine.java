@@ -61,24 +61,39 @@ public class PlatformTaskStateMachine {
         }
     }
 
+    /**
+     * 裁决 Run 状态转换。
+     *
+     * <p>Lease 事实由调用方从 {@code platform_run_lease} 实查后传入，不是自报值。
+     * 进入 LEASED / EXECUTING 必须确实持有活跃 Lease；进入终态必须确实已无 Lease 行，
+     * 避免出现「Run 已结束但写入权仍在」的悬挂写入者。
+     *
+     * <p>因此编排顺序固定为：授予 Lease → CREATED→LEASED → LEASED→EXECUTING
+     * → 释放 Lease → 进入终态。
+     */
     public void assertRunTransition(
         PlatformRunState from,
         PlatformRunState target,
-        PlatformActor requestedBy
+        PlatformActor requestedBy,
+        boolean holdsActiveLease,
+        boolean leaseReleased
     ) {
         if (requestedBy != PlatformActor.PLATFORM) {
             throw rejected("只有 Platform 可以裁决 Run 状态");
         }
         boolean allowed = switch (from) {
-            case CREATED -> target == PlatformRunState.LEASED || target == PlatformRunState.FAILED;
+            case CREATED ->
+                (target == PlatformRunState.LEASED && holdsActiveLease) ||
+                (target == PlatformRunState.FAILED && leaseReleased);
             case LEASED ->
-                target == PlatformRunState.EXECUTING ||
-                target == PlatformRunState.FAILED ||
-                target == PlatformRunState.CANCELLED;
+                (target == PlatformRunState.EXECUTING && holdsActiveLease) ||
+                ((target == PlatformRunState.FAILED || target == PlatformRunState.CANCELLED) &&
+                    leaseReleased);
             case EXECUTING ->
-                target == PlatformRunState.SUCCEEDED ||
-                target == PlatformRunState.FAILED ||
-                target == PlatformRunState.CANCELLED;
+                (target == PlatformRunState.SUCCEEDED ||
+                    target == PlatformRunState.FAILED ||
+                    target == PlatformRunState.CANCELLED) &&
+                leaseReleased;
             case SUCCEEDED, FAILED, CANCELLED -> false;
         };
         if (!allowed) {

@@ -17,6 +17,8 @@ class PlatformMigrationTest {
         String v5 = resource("/db/migration/V5__platform_audit_events_append_only.sql");
         String v6 = resource("/db/migration/V6__unify_app_root_and_platform_field_names.sql");
         String v7 = resource("/db/migration/V7__remove_legacy_run_and_credit.sql");
+        String v8 = resource("/db/migration/V8__platform_run_lease.sql");
+        String v9 = resource("/db/migration/V9__platform_run_recovery_checkpoint.sql");
 
         assertTrue(v1.contains("CREATE TABLE platform_application"));
         assertTrue(v1.contains("CREATE TABLE platform_requirement"));
@@ -47,6 +49,24 @@ class PlatformMigrationTest {
         assertTrue(v7.contains("DROP TABLE IF EXISTS credit_ledger"));
         assertTrue(v7.contains("remove_user_credits_column"));
         assertTrue(v7.contains("ALTER TABLE user DROP COLUMN credits"));
+
+        assertTrue(v8.contains("CREATE TABLE platform_run_lease"));
+        assertTrue(v8.contains("CREATE TABLE platform_run_lease_event"));
+        assertTrue(v8.contains("UNIQUE KEY uk_platform_run_lease_app (appId)"));
+        assertTrue(v8.contains("UNIQUE KEY uk_platform_run_lease_request (runId, eventType, requestId)"));
+        assertTrue(v8.contains("fenceToken BIGINT NOT NULL"));
+        assertTrue(v8.contains("platform_run_lease_event_no_update"));
+        assertTrue(v8.contains("platform_run_lease_event_no_delete"));
+        assertTrue(!v8.contains("platform_run_lease_no_delete"));
+        assertTrue(!v8.contains("FOREIGN KEY"));
+        assertTrue(!v8.contains("application_id"));
+
+        assertTrue(v9.contains("CREATE TABLE platform_run_recovery_checkpoint"));
+        assertTrue(v9.contains("CREATE TABLE platform_run_command_request"));
+        assertTrue(v9.contains("UNIQUE KEY uk_platform_run_command_request (runId, requestId)"));
+        assertTrue(v9.contains("containerId VARCHAR(64) NOT NULL"));
+        assertTrue(!v9.contains("ALTER TABLE platform_run"));
+        assertTrue(!v9.contains("DROP TABLE"));
     }
 
     private String resource(String path) throws Exception {

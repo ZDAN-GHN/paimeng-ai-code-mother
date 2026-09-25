@@ -3,11 +3,13 @@ package com.zdan.paimengaicodebackend.platform.domain;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.zdan.paimengaicodebackend.exception.BusinessException;
 import com.zdan.paimengaicodebackend.exception.ErrorCode;
+import com.zdan.paimengaicodebackend.mapper.platform.PlatformRunMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformTaskMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformTaskTransitionEventMapper;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformTask;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformTaskTransitionEvent;
 import java.time.LocalDateTime;
+import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,21 +18,33 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class PlatformTaskTransitionService {
 
+    private static final List<String> RUN_TERMINAL_STATES = List.of(
+        PlatformRunState.SUCCEEDED.name(),
+        PlatformRunState.FAILED.name(),
+        PlatformRunState.CANCELLED.name()
+    );
+
     private final PlatformTaskStateMachine stateMachine;
     private final PlatformTaskMapper taskMapper;
     private final PlatformTaskTransitionEventMapper transitionEventMapper;
     private final PlatformLogicalRelationValidator relationValidator;
+    private final PlatformRunLeaseService leaseService;
+    private final PlatformRunMapper runMapper;
 
     public PlatformTaskTransitionService(
         PlatformTaskStateMachine stateMachine,
         PlatformTaskMapper taskMapper,
         PlatformTaskTransitionEventMapper transitionEventMapper,
-        PlatformLogicalRelationValidator relationValidator
+        PlatformLogicalRelationValidator relationValidator,
+        PlatformRunLeaseService leaseService,
+        PlatformRunMapper runMapper
     ) {
         this.stateMachine = stateMachine;
         this.taskMapper = taskMapper;
         this.transitionEventMapper = transitionEventMapper;
         this.relationValidator = relationValidator;
+        this.leaseService = leaseService;
+        this.runMapper = runMapper;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -76,7 +90,11 @@ public class PlatformTaskTransitionService {
         TaskTransitionConditions persistedConditions = requestedConditions.withPersistedBaseline(
             task.getBaselineJson() != null
         );
-        stateMachine.assertTaskTransition(currentState, targetState, requestedBy, persistedConditions);
+        TaskTransitionConditions verifiedConditions = persistedConditions.withLeaseFacts(
+            leaseService.hasGrantedLeaseForTask(taskId),
+            leaseService.hasNoActiveLeaseForTask(taskId) && hasNoRunningRun(taskId)
+        );
+        stateMachine.assertTaskTransition(currentState, targetState, requestedBy, verifiedConditions);
 
         PlatformTask update = new PlatformTask();
         update.setState(targetState.name());
@@ -109,5 +127,17 @@ public class PlatformTaskTransitionService {
             requestId,
             java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos)
         );
+    }
+
+    /**
+     * Task 名下是否已无处于非终态的 Run。
+     *
+     * <p>「Run 已停止」不能只看 Lease：Lease 过期会被收割，但 Run 仍可能停在 EXECUTING。
+     * 因此该事实由 Run 状态与 Lease 缺失共同构成。
+     */
+    private boolean hasNoRunningRun(Long taskId) {
+        return runMapper.selectCountByQuery(
+            QueryWrapper.create().eq("taskId", taskId).notIn("state", RUN_TERMINAL_STATES)
+        ) == 0;
     }
 }

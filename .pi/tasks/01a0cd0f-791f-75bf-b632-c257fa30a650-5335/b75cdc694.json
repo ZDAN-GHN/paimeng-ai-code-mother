@@ -1,0 +1,28 @@
+{
+  "id": "b75cdc694",
+  "name": "Sandbox 隔离集成测试",
+  "command": "cd /home/zdan/github/paimeng-ai-code-mother/paimeng-ai-code-backend && ./mvnw -o -Dtest=PlatformSandboxExecutorIntegrationTest test 2>&1 | tail -60",
+  "status": "completed",
+  "outputPath": ".pi/tasks/01a0cd0f-791f-75bf-b632-c257fa30a650-5335/b75cdc694.output",
+  "cwd": "/home/zdan/github/paimeng-ai-code-mother",
+  "startTime": 1790320367777,
+  "endTime": 1790320384084,
+  "exitCode": 0,
+  "signal": null,
+  "pid": 42829,
+  "bytesWritten": 11751,
+  "isAgent": false,
+  "surviveReload": false,
+  "notified": true,
+  "notifyOnCompletion": true,
+  "triggerOnCompletion": true,
+  "timeoutSeconds": 900,
+  "shellPolicy": {
+    "policy": "inherit",
+    "executable": "/bin/bash",
+    "argvPrefix": [
+      "-c"
+    ],
+    "dialect": "bash"
+  }
+}

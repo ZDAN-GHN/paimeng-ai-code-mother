@@ -24,17 +24,20 @@ public class PlatformApplicationArchiveService {
     private final PlatformRunMapper runMapper;
     private final PlatformApplicationLifecycleEventMapper lifecycleEventMapper;
     private final PlatformLogicalRelationValidator relationValidator;
+    private final PlatformRunLeaseService leaseService;
 
     public PlatformApplicationArchiveService(
         AppMapper appMapper,
         PlatformRunMapper runMapper,
         PlatformApplicationLifecycleEventMapper lifecycleEventMapper,
-        PlatformLogicalRelationValidator relationValidator
+        PlatformLogicalRelationValidator relationValidator,
+        PlatformRunLeaseService leaseService
     ) {
         this.appMapper = appMapper;
         this.runMapper = runMapper;
         this.lifecycleEventMapper = lifecycleEventMapper;
         this.relationValidator = relationValidator;
+        this.leaseService = leaseService;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -74,6 +77,9 @@ public class PlatformApplicationArchiveService {
                 .in("state", ACTIVE_WRITING_RUN_STATES)
         ) > 0) {
             throw new BusinessException(ErrorCode.FORBIDDEN_ERROR, "存在活跃写入型 Run，不能归档 Application");
+        }
+        if (leaseService.hasActiveLeaseForApplication(applicationId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN_ERROR, "存在活跃写入 Lease，不能归档 Application");
         }
 
         App update = new App();

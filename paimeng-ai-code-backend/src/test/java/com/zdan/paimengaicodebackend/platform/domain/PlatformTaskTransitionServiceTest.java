@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.zdan.paimengaicodebackend.exception.BusinessException;
+import com.zdan.paimengaicodebackend.mapper.platform.PlatformRunMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformTaskMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformTaskTransitionEventMapper;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformTask;
@@ -22,11 +23,15 @@ class PlatformTaskTransitionServiceTest {
     private final PlatformLogicalRelationValidator relationValidator = mock(
         PlatformLogicalRelationValidator.class
     );
+    private final PlatformRunLeaseService leaseService = mock(PlatformRunLeaseService.class);
+    private final PlatformRunMapper runMapper = mock(PlatformRunMapper.class);
     private final PlatformTaskTransitionService transitionService = new PlatformTaskTransitionService(
         new PlatformTaskStateMachine(),
         taskMapper,
         eventMapper,
-        relationValidator
+        relationValidator,
+        leaseService,
+        runMapper
     );
 
     @Test

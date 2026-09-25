@@ -29,6 +29,18 @@
         <java.version>21</java.version>
         <!-- 运行时构建产物目录，默认 target/。 -->
         <maven.build.directory>${project.basedir}/target</maven.build.directory>
+        <!--
+            受控 Run 执行的 Sandbox 后端。webdrivermanager 会传递引入 3.5.0，
+            此处显式统一，避免 Sandbox 执行器依赖一个由无关组件决定的版本。
+        -->
+        <docker-java.version>3.7.1</docker-java.version>
+        <!--
+            收敛 docker-java-core 传递引入的 bouncycastle。3.7.1 默认带入 1.82，
+            该版本命中 6 条 advisory（GHSA-574f-3g2m-x479 / GHSA-9pwp-9qqc-pr26 /
+            GHSA-c3fc-8qff-9hwx / GHSA-p93r-85wp-75v3 / GHSA-qp49-qgx5-5m26 /
+            GHSA-wg6q-6289-32hp）。1.85 是把六条全部清零的最低版本（1.84 仍留 2 条）。
+        -->
+        <bouncycastle.version>1.85</bouncycastle.version>
     </properties>
 
     <dependencyManagement>
@@ -39,6 +51,46 @@
                 <version>1.11.0</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.github.docker-java</groupId>
+                <artifactId>docker-java</artifactId>
+                <version>${docker-java.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.docker-java</groupId>
+                <artifactId>docker-java-core</artifactId>
+                <version>${docker-java.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.docker-java</groupId>
+                <artifactId>docker-java-api</artifactId>
+                <version>${docker-java.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.docker-java</groupId>
+                <artifactId>docker-java-transport</artifactId>
+                <version>${docker-java.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.docker-java</groupId>
+                <artifactId>docker-java-transport-httpclient5</artifactId>
+                <version>${docker-java.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcpkix-jdk18on</artifactId>
+                <version>${bouncycastle.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcprov-jdk18on</artifactId>
+                <version>${bouncycastle.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcutil-jdk18on</artifactId>
+                <version>${bouncycastle.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -80,6 +132,24 @@
             <groupId>io.github.bonigarcia</groupId>
             <artifactId>webdrivermanager</artifactId>
             <version>6.1.0</version>
+        </dependency>
+        <!--
+            受控 Run 执行的 Sandbox 后端（Docker Engine API 客户端）。
+
+            只依赖 core + httpclient5 transport，不依赖聚合 artifact `docker-java`：
+            聚合包会额外拉入 jersey transport 及其 15 个传递依赖（jersey / hk2 / javassist /
+            junixsocket），而本项目走 httpclient5，那是第二套无用的 HTTP 栈。
+
+            transport 选 httpclient5 而非 netty：netty transport 引入 4.2.x，跨 Spring Boot BOM
+            的 netty 4.1.x 大版本线。
+        -->
+        <dependency>
+            <groupId>com.github.docker-java</groupId>
+            <artifactId>docker-java-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.github.docker-java</groupId>
+            <artifactId>docker-java-transport-httpclient5</artifactId>
         </dependency>
         <!-- https://github.com/ben-manes/caffeine -->
         <dependency>

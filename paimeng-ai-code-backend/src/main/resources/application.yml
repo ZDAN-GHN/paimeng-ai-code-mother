@@ -47,6 +47,30 @@ ts-agent:
     secret: ${TS_AGENT_JWT_SECRET:}
     ttl-minutes: ${TS_AGENT_JWT_TTL_MINUTES:10}
 
+# 受控 Run 执行（Issue #77 / T-05）
+platform:
+  execution:
+    # TODO 入站鉴权延后（维护者决策）：/platform/runs/execution/** 当前无鉴权。
+    # 禁止部署到共享或公网环境。开启后端点仍只接受回环调用方，但那不是鉴权的替代品。
+    enabled: ${PLATFORM_EXECUTION_ENABLED:false}
+  sandbox:
+    # 执行器独占 Docker API（AD-016）。未显式开启时不持有 Docker 客户端。
+    enabled: ${PLATFORM_SANDBOX_ENABLED:false}
+    # 镜像需本地构建：docker build -t paimeng-ai-code-sandbox:0.1.0 infra/docker/sandbox
+    image-reference: ${PLATFORM_SANDBOX_IMAGE:paimeng-ai-code-sandbox:0.1.0}
+    # 留空走 docker-java 默认发现（DOCKER_HOST 或本机 socket）
+    docker-host: ${PLATFORM_SANDBOX_DOCKER_HOST:}
+    # 以下限额取自 AD-016（Locked Decision）的固定值，改动等于偏离该决定，须先更新架构决策
+    memory-limit-mb: ${PLATFORM_SANDBOX_MEMORY_LIMIT_MB:4096}
+    cpu-limit: ${PLATFORM_SANDBOX_CPU_LIMIT:2.0}
+    pids-limit: ${PLATFORM_SANDBOX_PIDS_LIMIT:256}
+    # Workspace 是容器内 tmpfs，不是宿主机目录挂载；容器删除即消失
+    workspace-tmpfs-size-mb: ${PLATFORM_SANDBOX_WORKSPACE_TMPFS_MB:2048}
+    tmpfs-size-mb: ${PLATFORM_SANDBOX_TMPFS_MB:512}
+    stop-timeout-seconds: ${PLATFORM_SANDBOX_STOP_TIMEOUT_SECONDS:10}
+    default-command-timeout-seconds: ${PLATFORM_SANDBOX_DEFAULT_COMMAND_TIMEOUT_SECONDS:300}
+    max-command-timeout-seconds: ${PLATFORM_SANDBOX_MAX_COMMAND_TIMEOUT_SECONDS:900}
+
 # springdoc
 springdoc:
   group-configs:
