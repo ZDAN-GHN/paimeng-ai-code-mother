@@ -59,10 +59,8 @@ test('normalizes engine usage without price, business references, or raw Pi mess
   const normalizer = new PiEventNormalizer(fixedClock)
 
   const event = normalizer.normalize({
-    type: 'message_update',
-    assistantMessageEvent: {
-      type: 'done',
-      message: {
+    type: 'message_end',
+    message: {
         provider: 'anthropic',
         model: 'claude-sonnet',
         usage: {
@@ -73,7 +71,6 @@ test('normalizes engine usage without price, business references, or raw Pi mess
           totalTokens: 16,
           cost: { total: 99 },
         },
-      },
     },
   })
 
@@ -98,10 +95,8 @@ test('observes usage from Pi error events without exposing the error payload', (
   const normalizer = new PiEventNormalizer(fixedClock)
 
   const event = normalizer.normalize({
-    type: 'message_update',
-    assistantMessageEvent: {
-      type: 'error',
-      error: {
+    type: 'message_end',
+    message: {
         provider: 'anthropic',
         model: 'claude-sonnet',
         usage: {
@@ -112,7 +107,6 @@ test('observes usage from Pi error events without exposing the error payload', (
           totalTokens: 12,
         },
         errorMessage: 'must-not-be-forwarded',
-      },
     },
   })
 

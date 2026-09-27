@@ -96,7 +96,7 @@ Platform Layer
 - 状态：`Confirmed`
 - 来源：Grill Me 关于 Run、Runtime、Pi Session、Sandbox、Tool Boundary 和无 Subagent 的确认。
 - 目标：在不暴露宿主机、Production 或其他 Workspace 的前提下执行 Agent 代码生成和调试。
-- 行为：每个写入型 Task 同一时刻仅允许一个拥有 Application 写权的 Run。Runtime 为 Run 创建隔离 Sandbox/Workspace，调用 Agent Engine Adapter；Adapter 使用 Pi SDK 管理 Engine Session、工具循环和上下文。
+- 行为：每个写入型 Task 同一时刻仅允许一个拥有 Application 写权的 Run。Runtime 为 Run 创建隔离 Sandbox/Workspace，调用 Agent Engine Adapter；Adapter 使用 Pi Agent Core 管理单 Run Agent、工具循环和上下文。
 - 前置条件：Task 为 `ready`；Runtime 已获得有效 Run Lease 和 Application 写入权。
 - 输入：Run Context、固定 Source 基线、Trusted Profile、相关 Requirement、工具边界和执行策略。
 - 输出：统一 Run Event、Workspace 变更、阻断问题、Platform Request 或 Run 结果。
@@ -346,9 +346,9 @@ Requirement + Trusted Profile + Task Baseline
 #### Agent Engine Adapter
 
 - 职责：将 Run Context 映射到当前 Agent Engine，并将 Engine 事件转换为统一 Run Event。
-- 负责：Pi Session、上下文、Tool Loop 和 Engine 特有事件适配。
+- 负责：Pi Agent、上下文、Tool Loop 和 Engine 特有事件适配。
 - 不负责：Task 领域建模、状态裁决、生产权限或 Deployment。
-- 依赖：Pi SDK、Runtime 提供的 Sandbox Tool Contract。
+- 依赖：Pi Agent Core、Pi AI 模型协议、Runtime 提供的 Sandbox Tool Contract。
 - 输入：Run Context 和受控工具。
 - 输出：统一 Run Event、工具请求和 Agent 文本结果。
 - 关联需求：`R-003`
@@ -443,14 +443,14 @@ Requirement + Trusted Profile + Task Baseline
 - 关联约束：`CST-001`、`CST-004`
 - 关联未决问题：无
 
-### AD-006：Pi SDK 通过 Agent Engine Adapter 接入
+### AD-006：Pi Agent Core 通过 Agent Engine Adapter 接入
 
 - 状态：`Locked Decision`
-- 来源：维护者已确定 Pi SDK 为当前 Agent Engine；Grill Me Q13/Q14。
-- 背景：Task/Run 需要独立于具体 Engine，Pi 的 Session 和 Tool Loop 不应泄漏到领域模型。
-- 决定：Adapter 将 Run Context 和 Sandbox Tool Contract 映射到 Pi SDK，并将 Pi 事件归一化为 Run Event。
+- 来源：维护者确定 Pi 为当前 Agent Engine；Grill Me Q13/Q14；后续确认只需要 Pi 的 Agent 引擎。
+- 背景：Task/Run 需要独立于具体 Engine，Pi 的 Agent 和 Tool Loop 不应泄漏到领域模型。完整 Coding Agent SDK 额外引入 TUI、CLI 等不使用的依赖。
+- 决定：Adapter 将 Run Context 和 Sandbox Tool Contract 映射到 `pi-agent-core`，以 `pi-ai` 显式选择模型和凭据，只注册经 Platform fence 执行的 Sandbox 工具；将 Pi 事件归一化为 Run Event。不加载 Coding Agent 的默认本地工具或宿主资源。
 - 原因：隔离 Engine 特有行为并保留未来替换空间。
-- 影响：Pi Session 通常服务于一个 Run，但不是 Run 的领域身份。
+- 影响：每个 Run 使用独立 Pi Agent；Agent 的内部状态不是 Run 的领域身份，也不持久化为领域事实。
 - 后果：Adapter 必须不授予宿主机或 Production 权限。
 - 关联需求：`R-003`
 - 关联约束：`CST-004`、`CST-005`

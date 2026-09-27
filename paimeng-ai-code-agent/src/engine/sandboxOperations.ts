@@ -19,7 +19,7 @@ import { assertAbsoluteContainerPath, quoteShellArgument } from './shellQuote.js
  * - 内容经 base64 传输（膨胀 4/3），嵌在 JSON body 里。
  * - `/commands` 返回缓冲结果，因此 `bash` 的 `onData` 在命令结束时被调用一次，不是流式。
  * - `grep` 工具不可用本模块改道：其 ripgrep 是无条件本地执行的，装配它会让模型读到
- *   Runtime 宿主的文件。装配清单与理由见 `piEngineAdapter`。
+ *   Runtime 宿主的文件。装配清单与理由见 `../pi/piEngineAdapter.ts`。
  */
 
 /** 文件类操作的超时。它们都是单次 shell 内建命令，不需要与 `npm install` 同级的上限。 */

@@ -49,15 +49,10 @@ const piUsageMessageSchema = z.object({
   model: z.string().min(1),
   usage: piUsageSchema,
 })
-const piUsageObservedEventSchema = z
-  .object({
-    type: z.literal('message_update'),
-    assistantMessageEvent: z.discriminatedUnion('type', [
-      z.object({ type: z.literal('done'), message: piUsageMessageSchema }).passthrough(),
-      z.object({ type: z.literal('error'), error: piUsageMessageSchema }).passthrough(),
-    ]),
-  })
-  .passthrough()
+const piMessageEndSchema = z.object({
+  type: z.literal('message_end'),
+  message: piUsageMessageSchema,
+}).passthrough()
 
 export class PiEventNormalizer {
   public constructor(private readonly clock: Clock = () => new Date()) {}
@@ -74,6 +69,8 @@ export class PiEventNormalizer {
         return this.createEvent(occurredAt, { type: 'execution.started' })
       case 'message_update':
         return this.normalizeMessageUpdate(occurredAt, event)
+      case 'message_end':
+        return this.normalizeUsage(occurredAt, event)
       case 'tool_execution_start':
         return this.normalizeToolStarted(occurredAt, event)
       case 'tool_execution_end':
@@ -92,15 +89,15 @@ export class PiEventNormalizer {
       })
     }
 
-    const usageEvent = piUsageObservedEventSchema.safeParse(event)
-    if (!usageEvent.success) {
-      return undefined
-    }
+    return undefined
+  }
 
-    const message = getUsageMessage(usageEvent.data.assistantMessageEvent)
+  private normalizeUsage(occurredAt: string, event: unknown): AgentExecutionEvent | undefined {
+    const parsedEvent = piMessageEndSchema.safeParse(event)
+    if (!parsedEvent.success) return undefined
     return this.createEvent(occurredAt, {
       type: 'usage.observed',
-      observation: toEngineUsageObservation(message),
+      observation: toEngineUsageObservation(parsedEvent.data.message),
     })
   }
 
@@ -136,12 +133,6 @@ export class PiEventNormalizer {
       ...payload,
     })
   }
-}
-
-function getUsageMessage(
-  event: z.infer<typeof piUsageObservedEventSchema>['assistantMessageEvent'],
-): z.infer<typeof piUsageMessageSchema> {
-  return event.type === 'done' ? event.message : event.error
 }
 
 function toEngineUsageObservation(
