@@ -9,14 +9,14 @@
 
 本计划将已发布规格中的 `R-001` 至 `R-007` 拆为可独立验收的实施任务。主线是先建立 Platform 的持久领域事实和 Owner 入口，再构建单 Run 的 Pi Agent 执行与隔离边界，然后将不可变版本、权威验证、发布和订阅生命周期接入同一证据链。
 
-本计划不实施产品功能、不在未决问题上自行选择模板或执行后端、不将旧 `App` / `GenerationRun` 语义直接升级为新平台领域模型，也不创建额外的 Agent SDK 集成。D-01 已锁定固定模板，D-07 已锁定逻辑归档；Pi SDK 是唯一允许接入的 Agent Engine；RAG 不进入该主链路。
+本计划不实施产品功能、不在未决问题上自行选择模板或执行后端、不将旧 `App` / `GenerationRun` 语义直接升级为新平台领域模型，也不创建额外的 Agent SDK 集成。D-01 已锁定固定模板，D-07 已锁定逻辑归档；Pi Agent Core 是当前 Agent 引擎，Pi AI 仅提供模型/provider 协议，不接入完整 Coding Agent SDK 或第二个引擎；RAG 不进入该主链路。
 
 ## 已核实现状
 
 | 项目 | 事实 | 对计划的影响 |
 | --- | --- | --- |
 | Java 后端 | Spring Boot 3、Java 21、MyBatis Flex、MySQL 和 Redis；已有 `AppController`、`GenerationRunController`、认证和内部 API 基础。 | Platform Domain 应在 Java 后端建立权威持久状态与内部 API。旧模型只可作为迁移评估输入。 |
-| TS Agent | `paimeng-ai-code-agent/` 当前为空目录。 | Pi Adapter、Runtime、Sandbox Tool Contract 和 Agent 测试需从受控基础重新建立；不得复用 Vercel AI SDK 或其他 Agent SDK。 |
+| TS Agent（编写计划时） | `paimeng-ai-code-agent/` 当时为空目录；该快照不代表当前实现。 | Pi Adapter、Runtime、Sandbox Tool Contract 和 Agent 测试需从受控基础重新建立；不得复用 Vercel AI SDK 或其他 Agent SDK。 |
 | Vue 前端 | Vue 3、Ant Design Vue、OpenAPI 生成 API 类型；已有 Application 聊天/编辑页面和 SSE 客户端。 | Owner 入口在已有前端上演进，接口类型必须通过 `npm run openapi2ts` 生成，不能手写后端类型。 |
 | 基础设施 | 有 Docker Compose、Nginx 和 MySQL 初始化资料，但未发现平台级 Sandbox/Release/Deployment 实现。 | Sandbox、验证与部署后端必须先经决策门选择，再实施。 |
 | 既有生成链路 | README 记录旧 TS Agent/P3 生成主链路，规格明确其不构成新平台领域实现。 | 不承诺旧 SSE 或旧生成状态与新 `Run Event` 兼容；需要适配时在任务中显式测试。 |
@@ -190,10 +190,10 @@ D-04 订阅运营参数 ──────────────────�
 
 **关联规格：** `R-003`、`AD-005`、`AD-006`、`AD-007`、`CT-002`、`CST-005`。
 
-**说明：** 在当前空的 `paimeng-ai-code-agent/` 中建立可复现 Node.js/TypeScript 服务基线，接入 Pi SDK 作为唯一 Agent Engine，并定义 Engine Adapter、统一 Run Event 与仅解析任务 1 版本化 `TaskExecutionBaseline` 的映射层。不得引入 Vercel AI SDK、LangChain 或第二个 Agent SDK；该任务不实现持久 Platform 状态、Workspace/Sandbox Tool Contract、Execution Policy、Lease/Sandbox 资源管理或 Production 操作。完整 Run Context 的组装与受控能力映射属于任务 5。
+**说明：** 在 `paimeng-ai-code-agent/` 中建立可复现 Node.js/TypeScript 服务基线，以 Pi Agent Core 作为 Agent 引擎、Pi AI 作为模型/provider 协议，并定义 Engine Adapter、统一 Run Event 与仅解析任务 1 版本化 `TaskExecutionBaseline` 的映射层。不得引入完整 Coding Agent SDK、Vercel AI SDK、LangChain 或第二个 Agent 引擎；该任务不实现持久 Platform 状态、Workspace/Sandbox Tool Contract、Execution Policy、Lease/Sandbox 资源管理或 Production 操作。完整 Run Context 的组装与受控能力映射属于任务 5。
 
 **验收标准：**
-- [ ] 依赖锁文件、启动/类型检查/测试/构建脚本可复现，且只包含 Pi SDK 作为 Agent Engine。
+- [ ] 依赖锁文件、启动/类型检查/测试/构建脚本可复现；Agent 引擎只依赖 Pi Agent Core，模型协议使用 Pi AI，不引入完整 Coding Agent SDK 或第二个引擎。
 - [ ] Adapter 仅接受任务 1 已声明版本的 `TaskExecutionBaseline`，完整映射冻结基线并输出不泄漏 Pi Session 细节的统一 Run Event；未知版本或缺失字段被拒绝。
 - [ ] Adapter 没有 Production、宿主机、数据库、Workspace、Sandbox Tool、Execution Policy、Lease 或 Sandbox 清理能力，且不声明 Task/Release/Deployment 已完成。
 - [ ] Adapter 在每次 Agent 调用前后产生版本化、幂等的 Usage Evidence；它不计算或执行业务扣费，不调用旧 Java `CreditService`、`/credit` 或旧 `credit/freeze`。

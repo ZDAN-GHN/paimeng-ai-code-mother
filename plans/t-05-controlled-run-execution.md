@@ -1,5 +1,7 @@
 # T-05 受控 Run 执行（Lease / Sandbox / Run Context）实现计划
 
+> 历史实现计划：Issue #77 已关闭。下文“待评审”、`Pi SDK`/`AgentSession` API 取证与执行清单反映当时的完整 Coding Agent SDK，不是当前 Pi Agent Core 的实施指令。维护者的选型意图仅为薄 Agent 引擎；现行架构见 [工程规格 AD-006](../docs/specs/mvp-engineering-spec.md#ad-006pi-agent-core-通过-agent-engine-adapter-接入)，迁移及验证边界见 [Pi Agent Core 迁移记录](pi-agent-core-migration.md)。旧 SDK 的端到端验收不代表迁移后已复验完整 Platform/Lease/Sandbox 链路。
+
 > 状态：**待评审**。第 0 节四项决策已确认，取证已收口，§7 为可执行清单。
 > 对应 Issue：[#77](https://github.com/ZDAN-GHN/paimeng-ai-code-mother/issues/77)
 > 上游基线：Issue #77 三条评论（交接说明 → 独立核对 → 补充核对），均为已发布的取证产物。

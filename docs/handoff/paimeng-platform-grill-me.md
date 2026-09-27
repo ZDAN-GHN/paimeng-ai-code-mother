@@ -1,5 +1,7 @@
 # 非技术用户应用生成与托管平台：设计审查交接
 
+> 历史设计审查交接，不是当前实现或选型的权威来源。下文调研曾引用完整 Coding Agent SDK 的文档和 API，但维护者的选型意图仅为薄 Agent 引擎，而非采用完整 SDK。当前决策见 [工程规格 AD-006](../specs/mvp-engineering-spec.md#ad-006pi-agent-core-通过-agent-engine-adapter-接入) 与 [Issue #65](https://github.com/ZDAN-GHN/paimeng-ai-code-mother/issues/65)：使用 `pi-agent-core` 与 `pi-ai`，不加载完整 SDK 的 TUI、CLI 或宿主工具。
+
 ## 任务状态
 
 正在通过 `/grill-me` 方式审查“面向非技术用户的应用生成与托管平台”的 MVP 系统设计。用户要求：一次只问一个最重要的问题；每题先给推荐答案和理由；动态追问而非机械问卷；持续区分 Product / Agent / Platform 三层；优先利用 Pi SDK 已有能力，避免提前建立通用多 Agent Framework。

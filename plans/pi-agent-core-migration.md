@@ -75,7 +75,7 @@
 - 结果：无工具请求退出 0，Run `completed`，非空文本，事件 `execution.started`、`assistant.text.delta`、`usage.observed` 各 1。工具请求退出 0，Run `completed`，模型发起 1 次 `bash`，带 Run/Application/fence 的调用到达合成网关，事件 `tool.call.started`、`tool.call.completed` 各 1，`usage.observed` 2 次。
 - 边界：工具请求的网关是内存桩，**没有**启动 Java Platform、申请真实 Lease、在真实容器内执行命令或写入数据库。本次不能替代 #77 旧 SDK 的真实 Sandbox/Run 端到端证据，也不证明 core 版本已通过完整受控执行链路。
 
-## #77 密钥引用补验（待提交信息审批）
+## #77 密钥引用补验（已提交）
 
 - 类型：事故修复与验收补测；风险级别 R3（密钥解析和外部测试模型请求）。来源：用户明确指定 `runtime/tmp/issue-77/` 的测试配置并要求重跑真实模型请求；此前两次冒烟不能证明使用 #77 凭据。
 - 事实：`runtime/tmp/issue-77/models.json` 的 `xhy-api` `apiKey` 是 `$XHY_API_KEY` 引用，并非明文密钥；`paimeng-ai-code-agent/.env` 为本地权限 `0600` 的文件，包含对应变量。当前 `src/pi/piModelCatalog.ts` 只解释 `${ENV_NAME}`，会把裸 `$ENV_NAME` 当作字面量。此前对 `models.json` 权限导致明文密钥泄露的判断已更正，不作为安全事件记录。
@@ -90,3 +90,10 @@
 - 最终验证：增加 `${ENV_NAME}` 保持兼容及非法引用拒绝用例后，`cd paimeng-ai-code-agent && npm run type-check && npm run test && npm run build` 再次退出码 0，60/60 测试通过；`git diff --check` 退出码 0。`git check-ignore -v paimeng-ai-code-agent/.env runtime/tmp/issue-77/models.json` 确认两个本地凭据相关文件均被忽略，提交范围排除既有 `PLAN.md`。
 - 审查输入：目标为本节验收与已批准的 core 迁移计划；基线为当前 `HEAD`，变更为工作区的迁移文件及本次 `src/pi/piModelCatalog.ts` / `test/pi/piEngineAdapter.test.ts` / Agent README；证据为上列 RED/GREEN、最终 60/60 测试和真实模型探针。变更尚未提交，`code-review` Skill 的已提交固定点前提不满足；使用主 Agent 对未提交范围作 Standards/Spec 双轴限定审查。
 - 审查结论：Standards 轴检查配置引用校验、缺失环境变量不回退为字面量、凭据不传工具及不入日志、禁止命令凭据、私有文件权限；Spec 轴检查 #77 裸 `$ENV_NAME`、原有 `${ENV_NAME}`、真实出站认证匹配及模型非空响应。未发现当前范围的 P0/P1；未获得提供商后台计费对账或真实 Platform 容器执行证据，均不计为本次通过项。回滚方式仍为仅撤销本次模型目录解析、测试和 README 中新增的兼容性说明；core 迁移整体回滚按上方原计划执行。未暂存、未提交，等待用户审批提交信息。
+- 后续记录：维护者批准提交信息后，本地提交为 `fe18a7a`（未推送）；GitHub Issue #65 的当前选型已更正，#76 的历史票据增加置顶更正，#77 追加迁移后模型调用的验收边界说明。本节之前“待提交”的文字是提交前的阶段性证据，不代表当前状态。
+
+## 仓库文档选型同步（2026-09-27）
+
+- 状态：文档改动已完成、未提交。范围：当前工程规格、实施计划、任务清单；旧设计交接和 T-05 计划只加历史提示；本记录同步提交状态。非目标：改代码、重写历史票据、改变任务勾选或 GitHub Issue 状态。风险级别 R2（规格/计划与已同步的 Issue 决策一致性）；回滚仅撤销本节六个 Markdown 文件的文案改动，不回滚 `fe18a7a`。
+- 实际验证：`git diff --check` 退出码 0；`git grep -n -I -e 'Pi SDK' -e '@earendil-works/pi-coding-agent' -- docs/specs docs/tasks paimeng-ai-code-agent/README.md` 退出码 1（现行规范无旧选型命中）；与 #65 比较的四段现行选型文案一致；`mvp-plan.md` 与 `mvp-todo.md` 的勾选项数量分别保持 102 与 32。仅六个预期 Markdown 有修改，既有 `PLAN.md` 未触碰。纯文档更正，未运行无关构建。
+- 审查：以当前 `HEAD` 为基线检查上述六文件的未提交 diff。Standards：文档层级和历史来源可辨，未触及受版本副本规则保护的 `docs/tmp/` 票据；Spec：当前引擎/模型协议/工具边界与 #65 一致，历史交接不再被误当作当前实施指令。P0/P1 未发现；旧票据保留当时的术语作为历史证据。新文案尚未提交或推送。

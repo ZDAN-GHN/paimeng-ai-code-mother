@@ -35,7 +35,7 @@
 ## 检查点 B：执行与版本安全
 
 - [ ] Java/TS 验证通过：T-01 仅冻结 `TaskExecutionBaseline`，T-04 仅解析该基线，T-05 在 D-02 后定义版本化 `ExecutionCapabilities`、组装复合 Run Context 并验证完整 Adapter 映射；不兼容版本必须拒绝。Sandbox 越界、Lease、幂等、封闭源码路径和非权威方不能伪造 Validation 成功均有证据；T-06 不存在 SourceRevision 晋升入口。
-- [ ] 独立安全审查确认仅 Pi SDK 作为 Agent Engine，Pi Session 不是领域真相。
+- [ ] 独立安全审查确认仅 Pi Agent Core 作为 Agent 引擎、Pi AI 用于模型协议，默认宿主工具不可用；Pi Agent 状态不是领域真相。
 - [ ] 维护者审查 Snapshot 物理实现和 Profile 处置规则。
 
 ## Phase 3：验证与发布闭环

@@ -13,7 +13,7 @@
 - 当前阶段：新建 MVP
 - 核心目标：
   - 将自然语言 Requirement 归一化为受控 Task，并在必要时进行最小业务澄清。
-  - 在隔离环境中使用 Pi SDK 驱动 Agent 完成代码修改与验证准备,注意项目中各类 Agent SDK,如 Pi SDK, 目前严格要求只允许使用 Agent Engine, 不使用其他额外能力。
+  - 在隔离 Sandbox 中以 `@earendil-works/pi-agent-core` 驱动 Agent 循环，使用 `@earendil-works/pi-ai` 选择模型与流协议；只注册受控 Sandbox 工具，不引入完整 Coding Agent SDK 的 TUI、CLI 或宿主工具。
   - 以不可变 Snapshot、Validation、SourceRevision、Release 与 Deployment 建立可信证据链。
   - 首次生成后自动公开部署；后续更新由 Owner 确认上线。
   - 按订阅状态管理公开运行、停服保留与恢复。
@@ -293,7 +293,7 @@ Owner / System Administrator
   -> Platform Domain
   -> Agent Runtime
   -> Agent Engine Adapter
-  -> Pi SDK
+  -> Pi Agent Core (+ Pi AI model protocol)
   -> Sandbox / Workspace
   -> Platform Validation
   -> Release / Deployment
@@ -308,7 +308,7 @@ Platform 管理 Application 生命周期和生产运行环境。生成应用自�
 Requirement + Trusted Profile + Task Baseline
   -> Run Context
   -> Agent Runtime
-  -> Agent Engine Adapter / Pi SDK
+  -> Agent Engine Adapter / Pi Agent Core (+ Pi AI)
   -> Sandbox Workspace
   -> CandidateSourceSnapshot
   -> Platform Validation
@@ -537,7 +537,7 @@ Requirement + Trusted Profile + Task Baseline
 ### AD-013：TS Agent 负责 Agent 交互与用量计量
 
 - 状态：`Locked Decision`，维护者已明确决定。
-- 决定：Pi SDK、模型与工具调用、调用前后 Hook、Token/调用次数采集、用量聚合和未来价格计算均在 TS Agent 内实现。每次调用产生幂等 Usage Evidence，至少关联 `runId`、`invocationId`、`requestId`、模型标识、开始/结束时间、结果及引擎可用 usage 字段。
+- 决定：Pi Agent Core 的循环、Pi AI 模型/provider 调用、受控工具调用、调用前后 Hook、Token/调用次数采集、用量聚合和未来价格计算均在 TS Agent 内实现。每次调用产生幂等 Usage Evidence，至少关联 `runId`、`invocationId`、`requestId`、模型标识、开始/结束时间、结果及引擎可用 usage 字段。
 - 当前 MVP：Usage Evidence 只用于调试、诊断和未来计量；不冻结、扣减、退款、展示积分余额，不因余额阻断生成，也不包含货币、价格或余额裁决。
 - Java 边界：Java Platform 仍权威保存 Application/Task/Run/Validation/Release/Deployment 状态；未来独立账务可消费经受控边界提交的 Evidence，但新链路不得调用旧 `CreditService`、`/credit` 或旧 `credit/freeze`。
 - 迁移：旧积分实现与历史台账在新 Platform MVP 中隔离，不能作为新链路依赖；物理删除或数据迁移必须通过独立退役任务和数据影响评估。
@@ -880,9 +880,9 @@ Requirement + Trusted Profile + Task Baseline
 
 ## 现有状态与变更边界
 
-- 现有行为：当前系统为新建系统，不存在需要兼容的既有实现。`paimeng-ai-code-agent/` 当前为空目录；README 中关于旧 TS Agent SSE、Workspace/FileTools、Fastify、AI SDK 和 XState 的描述仅可作为历史迁移评估输入，不能作为当前可复现基线。
-- 当前架构：当前 Agent 实现尚未接入 Pi SDK；当前 Workspace/FileTools 不是容器级 Sandbox；尚未发现本规格定义的 Application/Task/Run/Snapshot/Release/Deployment 权威领域模型。
-- 当前接口：现有 SSE 事件和旧代码生成接口可作为迁移评估输入，但不能被假定为满足本规格的 Run Event 或 Platform Contract。
+- 编写本规格时的系统基线（历史记录，非当前现状）：当时系统为新建系统，`paimeng-ai-code-agent/` 尚未建立当前 Agent Runtime；旧 README 关于 TS Agent SSE、Workspace/FileTools、Fastify、AI SDK 和 XState 的描述仅用于当时的迁移评估。
+- 编写本规格时的架构基线（历史记录，非当前选型）：当时 Agent 实现尚未接入 Pi 引擎；当时的 Workspace/FileTools 不是容器级 Sandbox；当时尚未发现本规格定义的 Application/Task/Run/Snapshot/Release/Deployment 权威领域模型。
+- 编写本规格时的接口基线：当时的 SSE 事件和旧代码生成接口仅作为迁移评估输入，不能被假定为满足本规格的 Run Event 或 Platform Contract。
 - 需要改变的部分：新增 Platform Domain、Agent Runtime、Pi Adapter、隔离 Sandbox、Snapshot/Validation、版本晋升、Release/Deployment、订阅生命周期和对应 Product Layer。
 - 必须保持不变的部分：不修改 `runtime/tmp/` 或归档微服务作为开发基线；不得将生产凭据写入源码、日志或 Agent 上下文；不得让旧 Session 成为 Application 权威状态。
 
