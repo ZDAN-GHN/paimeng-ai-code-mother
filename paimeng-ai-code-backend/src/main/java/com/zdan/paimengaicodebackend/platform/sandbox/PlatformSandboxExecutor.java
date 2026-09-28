@@ -14,8 +14,15 @@ import com.github.dockerjava.api.model.StreamType;
 import com.zdan.paimengaicodebackend.exception.BusinessException;
 import com.zdan.paimengaicodebackend.exception.ErrorCode;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -50,6 +57,63 @@ public class PlatformSandboxExecutor {
     private static final int CONTAINER_UID = 1000;
     private static final int CONTAINER_GID = 1000;
     private static final String CONTAINER_RUN_AS_USER = CONTAINER_UID + ":" + CONTAINER_GID;
+
+    /** Fixed Platform-controlled exporter: never accepts a user path or command. */
+    private static final String QUIESCE_AND_TAR = """
+        const fs = require('node:fs');
+        const child = require('node:child_process');
+        const own = process.pid;
+        const started = Date.now();
+        function read(path) { return fs.readFileSync(path); }
+        function pids() { return fs.readdirSync('/proc').filter(x => /^\\d+$/.test(x)).map(Number); }
+        function startTime(pid) {
+          const stat = read(`/proc/${pid}/stat`).toString();
+          return BigInt(stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\\s+/)[19]);
+        }
+        function trustedSleep(pid) {
+          try {
+            return read(`/proc/${pid}/comm`).toString().trim() === 'sleep'
+              && read(`/proc/${pid}/cmdline`).equals(Buffer.from('sleep\\0infinity\\0'));
+          } catch { return false; }
+        }
+        function idleProcess() {
+          if (read('/proc/1/comm').toString().trim() !== 'docker-init') throw Error('init changed');
+          const children = read('/proc/1/task/1/children').toString().trim().split(/\\s+/)
+            .filter(Boolean).map(Number).filter(trustedSleep);
+          if (!children.length) throw Error('idle process missing');
+          return children.reduce((a, b) => startTime(a) <= startTime(b) ? a : b);
+        }
+        (async () => {
+          if (process.getuid() !== 1000 || process.getgid() !== 1000)
+            throw Error('snapshot exporter identity changed');
+          const idle = idleProcess();
+          const birth = startTime(idle);
+          let quiesced = false;
+          while (Date.now() - started < 5000) {
+            for (const pid of pids()) {
+              if (pid === 1 || pid === idle || pid === own) continue;
+              try { process.kill(pid, 'SIGKILL'); }
+              catch (e) { if (e.code !== 'ESRCH') throw e; }
+            }
+            await new Promise(resolve => setTimeout(resolve, 50));
+            if (!trustedSleep(idle) || startTime(idle) !== birth) throw Error('idle process changed');
+            const other = pids().some(pid => pid !== 1 && pid !== idle && pid !== own);
+            const ownTasks = fs.readdirSync('/proc/self/task').length;
+            const allTasks = Number(read('/sys/fs/cgroup/pids.current').toString().trim());
+            if (!other && allTasks === ownTasks + 2) { quiesced = true; break; }
+          }
+          if (!quiesced) throw Error('writers remain');
+          const tar = child.spawnSync('/bin/tar', ['-cf', '-', '-C', '/', '--', 'workspace'],
+            { stdio: ['ignore', 'inherit', 'pipe'], timeout: 20000, maxBuffer: 4096,
+              env: { PATH: '/usr/bin:/bin' } });
+          if (tar.error || tar.status !== 0 || tar.stderr.length) throw Error('tar failed');
+          if (!trustedSleep(idle) || startTime(idle) !== birth
+              || pids().some(pid => pid !== 1 && pid !== idle && pid !== own)
+              || Number(read('/sys/fs/cgroup/pids.current').toString().trim())
+                  !== fs.readdirSync('/proc/self/task').length + 2) throw Error('writers resumed');
+        })().catch(e => { process.stderr.write(`snapshot quiescence failed: ${e.message}\\n`);
+                         process.exitCode = 74; });
+        """;
 
     /** 孤儿容器回收用标签：按 managed-by 可枚举出本执行器创建的全部容器。 */
     private static final String LABEL_MANAGED_BY = "com.zdan.paimeng.platform.sandbox.managed-by";
@@ -308,6 +372,113 @@ public class PlatformSandboxExecutor {
             shortContainerId(handle.containerId()),
             TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos)
         );
+    }
+
+    /** Extract only a verified Git archive into an empty, owned tmpfs; Docker copy rejects read-only rootfs. */
+    public void restore(PlatformSandboxHandle handle, InputStream archive) {
+        requirePristineWorkspace(handle);
+        DockerClient docker = requireDockerClient();
+        var created = docker.execCreateCmd(handle.containerId())
+            .withAttachStdin(true).withAttachStdout(true).withAttachStderr(true)
+            .withUser(CONTAINER_RUN_AS_USER)
+            .withCmd("/bin/tar", "-xf", "-", "-C", CONTAINER_WORKSPACE_PATH,
+                "--no-same-owner", "--no-same-permissions").exec();
+        StreamCollector collector = new StreamCollector(null, null);
+        try {
+            docker.execStartCmd(created.getId()).withStdIn(archive).exec(collector);
+            if (!collector.awaitCompletion(30, TimeUnit.SECONDS)) {
+                throw new BusinessException(ErrorCode.OPERATION_ERROR, "Snapshot 恢复超时");
+            }
+            Integer exit = docker.inspectExecCmd(created.getId()).exec().getExitCode();
+            if (exit == null || exit != 0 || collector.stderrBytes != 0 || collector.stdoutBytes != 0) {
+                throw new BusinessException(ErrorCode.OPERATION_ERROR, "Snapshot TAR 恢复失败");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "Snapshot 恢复被中断");
+        } finally {
+            closeQuietly(collector);
+        }
+    }
+
+    /** Writes raw binary TAR only after the in-container quiescer has proved no other writer exists. */
+    public void exportQuiesced(PlatformSandboxHandle handle, Path destination, long maxBytes) {
+        DockerClient docker = requireDockerClient();
+        if (handle == null || destination == null || maxBytes <= 0 || maxBytes > 80L * 1024 * 1024
+            || !Objects.equals(find(handle.runId()).orElse(null), handle)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN_ERROR, "Sandbox 导出身份或上限不合法");
+        }
+        var inspected = docker.inspectContainerCmd(handle.containerId()).exec();
+        HostConfig host = inspected.getHostConfig();
+        if (inspected.getState() == null || !Boolean.TRUE.equals(inspected.getState().getRunning())
+            || Boolean.TRUE.equals(inspected.getState().getPaused()) || host == null
+            || !Boolean.TRUE.equals(host.getReadonlyRootfs()) || !"none".equals(host.getNetworkMode())
+            || !Boolean.TRUE.equals(host.getInit()) || !Boolean.FALSE.equals(host.getPrivileged())
+            || host.getCapDrop() == null || !Arrays.asList(host.getCapDrop()).contains(Capability.ALL)
+            || host.getSecurityOpts() == null
+            || !host.getSecurityOpts().contains("no-new-privileges:true")
+            || host.getTmpFs() == null || !host.getTmpFs().containsKey(CONTAINER_WORKSPACE_PATH)
+            || (host.getBinds() != null && host.getBinds().length > 0)
+            || inspected.getConfig() == null
+            || !CONTAINER_RUN_AS_USER.equals(inspected.getConfig().getUser())) {
+            throw new BusinessException(ErrorCode.FORBIDDEN_ERROR, "Sandbox 隔离状态不可确认");
+        }
+        var created = docker.execCreateCmd(handle.containerId())
+            .withAttachStdout(true).withAttachStderr(true).withUser(CONTAINER_RUN_AS_USER)
+            .withCmd("/usr/local/bin/node", "-e", QUIESCE_AND_TAR).exec();
+        try (OutputStream output = Files.newOutputStream(destination, StandardOpenOption.CREATE_NEW);
+             ArchiveCollector collector = new ArchiveCollector(output, maxBytes)) {
+            docker.execStartCmd(created.getId()).exec(collector);
+            if (!collector.awaitCompletion(30, TimeUnit.SECONDS)) {
+                throw new BusinessException(ErrorCode.OPERATION_ERROR, "Sandbox 静止导出超时");
+            }
+            Integer exit = docker.inspectExecCmd(created.getId()).exec().getExitCode();
+            if (exit == null || exit != 0 || collector.failure != null
+                || collector.stderrBytes != 0 || collector.stdoutBytes == 0) {
+                throw new BusinessException(ErrorCode.OPERATION_ERROR, "Sandbox 静止或 TAR 导出失败");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "Sandbox 静止导出被中断");
+        } catch (IOException e) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "Sandbox TAR 接收失败");
+        } catch (RuntimeException e) {
+            if (e instanceof BusinessException) throw e;
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "Sandbox TAR 流传输失败");
+        }
+    }
+
+    private static final class ArchiveCollector extends ResultCallback.Adapter<Frame> {
+        private final OutputStream output;
+        private final long maxBytes;
+        private long stdoutBytes;
+        private long stderrBytes;
+        private IOException failure;
+
+        private ArchiveCollector(OutputStream output, long maxBytes) {
+            this.output = output;
+            this.maxBytes = maxBytes;
+        }
+
+        @Override public void onNext(Frame frame) {
+            byte[] bytes = frame.getPayload();
+            if (bytes == null) return;
+            if (frame.getStreamType() == StreamType.STDERR) {
+                stderrBytes += bytes.length;
+                return;
+            }
+            if (frame.getStreamType() != StreamType.STDOUT || bytes.length > maxBytes - stdoutBytes) {
+                failure = new IOException("TAR 输出超出上限或流类型不可信");
+                throw new IllegalStateException(failure);
+            }
+            try {
+                output.write(bytes);
+                stdoutBytes += bytes.length;
+            } catch (IOException e) {
+                failure = e;
+                throw new IllegalStateException(e);
+            }
+        }
     }
 
     private HostConfig buildHostConfig() {

@@ -55,6 +55,12 @@ export interface RunLeaseGateway extends SandboxCommandGateway {
     fenceToken: string
     requestId: string
   }): Promise<void>
+  freezeSnapshot(input: {
+    applicationId: string
+    runId: string
+    fenceToken: string
+    requestId: string
+  }): Promise<void>
   renewLease(input: {
     applicationId: string
     runId: string
@@ -255,6 +261,15 @@ export class RunRuntime {
       }
     }
 
+    if (!await this.freezeSnapshotQuietly()) {
+      await this.reportOutcomeQuietly('FAILED', 'RUNTIME_SNAPSHOT_FREEZE_FAILED')
+      return {
+        status: 'failed',
+        reasonCode: 'RUNTIME_SNAPSHOT_FREEZE_FAILED',
+        failureSummary: 'Platform did not confirm a trusted Snapshot before success reporting',
+      }
+    }
+
     if (!await this.reportOutcomeQuietly('SUCCEEDED', 'RUNTIME_ENGINE_COMPLETED')) {
       return {
         status: 'failed',
@@ -361,6 +376,24 @@ export class RunRuntime {
       return true
     } catch {
       // 交由 Lease TTL 回收
+      return false
+    }
+  }
+
+  private async freezeSnapshotQuietly(): Promise<boolean> {
+    if (this.fenceToken === undefined) {
+      return false
+    }
+
+    try {
+      await this.options.client.freezeSnapshot({
+        applicationId: this.options.applicationId,
+        runId: this.options.runId,
+        fenceToken: this.fenceToken,
+        requestId: randomUUID(),
+      })
+      return true
+    } catch {
       return false
     }
   }

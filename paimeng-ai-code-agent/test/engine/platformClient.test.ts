@@ -79,10 +79,12 @@ test('recovery checkpoint endpoints send the fence and unique request keys befor
   const common = { applicationId: '9007199254740993', runId: 'run-1', fenceToken: '4' }
   await client.prepareRecovery({ ...common, requestId: 'prepare-1' })
   await client.beginExecution({ ...common, requestId: 'begin-1' })
+  await client.freezeSnapshot({ ...common, requestId: 'freeze-1' })
 
   assert.deepEqual(observed, [
     { path: '/platform/runs/execution/recovery/prepare', body: { ...common, requestId: 'prepare-1' } },
     { path: '/platform/runs/execution/recovery/begin', body: { ...common, requestId: 'begin-1' } },
+    { path: '/platform/runs/execution/snapshots/freeze', body: { ...common, requestId: 'freeze-1' } },
   ])
 })
 

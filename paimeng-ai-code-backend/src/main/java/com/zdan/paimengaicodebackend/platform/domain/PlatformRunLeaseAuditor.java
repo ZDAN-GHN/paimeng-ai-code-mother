@@ -29,9 +29,9 @@ import org.springframework.transaction.annotation.Transactional;
  * 两个事务会互等到 {@code innodb_lock_wait_timeout}（默认 50s）——InnoDB 看不出这是
  * 应用层环，不会报死锁，只会超时。
  *
- * <p>现状核对：{@code PlatformRunLeaseService} 的四条路径都用非锁定读
- * {@code selectOneByQuery} 定位 Lease，调用本类时未持有写锁，故不变式成立。
- * 引入 {@code SELECT ... FOR UPDATE} 或调整调用点顺序前须重新核对。
+ * <p>现状核对：普通 Lease 拒绝/过期路径均用非锁定读定位 Lease，调用本类时未持有写锁。
+ * Snapshot 发布在锁住 Run 后锁住 Lease，直到 READY 提交；该路径不调用本类的独立事务。
+ * 调整调用点或锁顺序前须重新核对。
  *
  * <p>由此推出的测试约束：验证本类写入的测试<strong>不能</strong>是
  * {@code @Transactional} 回滚式。外层未提交事务既会挡住 {@code recordExpiry} 的 DELETE，

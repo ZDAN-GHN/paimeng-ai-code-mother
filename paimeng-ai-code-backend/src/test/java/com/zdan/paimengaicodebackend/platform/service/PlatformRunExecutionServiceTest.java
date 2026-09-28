@@ -25,6 +25,8 @@ import com.zdan.paimengaicodebackend.platform.domain.PlatformRunTransitionServic
 import com.zdan.paimengaicodebackend.platform.domain.TaskExecutionBaselineCodec;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRun;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRunLease;
+import com.zdan.paimengaicodebackend.platform.snapshot.CandidateSnapshotService;
+import com.zdan.paimengaicodebackend.platform.entity.CandidateSourceSnapshot;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRunRecoveryCheckpoint;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformTask;
 import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxExecutor;
@@ -65,6 +67,7 @@ class PlatformRunExecutionServiceTest {
     private PlatformTaskMapper taskMapper;
     private TaskExecutionBaselineCodec baselineCodec;
     private PlatformRunRecoveryService recoveryService;
+    private CandidateSnapshotService snapshotService;
     private PlatformRunExecutionService executionService;
 
     @BeforeEach
@@ -78,6 +81,7 @@ class PlatformRunExecutionServiceTest {
         taskMapper = mock(PlatformTaskMapper.class);
         baselineCodec = mock(TaskExecutionBaselineCodec.class);
         recoveryService = mock(PlatformRunRecoveryService.class);
+        snapshotService = mock(CandidateSnapshotService.class);
         PlatformRun run = new PlatformRun();
         run.setId(RUN_ID);
         run.setApplicationId(APPLICATION_ID);
@@ -98,7 +102,8 @@ class PlatformRunExecutionServiceTest {
             runMapper,
             taskMapper,
             baselineCodec,
-            recoveryService
+            recoveryService,
+            snapshotService
         );
     }
 
@@ -394,10 +399,25 @@ class PlatformRunExecutionServiceTest {
     }
 
     @Test
+    void successWithoutSnapshotDoesNotStopSandboxOrReleaseLease() {
+        when(leaseService.requireHeldLease(eq(RUN_ID), eq(FENCE_TOKEN), anyString())).thenReturn(lease());
+        when(runMapper.selectOneByQuery(any())).thenReturn(run(PlatformRunState.EXECUTING));
+
+        assertThrows(BusinessException.class, () -> executionService.reportResult(
+            APPLICATION_ID_TEXT, RUN_ID, FENCE_TOKEN, "SUCCEEDED", "RUN_FINISHED", null, "req-1"
+        ));
+
+        verify(sandboxExecutor, never()).stop(any());
+        verify(leaseService, never()).release(anyString(), anyLong(), any(), anyString(), anyString());
+        verify(runTransitionService, never()).transition(anyString(), any(), any(), any(), anyString(), any(), anyString());
+    }
+
+    @Test
     void reportStopsContainerThenReleasesLeaseThenWritesTerminalState() {
         when(leaseService.requireHeldLease(eq(RUN_ID), eq(FENCE_TOKEN), anyString())).thenReturn(lease());
         when(sandboxExecutor.find(RUN_ID)).thenReturn(Optional.of(handle()));
         when(runMapper.selectOneByQuery(any())).thenReturn(run(PlatformRunState.EXECUTING));
+        when(snapshotService.requireReady(APPLICATION_ID, RUN_ID)).thenReturn(new CandidateSourceSnapshot());
 
         executionService.reportResult(
             APPLICATION_ID_TEXT,

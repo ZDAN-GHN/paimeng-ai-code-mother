@@ -3,6 +3,7 @@ package com.zdan.paimengaicodebackend.platform.service;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.zdan.paimengaicodebackend.exception.BusinessException;
 import com.zdan.paimengaicodebackend.exception.ErrorCode;
+import com.zdan.paimengaicodebackend.mapper.platform.CandidateSourceSnapshotMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformRunCommandRequestMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformRunMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformRunRecoveryCheckpointMapper;
@@ -36,6 +37,7 @@ public class PlatformRunRecoveryService {
     private static final String STARTED = "STARTED";
     private static final String COMPLETED = "COMPLETED";
 
+    private final CandidateSourceSnapshotMapper snapshotMapper;
     private final PlatformRunRecoveryCheckpointMapper checkpointMapper;
     private final PlatformRunCommandRequestMapper commandMapper;
     private final PlatformRunMapper runMapper;
@@ -45,6 +47,7 @@ public class PlatformRunRecoveryService {
 
     public PlatformRunRecoveryService(
         PlatformRunRecoveryCheckpointMapper checkpointMapper,
+        CandidateSourceSnapshotMapper snapshotMapper,
         PlatformRunCommandRequestMapper commandMapper,
         PlatformRunMapper runMapper,
         PlatformRunLeaseService leaseService,
@@ -52,6 +55,7 @@ public class PlatformRunRecoveryService {
         PlatformSandboxExecutor sandboxExecutor
     ) {
         this.checkpointMapper = checkpointMapper;
+        this.snapshotMapper = snapshotMapper;
         this.commandMapper = commandMapper;
         this.runMapper = runMapper;
         this.leaseService = leaseService;
@@ -166,6 +170,9 @@ public class PlatformRunRecoveryService {
         String requestId
     ) {
         requireRequestId(requestId);
+        if (snapshotMapper.lockRun(runId) == null || snapshotMapper.selectOneById(runId) != null) {
+            throw denied("Snapshot 冻结已开始，拒绝继续写入");
+        }
         leaseService.requireHeldLease(runId, fenceToken, requestId);
         requireCommandAdmitted(runId, fenceToken);
         PlatformRunCommandRequest record = new PlatformRunCommandRequest();

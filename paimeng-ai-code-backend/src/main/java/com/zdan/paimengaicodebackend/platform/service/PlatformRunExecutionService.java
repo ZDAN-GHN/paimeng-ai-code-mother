@@ -18,6 +18,7 @@ import com.zdan.paimengaicodebackend.platform.entity.PlatformTask;
 import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxExecutor;
 import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxHandle;
 import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxProperties;
+import com.zdan.paimengaicodebackend.platform.snapshot.CandidateSnapshotService;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformExecutionCapabilitiesVO;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformRunCommandResultVO;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformRunLeaseGrantVO;
@@ -65,6 +66,7 @@ public class PlatformRunExecutionService {
     private final PlatformRunMapper runMapper;
     private final PlatformTaskMapper taskMapper;
     private final TaskExecutionBaselineCodec baselineCodec;
+    private final CandidateSnapshotService snapshotService;
     private final PlatformRunRecoveryService recoveryService;
 
     public PlatformRunExecutionService(
@@ -76,7 +78,8 @@ public class PlatformRunExecutionService {
         PlatformRunMapper runMapper,
         PlatformTaskMapper taskMapper,
         TaskExecutionBaselineCodec baselineCodec,
-        PlatformRunRecoveryService recoveryService
+        PlatformRunRecoveryService recoveryService,
+        CandidateSnapshotService snapshotService
     ) {
         this.leaseService = leaseService;
         this.runTransitionService = runTransitionService;
@@ -87,6 +90,7 @@ public class PlatformRunExecutionService {
         this.taskMapper = taskMapper;
         this.baselineCodec = baselineCodec;
         this.recoveryService = recoveryService;
+        this.snapshotService = snapshotService;
     }
 
     /**
@@ -215,6 +219,15 @@ public class PlatformRunExecutionService {
             TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos)
         );
         return granted;
+    }
+
+    /** Freeze this Run's tmpfs before the Runtime reports SUCCEEDED. */
+    public void freeze(String applicationIdText, String runId, Long fenceToken, String requestId) {
+        Long applicationId = parseApplicationId(applicationIdText);
+        requireRunIdentity(runId, requestId);
+        requireFenceToken(fenceToken);
+        requireRunBelongsToDeclaredApplication(applicationId, runId);
+        snapshotService.freeze(applicationId, runId, fenceToken, requestId);
     }
 
     /** Register a pristine Sandbox as recoverable before entering the Pi session. */
@@ -377,6 +390,11 @@ public class PlatformRunExecutionService {
         leaseService.requireHeldLease(runId, fenceToken, requestId);
 
         PlatformRunState currentState = readRunState(runId);
+        if (targetState == PlatformRunState.SUCCEEDED
+            && (currentState != PlatformRunState.EXECUTING
+                || snapshotService.requireReady(applicationId, runId) == null)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN_ERROR, "Run 成功前必须冻结 Snapshot");
+        }
         stopSandboxIfPresent(runId);
         leaseService.release(runId, fenceToken, PlatformActor.RUNTIME, reasonCode, requestId);
         runTransitionService.transition(

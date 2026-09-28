@@ -165,6 +165,20 @@ public class PlatformRunExecutionController {
         );
     }
 
+    @PostMapping("/snapshots/freeze")
+    @Operation(summary = "冻结当前 Run Workspace 为候选 Snapshot")
+    public BaseResponse<Boolean> freezeSnapshot(
+        @RequestBody PlatformRunRecoveryRequest request,
+        HttpServletRequest servletRequest
+    ) {
+        requireLoopbackCaller(servletRequest);
+        requireBody(request);
+        executionService.freeze(
+            request.getApplicationId(), request.getRunId(), request.getFenceToken(), request.getRequestId()
+        );
+        return ResultUtils.success(true);
+    }
+
     @PostMapping("/results")
     @Operation(summary = "上报 Run 终态：停容器、释放 Lease、写入终态")
     public BaseResponse<Boolean> reportResult(

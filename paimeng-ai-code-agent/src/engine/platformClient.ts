@@ -111,6 +111,7 @@ export interface PlatformClientOptions {
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 /** 命令可能是 `npm install`，其上限由 Platform 的 `maxCommandTimeoutSeconds` 决定；客户端留出余量。 */
 const COMMAND_TIMEOUT_MARGIN_MS = 15_000
+const SNAPSHOT_FREEZE_TIMEOUT_MS = 75_000
 
 export class PlatformClient {
   private readonly baseUrl: string
@@ -158,6 +159,17 @@ export class PlatformClient {
     requestId: string
   }): Promise<void> {
     await this.send('beginExecution', 'POST', '/platform/runs/execution/recovery/begin', input)
+  }
+
+  /** Freeze the writable Sandbox workspace before a Run can report success. */
+  public async freezeSnapshot(input: {
+    applicationId: string
+    runId: string
+    fenceToken: string
+    requestId: string
+  }): Promise<void> {
+    await this.send('freezeSnapshot', 'POST', '/platform/runs/execution/snapshots/freeze',
+      input, SNAPSHOT_FREEZE_TIMEOUT_MS)
   }
 
   public async renewLease(input: {

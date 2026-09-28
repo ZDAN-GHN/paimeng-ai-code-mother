@@ -62,6 +62,7 @@ class FakeGateway implements RunLeaseGateway {
       failReport?: boolean
       failPrepare?: boolean
       failBegin?: boolean
+      failFreeze?: boolean
       rotateFenceOnRenewal?: boolean
       baselineJson?: string
     } = {},
@@ -88,6 +89,11 @@ class FakeGateway implements RunLeaseGateway {
   public async beginExecution(input: { fenceToken: string; requestId: string }): Promise<void> {
     this.calls.push({ operation: 'beginExecution', fenceToken: input.fenceToken, requestId: input.requestId })
     if (this.behaviour.failBegin === true) throw new Error('request status not confirmed')
+  }
+
+  public async freezeSnapshot(input: { fenceToken: string; requestId: string }): Promise<void> {
+    this.calls.push({ operation: 'freezeSnapshot', fenceToken: input.fenceToken, requestId: input.requestId })
+    if (this.behaviour.failFreeze === true) throw new Error('snapshot freeze rejected')
   }
 
   public async renewLease(input: { fenceToken: string; requestId: string }): Promise<PlatformLease> {
@@ -209,12 +215,29 @@ test('reports success and does not release the lease twice', async () => {
   // Java 侧 reportResult 已释放 Lease，收尾不得再释放一次：
   // 第二次释放会撞上已被回收的 Lease，制造一条虚假的审计拒绝记录
   assert.deepEqual(gateway.operations(), [
-    'grantLease', 'prepareRecovery', 'beginExecution', 'reportResult',
+    'grantLease', 'prepareRecovery', 'beginExecution', 'freezeSnapshot', 'reportResult',
   ])
   assert.equal(
     gateway.calls.filter((call) => call.operation === 'releaseLease').length,
     0,
   )
+})
+
+test('reports failure instead of success when Platform cannot freeze the Snapshot', async () => {
+  const gateway = new FakeGateway({ failFreeze: true })
+  const { runtime } = createRuntime(
+    gateway,
+    createFakeEngine(async () => ({ status: 'completed' })),
+  )
+
+  const result = await runtime.execute()
+
+  assert.equal(result.status, 'failed')
+  assert.equal(result.reasonCode, 'RUNTIME_SNAPSHOT_FREEZE_FAILED')
+  assert.deepEqual(gateway.operations(), [
+    'grantLease', 'prepareRecovery', 'beginExecution', 'freezeSnapshot', 'reportResult',
+  ])
+  assert.equal(gateway.calls.find((call) => call.operation === 'reportResult')?.outcome, 'FAILED')
 })
 
 test('assembles a versioned Run Context from the frozen Java baseline and capabilities', async () => {

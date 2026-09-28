@@ -11,7 +11,10 @@ import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.Capability;
 import com.zdan.paimengaicodebackend.exception.BusinessException;
+import com.zdan.paimengaicodebackend.platform.snapshot.SnapshotArchive;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -70,6 +73,22 @@ class PlatformSandboxExecutorIntegrationTest {
             }
             handle = null;
         }
+    }
+
+    @Test
+    void quiescedTmpfsTarCanBeReadBeforeContainerStops(@org.junit.jupiter.api.io.TempDir Path stage) throws Exception {
+        handle = executor.start(nextRunId(), 1L);
+        assertEquals(0, executor.exec(handle, "printf 'frozen' > /workspace/source.txt", 10,
+            ignored -> { }, ignored -> { }));
+        Path archive = stage.resolve("capture.tar");
+        executor.exportQuiesced(handle, archive, SnapshotArchive.MAX_ARCHIVE_BYTES);
+        Path tree = Files.createDirectory(stage.resolve("tree"));
+        try (var bytes = Files.newInputStream(archive)) {
+            SnapshotArchive.extract(bytes, tree);
+        }
+        assertEquals("frozen", Files.readString(tree.resolve("source.txt")));
+        assertTrue(!Boolean.TRUE.equals(dockerClient.inspectContainerCmd(handle.containerId())
+            .exec().getState().getPaused()));
     }
 
     @Test

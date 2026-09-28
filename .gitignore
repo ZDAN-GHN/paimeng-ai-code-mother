@@ -60,3 +60,6 @@ runtime/
 
 ## Exclude local markdown files ##
 *.local.md
+
+## Exclude tmp docs
+docs/tmp/

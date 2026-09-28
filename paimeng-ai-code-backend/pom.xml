@@ -151,6 +151,12 @@
             <groupId>com.github.docker-java</groupId>
             <artifactId>docker-java-transport-httpclient5</artifactId>
         </dependency>
+        <!-- Docker archive ingestion uses a declared, version-pinned TAR parser. -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-compress</artifactId>
+            <version>1.28.0</version>
+        </dependency>
         <!-- https://github.com/ben-manes/caffeine -->
         <dependency>
             <groupId>com.github.ben-manes.caffeine</groupId>

@@ -210,6 +210,15 @@ public class PlatformRunLeaseService {
         return requireLeaseHeldBy(runId, fenceToken, LocalDateTime.now(), requestId);
     }
 
+    /** Called after locking the Run row; the lease lock is held through Snapshot READY commit. */
+    @Transactional(rollbackFor = Exception.class)
+    public void requireHeldLeaseForSnapshotPublication(String runId, long fenceToken, String requestId) {
+        requireRequestParams(runId, requestId);
+        if (leaseMapper.lockActiveFence(runId, fenceToken, LocalDateTime.now()) == null) {
+            throw new BusinessException(ErrorCode.FORBIDDEN_ERROR, "Snapshot 发布时 Lease 已失效");
+        }
+    }
+
     /** Task 是否存在「已创建 Run 且已授予 Lease」的真实事实。 */
     public boolean hasGrantedLeaseForTask(Long taskId) {
         if (taskId == null) {

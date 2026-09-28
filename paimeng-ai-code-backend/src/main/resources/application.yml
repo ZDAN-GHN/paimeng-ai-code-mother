@@ -53,6 +53,9 @@ platform:
     # TODO 入站鉴权延后（维护者决策）：/platform/runs/execution/** 当前无鉴权。
     # 禁止部署到共享或公网环境。开启后端点仍只接受回环调用方，但那不是鉴权的替代品。
     enabled: ${PLATFORM_EXECUTION_ENABLED:false}
+  snapshot:
+    # Platform-only persistent volume, never a Sandbox/Agent mount. Required when execution is enabled.
+    repo-root: ${PLATFORM_SNAPSHOT_REPO_ROOT:}
   sandbox:
     # 执行器独占 Docker API（AD-016）。未显式开启时不持有 Docker 客户端。
     enabled: ${PLATFORM_SANDBOX_ENABLED:false}

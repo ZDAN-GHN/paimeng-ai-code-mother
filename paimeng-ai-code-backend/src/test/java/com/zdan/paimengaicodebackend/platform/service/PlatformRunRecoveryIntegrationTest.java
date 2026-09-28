@@ -28,19 +28,48 @@ import com.zdan.paimengaicodebackend.platform.entity.PlatformRunLease;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformTask;
 import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxExecutor;
 import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxProperties;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 /** AC-3: same-Run recovery is real only before the first Pi/tool request. */
-@SpringBootTest(properties = "platform.sandbox.enabled=true")
+@SpringBootTest(properties = {"platform.sandbox.enabled=true", "platform.execution.enabled=true"})
 class PlatformRunRecoveryIntegrationTest {
+
+    private static final Path SNAPSHOT_ROOT = snapshotRoot();
+
+    @DynamicPropertySource
+    static void snapshotProperties(DynamicPropertyRegistry properties) {
+        properties.add("platform.snapshot.repo-root", SNAPSHOT_ROOT::toString);
+    }
+
+    @AfterAll
+    static void removeTestGitRoot() throws IOException {
+        try (var paths = Files.walk(SNAPSHOT_ROOT)) {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
+        }
+    }
+
+    private static Path snapshotRoot() {
+        try {
+            return Files.createTempDirectory("issue78-snapshot-test-");
+        } catch (IOException e) {
+            throw new IllegalStateException("Cannot create test Git root", e);
+        }
+    }
 
     private static final String BASELINE_JSON = "{\"schemaVersion\":1,\"baseProfileVersion\":null,"
         + "\"baseSourceRevision\":null,\"requestedOutcome\":\"Build app\","
@@ -161,6 +190,7 @@ class PlatformRunRecoveryIntegrationTest {
             QueryWrapper.create().eq("runId", graph.runId()).eq("requestId", "command-once")
         ));
 
+        executionService.freeze(graph.appIdText(), graph.runId(), freshFence, "freeze-done");
         executionService.reportResult(
             graph.appIdText(), graph.runId(), freshFence, "SUCCEEDED", "TEST_DONE", null, "report-done"
         );
