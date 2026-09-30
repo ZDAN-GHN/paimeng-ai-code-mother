@@ -22,6 +22,8 @@ public enum PlatformDeploymentReasonCode {
     HEALTH_PROBE_FAILED,
     /** 在规定窗口内没有得到成功响应。 */
     HEALTH_PROBE_TIMEOUT,
+    /** Platform 缺少启动该应用必需的运行时配置（如托管数据库连接串）。 */
+    RUNTIME_CONFIGURATION_MISSING,
     /** Application 已归档或已逻辑删除，不再具备上线条件。 */
     APPLICATION_NOT_ACTIVE;
 
@@ -44,6 +46,7 @@ public enum PlatformDeploymentReasonCode {
             case CONTAINER_ADDRESS_UNAVAILABLE -> "运行环境没有成功就绪";
             case HEALTH_PROBE_FAILED -> "应用没有通过上线前检查";
             case HEALTH_PROBE_TIMEOUT -> "上线前检查没有在规定时间内完成";
+            case RUNTIME_CONFIGURATION_MISSING -> "运行环境配置尚未就绪";
             case APPLICATION_NOT_ACTIVE -> "该应用当前不接受上线";
         };
     }

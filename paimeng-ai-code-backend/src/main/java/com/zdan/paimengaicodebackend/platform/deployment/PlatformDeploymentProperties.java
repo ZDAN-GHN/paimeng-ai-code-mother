@@ -37,6 +37,18 @@ public class PlatformDeploymentProperties {
     /** 容器内健康路径。AD-017 固定为应用自身的 {@code GET /healthz}。 */
     private String healthPath = "/healthz";
 
+    /**
+     * 注入应用容器的托管数据库连接串。
+     *
+     * <p>AD-016 把「Production 凭据注入」列为 Platform 独占职责，模板启动时也强制要求该变量。
+     * 本 MVP 切片<b>不实现</b>生产密钥管理（TLS 证书、第三方密钥、轮换与吊销均未覆盖），
+     * 只保留这一个显式注入位：值来自部署环境配置，不进代码、不进版本库。
+     *
+     * <p>刻意做成单个具名字段而不是通用环境变量 Map：Map 会让任意变量都能被注入，
+     * 而白名单字段在审计和故障排查时能说清「这个容器到底拿到了什么」。
+     */
+    private String managedDatabaseUrl = "";
+
     /** Platform 独占的内部 Deployment network；容器只加入这一个网络。 */
     private String networkName = "paimeng-platform-deploy";
 

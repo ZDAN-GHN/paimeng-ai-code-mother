@@ -64,6 +64,10 @@ public class PlatformDeploymentExecutor {
         if (applicationId == null || applicationId <= 0 || releaseId == null || releaseId.isBlank()) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "部署启动参数不完整");
         }
+        // 先求值再碰 Docker：缺配置属于 Platform 自身的部署前置条件不满足，
+        // 若留到 createContainerCmd 的 try 内求值，受控失败会被笼统的 RuntimeException
+        // 重新包装成 CONTAINER_START_FAILED，把配置问题伪装成镜像或 Docker 问题。
+        List<String> environment = runtimeEnvironment();
         ensureNetwork(dockerClient);
         removeExisting(dockerClient, releaseId);
 
@@ -76,12 +80,7 @@ public class PlatformDeploymentExecutor {
                     LABEL_RELEASE_ID, releaseId,
                     LABEL_APPLICATION_ID, String.valueOf(applicationId)
                 ))
-                // 只注入运行契约，不注入任何密钥：MVP 切片不实现生产密钥注入，
-                // 留一个空的注入位比留一个会被随手填入明文密钥的位置安全。
-                .withEnv(List.of(
-                    "NODE_ENV=production",
-                    "PORT=" + properties.getInternalPort()
-                ))
+                .withEnv(environment)
                 .withExposedPorts(List.of(new ExposedPort(properties.getInternalPort())))
                 .withHostConfig(buildHostConfig())
                 .exec();
@@ -146,6 +145,34 @@ public class PlatformDeploymentExecutor {
         } finally {
             removeQuietly(dockerClient, containerId, releaseId);
         }
+    }
+
+    /**
+     * 注入容器的运行时环境变量，白名单且全部由 Platform 决定。
+     *
+     * <p>{@code HOST=0.0.0.0} 不是可选项：固定模板默认只监听容器内回环（{@code server.ts}
+     * 的 {@code process.env.HOST ?? '127.0.0.1'}），而 AD-016 明确 Deployment 不发布宿主机端口，
+     * 可达性只能来自内部 Deployment network。不覆盖它的话，容器能启动、健康探测永远连不上，
+     * 表现为「部署失败」却与代码无关——这个坑必须留在代码里而不是留给运维记忆。
+     *
+     * <p>刻意不注入 {@code APP_BASE_PATH}：公开入口由 Platform 的反向代理剥掉
+     * {@code /apps/<application-id>/} 前缀后转发，应用因此运行在根路径。模板的 path base
+     * 能力由 #79 的 Runtime Gate（SUBPATH）覆盖，不在部署路径上重复引入第二套前缀语义。
+     */
+    private List<String> runtimeEnvironment() {
+        List<String> environment = new ArrayList<>(List.of(
+            "NODE_ENV=production",
+            "HOST=0.0.0.0",
+            "PORT=" + properties.getInternalPort()
+        ));
+        String databaseUrl = properties.getManagedDatabaseUrl();
+        if (databaseUrl == null || databaseUrl.isBlank()) {
+            throw new PlatformDeploymentFailureException(
+                PlatformDeploymentReasonCode.RUNTIME_CONFIGURATION_MISSING,
+                "未配置托管数据库连接串，无法启动受管应用容器");
+        }
+        environment.add("DATABASE_URL=" + databaseUrl);
+        return environment;
     }
 
     private List<Container> existingContainers(DockerClient dockerClient, String releaseId) {
