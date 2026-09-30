@@ -11,7 +11,8 @@ import com.github.dockerjava.api.DockerClient;
 import com.zdan.paimengaicodebackend.platform.entity.CandidateSourceSnapshot;
 import com.zdan.paimengaicodebackend.platform.entity.ProfileDisposition;
 import com.zdan.paimengaicodebackend.mapper.platform.ProfileDispositionMapper;
-import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxDockerConfig;
+import com.zdan.paimengaicodebackend.platform.docker.PlatformDockerClientConfiguration;
+import com.zdan.paimengaicodebackend.platform.docker.PlatformDockerProperties;
 import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxProperties;
 import com.zdan.paimengaicodebackend.platform.snapshot.CandidateGitStore;
 import com.zdan.paimengaicodebackend.platform.snapshot.CandidateSnapshotService;
@@ -30,8 +31,7 @@ class CandidateFourGateExecutorIntegrationTest {
 
     @Test
     void runsFourGatesOnlyOnRealCandidateSnapshot() throws Exception {
-        try (DockerClient docker = new PlatformSandboxDockerConfig()
-            .platformSandboxDockerClient(new PlatformSandboxProperties())) {
+        try (DockerClient docker = new PlatformDockerClientConfiguration().platformDockerClient(new PlatformDockerProperties())) {
             try {
                 docker.pingCmd().exec();
                 var image = docker.inspectImageCmd("issue79-validation-runtime:local").exec();

@@ -593,6 +593,7 @@ Requirement + Trusted Profile + Task Baseline
 - 决定：MVP 不申请、分配或验证 Application 独立域名。所有 Application 使用 Platform 服务器既有域名下的稳定路径：Production 为 `https://<platform-host>/apps/<application-id>/`，本地开发为 `http://localhost/apps/<application-id>/`。`application-id` 是创建后不变的地址标识，Release、Deployment、回滚或 Application 名称变更均不得改变该路径。
 - TLS 与路由：Production TLS 仅在 Platform 统一 Nginx ingress 终止；证书和 `platform-host` 是部署环境配置，由 Platform 运维边界管理，不在代码、Agent 上下文或 Application 配置中硬编码。开发回环可使用 HTTP。Deployment 容器不发布宿主机端口，ingress 仅在内部健康检查通过后将对应 `/apps/<application-id>/` 前缀代理至当前健康 Deployment；固定模板必须支持由 Platform 注入的 path base，不能假定运行于域名根路径。
 - 健康、失败与回滚：健康探测只经内部 Deployment network 调用应用 `GET /healthz`。首次 Deployment 未健康时不创建公开路由，访问该路径返回 `404`；后续 Deployment 在新版本健康前保持旧健康路由不变，健康失败时继续或恢复上一健康 Deployment。没有任何健康 Deployment 的已发布路径返回 `503`，且不得泄露容器、版本、日志或基础设施细节。
+- 判定边界（`T-09` / Issue #81 实现时澄清）：`404` 与 `503` 的分界是「该 Application 是否**曾经**存在健康 Deployment」，而不是「当前是否有 Release」。从未健康（含首次部署失败）一律 `404`，使外观与路径不存在完全一致、不可用作存在性预言机；曾经健康但当前无健康 Deployment 才是 `503`，让访问者能区分「稍后重试」与「换地址」。
 - 停用：Application 归档、订阅宽限结束停服或 Platform 明确撤流时移除公开路由并返回 `404`；这不删除 Application、Release、Deployment、数据库、日志或审计事实。恢复订阅时仅重新挂载上一健康 Deployment 到同一路径。
 - 非范围：Owner 自定义域名、通配子域、每 Application DNS 记录、自动证书签发、DNS 验证和多域名迁移均延期；需要这些能力时必须新增独立架构决策。
 - 原因：共享路径入口复用 Platform 现有服务器域名和统一 ingress，避免在开发阶段引入域名采购、DNS 生命周期或证书管理，同时保留稳定可验证的公开地址。

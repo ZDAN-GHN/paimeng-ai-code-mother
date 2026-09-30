@@ -13,6 +13,7 @@ import com.zdan.paimengaicodebackend.mapper.AppMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.*;
 import com.zdan.paimengaicodebackend.model.entity.App;
 import com.zdan.paimengaicodebackend.platform.entity.*;
+import com.zdan.paimengaicodebackend.platform.release.PlatformReleaseService;
 import com.zdan.paimengaicodebackend.platform.snapshot.*;
 import com.zdan.paimengaicodebackend.platform.validation.PlatformValidationQueueService;
 import java.nio.charset.StandardCharsets;
@@ -35,9 +36,10 @@ class SourceRevisionPromotionServiceTest {
     private final CandidateGitStore git = mock(CandidateGitStore.class);
     private final PlatformTaskTransitionService transitions = mock(PlatformTaskTransitionService.class);
     private final PlatformValidationQueueService validationQueue = mock(PlatformValidationQueueService.class);
+    private final PlatformReleaseService releases = mock(PlatformReleaseService.class);
     private final SourceRevisionPromotionService service = new SourceRevisionPromotionService(
         apps, tasks, runs, snapshots, dispositions, profiles, requirements, evidence, revisions, git,
-        transitions, validationQueue, new ObjectMapper());
+        transitions, validationQueue, releases, new ObjectMapper());
     private final String attempt = "11111111-2222-3333-4444-555555555555";
     private final Map<String, byte[]> artifacts = new HashMap<>();
     private final SnapshotReference ref = new SnapshotReference(1, 2, "run", CandidateGitStore.sha256("{}"), null,
@@ -73,7 +75,7 @@ class SourceRevisionPromotionServiceTest {
         snapshot.setCommitHash(ref.commitHash()); snapshot.setTreeHash(ref.treeHash());
         PlatformTrustedProfileVersion profile = new PlatformTrustedProfileVersion();
         profile.setId(3L); profile.setApplicationId(1L); profile.setVersionNumber(1L);
-        when(apps.lockForPromotion(1L)).thenReturn(1L);
+        when(apps.lockApplication(1L)).thenReturn(1L);
         when(validationQueue.requirePassed(any())).thenReturn(attempt);
         when(apps.selectOneById(1L)).thenReturn(app);
         when(tasks.selectOneById(2L)).thenReturn(task);

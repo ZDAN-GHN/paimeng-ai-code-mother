@@ -2,10 +2,14 @@ package com.zdan.paimengaicodebackend.platform.service;
 
 import com.zdan.paimengaicodebackend.exception.BusinessException;
 import com.zdan.paimengaicodebackend.exception.ErrorCode;
+import com.zdan.paimengaicodebackend.mapper.platform.PlatformDeploymentMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformRunMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformTaskMapper;
 import com.zdan.paimengaicodebackend.model.entity.App;
 import com.zdan.paimengaicodebackend.model.entity.User;
+import com.zdan.paimengaicodebackend.platform.deployment.PlatformDeploymentReasonCode;
+import com.zdan.paimengaicodebackend.platform.deployment.PlatformDeploymentStage;
+import com.zdan.paimengaicodebackend.platform.deployment.PublicApplicationRouteResolver;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformApplicationAccessGuard;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformOwnerVisibleStatus;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformProgressStage;
@@ -15,6 +19,7 @@ import com.zdan.paimengaicodebackend.platform.domain.PlatformStatusChangeNotifie
 import com.zdan.paimengaicodebackend.platform.domain.PlatformTaskRetryService;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformTaskState;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformNormalizationQueue;
+import com.zdan.paimengaicodebackend.platform.entity.PlatformDeployment;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRun;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRunProgressEvent;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformTask;
@@ -53,6 +58,8 @@ public class PlatformApplicationStatusService {
     private final PlatformRunProgressService progressService;
     private final PlatformTaskRetryService retryService;
     private final PlatformStatusChangeNotifier notifier;
+    private final PlatformDeploymentMapper deploymentMapper;
+    private final PublicApplicationRouteResolver routeResolver;
 
     public PlatformApplicationStatusService(
         PlatformApplicationAccessGuard accessGuard,
@@ -61,7 +68,9 @@ public class PlatformApplicationStatusService {
         PlatformRequirementNormalizationService normalizationService,
         PlatformRunProgressService progressService,
         PlatformTaskRetryService retryService,
-        PlatformStatusChangeNotifier notifier
+        PlatformStatusChangeNotifier notifier,
+        PlatformDeploymentMapper deploymentMapper,
+        PublicApplicationRouteResolver routeResolver
     ) {
         this.accessGuard = accessGuard;
         this.taskMapper = taskMapper;
@@ -70,6 +79,8 @@ public class PlatformApplicationStatusService {
         this.progressService = progressService;
         this.retryService = retryService;
         this.notifier = notifier;
+        this.deploymentMapper = deploymentMapper;
+        this.routeResolver = routeResolver;
     }
 
     /**
@@ -124,7 +135,63 @@ public class PlatformApplicationStatusService {
                 status.setProgressStage(null);
             }
         }
+        applyDeploymentProjection(status, applicationId, visible);
         return status;
+    }
+
+    /**
+     * 叠加「是否已上线」与受控诊断（Issue #81 / T-09）。
+     *
+     * <p>AD-010：Task {@code released} 只表示固定 Release 已创建，不代表线上有东西在跑。
+     * 因此这一段既是「已上线」的唯一定义处，也是唯一会把 {@code RELEASED} 的标题改写成
+     * 「未上线」的地方——两处若分开写，迟早会有一处漏掉，Owner 就会看到「已发布固定版本」
+     * 却打不开公开地址。
+     */
+    private void applyDeploymentProjection(
+        PlatformApplicationStatusVO status,
+        Long applicationId,
+        PlatformOwnerVisibleStatus visible
+    ) {
+        PlatformDeployment healthy = deploymentMapper.selectHealthyForApplication(applicationId);
+        if (healthy != null) {
+            status.setLive(true);
+            status.setPublicUrl(routeResolver.publicBasePath() + "/" + applicationId + "/");
+            status.setDeployStage(publishableStage(healthy.getStage()));
+            return;
+        }
+        status.setLive(false);
+        status.setPublicUrl(null);
+        PlatformDeployment latest = deploymentMapper.selectLatestForApplication(applicationId);
+        if (latest == null) {
+            return;
+        }
+        String stage = publishableStage(latest.getStage());
+        status.setDeployStage(stage);
+        PlatformDeploymentReasonCode reason = PlatformDeploymentReasonCode.of(latest.getReasonCode());
+        if (reason != null) {
+            status.setDeployReason(reason.name());
+        }
+        if (visible != PlatformOwnerVisibleStatus.RELEASED) {
+            return;
+        }
+        if (PlatformDeploymentStage.UNHEALTHY.name().equals(stage)) {
+            status.setHeadline(PlatformDeploymentStage.UNHEALTHY.ownerText());
+            status.setDetail(reason == null
+                ? "这个版本没有通过上线前检查，应用暂未对外开放；你的需求和已确认的目标都保留着。"
+                : reason.ownerText() + "，应用暂未对外开放；你的需求和已确认的目标都保留着。");
+        } else {
+            status.setHeadline("已创建固定版本，正在准备上线");
+            status.setDetail("上线前检查通过后，这个版本就会通过公开地址对外提供服务。");
+        }
+    }
+
+    /** 白名单过滤：未登记的阶段码不外发，宁可缺字段也不透传数据库里的任意值。 */
+    private String publishableStage(String raw) {
+        try {
+            return raw == null ? null : PlatformDeploymentStage.valueOf(raw).name();
+        } catch (IllegalArgumentException unregistered) {
+            return null;
+        }
     }
 
     /**
@@ -224,7 +291,7 @@ public class PlatformApplicationStatusService {
             case BLOCKED -> "我们只需要确认一件事，确认后就会继续构建。";
             case FAILED -> "本次构建没有通过验证，你的需求和已确认的目标都保留着。";
             case VALIDATED -> "验证已通过，这个版本已经是可用的稳定基线。";
-            case RELEASED -> "已创建固定版本，公开运行状态由发布流程单独告知。";
+            case RELEASED -> "已创建固定版本，是否已上线由部署健康状态单独判定。";
             case CANCELLED -> "这次构建已取消，需求和已确认的目标仍然保留。";
         };
     }

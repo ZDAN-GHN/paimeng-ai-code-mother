@@ -26,9 +26,9 @@ public class PlatformSandboxProperties {
     private String imageReference = "paimeng-ai-code-sandbox:0.1.0";
 
     /**
-     * Docker Engine 地址。留空则走 docker-java 默认发现（DOCKER_HOST 或本机 socket）。
+     * Docker Engine 地址已迁移到 {@code platform.docker.host}（Issue #81 / T-09）：
+     * Sandbox 与 Deployment 共用同一个 Platform 独占客户端，配置不再属于任一执行器。
      */
-    private String dockerHost = "";
 
     /**
      * 以下限额取自 AD-016（{@code Locked Decision}）规定的固定值：

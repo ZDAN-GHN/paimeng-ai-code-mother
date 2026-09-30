@@ -4,6 +4,7 @@ import com.mybatisflex.core.query.QueryWrapper;
 import com.zdan.paimengaicodebackend.exception.BusinessException;
 import com.zdan.paimengaicodebackend.exception.ErrorCode;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformRunMapper;
+import com.zdan.paimengaicodebackend.mapper.platform.PlatformReleaseMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformTaskMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformTaskRetryRequestMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformTaskTransitionEventMapper;
@@ -32,6 +33,7 @@ public class PlatformTaskTransitionService {
     private final PlatformRunLeaseService leaseService;
     private final PlatformRunMapper runMapper;
     private final PlatformTaskRetryRequestMapper retryMapper;
+    private final PlatformReleaseMapper releaseMapper;
 
     public PlatformTaskTransitionService(
         PlatformTaskStateMachine stateMachine,
@@ -40,7 +42,8 @@ public class PlatformTaskTransitionService {
         PlatformLogicalRelationValidator relationValidator,
         PlatformRunLeaseService leaseService,
         PlatformRunMapper runMapper,
-        PlatformTaskRetryRequestMapper retryMapper
+        PlatformTaskRetryRequestMapper retryMapper,
+        PlatformReleaseMapper releaseMapper
     ) {
         this.stateMachine = stateMachine;
         this.taskMapper = taskMapper;
@@ -49,6 +52,7 @@ public class PlatformTaskTransitionService {
         this.leaseService = leaseService;
         this.runMapper = runMapper;
         this.retryMapper = retryMapper;
+        this.releaseMapper = releaseMapper;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -97,7 +101,8 @@ public class PlatformTaskTransitionService {
         TaskTransitionConditions verifiedConditions = persistedConditions.withLeaseFacts(
             leaseService.hasGrantedLeaseForTask(taskId),
             leaseService.hasNoActiveLeaseForTask(taskId) && hasNoRunningRun(taskId)
-        ).withOwnerRetryFact(retryMapper.countAcceptedForTask(taskId) > 0);
+        ).withOwnerRetryFact(retryMapper.countAcceptedForTask(taskId) > 0)
+            .withFirstReleaseFact(isPersistedFirstRelease(task));
         stateMachine.assertTaskTransition(currentState, targetState, requestedBy, verifiedConditions);
 
         PlatformTask update = new PlatformTask();
@@ -131,6 +136,20 @@ public class PlatformTaskTransitionService {
             requestId,
             java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos)
         );
+    }
+
+    /**
+     * AD-011 的「首次发布」是持久事实：这个 Task 恰好拥有一个固定 Release，且该 Application
+     * 名下不存在任何其他 Task 的 Release。
+     *
+     * <p>写成两个计数而不是「Release 总数为 0 或 1」，是因为后者的结果取决于转换发生在
+     * Release 插入之前还是之后，同一次调用在不同事务顺序下会得到相反结论。
+     *
+     * @return 该 Task 是否是所属 Application 的第一个固定版本
+     */
+    private boolean isPersistedFirstRelease(PlatformTask task) {
+        return releaseMapper.countForTask(task.getApplicationId(), task.getId()) == 1
+            && releaseMapper.countForOtherTasks(task.getApplicationId(), task.getId()) == 0;
     }
 
     /**

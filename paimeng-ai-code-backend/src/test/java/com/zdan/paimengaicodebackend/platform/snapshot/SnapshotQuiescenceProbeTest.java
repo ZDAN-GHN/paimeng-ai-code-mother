@@ -11,7 +11,8 @@ import com.zdan.paimengaicodebackend.exception.BusinessException;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.StreamType;
-import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxDockerConfig;
+import com.zdan.paimengaicodebackend.platform.docker.PlatformDockerClientConfiguration;
+import com.zdan.paimengaicodebackend.platform.docker.PlatformDockerProperties;
 import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxExecutor;
 import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxHandle;
 import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxProperties;
@@ -31,7 +32,7 @@ class SnapshotQuiescenceProbeTest {
     void stopsBackgroundWriterAndExportsItsFinalBytes(@TempDir Path directory) throws Exception {
         PlatformSandboxProperties properties = new PlatformSandboxProperties();
         properties.setEnabled(true);
-        try (DockerClient docker = new PlatformSandboxDockerConfig().platformSandboxDockerClient(properties)) {
+        try (DockerClient docker = new PlatformDockerClientConfiguration().platformDockerClient(new PlatformDockerProperties())) {
             @SuppressWarnings("unchecked")
             ObjectProvider<DockerClient> provider = mock(ObjectProvider.class);
             when(provider.getIfAvailable()).thenReturn(docker);
@@ -71,7 +72,7 @@ class SnapshotQuiescenceProbeTest {
     void exportRejectsTruncatedTarBeforeItCanBeUsed(@TempDir Path directory) throws Exception {
         PlatformSandboxProperties properties = new PlatformSandboxProperties();
         properties.setEnabled(true);
-        try (DockerClient docker = new PlatformSandboxDockerConfig().platformSandboxDockerClient(properties)) {
+        try (DockerClient docker = new PlatformDockerClientConfiguration().platformDockerClient(new PlatformDockerProperties())) {
             @SuppressWarnings("unchecked") ObjectProvider<DockerClient> provider = mock(ObjectProvider.class);
             when(provider.getIfAvailable()).thenReturn(docker);
             PlatformSandboxExecutor sandbox = new PlatformSandboxExecutor(properties, provider);
@@ -91,7 +92,7 @@ class SnapshotQuiescenceProbeTest {
     void gitCommitRestoresSameContentToEmptyTmpfs(@TempDir Path root) throws Exception {
         PlatformSandboxProperties properties = new PlatformSandboxProperties();
         properties.setEnabled(true);
-        try (DockerClient docker = new PlatformSandboxDockerConfig().platformSandboxDockerClient(properties)) {
+        try (DockerClient docker = new PlatformDockerClientConfiguration().platformDockerClient(new PlatformDockerProperties())) {
             @SuppressWarnings("unchecked") ObjectProvider<DockerClient> provider = mock(ObjectProvider.class);
             when(provider.getIfAvailable()).thenReturn(docker);
             PlatformSandboxExecutor sandbox = new PlatformSandboxExecutor(properties, provider);
@@ -133,7 +134,7 @@ class SnapshotQuiescenceProbeTest {
     void quiescerSettlesForkingWriterBeforeTarStarts(@TempDir Path directory) throws Exception {
         PlatformSandboxProperties properties = new PlatformSandboxProperties();
         properties.setEnabled(true);
-        try (DockerClient docker = new PlatformSandboxDockerConfig().platformSandboxDockerClient(properties)) {
+        try (DockerClient docker = new PlatformDockerClientConfiguration().platformDockerClient(new PlatformDockerProperties())) {
             @SuppressWarnings("unchecked") ObjectProvider<DockerClient> provider = mock(ObjectProvider.class);
             when(provider.getIfAvailable()).thenReturn(docker);
             PlatformSandboxExecutor sandbox = new PlatformSandboxExecutor(properties, provider);
@@ -169,7 +170,7 @@ class SnapshotQuiescenceProbeTest {
     void unreadableWorkspaceFileRejectsTarExport(@TempDir Path directory) throws Exception {
         PlatformSandboxProperties properties = new PlatformSandboxProperties();
         properties.setEnabled(true);
-        try (DockerClient docker = new PlatformSandboxDockerConfig().platformSandboxDockerClient(properties)) {
+        try (DockerClient docker = new PlatformDockerClientConfiguration().platformDockerClient(new PlatformDockerProperties())) {
             @SuppressWarnings("unchecked") ObjectProvider<DockerClient> provider = mock(ObjectProvider.class);
             when(provider.getIfAvailable()).thenReturn(docker);
             PlatformSandboxExecutor sandbox = new PlatformSandboxExecutor(properties, provider);
@@ -191,7 +192,7 @@ class SnapshotQuiescenceProbeTest {
     void observesTrustedIdleProcessesAndTools() throws Exception {
         PlatformSandboxProperties properties = new PlatformSandboxProperties();
         properties.setEnabled(true);
-        try (DockerClient docker = new PlatformSandboxDockerConfig().platformSandboxDockerClient(properties)) {
+        try (DockerClient docker = new PlatformDockerClientConfiguration().platformDockerClient(new PlatformDockerProperties())) {
             @SuppressWarnings("unchecked")
             ObjectProvider<DockerClient> provider = mock(ObjectProvider.class);
             when(provider.getIfAvailable()).thenReturn(docker);

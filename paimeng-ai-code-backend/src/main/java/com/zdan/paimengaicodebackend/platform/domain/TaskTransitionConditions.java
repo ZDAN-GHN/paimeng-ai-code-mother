@@ -13,6 +13,17 @@ record TaskTransitionConditions(
         return new TaskTransitionConditions(false, false, false, false, false, false, false);
     }
 
+    /**
+     * {@code validated -> released} 的首次发布意图。
+     *
+     * <p>AD-011：首次 validated 版本自动发布，之后的版本必须由 Owner 确认。调用方只能表达
+     * 「我打算做首次发布」这个意图，真正的前置条件由
+     * {@link #withFirstReleaseFact(boolean)} 用持久事实覆盖。
+     */
+    static TaskTransitionConditions forFirstRelease() {
+        return new TaskTransitionConditions(false, false, false, true, false, false, false);
+    }
+
     TaskTransitionConditions withPersistedBaseline(boolean persistedBaselineFrozen) {
         return new TaskTransitionConditions(
             persistedBaselineFrozen,
@@ -61,6 +72,25 @@ record TaskTransitionConditions(
             firstRelease,
             ownerConfirmedPublish,
             actualRunCreatedAndLeaseGranted,
+            validationPassed
+        );
+    }
+
+    /**
+     * 用 Platform 侧的真实 Release 事实覆盖调用方自报的「首次发布」。
+     *
+     * <p>AD-011 的前置条件与 Lease、Owner 重试是同一类：任何内部调用方都能传
+     * {@code firstRelease=true} 把一个后续版本自动推上线。Platform 必须自己确认「这个版本是该
+     * Application 的第一个固定版本」，而不是相信入参。
+     */
+    TaskTransitionConditions withFirstReleaseFact(boolean persistedFirstRelease) {
+        return new TaskTransitionConditions(
+            baselineFrozen,
+            runStoppedAndLeaseReleased,
+            retryRequestedByOwner,
+            persistedFirstRelease,
+            ownerConfirmedPublish,
+            runCreatedAndLeaseGranted,
             validationPassed
         );
     }

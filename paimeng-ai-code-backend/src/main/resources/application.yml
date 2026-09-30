@@ -56,13 +56,17 @@ platform:
   snapshot:
     # Platform-only persistent volume, never a Sandbox/Agent mount. Required when execution is enabled.
     repo-root: ${PLATFORM_SNAPSHOT_REPO_ROOT:}
+  # Platform 受控执行器独占的 Docker Engine 连接（Issue #81 / T-09）。
+  # 原 platform.sandbox.docker-host 已迁移至此：Sandbox 与 Deployment 是两条受控执行器，
+  # 共用同一个进程内 Docker 客户端，但部署生产容器不该依赖 Sandbox 的配置命名空间。
+  docker:
+    # 留空走 docker-java 默认发现（DOCKER_HOST 或本机 socket）
+    host: ${PLATFORM_DOCKER_HOST:}
   sandbox:
     # 执行器独占 Docker API（AD-016）。未显式开启时不持有 Docker 客户端。
     enabled: ${PLATFORM_SANDBOX_ENABLED:false}
     # 镜像需本地构建：docker build -t paimeng-ai-code-sandbox:0.1.0 infra/docker/sandbox
     image-reference: ${PLATFORM_SANDBOX_IMAGE:paimeng-ai-code-sandbox:0.1.0}
-    # 留空走 docker-java 默认发现（DOCKER_HOST 或本机 socket）
-    docker-host: ${PLATFORM_SANDBOX_DOCKER_HOST:}
     # 以下限额取自 AD-016（Locked Decision）的固定值，改动等于偏离该决定，须先更新架构决策
     memory-limit-mb: ${PLATFORM_SANDBOX_MEMORY_LIMIT_MB:4096}
     cpu-limit: ${PLATFORM_SANDBOX_CPU_LIMIT:2.0}
@@ -73,6 +77,34 @@ platform:
     stop-timeout-seconds: ${PLATFORM_SANDBOX_STOP_TIMEOUT_SECONDS:10}
     default-command-timeout-seconds: ${PLATFORM_SANDBOX_DEFAULT_COMMAND_TIMEOUT_SECONDS:300}
     max-command-timeout-seconds: ${PLATFORM_SANDBOX_MAX_COMMAND_TIMEOUT_SECONDS:900}
+
+  # 固定 Release 的受控部署（Issue #81 / T-09；AD-016 / AD-017）
+  deployment:
+    # 部署总开关。关闭时不创建任何生产容器，首次 validated 版本只固定 Release 并排期。
+    enabled: ${PLATFORM_DEPLOYMENT_ENABLED:false}
+    # runtimeProfile 被写入不可变的 Release：事后改配置不会静默改变已发布版本的运行语义
+    runtime-profile: ${PLATFORM_DEPLOYMENT_RUNTIME_PROFILE:NODE_20}
+    image-reference: ${PLATFORM_DEPLOYMENT_IMAGE:paimeng-application-runtime:0.1.0}
+    # AD-016：Deployment 不发布宿主机端口，该端口只用于容器内监听与内部网络寻址
+    internal-port: ${PLATFORM_DEPLOYMENT_INTERNAL_PORT:8123}
+    health-path: ${PLATFORM_DEPLOYMENT_HEALTH_PATH:/healthz}
+    # Platform 独占的内部 Deployment network；容器只加入这一个网络
+    network-name: ${PLATFORM_DEPLOYMENT_NETWORK:paimeng-platform-deploy}
+    # AD-017：公开入口固定为 Platform 既有域名下的 /apps/<application-id>/
+    public-base-path: ${PLATFORM_DEPLOYMENT_PUBLIC_BASE_PATH:/apps}
+    probe-connect-timeout-seconds: ${PLATFORM_DEPLOYMENT_PROBE_CONNECT_TIMEOUT_SECONDS:2}
+    probe-request-timeout-seconds: ${PLATFORM_DEPLOYMENT_PROBE_REQUEST_TIMEOUT_SECONDS:5}
+    probe-retry-interval-ms: ${PLATFORM_DEPLOYMENT_PROBE_RETRY_INTERVAL_MS:2000}
+    # 超时按未健康处理，不无限等待
+    readiness-deadline-seconds: ${PLATFORM_DEPLOYMENT_READINESS_DEADLINE_SECONDS:120}
+    # Platform 被终止后据此回收僵死的 PROVISIONING，避免首次部署永远停在准备中
+    stale-provisioning-seconds: ${PLATFORM_DEPLOYMENT_STALE_PROVISIONING_SECONDS:600}
+    poll-interval-ms: ${PLATFORM_DEPLOYMENT_POLL_INTERVAL_MS:5000}
+    max-proxied-response-bytes: ${PLATFORM_DEPLOYMENT_MAX_PROXIED_RESPONSE_BYTES:8388608}
+    proxy-timeout-seconds: ${PLATFORM_DEPLOYMENT_PROXY_TIMEOUT_SECONDS:30}
+    memory-limit-mb: ${PLATFORM_DEPLOYMENT_MEMORY_LIMIT_MB:2048}
+    cpu-limit: ${PLATFORM_DEPLOYMENT_CPU_LIMIT:1.0}
+    pids-limit: ${PLATFORM_DEPLOYMENT_PIDS_LIMIT:128}
 
 # springdoc
 springdoc:

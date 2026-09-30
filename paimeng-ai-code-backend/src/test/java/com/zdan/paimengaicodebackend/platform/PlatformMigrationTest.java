@@ -108,6 +108,43 @@ class PlatformMigrationTest {
         assertTrue(!v14.contains("DEFAULT CHARACTER SET"));
     }
 
+    /**
+     * Issue #81 的结构契约。
+     *
+     * <p>要钉住的不是「建了两张表」，而是三条真实不变量：Release 不可变且必须与被晋升的
+     * SourceRevision 逐列一致；一个 SourceRevision 只能产生一个 Release；「已上线」这一事实
+     * 只能由带 healthyTime 的 Deployment 表达，因此 HEALTHY 与 healthyTime 必须同时成立。
+     */
+    @Test
+    void releaseAndDeploymentMigrationKeepsTheFixedEvidenceChain() throws Exception {
+        String v17 = resource("/db/migration/V17__platform_release_and_deployment.sql");
+
+        assertTrue(v17.contains("CREATE TABLE platform_release"));
+        assertTrue(v17.contains("CREATE TABLE platform_deployment"));
+        // 一个 SourceRevision 至多一个 Release：晋升重放不得产生第二个「固定版本」。
+        assertTrue(v17.contains("UNIQUE KEY uk_release_revision (appId, sourceRevisionId)"));
+        assertTrue(v17.contains("UNIQUE KEY uk_release_task (taskId)"));
+        assertTrue(v17.contains("UNIQUE KEY uk_deployment_release (releaseId)"));
+        // CST-006：有副作用的 Platform 请求必须可幂等重放。
+        assertTrue(v17.contains("UNIQUE KEY uk_deployment_request (appId, requestId)"));
+        // Release 必须钉住运行时契约，否则事后改配置会静默改变已发布版本的含义。
+        assertTrue(v17.contains("runtimeProfile VARCHAR(32) NOT NULL"));
+        assertTrue(v17.contains("runtimeProfile REGEXP '^[A-Z0-9_]{1,32}$'"));
+        // 「已上线」不能被后续更新抹掉。
+        assertTrue(v17.contains("CONSTRAINT ck_deployment_healthy_time CHECK"));
+        assertTrue(v17.contains("HEX(state) = HEX('HEALTHY') AND healthyTime IS NOT NULL"));
+        // 不可变与终态保护。
+        assertTrue(v17.contains("CREATE TRIGGER platform_release_insert_guard"));
+        assertTrue(v17.contains("CREATE TRIGGER platform_release_immutable"));
+        assertTrue(v17.contains("CREATE TRIGGER platform_release_no_delete"));
+        assertTrue(v17.contains("CREATE TRIGGER platform_deployment_terminal_guard"));
+        assertTrue(v17.contains("CREATE TRIGGER platform_deployment_no_delete"));
+        // AD-010：「已上线」由 Deployment 表达，不与 Task 状态绑成同一个布尔。
+        assertTrue(!v17.contains("FOREIGN KEY (releaseId, appId) REFERENCES platform_release (id, appId, taskId)"));
+        assertTrue(!v17.contains("DROP TABLE"));
+        assertTrue(v17.contains("DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"));
+    }
+
     private String resource(String path) throws Exception {
         try (InputStream stream = getClass().getResourceAsStream(path)) {
             return new String(stream.readAllBytes(), StandardCharsets.UTF_8);

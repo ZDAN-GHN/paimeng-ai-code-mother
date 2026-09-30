@@ -12,6 +12,7 @@ import com.zdan.paimengaicodebackend.platform.entity.*;
 import com.zdan.paimengaicodebackend.platform.snapshot.CandidateGitStore;
 import com.zdan.paimengaicodebackend.platform.snapshot.CandidateSnapshotService;
 import com.zdan.paimengaicodebackend.platform.snapshot.SnapshotReference;
+import com.zdan.paimengaicodebackend.platform.release.PlatformReleaseService;
 import com.zdan.paimengaicodebackend.platform.validation.PlatformValidationQueueService;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -39,6 +40,7 @@ public class SourceRevisionPromotionService {
     private final CandidateGitStore git;
     private final PlatformTaskTransitionService transitions;
     private final PlatformValidationQueueService validationQueue;
+    private final PlatformReleaseService releases;
     private final ObjectMapper json;
 
     SourceRevisionPromotionService(AppMapper apps, PlatformTaskMapper tasks, PlatformRunMapper runs,
@@ -46,7 +48,7 @@ public class SourceRevisionPromotionService {
         PlatformTrustedProfileVersionMapper profiles, PlatformRequirementMapper requirements,
         ValidationEvidenceMapper evidence, SourceRevisionMapper revisions, CandidateGitStore git,
         PlatformTaskTransitionService transitions, PlatformValidationQueueService validationQueue,
-        ObjectMapper json) {
+        PlatformReleaseService releases, ObjectMapper json) {
         this.apps = apps;
         this.tasks = tasks;
         this.runs = runs;
@@ -59,13 +61,14 @@ public class SourceRevisionPromotionService {
         this.git = git;
         this.transitions = transitions;
         this.validationQueue = validationQueue;
+        this.releases = releases;
         this.json = json;
     }
 
     @Transactional(rollbackFor = Exception.class)
     public SourceRevision promote(SnapshotReference ref) {
         if (ref == null || ref.applicationId() <= 0 || ref.taskId() <= 0 || ref.runId() == null
-            || ref.runId().isBlank() || apps.lockForPromotion(ref.applicationId()) == null) throw denied();
+            || ref.runId().isBlank() || apps.lockApplication(ref.applicationId()) == null) throw denied();
         App app = apps.selectOneById(ref.applicationId());
         if (app == null || !"ACTIVE".equals(app.getLifecycleStatus()) || !Objects.equals(app.getIsDelete(), 0)) {
             throw denied();
@@ -85,6 +88,9 @@ public class SourceRevisionPromotionService {
                 || !Objects.equals(existing.getTaskAcceptanceEvidenceId(), replayEvidence.get("TASK_ACCEPTANCE").getId())) {
                 throw denied();
             }
+            // CT-004：晋升与 Release 创建是同一契约的两个输出。重放同样要补齐，否则一次
+            // 晋升重放会让「已晋升但永远没有固定版本」成为可复现的状态。
+            releases.releaseFirstVersion(existing);
             return existing;
         }
         PlatformTask task = tasks.selectOneById(ref.taskId());
@@ -143,6 +149,9 @@ public class SourceRevisionPromotionService {
         if (ref.baseSourceRevision() == null) condition.isNull("stableSourceRevision");
         else condition.eq("stableSourceRevision", ref.baseSourceRevision());
         if (apps.updateByQuery(update, true, condition) != 1) throw denied();
+        // CT-004 / AD-011：首次 validated 版本自动固定 Release 并排期部署。后续版本在这里
+        // 返回空值，不自动上线。
+        releases.releaseFirstVersion(revision);
         return revision;
     }
 

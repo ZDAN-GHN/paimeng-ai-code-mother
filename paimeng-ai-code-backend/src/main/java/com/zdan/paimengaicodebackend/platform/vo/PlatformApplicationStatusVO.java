@@ -54,6 +54,25 @@ public class PlatformApplicationStatusVO {
     @Schema(description = "Application 是否已归档；归档后本投影变为只读事实", example = "false")
     private boolean archived;
 
+    /**
+     * 是否存在健康 Deployment 对外提供公开运行入口（Issue #81 / T-09）。
+     *
+     * <p>AD-010 / R-001：未健康 Deployment 不被表述为已上线。这个布尔是「已上线」的唯一事实，
+     * 与 Task 是否 {@code released} 无关。
+     */
+    @Schema(description = "是否已上线运行；仅在内部健康检查通过后为 true", example = "false")
+    private boolean live;
+
+    @Schema(description = "公开运行入口；未上线时为空。生产为 Platform 域名下的 /apps/<application-id>/",
+        example = "/apps/460017668615995392/")
+    private String publicUrl;
+
+    @Schema(description = "受控上线阶段；白名单取值，不含容器、版本或日志", example = "UNHEALTHY")
+    private String deployStage;
+
+    @Schema(description = "受控上线失败原因；白名单取值，不含敏感配置", example = "HEALTH_PROBE_FAILED")
+    private String deployReason;
+
     @Schema(description = "该投影最后变化时间")
     private LocalDateTime updatedAt;
 }

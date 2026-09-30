@@ -132,6 +132,22 @@ public class PlatformTaskLifecycleService {
             PlatformActor.PLATFORM, TaskTransitionConditions.none(), reasonCode, evidenceRef, requestId);
     }
 
+    /**
+     * {@code VALIDATED -> RELEASED}：该 validated 版本已被固定为 Release（Issue #81 / T-09）。
+     *
+     * <p>AD-011 / D-06：{@code released} 只表示「固定 Release 已创建」，不表示已上线。
+     * 是否健康、是否公开运行由 Deployment 独立表达。因此这里不写任何上线字段。
+     *
+     * <p>「首次发布」的前置条件由 {@link PlatformTaskTransitionService} 用 Release 表实查覆盖，
+     * 传 {@code true} 本身不构成授权。
+     *
+     * @param evidenceRef 被创建的 Release 标识；状态机要求发布类转换可追溯到一个固定版本
+     */
+    public void markReleased(Long taskId, String reasonCode, String evidenceRef, String requestId) {
+        transitions.transition(taskId, PlatformTaskState.VALIDATED, PlatformTaskState.RELEASED,
+            PlatformActor.PLATFORM, TaskTransitionConditions.forFirstRelease(), reasonCode, evidenceRef, requestId);
+    }
+
     private void writeBlockingQuestion(Long taskId, String question, PlatformTaskState expectedState, boolean requireNoBaseline) {
         PlatformTask update = new PlatformTask();
         update.setBlockedQuestion(question.trim());

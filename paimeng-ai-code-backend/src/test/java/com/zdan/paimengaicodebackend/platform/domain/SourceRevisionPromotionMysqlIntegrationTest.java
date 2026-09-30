@@ -100,7 +100,7 @@ class SourceRevisionPromotionMysqlIntegrationTest {
         snapshot.setStatus("READY");
         App application = new App();
         application.setId(app); application.setIsDelete(0); application.setLifecycleStatus("ACTIVE");
-        when(apps.lockForPromotion(app)).thenReturn(app);
+        when(apps.lockApplication(app)).thenReturn(app);
         when(apps.selectOneById(app)).thenReturn(application);
         when(apps.updateByQuery(any(App.class), eq(true), any())).thenReturn(0);
         when(snapshots.requireReady(app, run)).thenReturn(snapshot);

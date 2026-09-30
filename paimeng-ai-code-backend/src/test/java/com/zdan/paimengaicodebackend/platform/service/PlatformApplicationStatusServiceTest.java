@@ -17,10 +17,15 @@ import static org.mockito.Mockito.when;
 
 import com.zdan.paimengaicodebackend.exception.BusinessException;
 import com.zdan.paimengaicodebackend.exception.ErrorCode;
+import com.zdan.paimengaicodebackend.mapper.platform.PlatformDeploymentMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformRunMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformTaskMapper;
 import com.zdan.paimengaicodebackend.model.entity.App;
 import com.zdan.paimengaicodebackend.model.entity.User;
+import com.zdan.paimengaicodebackend.platform.deployment.PlatformDeploymentReasonCode;
+import com.zdan.paimengaicodebackend.platform.deployment.PlatformDeploymentStage;
+import com.zdan.paimengaicodebackend.platform.deployment.PlatformDeploymentState;
+import com.zdan.paimengaicodebackend.platform.deployment.PublicApplicationRouteResolver;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformActor;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformApplicationAccessGuard;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformOwnerVisibleStatus;
@@ -30,6 +35,7 @@ import com.zdan.paimengaicodebackend.platform.domain.PlatformRunProgressService;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformStatusChangeNotifier;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformTaskRetryService;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformTaskState;
+import com.zdan.paimengaicodebackend.platform.entity.PlatformDeployment;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformNormalizationQueue;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRun;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRunProgressEvent;
@@ -63,13 +69,18 @@ class PlatformApplicationStatusServiceTest {
     private final PlatformRunProgressService progressService = mock(PlatformRunProgressService.class);
     private final PlatformTaskRetryService retryService = mock(PlatformTaskRetryService.class);
     private final PlatformStatusChangeNotifier notifier = mock(PlatformStatusChangeNotifier.class);
+    private final PlatformDeploymentMapper deploymentMapper = mock(PlatformDeploymentMapper.class);
+    private final PublicApplicationRouteResolver routeResolver = mock(PublicApplicationRouteResolver.class);
 
     private PlatformApplicationStatusService statusService;
 
     @BeforeEach
     void setUp() {
         statusService = new PlatformApplicationStatusService(accessGuard, taskMapper, runMapper,
-            normalizationService, progressService, retryService, notifier);
+            normalizationService, progressService, retryService, notifier, deploymentMapper, routeResolver);
+        lenient().when(routeResolver.publicBasePath()).thenReturn("/apps");
+        lenient().when(deploymentMapper.selectHealthyForApplication(APPLICATION_ID)).thenReturn(null);
+        lenient().when(deploymentMapper.selectLatestForApplication(APPLICATION_ID)).thenReturn(null);
         // 默认放行 ACTIVE Application；归档后必须拒绝写，这个边界在下面单独覆盖。
         lenient().when(accessGuard.requireManaged(eq(APPLICATION_ID), any(User.class)))
             .thenReturn(application("ACTIVE"));
@@ -232,6 +243,81 @@ class PlatformApplicationStatusServiceTest {
             APPLICATION_ID, String.valueOf(TASK_ID), "   ", owner()));
         assertThrows(BusinessException.class, () -> statusService.answerBlockingQuestion(
             APPLICATION_ID, String.valueOf(TASK_ID), "x".repeat(4001), owner()));
+    }
+
+    @Test
+    void releasedTaskWithoutHealthyDeploymentIsShownAsNotLiveWithControlledDiagnosis() {
+        whenTask("RELEASED", null);
+        when(deploymentMapper.selectLatestForApplication(APPLICATION_ID)).thenReturn(
+            deployment(PlatformDeploymentState.UNHEALTHY, PlatformDeploymentReasonCode.HEALTH_PROBE_FAILED));
+
+        PlatformApplicationStatusVO status = read();
+
+        assertFalse(status.isLive());
+        assertNull(status.getPublicUrl());
+        assertEquals(PlatformDeploymentStage.UNHEALTHY.name(), status.getDeployStage());
+        assertEquals(PlatformDeploymentReasonCode.HEALTH_PROBE_FAILED.name(), status.getDeployReason());
+        // 「已发布固定版本」会误导 Owner：Task released 只说明固定版本已创建。
+        assertEquals(PlatformDeploymentStage.UNHEALTHY.ownerText(), status.getHeadline());
+        assertTrue(containsIgnoreCase(status.getDetail(), "暂未对外开放"));
+        // 受控诊断不含容器、版本、日志或基础设施细节。
+        assertFalse(containsIgnoreCase(status.getDetail(), "container"));
+        assertFalse(containsIgnoreCase(status.getDetail(), "172."));
+    }
+
+    @Test
+    void releasedTaskWhileDeployingIsNotYetDescribedAsLive() {
+        whenTask("RELEASED", null);
+        when(deploymentMapper.selectLatestForApplication(APPLICATION_ID)).thenReturn(
+            deployment(PlatformDeploymentState.PROVISIONING, null));
+
+        PlatformApplicationStatusVO status = read();
+
+        assertFalse(status.isLive());
+        assertEquals(PlatformDeploymentStage.PROVISIONING.name(), status.getDeployStage());
+        assertNull(status.getDeployReason());
+        assertTrue(containsIgnoreCase(status.getHeadline(), "正在准备上线"));
+    }
+
+    @Test
+    void healthyDeploymentPublishesTheStableApplicationScopedUrl() {
+        whenTask("RELEASED", null);
+        PlatformDeployment healthy = deployment(PlatformDeploymentState.HEALTHY, null);
+        healthy.setContainerAddress("172.18.0.9");
+        when(deploymentMapper.selectHealthyForApplication(APPLICATION_ID)).thenReturn(healthy);
+
+        PlatformApplicationStatusVO status = read();
+
+        assertTrue(status.isLive());
+        assertEquals("/apps/" + APPLICATION_ID + "/", status.getPublicUrl());
+        assertEquals(PlatformDeploymentStage.HEALTHY.name(), status.getDeployStage());
+    }
+
+    @Test
+    void unregisteredReasonCodeIsNotProjected() {
+        whenTask("RELEASED", null);
+        PlatformDeployment tampered = deployment(PlatformDeploymentState.UNHEALTHY, null);
+        tampered.setReasonCode("DATABASE_URL=postgres://user:secret@db/internal failed");
+        when(deploymentMapper.selectLatestForApplication(APPLICATION_ID)).thenReturn(tampered);
+
+        PlatformApplicationStatusVO status = read();
+
+        assertNull(status.getDeployReason());
+        assertFalse(containsIgnoreCase(status.getDetail(), "secret"));
+    }
+
+    private PlatformDeployment deployment(PlatformDeploymentState state, PlatformDeploymentReasonCode reason) {
+        PlatformDeployment deployment = new PlatformDeployment();
+        deployment.setId(7L);
+        deployment.setApplicationId(APPLICATION_ID);
+        deployment.setState(state.name());
+        deployment.setStage(state == PlatformDeploymentState.HEALTHY
+            ? PlatformDeploymentStage.HEALTHY.name()
+            : (state == PlatformDeploymentState.UNHEALTHY
+                ? PlatformDeploymentStage.UNHEALTHY.name()
+                : PlatformDeploymentStage.PROVISIONING.name()));
+        deployment.setReasonCode(reason == null ? null : reason.name());
+        return deployment;
     }
 
     private PlatformApplicationStatusVO read() {

@@ -21,8 +21,8 @@ public enum PlatformOwnerVisibleStatus {
     FAILED("构建未通过验证"),
     /** 同一 Snapshot 的必需验证全部通过。 */
     VALIDATED("验证已通过"),
-    /** 已创建固定 Release（发布确认与部署由 T-09 表达）。 */
-    RELEASED("已发布固定版本"),
+    /** 已创建固定 Release。是否已上线由 Deployment 独立表达，标题会据此改写为未上线。 */
+    RELEASED("已创建固定版本"),
     /** Owner 或 System Administrator 已取消。 */
     CANCELLED("已取消");
 

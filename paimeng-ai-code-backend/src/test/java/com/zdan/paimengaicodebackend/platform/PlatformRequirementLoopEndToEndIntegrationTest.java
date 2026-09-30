@@ -18,6 +18,8 @@ import com.zdan.paimengaicodebackend.mapper.AppMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformRequirementMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformRunMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformTaskMapper;
+import com.zdan.paimengaicodebackend.mapper.platform.PlatformDeploymentMapper;
+import com.zdan.paimengaicodebackend.mapper.platform.PlatformReleaseMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.SourceRevisionMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.ValidationEvidenceMapper;
 import com.zdan.paimengaicodebackend.model.entity.App;
@@ -28,6 +30,8 @@ import com.zdan.paimengaicodebackend.platform.domain.PlatformOwnerVisibleStatus;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformRequirementNormalizationService;
 import com.zdan.paimengaicodebackend.platform.dto.PlatformNormalizationResultRequest;
 import com.zdan.paimengaicodebackend.platform.entity.CandidateSourceSnapshot;
+import com.zdan.paimengaicodebackend.platform.entity.PlatformDeployment;
+import com.zdan.paimengaicodebackend.platform.entity.PlatformRelease;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformTask;
 import com.zdan.paimengaicodebackend.platform.entity.SourceRevision;
 import com.zdan.paimengaicodebackend.platform.entity.ValidationEvidence;
@@ -108,6 +112,8 @@ class PlatformRequirementLoopEndToEndIntegrationTest {
     @Autowired private PlatformTaskMapper taskMapper;
     @Autowired private PlatformRunMapper runMapper;
     @Autowired private SourceRevisionMapper revisionMapper;
+    @Autowired private PlatformReleaseMapper releaseMapper;
+    @Autowired private PlatformDeploymentMapper deploymentMapper;
     @Autowired private PlatformApplicationManagementService managementService;
     @Autowired private PlatformApplicationStatusService statusService;
     @Autowired private PlatformAgentWorkService workService;
@@ -163,8 +169,10 @@ class PlatformRequirementLoopEndToEndIntegrationTest {
         assertEquals("PASS", settled.get().state());
         assertEquals("ALL_GATES_PASSED", settled.get().reasonCode());
 
+        // Issue #81（AC-019）：首次 validated 版本自动固定 Release，因此 Task 越过 VALIDATED
+        // 直接落到 RELEASED。Release 已创建不等于已上线——「已上线」由 Deployment 表达。
         PlatformTask validated = taskMapper.selectOneById(loop.taskId());
-        assertEquals("VALIDATED", validated.getState());
+        assertEquals("RELEASED", validated.getState());
         // 基线在整个闭环中保持冻结：晋升不改写它。
         assertNotNull(validated.getBaselineJson());
         assertNull(validated.getFailureCode());
@@ -192,7 +200,28 @@ class PlatformRequirementLoopEndToEndIntegrationTest {
 
         App application = appMapper.selectOneById(loop.applicationId());
         assertEquals(revision.getId(), application.getStableSourceRevision());
-        assertEquals(PlatformOwnerVisibleStatus.VALIDATED, statusService.getStatus(loop.applicationId(), owner()).getStatus());
+
+        // 固定 Release：逐列绑定被晋升的 SourceRevision，并已排期一次 Deployment。
+        List<PlatformRelease> releases = releaseMapper.selectListByQuery(
+            QueryWrapper.create().eq("runId", loop.runId()));
+        assertEquals(1, releases.size());
+        PlatformRelease release = releases.getFirst();
+        assertEquals(revision.getId(), release.getSourceRevisionId());
+        assertEquals(revision.getProfileVersionId(), release.getProfileVersionId());
+        assertEquals(revision.getValidationAttemptId(), release.getValidationAttemptId());
+        assertNotNull(release.getRuntimeProfile());
+
+        List<PlatformDeployment> deployments = deploymentMapper.selectListByQuery(
+            QueryWrapper.create().eq("releaseId", release.getId()));
+        assertEquals(1, deployments.size());
+        assertEquals("PENDING", deployments.getFirst().getState());
+        assertNull(deployments.getFirst().getHealthyTime());
+
+        // 部署尚未健康前必须保持未上线：既没有公开 URL，也没有健康 Deployment。
+        PlatformApplicationStatusVO status = statusService.getStatus(loop.applicationId(), owner());
+        assertEquals(PlatformOwnerVisibleStatus.RELEASED, status.getStatus());
+        assertFalse(status.isLive());
+        assertNull(status.getPublicUrl());
     }
 
     /**

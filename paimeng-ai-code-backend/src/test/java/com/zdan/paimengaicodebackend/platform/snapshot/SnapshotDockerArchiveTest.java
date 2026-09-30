@@ -9,7 +9,8 @@ import static org.mockito.Mockito.when;
 
 import com.github.dockerjava.api.DockerClient;
 import com.zdan.paimengaicodebackend.exception.BusinessException;
-import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxDockerConfig;
+import com.zdan.paimengaicodebackend.platform.docker.PlatformDockerClientConfiguration;
+import com.zdan.paimengaicodebackend.platform.docker.PlatformDockerProperties;
 import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxExecutor;
 import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxHandle;
 import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxProperties;
@@ -31,7 +32,7 @@ class SnapshotDockerArchiveTest {
     void pausedContainerArchiveRejectsDirectoryOnlyExport(@TempDir Path stage) throws Exception {
         PlatformSandboxProperties properties = new PlatformSandboxProperties();
         properties.setEnabled(true);
-        try (DockerClient docker = new PlatformSandboxDockerConfig().platformSandboxDockerClient(properties)) {
+        try (DockerClient docker = new PlatformDockerClientConfiguration().platformDockerClient(new PlatformDockerProperties())) {
             var provider = mockDockerProvider(docker);
             PlatformSandboxExecutor sandbox = new PlatformSandboxExecutor(properties, provider);
             String runId = "snapshot-archive-" + java.util.UUID.randomUUID();
