@@ -183,6 +183,10 @@ public class AppController {
         if (!oldApp.getUserId().equals(loginUser.getId())) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
         }
+        // appName 已由数据库设为 NOT NULL，这里先给出可读错误，避免把数据库异常抛给前端
+        if (StrUtil.isBlank(appUpdateRequest.getAppName())) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用名称不能为空");
+        }
         App app = new App();
         app.setId(id);
         app.setAppName(appUpdateRequest.getAppName());
@@ -299,6 +303,10 @@ public class AppController {
         long id = appAdminUpdateRequest.getId();
 
         requireActiveApp(id);
+        // 同上：数据库已禁止 appName 为空，这里给出可读错误
+        if (appAdminUpdateRequest.getAppName() != null && StrUtil.isBlank(appAdminUpdateRequest.getAppName())) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "应用名称不能为空");
+        }
         App app = new App();
         BeanUtil.copyProperties(appAdminUpdateRequest, app);
 

@@ -167,6 +167,10 @@ public class CandidateGitStore {
     }
 
     public void verifyEvidence(SnapshotReference snapshot, ArtifactReference artifact) throws IOException {
+        readEvidence(snapshot, artifact);
+    }
+
+    public byte[] readEvidence(SnapshotReference snapshot, ArtifactReference artifact) throws IOException {
         if (snapshot == null || snapshot.runId() == null || artifact == null
             || artifact.ref() == null || artifact.commitHash() == null || artifact.sha256() == null
             || !artifact.ref().matches("refs/evidence/[0-9a-f]{64}")
@@ -186,6 +190,7 @@ public class CandidateGitStore {
             throw new BusinessException(ErrorCode.FORBIDDEN_ERROR, "证据对象或归属不一致");
         }
         command(env, "fsck", "--no-reflogs", "--full", artifact.commitHash());
+        return bytes;
     }
 
     private byte[] evidenceBinding(SnapshotReference snapshot) throws IOException {

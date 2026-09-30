@@ -546,12 +546,13 @@ Requirement + Trusted Profile + Task Baseline
 ### AD-014：固定 TypeScript 全栈模板与兼容 Migration 工具
 
 - 状态：`Locked Decision`，维护者已明确决定。
-- 来源：维护者对 Issue #66 的批准；当前仓库 Node/Vue/Vite 基线与官方供应链元数据。
-- 决定：MVP 生成 Application 使用唯一组合：Node.js `24.20.0`、Vue `3.5.17`、Vite `7.0.4`、Fastify `5.12.3`、Prisma/`@prisma/client` `7.10.0` 和 MySQL `8`。生产构建由同一个 Fastify HTTP 服务提供 Vite 静态资源和 `/api`；模板必须提交 `package-lock.json` 与 SQL migration；不得引入第二种 Web framework、ORM 或 migration 工具。
+- 来源：维护者对 Issue #66 的批准；Issue #79 实施中发现固定版本链的 high 漏洞后，维护者明确批准修订受影响版本；当前仓库基线与 npm 官方元数据。
+- 决定：MVP 生成 Application 使用唯一组合：Node.js `24.20.0`、Vue `3.5.17`、Vite `7.3.6`、Fastify `5.12.3`、Prisma/`@prisma/client` `7.10.0` 和 MySQL `8`。Prisma MariaDB Adapter 固定 `7.10.0`，锁文件对其 MariaDB 驱动覆盖至 `3.4.7`，并对 Prisma CLI 的 `mysql2` 覆盖至 `3.23.1`、配置包的 `deepmerge-ts` 覆盖至 `8.0.0`；这些覆盖以隔离迁移及模板回归为交付验证条件。生产构建由同一个 Fastify HTTP 服务提供 Vite 静态资源和 `/api`；模板必须提交 `package-lock.json` 与 SQL migration；不得引入第二种 Web framework、ORM 或 migration 工具。
 - 验证命令：模板提供 `npm ci`、`npm run type-check`、`npm test`、`npm run build`、`npm run db:migrate:status`（`prisma migrate status`）和 `npm run db:migrate:deploy`（`prisma migrate deploy`）。后者只由 Platform Deployment Controller 在隔离或 Production 环境执行，禁止 Agent 直连 Production 数据库。
 - Migration 规则：`prisma migrate deploy` 只应用已提交 migration，不承担 schema drift 或 `CST-009` 兼容性裁决；T-07 必须在部署前审查 SQL 并拒绝破坏性变更。不得在已存在数据环境执行 `migrate reset`。
+- 数据库认证：MySQL 8 默认 `caching_sha2_password`，MariaDB Connector/Node.js 在未取得服务端 RSA 公钥时建连失败。模板运行期连接按 `AD-016` 的边界只接入 Platform 内部网络并使用短生命周期非生产凭据，因此固定 `allowPublicKeyRetrieval: true`；不得改用已废弃的 `mysql_native_password`。一旦数据服务跨出内部网络，该设置必须先由 TLS 取代。
 - 原因：复用当前 Vue/Vite 和 Node 基线，同时提供单 HTTP 服务、可锁定依赖和提交式 SQL migration。
-- 许可证/维护状态：Vue、Vite、Fastify 为 MIT；Prisma/Client 为 Apache-2.0；版本在决策时可从 npm 官方元数据获取，后续升级必须经独立依赖评估。
+- 许可证/维护状态：Vue、Vite、Fastify 为 MIT；Prisma/Client 和 Adapter 为 Apache-2.0；适配器引入的 MariaDB Connector/Node.js 为 LGPL-2.1-or-later，重新分发依赖时须保留许可和履行适用义务。Issue #79 的版本修订经独立依赖元数据及公开漏洞评估；后续升级仍须独立评估。
 - 关联需求：`R-003`、`R-005`
 - 关联约束：`CST-009`、`CST-010`
 - 关联未决问题：`OQ-002`
@@ -891,7 +892,7 @@ Requirement + Trusted Profile + Task Baseline
 ### OQ-001：固定 TypeScript 全栈模板与 Migration 工具
 
 - 状态：`Resolved by AD-014`
-- 决定：Node.js `24.20.0`、Vue `3.5.17`、Vite `7.0.4`、Fastify `5.12.3`、Prisma/`@prisma/client` `7.10.0` 和 MySQL `8`；验证及兼容 Migration 边界以 `AD-014` 为准。
+- 决定：Node.js `24.20.0`、Vue `3.5.17`、Vite `7.3.6`、Fastify `5.12.3`、Prisma/`@prisma/client` `7.10.0` 和 MySQL `8`；传递依赖的安全覆盖、验证及兼容 Migration 边界以 `AD-014` 为准。
 - 已解除阻塞：`T-04` 可在 `T-01` 基线上启动；`T-05`、`T-07` 已使用 `AD-016` 的执行边界，仍等待各自既有上游依赖。
 
 ### OQ-002：Snapshot 与 SourceRevision 的物理存储

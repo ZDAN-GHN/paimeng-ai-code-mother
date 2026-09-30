@@ -66,6 +66,9 @@ public class App implements Serializable {
     @Column("lifecycleStatus")
     private String lifecycleStatus;
 
+    @Column("stableSourceRevision")
+    private String stableSourceRevision;
+
     @Column("archivedTime")
     private LocalDateTime archivedTime;
 

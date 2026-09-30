@@ -18,12 +18,14 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** Persistence-only internal contract; authoritative validators and promotion belong to later work. */
+/** Persists legacy records separately from Platform validator-issued results. */
 @Service
 public class ValidationEvidenceService {
     private final CandidateSnapshotService snapshots;
@@ -50,6 +52,24 @@ public class ValidationEvidenceService {
     public ValidationEvidence record(SnapshotReference ref, String category, String result,
                                      String payloadJson, CandidateGitStore.ArtifactReference artifact,
                                      String idempotencyKey) {
+        return recordInternal(ref, category, result, payloadJson, artifact, idempotencyKey, "LEGACY", "LEGACY");
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public ValidationEvidence recordValidated(SnapshotReference ref, String category, String result,
+                                              String payloadJson, CandidateGitStore.ArtifactReference artifact,
+                                              String attemptId) {
+        if (attemptId == null || !attemptId.matches("[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+            || category == null || !List.of("ENGINEERING", "DATABASE", "RUNTIME", "TASK_ACCEPTANCE").contains(category)) {
+            throw denied();
+        }
+        return recordInternal(ref, category, result, payloadJson, artifact, attemptId + ":" + category,
+            "PLATFORM_VALIDATOR_V1", attemptId);
+    }
+
+    private ValidationEvidence recordInternal(SnapshotReference ref, String category, String result,
+                                              String payloadJson, CandidateGitStore.ArtifactReference artifact,
+                                              String idempotencyKey, String issuer, String attemptId) {
         if (ref == null || ref.runId() == null || snapshotMapper.lockRun(ref.runId()) == null) throw denied();
         PlatformRun run = runs.selectOneById(ref.runId());
         // A READY snapshot can survive a failed/expired Run; it is not sufficient for validation.
@@ -58,8 +78,11 @@ public class ValidationEvidenceService {
             || !Objects.equals(run.getTaskId(), ref.taskId())) throw denied();
         ref.require(snapshots);
         ProfileDisposition disposition = dispositions.selectOneById(ref.runId());
-        if (disposition == null || !ProfileDispositionService.matches(disposition, ref)
-            || ("PASS".equals(result) && "uncertain".equals(disposition.getDisposition()))) throw denied();
+        boolean validDisposition = disposition != null && ProfileDispositionService.matches(disposition, ref);
+        if (("LEGACY".equals(issuer) && !validDisposition)
+            || ("PASS".equals(result) && (!validDisposition || "uncertain".equals(disposition.getDisposition())))) {
+            throw denied();
+        }
         if (category == null || !category.matches("[A-Z][A-Z0-9_]{0,63}")
             || !("PASS".equals(result) || "FAIL".equals(result) || "INCONCLUSIVE".equals(result))
             || idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 64
@@ -70,13 +93,19 @@ public class ValidationEvidenceService {
             JsonNode parsed = json.readTree(parser);
             if (parsed == null || !(parsed.isObject() || parsed.isArray()) || parsed.isEmpty()
                 || parser.nextToken() != null) throw denied();
+            if (!"LEGACY".equals(issuer)
+                && (parsed.size() != 4 || parsed.path("schemaVersion").asInt(-1) != 1
+                    || !category.equals(parsed.path("category").asText(null))
+                    || !result.equals(parsed.path("status").asText(null))
+                    || !parsed.path("reasonCode").asText("").matches("[A-Z][A-Z0-9_]{0,63}"))) throw denied();
             payload = json.writeValueAsBytes(parsed);
         } catch (IOException e) {
             throw denied();
         }
         if (payload.length > 65536) throw denied();
         try {
-            git.verifyEvidence(ref, artifact);
+            if ("LEGACY".equals(issuer)) git.verifyEvidence(ref, artifact);
+            else if (!Arrays.equals(payload, git.readEvidence(ref, artifact))) throw denied();
         } catch (IOException e) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "证据对象不可恢复", e);
         }
@@ -85,6 +114,7 @@ public class ValidationEvidenceService {
             QueryWrapper.create().eq("runId", ref.runId()).eq("idempotencyKey", idempotencyKey));
         if (existing != null) {
             if (!matches(existing, ref) || !Objects.equals(existing.getCategory(), category)
+                || !issuer.equals(existing.getIssuer()) || !attemptId.equals(existing.getAttemptId())
                 || !Objects.equals(existing.getIdempotencyKey(), idempotencyKey)
                 || !Objects.equals(existing.getResult(), result)
                 || !Objects.equals(existing.getArtifactRef(), artifact.ref())
@@ -110,6 +140,8 @@ public class ValidationEvidenceService {
         recorded.setArtifactCommitHash(artifact.commitHash());
         recorded.setArtifactSha256(artifact.sha256());
         recorded.setIdempotencyKey(idempotencyKey);
+        recorded.setIssuer(issuer);
+        recorded.setAttemptId(attemptId);
         evidence.insert(recorded);
         return recorded;
     }

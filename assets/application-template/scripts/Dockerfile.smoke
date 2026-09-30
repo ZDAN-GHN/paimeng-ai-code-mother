@@ -1,0 +1,2 @@
+# Locally built, version-pinned validation image. Never use this image for production.
+FROM issue79-validation-runtime:local

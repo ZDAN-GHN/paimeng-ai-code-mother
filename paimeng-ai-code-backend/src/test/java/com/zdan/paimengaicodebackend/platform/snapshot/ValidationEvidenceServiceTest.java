@@ -19,6 +19,7 @@ import com.zdan.paimengaicodebackend.platform.entity.PlatformRun;
 import com.zdan.paimengaicodebackend.platform.entity.ProfileDisposition;
 import com.zdan.paimengaicodebackend.platform.entity.ValidationEvidence;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -97,6 +98,8 @@ class ValidationEvidenceServiceTest {
             "{\"ok\":true}{\"hidden\":true}", artifact, "key"));
         assertThrows(BusinessException.class, () -> service.record(ref, "BUILD", "PASS", "{\"data\":\"" + "x".repeat(65536) + "\"}", artifact, "key"));
         ValidationEvidence row = service.record(ref, "BUILD", "PASS", "{\"ok\":true}", artifact, "key");
+        assertEquals("LEGACY", row.getIssuer());
+        assertEquals("LEGACY", row.getAttemptId());
         assertEquals("4062edaf750fb8074e7e83e0c9028c94e32468a8b6f1614774328ef045150f93", row.getPayloadSha256());
         assertEquals("{\"ok\":true}", row.getPayloadJson());
         assertEquals(artifact.ref(), row.getArtifactRef());
@@ -105,6 +108,12 @@ class ValidationEvidenceServiceTest {
         when(evidence.selectOneByQuery(any())).thenReturn(row);
         assertEquals(row, service.record(ref, "BUILD", "PASS", " { \"ok\" : true } ", artifact, "key"));
         assertEquals(row, service.record(ref, "BUILD", "PASS", "{\"ok\":true}", artifact, "key"));
+        row.setIssuer("PLATFORM_VALIDATOR_V1");
+        assertThrows(BusinessException.class, () -> service.record(ref, "BUILD", "PASS", "{\"ok\":true}", artifact, "key"));
+        row.setIssuer("LEGACY");
+        row.setAttemptId("11111111-2222-3333-4444-555555555555");
+        assertThrows(BusinessException.class, () -> service.record(ref, "BUILD", "PASS", "{\"ok\":true}", artifact, "key"));
+        row.setAttemptId("LEGACY");
         assertThrows(BusinessException.class, () -> service.record(ref, "BUILD", "FAIL", "{\"ok\":true}", artifact, "key"));
         assertThrows(BusinessException.class, () -> service.record(ref, "BUILD", "PASS", "{\"ok\":false}", artifact, "key"));
         row.setIdempotencyKey("Key");
@@ -125,6 +134,50 @@ class ValidationEvidenceServiceTest {
             .when(git).verifyEvidence(ref, artifact);
         assertThrows(BusinessException.class, () -> service.record(ref, "TEST", "PASS", "{\"ok\":true}", artifact, "key"));
         verify(evidence, never()).insert(any());
+    }
+
+    @Test
+    void validatorIssuedPassRequiresMatchingArtifactAndAttempt() throws IOException {
+        ready("SUCCEEDED", "unchanged");
+        String attempt = "11111111-2222-3333-4444-555555555555";
+        String payload = "{\"schemaVersion\":1,\"category\":\"ENGINEERING\",\"status\":\"PASS\",\"reasonCode\":\"PASS\"}";
+        when(git.readEvidence(ref, artifact)).thenReturn(payload.getBytes(StandardCharsets.UTF_8));
+        ValidationEvidence row = service.recordValidated(ref, "ENGINEERING", "PASS", payload, artifact, attempt);
+        assertEquals("PLATFORM_VALIDATOR_V1", row.getIssuer());
+        assertEquals(attempt, row.getAttemptId());
+        assertEquals(attempt + ":ENGINEERING", row.getIdempotencyKey());
+        assertThrows(BusinessException.class, () -> service.recordValidated(ref, "ENGINEERING", "PASS",
+            payload.replace("\"PASS\",\"reasonCode\"", "\"FAIL\",\"reasonCode\""), artifact, attempt));
+        assertThrows(BusinessException.class, () -> service.recordValidated(ref, "BUILD", "PASS", payload, artifact, attempt));
+        when(git.readEvidence(ref, artifact)).thenReturn("{\"other\":true}".getBytes(StandardCharsets.UTF_8));
+        assertThrows(BusinessException.class, () -> service.recordValidated(ref, "ENGINEERING", "PASS", payload, artifact, attempt));
+    }
+
+    @Test
+    void missingDispositionCanRecordOnlyValidatorIssuedInconclusiveEvidence() throws IOException {
+        when(snapshotMapper.lockRun("run-1")).thenReturn("run-1");
+        PlatformRun run = new PlatformRun();
+        run.setApplicationId(1L);
+        run.setTaskId(2L);
+        run.setState("SUCCEEDED");
+        when(runs.selectOneById("run-1")).thenReturn(run);
+        CandidateSourceSnapshot snapshot = new CandidateSourceSnapshot();
+        snapshot.setApplicationId(1L);
+        snapshot.setTaskId(2L);
+        snapshot.setRunId("run-1");
+        snapshot.setBaselineHash("baseline");
+        snapshot.setCommitHash("commit");
+        snapshot.setTreeHash("tree");
+        when(snapshots.requireReady(1, "run-1")).thenReturn(snapshot);
+        String attempt = "11111111-2222-3333-4444-555555555555";
+        String payload = "{\"schemaVersion\":1,\"category\":\"ENGINEERING\",\"status\":\"INCONCLUSIVE\","
+            + "\"reasonCode\":\"PROFILE_DECLARATION_MISSING\"}";
+        when(git.readEvidence(ref, artifact)).thenReturn(payload.getBytes(StandardCharsets.UTF_8));
+        assertThrows(BusinessException.class, () -> service.recordValidated(ref, "ENGINEERING", "PASS",
+            payload.replace("INCONCLUSIVE", "PASS"), artifact, attempt));
+        ValidationEvidence row = service.recordValidated(ref, "ENGINEERING", "INCONCLUSIVE", payload, artifact, attempt);
+        assertEquals("PLATFORM_VALIDATOR_V1", row.getIssuer());
+        assertEquals("INCONCLUSIVE", row.getResult());
     }
 
     @Test

@@ -75,6 +75,8 @@ test('core Agent loads only sandbox tools and no host resources without contacti
     assert.equal(agent.state.messages[0]?.role, 'system')
     assert.deepEqual(agent.state.messages[0]?.toolsAdded?.map((tool) => tool.name), [...SANDBOX_TOOL_NAMES])
     assert.match(agent.state.systemPrompt, /\/workspace/)
+    assert.match(agent.state.systemPrompt, /\.platform\/profile-disposition\.json/)
+    assert.match(agent.state.systemPrompt, /Do not invent a Requirement ID/)
     assert.doesNotMatch(agent.state.systemPrompt, new RegExp(isolatedDir))
   } finally {
     await rm(isolatedDir, { recursive: true, force: true })

@@ -7,6 +7,7 @@ import com.zdan.paimengaicodebackend.mapper.platform.PlatformRunMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformRunTransitionEventMapper;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRun;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRunTransitionEvent;
+import com.zdan.paimengaicodebackend.platform.validation.PlatformValidationQueueService;
 import java.time.LocalDateTime;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -21,19 +22,22 @@ public class PlatformRunTransitionService {
     private final PlatformRunTransitionEventMapper transitionEventMapper;
     private final PlatformLogicalRelationValidator relationValidator;
     private final PlatformRunLeaseService leaseService;
+    private final PlatformValidationQueueService validationQueue;
 
     public PlatformRunTransitionService(
         PlatformTaskStateMachine stateMachine,
         PlatformRunMapper runMapper,
         PlatformRunTransitionEventMapper transitionEventMapper,
         PlatformLogicalRelationValidator relationValidator,
-        PlatformRunLeaseService leaseService
+        PlatformRunLeaseService leaseService,
+        PlatformValidationQueueService validationQueue
     ) {
         this.stateMachine = stateMachine;
         this.runMapper = runMapper;
         this.transitionEventMapper = transitionEventMapper;
         this.relationValidator = relationValidator;
         this.leaseService = leaseService;
+        this.validationQueue = validationQueue;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -96,6 +100,12 @@ public class PlatformRunTransitionService {
         event.setRequestId(requestId);
         event.setOccurredAt(LocalDateTime.now());
         transitionEventMapper.insert(event);
+
+        // 只有平台推进的 Run 才进入权威验证队列；与 Run 成功共用一个事务
+        if (targetState == PlatformRunState.SUCCEEDED && requestedBy == PlatformActor.PLATFORM) {
+            validationQueue.enqueue(event.getId(), run.getApplicationId(), runId);
+        }
+
         log.info(
             "Platform Run transition completed, applicationId: {}, runId: {}, from: {}, to: {}, reasonCode: {}, requestId: {}, result: success, durationMs: {}",
             run.getApplicationId(),

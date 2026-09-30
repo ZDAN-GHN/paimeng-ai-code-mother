@@ -31,7 +31,8 @@ export function createIsolatedPiAgent(model: Model<Api>, operations: SandboxOper
   return new Agent({
     initialState: {
       model,
-      systemPrompt: `You are a coding assistant. Work only inside the provided container workspace ${operations.workspacePath} using the available tools. The workspace is ephemeral.`,
+      systemPrompt: `You are a coding assistant. Work only inside the provided container workspace ${operations.workspacePath} using the available tools. The workspace is ephemeral.
+Before completing a successful run, write ${operations.workspacePath}/.platform/profile-disposition.json as a JSON object with disposition and a non-empty reason. Use {"disposition":"unchanged","reason":"..."} only when you have determined that the Application Profile is unchanged. Use {"disposition":"changed","reason":"...","requirementId":123,"diff":{"changes":[...],"candidateProfile":{...}}} only with a known, real Requirement ID and a complete candidate Profile. Otherwise declare {"disposition":"uncertain","reason":"..."}. Do not invent a Requirement ID, infer unchanged from missing information, or claim validation passed.`,
       // Each tool was checked against its own TypeBox schema. Core erases those
       // heterogeneous schemas to `unknown` in AgentState.tools.
       tools: tools as unknown as Agent['state']['tools'],

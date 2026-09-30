@@ -14,10 +14,13 @@ import com.zdan.paimengaicodebackend.mapper.platform.PlatformRunMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformRunTransitionEventMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformTaskMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformTaskTransitionEventMapper;
+import com.zdan.paimengaicodebackend.mapper.platform.PlatformValidationQueueEventMapper;
+import com.zdan.paimengaicodebackend.mapper.platform.PlatformValidationQueueMapper;
 import com.zdan.paimengaicodebackend.model.entity.App;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformApplicationLifecycleEvent;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRequirement;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRun;
+import com.zdan.paimengaicodebackend.platform.entity.PlatformRunLease;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRunTransitionEvent;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformTask;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformTaskTransitionEvent;
@@ -69,6 +72,12 @@ class PlatformIntegrityIntegrationTest {
 
     @Autowired
     private PlatformRunLeaseService leaseService;
+
+    @Autowired
+    private PlatformValidationQueueMapper validationQueueMapper;
+
+    @Autowired
+    private PlatformValidationQueueEventMapper validationQueueEventMapper;
 
     @Test
     void archivesApplicationAndAppendsLifecycleEvidence() {
@@ -278,6 +287,58 @@ class PlatformIntegrityIntegrationTest {
         assertEquals(1, runTransitionEventMapper.selectCountByQuery(
             QueryWrapper.create().eq("runId", graph.run().getId())
         ));
+    }
+
+    @Test
+    void enqueuesValidationWhenPlatformSucceedsTheRun() {
+        Graph graph = createGraph();
+        baselineFreezer.freeze(graph.task(), baseline());
+
+        PlatformRunLease leaseEnqueue = leaseService.grant(
+            graph.run().getId(), PlatformActor.RUNTIME, "RUN_STARTED", "lease-enqueue");
+        runTransitionService.transition(graph.run().getId(), PlatformRunState.CREATED,
+            PlatformRunState.LEASED, PlatformActor.PLATFORM, "LEASE_GRANTED", null, "run-enqueue-leased");
+        runTransitionService.transition(graph.run().getId(), PlatformRunState.LEASED,
+            PlatformRunState.EXECUTING, PlatformActor.PLATFORM, "RUN_EXECUTING", null, "run-enqueue-executing");
+
+        // 失败终态不进入验证队列
+        assertEquals(0, validationQueueMapper.selectCountByQuery(
+            QueryWrapper.create().eq("runId", graph.run().getId())), "尚未成功前不得入队");
+        leaseService.release(graph.run().getId(), leaseEnqueue.getFenceToken(),
+            PlatformActor.RUNTIME, "RUN_FAILED", "lease-enqueue-2");
+        runTransitionService.transition(graph.run().getId(), PlatformRunState.EXECUTING,
+            PlatformRunState.FAILED, PlatformActor.PLATFORM, "RUN_FAILED", null, "run-enqueue-failed");
+        assertEquals(0, validationQueueMapper.selectCountByQuery(
+            QueryWrapper.create().eq("runId", graph.run().getId())), "失败终态不进入权威验证队列");
+    }
+
+    @Test
+    void queuesValidationRequestOnTheSameTransactionAsTheSuccessfulRun() {
+        Graph graph = createGraph();
+        baselineFreezer.freeze(graph.task(), baseline());
+
+        PlatformRunLease leaseQueue = leaseService.grant(
+            graph.run().getId(), PlatformActor.RUNTIME, "RUN_STARTED", "lease-queue");
+        runTransitionService.transition(graph.run().getId(), PlatformRunState.CREATED,
+            PlatformRunState.LEASED, PlatformActor.PLATFORM, "LEASE_GRANTED", null, "run-queue-leased");
+        runTransitionService.transition(graph.run().getId(), PlatformRunState.LEASED,
+            PlatformRunState.EXECUTING, PlatformActor.PLATFORM, "RUN_EXECUTING", null, "run-queue-executing");
+        leaseService.release(graph.run().getId(), leaseQueue.getFenceToken(),
+            PlatformActor.RUNTIME, "RUN_DONE", "lease-queue-2");
+        runTransitionService.transition(graph.run().getId(), PlatformRunState.EXECUTING,
+            PlatformRunState.SUCCEEDED, PlatformActor.PLATFORM, "RUN_SUCCEEDED", null, "run-queue-succeeded");
+
+        // 本项目的 @Transactional 由 MyBatis-Flex 事务管理器驱动，断言必须走同一条数据访问路径
+        assertEquals(1, validationQueueMapper.selectCountByQuery(
+            QueryWrapper.create().eq("runId", graph.run().getId())),
+            "成功的 Run 必须由 Platform 显式登记验证队列");
+        assertEquals(1, validationQueueMapper.selectCountByQuery(
+            QueryWrapper.create().eq("runId", graph.run().getId()).eq("state", "PENDING")));
+        assertEquals(3, runTransitionEventMapper.selectCountByQuery(
+            QueryWrapper.create().eq("runId", graph.run().getId())), "本用例共三次 Run 转换");
+        assertEquals(1, validationQueueEventMapper.selectCountByQuery(
+            QueryWrapper.create().eq("runId", graph.run().getId())),
+            "队列登记必须同时写入审计事件");
     }
 
     private Graph createGraph() {

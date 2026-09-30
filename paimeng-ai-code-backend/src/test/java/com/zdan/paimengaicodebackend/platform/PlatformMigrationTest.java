@@ -69,6 +69,45 @@ class PlatformMigrationTest {
         assertTrue(!v9.contains("DROP TABLE"));
     }
 
+    @Test
+    void sourceRevisionMigrationIsAppendOnlyAndPreservesLegacyPointer() throws Exception {
+        String v12 = resource("/db/migration/V12__platform_source_revision.sql");
+        assertTrue(v12.contains("stableSourceRevision VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL"));
+        assertTrue(v12.contains("CREATE TABLE platform_source_revision"));
+        assertTrue(v12.contains("fk_app_stable_revision"));
+        assertTrue(v12.contains("source_revision_insert_guard"));
+        assertTrue(v12.contains("source_revision_immutable"));
+        assertTrue(v12.contains("source_revision_no_delete"));
+        assertTrue(!v12.contains("DROP TABLE"));
+        String v13 = resource("/db/migration/V13__platform_validation_queue.sql");
+        assertTrue(v13.contains("CREATE TABLE platform_validation_queue"));
+        assertTrue(v13.contains("AFTER INSERT ON platform_run_transition_event"));
+        assertTrue(v13.contains("platform_validation_queue_event_no_delete"));
+        assertTrue(!v13.contains("DROP TABLE"));
+        String v14 = resource("/db/migration/V14__database_constraint_governance.sql");
+        // 业务写入不再由触发器代劳，状态机守卫仍在
+        assertTrue(v14.contains("DROP TRIGGER platform_run_success_enqueue"));
+        assertTrue(v14.contains("DROP TRIGGER platform_validation_queue_audit_insert"));
+        assertTrue(v14.contains("DROP TRIGGER platform_validation_queue_audit_update"));
+        assertTrue(!v14.contains("DROP TRIGGER platform_validation_queue_identity_guard"));
+        assertTrue(!v14.contains("DROP TRIGGER platform_validation_queue_no_delete"));
+        // 与守卫完全重叠的单列证据外键必须删除，跨聚合归属外键必须保留
+        assertTrue(v14.contains("DROP FOREIGN KEY fk_validation_queue_event"));
+        assertTrue(v14.contains("DROP FOREIGN KEY fk_validation_queue_run"));
+        assertTrue(v14.contains("DROP FOREIGN KEY fk_source_revision_engineering"));
+        assertTrue(v14.contains("DROP FOREIGN KEY fk_source_revision_task_acceptance"));
+        assertTrue(!v14.contains("DROP FOREIGN KEY fk_source_revision_app"));
+        assertTrue(!v14.contains("DROP FOREIGN KEY fk_source_revision_snapshot"));
+        // 被左前缀覆盖的重复索引必须删除
+        assertTrue(v14.contains("DROP INDEX idx_userId ON app"));
+        assertTrue(!v14.contains("DROP INDEX idx_app_userId_lifecycleStatus"));
+        // 每张表都必须显式声明字符集，不再依赖服务端默认值
+        assertTrue(v14.contains("ALTER TABLE platform_validation_queue\n"
+            + "    CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"));
+        assertTrue(v14.contains("CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"));
+        assertTrue(!v14.contains("DEFAULT CHARACTER SET"));
+    }
+
     private String resource(String path) throws Exception {
         try (InputStream stream = getClass().getResourceAsStream(path)) {
             return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
