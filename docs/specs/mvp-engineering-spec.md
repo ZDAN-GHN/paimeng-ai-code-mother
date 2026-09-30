@@ -227,7 +227,7 @@ Owner 创建 Application
 
 ### D-06：Task 与 Run 状态转换矩阵
 
-- 状态：`Locked Decision`；维护者已批准，实施不得自行扩展状态或改变边的语义。
+- 状态：`Locked Decision`；维护者已批准，实施不得自行扩展状态或改变边的语义。状态集合本身自本决策以来未变；其中「决定性业务歧义阻断」的 Run 终态语义由维护者于 2026-09-30 修订认下（见下方 Run 表 `cancelled` 行），不视为实施方自行扩展。
 - 权威性：Platform Domain 是 Task/Run 状态的唯一裁决方。Runtime 只能申请或报告 Lease、Sandbox 和规范化 Run Event；Agent 只能提出阻断或 Platform Request，不能自行完成状态转换。
 
 #### Task 状态与允许转换
@@ -239,7 +239,7 @@ Owner 创建 Application
 | `blocked`（尚未冻结基线） | `created` | Owner 提交答复；Platform 保留不可变答复记录并重新归一化 | 未授权主体、未答复当前唯一问题 |
 | `blocked`（已有冻结基线） | 原 Task 保持 `blocked`；新 Task 为 `created` | Owner 答复执行中发现的业务歧义；Platform 保留原 Task/基线，并为重新归一化结果创建新 Task | 试图修改原 Task 的 `TaskExecutionBaseline`、由 Agent 直接恢复执行 |
 | `ready` | `executing` | Platform 创建 Run 并授予 fenced Lease；Runtime 已获得受控执行上下文 | 另一个写入型 Run 持有 Application Lease、基线或能力不兼容 |
-| `executing` | `blocked` | Platform 接受 Agent 的阻断请求，Run 已停止且不再持有 Lease | Agent 文本直接改写 Task、存在可继续执行的未解决副作用 |
+| `executing` | `blocked` | Platform 接受 Agent 的阻断请求；对应 Run 已停止、进入终态 `cancelled`（`reasonCode = BUSINESS_CLARIFICATION_REQUIRED`）且不再持有 Lease | Agent 文本直接改写 Task、存在可继续执行的未解决副作用 |
 | `executing` | `failed` | Platform 记录不可恢复的 Run、Validation 或安全失败；不得晋升 | Agent 自述失败但证据或 Run 终态未确认 |
 | `failed` | `ready` | Owner 显式请求重试；Platform 创建新 Run，Requirement 与冻结基线不变 | 改变业务目标、基线或验收目标时，必须创建新 Requirement/Task |
 | `executing` | `validated` | 同一 CandidateSourceSnapshot 的全部必需 Validation/Evidence 通过 | Agent 自检、可写 Workspace、失败或缺失的验证 |
@@ -257,9 +257,10 @@ Owner 创建 Application
 | `leased` | `executing` | Runtime 已建立可信 Sandbox、Workspace 和完整 Run Context |
 | `executing` | `succeeded` | Runtime 已停止写入并提交受控 Snapshot/Validation 请求；这本身不裁决 Task `validated` |
 | `leased`、`executing` | `failed` | Platform 确认 Runtime、Sandbox、安全或不可恢复的执行失败 |
-| `leased`、`executing` | `cancelled` | Owner 取消已被 Platform 接受，Runtime 已停止 |
+| `leased`、`executing` | `cancelled` | Runtime 已停止，且下列触发者之一被 Platform 接受：Owner 取消；或 Agent 提出决定性业务歧义的阻断请求（此时 `reasonCode = BUSINESS_CLARIFICATION_REQUIRED`）。两者由终态转换事件的 `actorType` 区分（`OWNER` 对 `PLATFORM`） |
 
 - Run 终态、Sandbox 清理、Lease 释放及相应 Task 迁移由 Platform 以可恢复的顺序协调；取消后不得自动恢复。
+- `platform_run.state = 'CANCELLED'` 不得读作「Owner 取消」：等待 Owner 答复的业务歧义阻断同样是 `cancelled`。统计或排查 Run 终态必须按终态转换事件的 `actorType` 与 `reasonCode` 过滤（Owner 取消为 `actorType = 'OWNER'`；业务歧义阻断为 `actorType = 'PLATFORM'` 且 `reasonCode = 'BUSINESS_CLARIFICATION_REQUIRED'`），不得仅按 `platform_run.state` 单列聚合。Owner 可见状态由 Task 状态投影，不经 Run 终态。
 - Runtime 崩溃时，只有 Lease fencing、Workspace 归属与完整性、Sandbox 边界和外部副作用状态都可确认，新的 Runtime 才能接管同一活跃 Run；否则 Run 进入 `failed`。
 - 所有未列转换、错误触发者、缺失前置条件和过期 Lease 均被拒绝，并留下可审计原因。
 

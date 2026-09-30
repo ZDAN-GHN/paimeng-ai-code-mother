@@ -2,7 +2,6 @@ package com.zdan.paimengaicodebackend.platform.service;
 
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.core.paginate.Page;
-import com.zdan.paimengaicodebackend.constant.UserConstant;
 import com.zdan.paimengaicodebackend.exception.BusinessException;
 import com.zdan.paimengaicodebackend.exception.ErrorCode;
 import com.zdan.paimengaicodebackend.ai.enums.CodeGenTypeEnum;
@@ -11,8 +10,9 @@ import com.zdan.paimengaicodebackend.mapper.platform.PlatformRequirementMapper;
 import com.zdan.paimengaicodebackend.model.entity.App;
 import com.zdan.paimengaicodebackend.model.entity.User;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformActor;
+import com.zdan.paimengaicodebackend.platform.domain.PlatformApplicationAccessGuard;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformApplicationArchiveService;
-import com.zdan.paimengaicodebackend.platform.domain.PlatformLogicalRelationValidator;
+import com.zdan.paimengaicodebackend.platform.domain.PlatformRequirementNormalizationService;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRequirement;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformApplicationVO;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformApplicationInitialRequirementVO;
@@ -24,23 +24,24 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class PlatformApplicationManagementService {
 
-    private static final String PENDING_NORMALIZATION = "PENDING_NORMALIZATION";
-
     private final AppMapper appMapper;
     private final PlatformRequirementMapper requirementMapper;
-    private final PlatformLogicalRelationValidator relationValidator;
     private final PlatformApplicationArchiveService archiveService;
+    private final PlatformApplicationAccessGuard accessGuard;
+    private final PlatformRequirementNormalizationService normalizationService;
 
     public PlatformApplicationManagementService(
         AppMapper appMapper,
         PlatformRequirementMapper requirementMapper,
-        PlatformLogicalRelationValidator relationValidator,
-        PlatformApplicationArchiveService archiveService
+        PlatformApplicationArchiveService archiveService,
+        PlatformApplicationAccessGuard accessGuard,
+        PlatformRequirementNormalizationService normalizationService
     ) {
         this.appMapper = appMapper;
         this.requirementMapper = requirementMapper;
-        this.relationValidator = relationValidator;
         this.archiveService = archiveService;
+        this.accessGuard = accessGuard;
+        this.normalizationService = normalizationService;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -106,6 +107,8 @@ public class PlatformApplicationManagementService {
         requirement.setKind("OWNER_REQUEST");
         requirement.setOriginalText(originalText);
         requirementMapper.insertSelective(requirement);
+        // 归一化必须从 Requirement 落库那一刻就有持久归属，否则「等待归一化」只是前端文案。
+        normalizationService.openNormalization(applicationId, requirement, UUID.randomUUID().toString());
         return toRequirementVO(requirement);
     }
 
@@ -152,39 +155,19 @@ public class PlatformApplicationManagementService {
     }
 
     private App requireAuthorizedActiveApplication(Long applicationId, User actor) {
-        App application = requireAuthorizedApplication(applicationId, actor);
-        if (!"ACTIVE".equals(application.getLifecycleStatus())) {
-            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "Application 不存在或已归档");
-        }
-        return application;
+        return accessGuard.requireManaged(applicationId, actor);
     }
 
     private App requireAuthorizedApplication(Long applicationId, User actor) {
-        if (applicationId == null || applicationId <= 0) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "Application ID 无效");
-        }
-        App application = relationValidator.requireApplication(applicationId);
-        if (
-            actorFor(actor) == PlatformActor.OWNER &&
-            !requireActorId(actor).equals(application.getUserId())
-        ) {
-            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "无权管理该 Application");
-        }
-        return application;
+        return accessGuard.requireReadable(applicationId, actor);
     }
 
     private PlatformActor actorFor(User actor) {
-        requireActorId(actor);
-        return UserConstant.ADMIN_ROLE.equals(actor.getUserRole())
-            ? PlatformActor.SYSTEM_ADMINISTRATOR
-            : PlatformActor.OWNER;
+        return accessGuard.actorFor(actor);
     }
 
     private Long requireActorId(User actor) {
-        if (actor == null || actor.getId() == null) {
-            throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
-        }
-        return actor.getId();
+        return accessGuard.requireActorId(actor);
     }
 
     private void requireText(String value, String message) {
@@ -218,7 +201,11 @@ public class PlatformApplicationManagementService {
         response.setId(identifierText(requirement.getId()));
         response.setApplicationId(identifierText(requirement.getApplicationId()));
         response.setOriginalText(requirement.getOriginalText());
-        response.setNormalizationStatus(PENDING_NORMALIZATION);
+        response.setKind(requirement.getKind());
+        // 归一化状态来自队列事实，不再是硬编码文案。
+        response.setNormalizationStatus(
+            normalizationService.normalizationStatus(requirement.getApplicationId(), requirement.getId())
+        );
         response.setCreatedAt(requirement.getCreatedAt());
         return response;
     }

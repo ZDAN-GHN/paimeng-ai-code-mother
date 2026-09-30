@@ -220,6 +220,22 @@ export class PlatformClient {
     return this.parse('executeCommand', commandResultSchema, data)
   }
 
+  /**
+   * 请求按决定性业务歧义阻断。
+   *
+   * 走 `/platform/runs/execution/**` 而不是工作项通道：Platform 侧要求调用方仍持有该 Run
+   * 的 Lease，并在同一请求内完成停容器、释放 Lease 与 Run 终态。
+   */
+  public async requestClarification(input: {
+    applicationId: string
+    runId: string
+    fenceToken: string
+    blockingQuestion: string
+    requestId: string
+  }): Promise<void> {
+    await this.send('requestClarification', 'POST', '/platform/runs/execution/blocks', input)
+  }
+
   public async reportResult(input: {
     applicationId: string
     runId: string

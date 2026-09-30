@@ -67,6 +67,28 @@ export async function archiveApplication(
   )
 }
 
+/** 提交唯一阻断问题的答复并重新归一化 POST /platform/applications/${param0}/clarification-answers */
+export async function answerBlockingQuestion(
+  // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
+  params: API.answerBlockingQuestionParams,
+  body: API.PlatformClarificationAnswerRequest,
+  options?: { [key: string]: any }
+) {
+  const { applicationId: param0, ...queryParams } = params
+  return request<API.BaseResponsePlatformClarificationAnswerVO>(
+    `/platform/applications/${param0}/clarification-answers`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      params: { ...queryParams },
+      data: body,
+      ...(options || {}),
+    }
+  )
+}
+
 /** 分页读取 Application 的不可变 Requirement 历史 GET /platform/applications/${param0}/requirements */
 export async function listRequirements(
   // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
@@ -124,6 +146,59 @@ export async function getRequirement(
     {
       method: 'GET',
       params: { ...queryParams },
+      ...(options || {}),
+    }
+  )
+}
+
+/** 读取 Owner 可见的 Application 执行状态 GET /platform/applications/${param0}/status */
+export async function getStatus(
+  // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
+  params: API.getStatusParams,
+  options?: { [key: string]: any }
+) {
+  const { applicationId: param0, ...queryParams } = params
+  return request<API.BaseResponsePlatformApplicationStatusVO>(
+    `/platform/applications/${param0}/status`,
+    {
+      method: 'GET',
+      params: { ...queryParams },
+      ...(options || {}),
+    }
+  )
+}
+
+/** 订阅 Owner 可见的 Application 执行状态变化 GET /platform/applications/${param0}/status/stream */
+export async function streamStatus(
+  // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
+  params: API.streamStatusParams,
+  options?: { [key: string]: any }
+) {
+  const { applicationId: param0, ...queryParams } = params
+  return request<API.SseEmitter>(`/platform/applications/${param0}/status/stream`, {
+    method: 'GET',
+    params: { ...queryParams },
+    ...(options || {}),
+  })
+}
+
+/** Owner 对失败的 Task 请求重试；Requirement 与冻结基线保持不变 POST /platform/applications/${param0}/tasks/${param1}/retries */
+export async function requestRetry(
+  // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
+  params: API.requestRetryParams,
+  body: API.PlatformTaskRetryRequest,
+  options?: { [key: string]: any }
+) {
+  const { applicationId: param0, taskId: param1, ...queryParams } = params
+  return request<API.BaseResponsePlatformTaskRetryVO>(
+    `/platform/applications/${param0}/tasks/${param1}/retries`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      params: { ...queryParams },
+      data: body,
       ...(options || {}),
     }
   )

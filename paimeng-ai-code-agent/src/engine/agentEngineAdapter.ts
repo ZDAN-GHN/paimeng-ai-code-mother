@@ -36,9 +36,16 @@ export interface AgentEngineRunOutcome {
    * 取消导致的结束是 `aborted`，不是 `failed`：两者的 Run 终态不同，
    * 混同会把用户主动取消记成执行失败。
    */
-  readonly status: 'completed' | 'aborted' | 'failed'
+  readonly status: 'completed' | 'aborted' | 'failed' | 'blocked-for-clarification'
   /** 失败原因摘要。`status === 'failed'` 时必须有值，用于写进 Run 的 reasonCode 语境。 */
   readonly failureSummary?: string | undefined
+  /**
+   * 唯一的决定性业务问题。`status === 'blocked-for-clarification'` 时必须有值。
+   *
+   * 引擎只负责「发现并提问」，不负责裁决：Runtime 把它交给 Platform，由 Platform 停容器、
+   * 释放 Lease、让 Run 进入终态后落 Task 阻断。
+   */
+  readonly blockingQuestion?: string | undefined
 }
 
 export interface AgentEngineAdapter {

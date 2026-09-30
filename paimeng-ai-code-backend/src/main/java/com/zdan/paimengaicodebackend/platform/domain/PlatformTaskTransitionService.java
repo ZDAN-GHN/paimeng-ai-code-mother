@@ -5,6 +5,7 @@ import com.zdan.paimengaicodebackend.exception.BusinessException;
 import com.zdan.paimengaicodebackend.exception.ErrorCode;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformRunMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformTaskMapper;
+import com.zdan.paimengaicodebackend.mapper.platform.PlatformTaskRetryRequestMapper;
 import com.zdan.paimengaicodebackend.mapper.platform.PlatformTaskTransitionEventMapper;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformTask;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformTaskTransitionEvent;
@@ -30,6 +31,7 @@ public class PlatformTaskTransitionService {
     private final PlatformLogicalRelationValidator relationValidator;
     private final PlatformRunLeaseService leaseService;
     private final PlatformRunMapper runMapper;
+    private final PlatformTaskRetryRequestMapper retryMapper;
 
     public PlatformTaskTransitionService(
         PlatformTaskStateMachine stateMachine,
@@ -37,7 +39,8 @@ public class PlatformTaskTransitionService {
         PlatformTaskTransitionEventMapper transitionEventMapper,
         PlatformLogicalRelationValidator relationValidator,
         PlatformRunLeaseService leaseService,
-        PlatformRunMapper runMapper
+        PlatformRunMapper runMapper,
+        PlatformTaskRetryRequestMapper retryMapper
     ) {
         this.stateMachine = stateMachine;
         this.taskMapper = taskMapper;
@@ -45,6 +48,7 @@ public class PlatformTaskTransitionService {
         this.relationValidator = relationValidator;
         this.leaseService = leaseService;
         this.runMapper = runMapper;
+        this.retryMapper = retryMapper;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -93,7 +97,7 @@ public class PlatformTaskTransitionService {
         TaskTransitionConditions verifiedConditions = persistedConditions.withLeaseFacts(
             leaseService.hasGrantedLeaseForTask(taskId),
             leaseService.hasNoActiveLeaseForTask(taskId) && hasNoRunningRun(taskId)
-        );
+        ).withOwnerRetryFact(retryMapper.countAcceptedForTask(taskId) > 0);
         stateMachine.assertTaskTransition(currentState, targetState, requestedBy, verifiedConditions);
 
         PlatformTask update = new PlatformTask();

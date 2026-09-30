@@ -12,7 +12,14 @@ export interface AgentTokenResult {
   message: string
 }
 
-export async function getAgentToken(appId: string, options?: { [key: string]: any }) {
+export interface AgentTokenRequestOptions {
+  headers?: Record<string, string>
+  timeout?: number
+  signal?: AbortSignal
+  withCredentials?: boolean
+}
+
+export async function getAgentToken(appId: string, options?: AgentTokenRequestOptions) {
   return request<AgentTokenResult>('/app/agent/token', {
     method: 'GET',
     params: { appId },

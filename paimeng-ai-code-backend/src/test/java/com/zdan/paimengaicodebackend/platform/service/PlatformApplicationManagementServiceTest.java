@@ -5,8 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.zdan.paimengaicodebackend.exception.BusinessException;
@@ -16,7 +16,8 @@ import com.zdan.paimengaicodebackend.model.entity.App;
 import com.zdan.paimengaicodebackend.model.entity.User;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformActor;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformApplicationArchiveService;
-import com.zdan.paimengaicodebackend.platform.domain.PlatformLogicalRelationValidator;
+import com.zdan.paimengaicodebackend.platform.domain.PlatformApplicationAccessGuard;
+import com.zdan.paimengaicodebackend.platform.domain.PlatformRequirementNormalizationService;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRequirement;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformApplicationVO;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformApplicationInitialRequirementVO;
@@ -43,10 +44,13 @@ class PlatformApplicationManagementServiceTest {
     private PlatformRequirementMapper requirementMapper;
 
     @Mock
-    private PlatformLogicalRelationValidator relationValidator;
+    private PlatformApplicationAccessGuard accessGuard;
 
     @Mock
     private PlatformApplicationArchiveService archiveService;
+
+    @Mock
+    private PlatformRequirementNormalizationService normalizationService;
 
     private PlatformApplicationManagementService managementService;
 
@@ -55,9 +59,21 @@ class PlatformApplicationManagementServiceTest {
         managementService = new PlatformApplicationManagementService(
             appMapper,
             requirementMapper,
-            relationValidator,
-            archiveService
+            archiveService,
+            accessGuard,
+            normalizationService
         );
+        // 主体身份与 Application 归属判定由 PlatformApplicationAccessGuard 单独负责；这里给出
+        // 与真实实现行为一致的默认桩，让本测试只关注 ManagementService 自身的行为。
+        lenient().when(accessGuard.requireActorId(any(User.class)))
+            .thenAnswer(invocation -> ((User) invocation.getArgument(0)).getId());
+        lenient().when(accessGuard.actorFor(any(User.class))).thenAnswer(invocation ->
+            "admin".equals(((User) invocation.getArgument(0)).getUserRole())
+                ? PlatformActor.SYSTEM_ADMINISTRATOR
+                : PlatformActor.OWNER);
+        lenient().when(accessGuard.requireManaged(eq(APPLICATION_ID), any(User.class))).thenReturn(application());
+        lenient().when(accessGuard.requireReadable(eq(APPLICATION_ID), any(User.class))).thenReturn(application());
+        lenient().when(normalizationService.normalizationStatus(any(), any())).thenReturn("PENDING_NORMALIZATION");
     }
 
     @Test
@@ -78,7 +94,6 @@ class PlatformApplicationManagementServiceTest {
     @Test
     void ownerSubmitsUnchangedRequirementWithPendingNormalizationStatus() {
         App application = application();
-        when(relationValidator.requireApplication(APPLICATION_ID)).thenReturn(application);
         User owner = user(OWNER_ID, "user");
         String originalText = "  保留这段原文  ";
 
@@ -95,6 +110,27 @@ class PlatformApplicationManagementServiceTest {
         assertEquals(originalText, requirementCaptor.getValue().getOriginalText());
         assertEquals(originalText, result.getOriginalText());
         assertEquals("PENDING_NORMALIZATION", result.getNormalizationStatus());
+        // Requirement 一落库就必须有人负责归一化，否则「等待归一化」只是前端文案。
+        verify(normalizationService).openNormalization(eq(APPLICATION_ID), any(PlatformRequirement.class), any(String.class));
+    }
+
+    @Test
+    void requirementNormalizationStatusProjectsRealQueueState() {
+        App application = application();
+        doAnswer(invocation -> {
+            invocation.getArgument(0, PlatformRequirement.class).setId(911L);
+            return 1;
+        }).when(requirementMapper).insertSelective(any(PlatformRequirement.class));
+        when(normalizationService.normalizationStatus(any(), any())).thenReturn("BLOCKED");
+
+        PlatformRequirementVO result = managementService.submitRequirement(
+            APPLICATION_ID,
+            user(OWNER_ID, "user"),
+            "预约系统"
+        );
+
+        assertEquals("BLOCKED", result.getNormalizationStatus());
+        assertEquals("OWNER_REQUEST", result.getKind());
     }
 
     @Test
@@ -106,7 +142,6 @@ class PlatformApplicationManagementServiceTest {
         })
             .when(appMapper)
             .insertSelective(any(App.class));
-        when(relationValidator.requireApplication(APPLICATION_ID)).thenReturn(application());
 
         PlatformApplicationInitialRequirementVO result = managementService.createApplicationWithInitialRequirement(
             owner,
@@ -165,7 +200,6 @@ class PlatformApplicationManagementServiceTest {
         requirement.setApplicationId(APPLICATION_ID);
         requirement.setOriginalText("Build it");
         requirements.setRecords(List.of(requirement));
-        when(relationValidator.requireApplication(APPLICATION_ID)).thenReturn(application());
         when(requirementMapper.paginate(any(Page.class), any())).thenReturn(requirements);
 
         Page<PlatformRequirementVO> result = managementService.listRequirements(
@@ -194,48 +228,19 @@ class PlatformApplicationManagementServiceTest {
     }
 
     @Test
-    void rejectsNonOwnerButAllowsSystemAdministratorToRead() {
+    void ownerAndAdministratorBothReachTheApplicationThroughTheSameGuard() {
         App application = application();
-        when(relationValidator.requireApplication(APPLICATION_ID)).thenReturn(application);
 
-        assertThrows(
-            BusinessException.class,
-            () -> managementService.getApplication(APPLICATION_ID, user(999L, "user"))
-        );
+        PlatformApplicationVO ownerView = managementService.getApplication(APPLICATION_ID, user(OWNER_ID, "user"));
+        PlatformApplicationVO adminView = managementService.getApplication(APPLICATION_ID, user(999L, "admin"));
 
-        PlatformApplicationVO result = managementService.getApplication(
-            APPLICATION_ID,
-            user(999L, "admin")
-        );
-        assertEquals(String.valueOf(APPLICATION_ID), result.getId());
-    }
-
-    @Test
-    void archivedApplicationRemainsReadableButRejectsNewRequirement() {
-        App archivedApplication = application();
-        archivedApplication.setLifecycleStatus("ARCHIVED");
-        when(relationValidator.requireApplication(APPLICATION_ID)).thenReturn(archivedApplication);
-
-        PlatformApplicationVO result = managementService.getApplication(
-            APPLICATION_ID,
-            user(OWNER_ID, "user")
-        );
-
-        assertEquals("ARCHIVED", result.getLifecycleStatus());
-        assertEquals("UNAVAILABLE", result.getPublicAvailability());
-        assertEquals(true, result.isRetained());
-        assertEquals(false, result.isRecoverySupported());
-        assertThrows(
-            BusinessException.class,
-            () -> managementService.submitRequirement(APPLICATION_ID, user(OWNER_ID, "user"), "No longer active")
-        );
-        verifyNoInteractions(requirementMapper);
+        assertEquals(String.valueOf(APPLICATION_ID), ownerView.getId());
+        assertEquals(String.valueOf(APPLICATION_ID), adminView.getId());
     }
 
     @Test
     void archivesThroughDomainServiceAndReturnsRetentionBoundary() {
         App application = application();
-        when(relationValidator.requireApplication(APPLICATION_ID)).thenReturn(application);
         App archivedApplication = application();
         archivedApplication.setLifecycleStatus("ARCHIVED");
         when(archiveService.archive(

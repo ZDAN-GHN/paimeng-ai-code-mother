@@ -9,6 +9,7 @@ import {
   submitRequirement,
 } from '@/api/platformApplication'
 import { useLoginUserStore } from '@/stores/loginUser'
+import PlatformExecutionStatusPanel from '@/components/platform/PlatformExecutionStatusPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -133,9 +134,7 @@ onMounted(loadWorkspace)
             <span class="eyebrow">PLATFORM APPLICATION</span>
             <h1>{{ application.name }}</h1>
             <a-space wrap>
-              <a-tag :color="isArchived ? 'default' : 'success'">
-                {{ isArchived ? '已归档' : '等待归一化' }}
-              </a-tag>
+              <a-tag v-if="isArchived" color="default">已归档</a-tag>
               <span class="muted">Owner #{{ application.ownerId }}</span>
             </a-space>
           </div>
@@ -172,7 +171,10 @@ onMounted(loadWorkspace)
                 <div class="user-bubble">{{ requirement.originalText }}</div>
                 <div class="system-status">
                   <span class="status-dot" />
-                  <div><strong>已接收，等待归一化</strong><p>{{ formatDate(requirement.createdAt) }}</p></div>
+                  <div>
+                    <strong>{{ requirement.normalizationStatus || '已接收' }}</strong>
+                    <p>{{ formatDate(requirement.createdAt) }}</p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -200,13 +202,7 @@ onMounted(loadWorkspace)
           </section>
 
           <aside class="status-panel">
-            <header class="panel-header"><div><h2>Application 状态</h2><p>全栈构建工作流将在后续阶段接入。</p></div></header>
-            <ol class="status-timeline">
-              <li class="done"><span>1</span><div><strong>Application 已创建</strong><p>Platform 已记录 Owner 与生命周期。</p></div></li>
-              <li class="active"><span>2</span><div><strong>Requirement 等待归一化</strong><p>原始输入已保存，不会被覆盖。</p></div></li>
-              <li><span>3</span><div><strong>全栈实现与验证</strong><p>等待受控 Runtime、构建和验证能力接入。</p></div></li>
-              <li><span>4</span><div><strong>预览与发布</strong><p>验证通过后才会提供可运行的预览。</p></div></li>
-            </ol>
+            <PlatformExecutionStatusPanel :application-id="application.id!" />
           </aside>
         </div>
       </template>
@@ -235,15 +231,6 @@ onMounted(loadWorkspace)
 .status-dot { width: 9px; height: 9px; flex: 0 0 auto; margin-top: 6px; background: #cb573e; border-radius: 50%; box-shadow: 0 0 0 5px rgba(203, 87, 62, 0.12); }
 .composer { padding: 16px; border-top: 1px solid #e2e8f0; }
 .composer-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 10px; font-size: 13px; }
-.status-timeline { padding: 30px 28px; margin: 0; list-style: none; }
-.status-timeline li { position: relative; display: flex; gap: 16px; padding-bottom: 32px; color: #94a3b8; }
-.status-timeline li:not(:last-child)::before { position: absolute; top: 32px; left: 15px; width: 2px; height: calc(100% - 32px); content: ''; background: #e2e8f0; }
-.status-timeline li > span { z-index: 1; display: grid; width: 32px; height: 32px; flex: 0 0 auto; color: #64748b; place-items: center; background: #e2e8f0; border-radius: 50%; }
-.status-timeline li.done, .status-timeline li.active { color: #1e293b; }
-.status-timeline li.done > span { color: #fff; background: #52c41a; }
-.status-timeline li.active > span { color: #fff; background: #cb573e; }
-.status-timeline strong { display: block; margin-top: 4px; }
-.status-timeline p { margin: 5px 0 0; font-size: 13px; line-height: 1.55; }
 @media (max-width: 920px) { #platformApplicationWorkspace { padding: 16px; } .workspace-grid { grid-template-columns: 1fr; } .conversation-panel, .status-panel { min-height: auto; } }
 @media (max-width: 560px) { .workspace-header, .composer-actions { align-items: flex-start; flex-direction: column; } }
 </style>

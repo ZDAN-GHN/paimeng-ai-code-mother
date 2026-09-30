@@ -17,7 +17,12 @@ public class PlatformRequirementVO {
     @Schema(description = "未经归一化的原文")
     private String originalText;
 
-    @Schema(description = "归一化状态；本阶段固定为 PENDING_NORMALIZATION")
+    @Schema(description = "Requirement 类型；OWNER_REQUEST 为 Owner 原始需求，CLARIFICATION_ANSWER 为阻断答复",
+        example = "OWNER_REQUEST", allowableValues = {"OWNER_REQUEST", "CLARIFICATION_ANSWER"})
+    private String kind;
+
+    @Schema(description = "归一化状态；由 Platform 归一化队列事实投影，未入队时为 PENDING_NORMALIZATION",
+        example = "BLOCKED")
     private String normalizationStatus;
 
     @Schema(description = "提交时间")

@@ -4,6 +4,8 @@ import com.zdan.paimengaicodebackend.common.BaseResponse;
 import com.zdan.paimengaicodebackend.common.ResultUtils;
 import com.zdan.paimengaicodebackend.exception.BusinessException;
 import com.zdan.paimengaicodebackend.exception.ErrorCode;
+import com.zdan.paimengaicodebackend.platform.domain.PlatformLoopbackCallerGuard;
+import com.zdan.paimengaicodebackend.platform.dto.PlatformRunBlockRequest;
 import com.zdan.paimengaicodebackend.platform.dto.PlatformRunCommandRequest;
 import com.zdan.paimengaicodebackend.platform.dto.PlatformRunLeaseGrantRequest;
 import com.zdan.paimengaicodebackend.platform.dto.PlatformRunLeaseReleaseRequest;
@@ -18,7 +20,6 @@ import com.zdan.paimengaicodebackend.platform.vo.PlatformRunLeaseVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
-import java.util.Set;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -35,7 +36,7 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <ol>
  *   <li>{@code platform.execution.enabled} 默认 {@code false}，未显式开启时本控制器不注册；</li>
- *   <li>即使开启，也只接受回环调用方——见 {@link #requireLoopbackCaller}。</li>
+ *   <li>即使开启，也只接受回环调用方——见 {@link PlatformLoopbackCallerGuard}。</li>
  * </ol>
  *
  * <p>这两条不是鉴权的替代品，只是把「忘记加鉴权」的后果从「公网可写」降到「本机可写」。
@@ -47,18 +48,15 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "Platform Run Execution", description = "受控 Run 执行：Lease、Sandbox 命令、结果上报")
 public class PlatformRunExecutionController {
 
-    /** 回环地址的全部表示形式。IPv4、IPv6 与 IPv4-mapped IPv6 都要覆盖。 */
-    private static final Set<String> LOOPBACK_ADDRESSES = Set.of(
-        "127.0.0.1",
-        "0:0:0:0:0:0:0:1",
-        "::1",
-        "::ffff:127.0.0.1"
-    );
-
     private final PlatformRunExecutionService executionService;
+    private final PlatformLoopbackCallerGuard loopbackGuard;
 
-    public PlatformRunExecutionController(PlatformRunExecutionService executionService) {
+    public PlatformRunExecutionController(
+        PlatformRunExecutionService executionService,
+        PlatformLoopbackCallerGuard loopbackGuard
+    ) {
         this.executionService = executionService;
+        this.loopbackGuard = loopbackGuard;
     }
 
     @PostMapping("/lease")
@@ -67,7 +65,7 @@ public class PlatformRunExecutionController {
         @RequestBody PlatformRunLeaseGrantRequest request,
         HttpServletRequest servletRequest
     ) {
-        requireLoopbackCaller(servletRequest);
+        loopbackGuard.requireLoopbackCaller(servletRequest);
         requireBody(request);
         return ResultUtils.success(
             executionService.grantLease(
@@ -86,7 +84,7 @@ public class PlatformRunExecutionController {
         @RequestBody PlatformRunRecoveryRequest request,
         HttpServletRequest servletRequest
     ) {
-        requireLoopbackCaller(servletRequest);
+        loopbackGuard.requireLoopbackCaller(servletRequest);
         requireBody(request);
         executionService.prepareRecovery(
             request.getApplicationId(), request.getRunId(), request.getFenceToken(), request.getRequestId()
@@ -100,7 +98,7 @@ public class PlatformRunExecutionController {
         @RequestBody PlatformRunRecoveryRequest request,
         HttpServletRequest servletRequest
     ) {
-        requireLoopbackCaller(servletRequest);
+        loopbackGuard.requireLoopbackCaller(servletRequest);
         requireBody(request);
         executionService.beginExecution(
             request.getApplicationId(), request.getRunId(), request.getFenceToken(), request.getRequestId()
@@ -114,7 +112,7 @@ public class PlatformRunExecutionController {
         @RequestBody PlatformRunLeaseRenewRequest request,
         HttpServletRequest servletRequest
     ) {
-        requireLoopbackCaller(servletRequest);
+        loopbackGuard.requireLoopbackCaller(servletRequest);
         requireBody(request);
         return ResultUtils.success(
             executionService.renewLease(
@@ -133,7 +131,7 @@ public class PlatformRunExecutionController {
         @RequestBody PlatformRunLeaseReleaseRequest request,
         HttpServletRequest servletRequest
     ) {
-        requireLoopbackCaller(servletRequest);
+        loopbackGuard.requireLoopbackCaller(servletRequest);
         requireBody(request);
         executionService.releaseLease(
             request.getApplicationId(),
@@ -151,7 +149,7 @@ public class PlatformRunExecutionController {
         @RequestBody PlatformRunCommandRequest request,
         HttpServletRequest servletRequest
     ) {
-        requireLoopbackCaller(servletRequest);
+        loopbackGuard.requireLoopbackCaller(servletRequest);
         requireBody(request);
         return ResultUtils.success(
             executionService.execute(
@@ -171,7 +169,7 @@ public class PlatformRunExecutionController {
         @RequestBody PlatformRunRecoveryRequest request,
         HttpServletRequest servletRequest
     ) {
-        requireLoopbackCaller(servletRequest);
+        loopbackGuard.requireLoopbackCaller(servletRequest);
         requireBody(request);
         executionService.freeze(
             request.getApplicationId(), request.getRunId(), request.getFenceToken(), request.getRequestId()
@@ -185,7 +183,7 @@ public class PlatformRunExecutionController {
         @RequestBody PlatformRunResultRequest request,
         HttpServletRequest servletRequest
     ) {
-        requireLoopbackCaller(servletRequest);
+        loopbackGuard.requireLoopbackCaller(servletRequest);
         requireBody(request);
         executionService.reportResult(
             request.getApplicationId(),
@@ -199,32 +197,49 @@ public class PlatformRunExecutionController {
         return ResultUtils.success(true);
     }
 
+    /**
+     * 受控执行中发现决定性业务歧义时请求阻断。
+     *
+     * <p>放在执行通道而不是工作项通道：它要求调用方仍持有该 Run 的 fenced Lease，
+     * 因此属于「一次受控执行的对内沟通」，与 Lease、命令、结果上报同一组。
+     */
+    @PostMapping("/blocks")
+    @Operation(summary = "受控执行中发现决定性业务歧义时请求阻断")
+    public BaseResponse<Boolean> requestBlock(
+        @RequestBody PlatformRunBlockRequest request,
+        HttpServletRequest servletRequest
+    ) {
+        loopbackGuard.requireLoopbackCaller(servletRequest);
+        requireBody(request);
+        executionService.blockForClarification(
+            request.getApplicationId(),
+            request.getRunId(),
+            parseFenceToken(request.getFenceToken()),
+            request.getBlockingQuestion(),
+            request.getRequestId()
+        );
+        return ResultUtils.success(true);
+    }
+
+    /** fence token 以字符串传输并按 long 解析：JavaScript 无法无损承载 long。 */
+    private Long parseFenceToken(String fenceToken) {
+        if (fenceToken == null || !fenceToken.matches("[1-9]\\d{0,18}")) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "fence token 无效");
+        }
+        try {
+            return Long.parseLong(fenceToken);
+        } catch (NumberFormatException notANumber) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "fence token 无效");
+        }
+    }
+
     @GetMapping("/capabilities")
     @Operation(summary = "读取受控执行环境能力（不需要持有 Lease）")
     public BaseResponse<PlatformExecutionCapabilitiesVO> readCapabilities(
         HttpServletRequest servletRequest
     ) {
-        requireLoopbackCaller(servletRequest);
+        loopbackGuard.requireLoopbackCaller(servletRequest);
         return ResultUtils.success(executionService.buildCapabilities());
-    }
-
-    /**
-     * 只接受回环调用方。
-     *
-     * <p>判据取 {@code getRemoteAddr()}——TCP 对端地址，不是任何可伪造的请求头。
-     * {@code X-Forwarded-For} 之类由调用方填写的值在此一律不参与判断。
-     *
-     * <p>反向代理转发会使对端变成代理本身，因此本端点不应放在代理之后；那种部署形态需要的是
-     * 真正的鉴权，而不是把这里改宽。
-     */
-    private void requireLoopbackCaller(HttpServletRequest request) {
-        String remoteAddress = request.getRemoteAddr();
-        if (remoteAddress == null || !LOOPBACK_ADDRESSES.contains(remoteAddress)) {
-            throw new BusinessException(
-                ErrorCode.FORBIDDEN_ERROR,
-                "受控执行端点只接受本机调用"
-            );
-        }
     }
 
     private void requireBody(Object request) {

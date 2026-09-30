@@ -10,6 +10,8 @@ import com.zdan.paimengaicodebackend.platform.domain.PlatformLogicalRelationVali
 import com.zdan.paimengaicodebackend.platform.domain.PlatformRunLeaseService;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformRunState;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformRunTransitionService;
+import com.zdan.paimengaicodebackend.platform.domain.PlatformTaskLifecycleService;
+import com.zdan.paimengaicodebackend.platform.domain.PlatformTaskState;
 import com.zdan.paimengaicodebackend.platform.domain.TaskExecutionBaselineCodec;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRun;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRunLease;
@@ -18,6 +20,7 @@ import com.zdan.paimengaicodebackend.platform.entity.PlatformTask;
 import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxExecutor;
 import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxHandle;
 import com.zdan.paimengaicodebackend.platform.sandbox.PlatformSandboxProperties;
+import com.zdan.paimengaicodebackend.platform.snapshot.CandidateGitStore;
 import com.zdan.paimengaicodebackend.platform.snapshot.CandidateSnapshotService;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformExecutionCapabilitiesVO;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformRunCommandResultVO;
@@ -29,6 +32,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 受控 Run 执行的编排（Issue #77 / T-05）。
@@ -58,6 +62,9 @@ public class PlatformRunExecutionService {
         PlatformRunState.CANCELLED
     );
 
+    /** 业务歧义阻断的原因码；同时用于 Run 终态和 Task blocked 转换的审计。 */
+    private static final String BLOCK_REASON_CODE = "BUSINESS_CLARIFICATION_REQUIRED";
+
     private final PlatformRunLeaseService leaseService;
     private final PlatformRunTransitionService runTransitionService;
     private final PlatformLogicalRelationValidator relationValidator;
@@ -68,6 +75,7 @@ public class PlatformRunExecutionService {
     private final TaskExecutionBaselineCodec baselineCodec;
     private final CandidateSnapshotService snapshotService;
     private final PlatformRunRecoveryService recoveryService;
+    private final PlatformTaskLifecycleService taskLifecycle;
 
     public PlatformRunExecutionService(
         PlatformRunLeaseService leaseService,
@@ -79,7 +87,8 @@ public class PlatformRunExecutionService {
         PlatformTaskMapper taskMapper,
         TaskExecutionBaselineCodec baselineCodec,
         PlatformRunRecoveryService recoveryService,
-        CandidateSnapshotService snapshotService
+        CandidateSnapshotService snapshotService,
+        PlatformTaskLifecycleService taskLifecycle
     ) {
         this.leaseService = leaseService;
         this.runTransitionService = runTransitionService;
@@ -91,6 +100,7 @@ public class PlatformRunExecutionService {
         this.baselineCodec = baselineCodec;
         this.recoveryService = recoveryService;
         this.snapshotService = snapshotService;
+        this.taskLifecycle = taskLifecycle;
     }
 
     /**
@@ -246,6 +256,9 @@ public class PlatformRunExecutionService {
         requireFenceToken(fenceToken);
         requireRunBelongsToDeclaredApplication(applicationId, runId);
         recoveryService.begin(applicationId, runId, fenceToken, requestId);
+        // begin() 会把 Run 推到 EXECUTING；Task 必须跟着走，否则 Owner 会看到 Task 停在
+        // ready 而 Run 已经在写 Workspace。
+        markTaskExecutingIfNeeded(runId, requestId + "-task-executing");
     }
 
     /** 续租。fence 落后、Lease 过期或已达续租上限由 Lease 服务拒绝。 */
@@ -418,6 +431,68 @@ public class PlatformRunExecutionService {
         );
     }
 
+    /**
+     * 受控执行中发现决定性业务歧义：停容器 → 释放 Lease → Run 进入终态 → Task 落 blocked。
+     *
+     * <p>Agent 只能提出问题，不能改写 Task 状态。顺序由 D-06 决定：Task 的
+     * {@code executing→blocked} 要求「Run 已停止且不再持有 Lease」，因此必须先释放写入权
+     * 再转状态，否则会出现「已阻断但仍可写入」的窗口。
+     *
+     * <p>Run 落在 {@code CANCELLED} 而不是 {@code FAILED}：D-06 的 Run 状态集合是锁定的，
+     * {@code SUCCEEDED} 会触发验证队列、{@code FAILED} 表示不可恢复的执行失败，两者都会把
+     * 「等一个业务答复」误报成执行结果。D-06 同时要求 blocked（有冻结基线）时原 Task 保持
+     * blocked 并为重新归一化创建新 Task，因此这次取消不会被自动恢复。
+     *
+     * <p>这条边曾一度只有实现方自述的论证；D-06 的 Run 表现已显式认下「Agent 提出决定性
+     * 业务歧义 → {@code cancelled}（{@code BUSINESS_CLARIFICATION_REQUIRED}）」，并要求用终态
+     * 转换事件的 {@code actorType} 与 Owner 取消区分。改动终态统计口径时必须按
+     * {@code actorType} / {@code reasonCode} 过滤，不能只看 {@code platform_run.state}。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void blockForClarification(
+        String applicationIdText,
+        String runId,
+        Long fenceToken,
+        String blockingQuestion,
+        String requestId
+    ) {
+        long startedNanos = System.nanoTime();
+        Long applicationId = parseApplicationId(applicationIdText);
+        requireRunIdentity(runId, requestId);
+        requireFenceToken(fenceToken);
+        // 先校验问题再拆执行：不合格的问题如果留到落库前才发现，一次受控执行已经被停掉了。
+        PlatformTaskLifecycleService.requireAnswerableQuestion(blockingQuestion);
+        requireRunBelongsToDeclaredApplication(applicationId, runId);
+        leaseService.requireHeldLease(runId, fenceToken, requestId);
+
+        PlatformRunState currentState = readRunState(runId);
+        if (currentState != PlatformRunState.LEASED && currentState != PlatformRunState.EXECUTING) {
+            throw new BusinessException(
+                ErrorCode.FORBIDDEN_ERROR, "Run 已进入终态，无法再按业务歧义阻断");
+        }
+        stopSandboxIfPresent(runId);
+        leaseService.release(runId, fenceToken, PlatformActor.RUNTIME, BLOCK_REASON_CODE, requestId);
+        runTransitionService.transition(
+            runId,
+            currentState,
+            PlatformRunState.CANCELLED,
+            PlatformActor.PLATFORM,
+            BLOCK_REASON_CODE,
+            null,
+            requestId + "-run-cancelled"
+        );
+        taskLifecycle.markBlockedAfterRunStopped(
+            taskIdForRun(runId), blockingQuestion, BLOCK_REASON_CODE, requestId + "-task-blocked");
+        log.info(
+            "Platform Run execution blocked for clarification, applicationId: {}, runId: {}, fenceToken: {}, requestId: {}, result: success, durationMs: {}",
+            applicationId,
+            runId,
+            fenceToken,
+            requestId,
+            TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos)
+        );
+    }
+
     /** 读取真实环境能力。字段值一律取自实际配置与 Lease 常量，不复制字面量。 */
     public PlatformExecutionCapabilitiesVO buildCapabilities() {
         PlatformExecutionCapabilitiesVO capabilities = new PlatformExecutionCapabilitiesVO();
@@ -489,7 +564,14 @@ public class PlatformRunExecutionService {
         }
     }
 
-    /** 首次执行命令时推进 {@code LEASED→EXECUTING}；已在 EXECUTING 则不重复转换。 */
+    /**
+     * 首次执行命令时推进 {@code LEASED→EXECUTING}；已在 EXECUTING 则不重复转换。
+     *
+     * <p>Task 的 {@code ready→executing} 放在同一处而不是授予 Lease 时：D-06 要求
+     * 「Runtime 已获得受控执行上下文」，而上下文成立的那一刻是第一条命令被接纳，
+     * 不是 Lease 被授予。这样 Task 的 {@code executing} 与 Run 的 {@code executing}
+     * 永远同义，Owner 的状态投影也不会出现「Task 在跑但 Run 还没开始」。
+     */
     private void advanceToExecutingIfNeeded(String runId, String requestId) {
         PlatformRunState currentState = readRunState(runId);
         if (currentState == PlatformRunState.EXECUTING) {
@@ -504,6 +586,33 @@ public class PlatformRunExecutionService {
             null,
             requestId + "-executing"
         );
+        markTaskExecutingIfNeeded(runId, requestId + "-task-executing");
+    }
+
+    /**
+     * Task {@code ready -> executing}，只在当前仍是 ready 时执行。
+     *
+     * <p>Run 有两条进入 {@code EXECUTING} 的路径：显式 {@code beginExecution} 与首条命令；
+     * 两条都要让 Task 跟着走，才不变量「Task executing 等价于 Run executing」才成立。
+     * 幂等写成「仅在 ready 时推进」而不是靠状态机拒绝重复转换，这样任一路径重复触发都无害。
+     */
+    private void markTaskExecutingIfNeeded(String runId, String requestId) {
+        Long taskId = taskIdForRun(runId);
+        PlatformTask task = taskMapper.selectOneById(taskId);
+        if (task == null || !PlatformTaskState.READY.name().equals(task.getState())) {
+            return;
+        }
+        // 证据引用是冻结基线的指纹：它解释了「这次受控执行写的是哪一份输入」。
+        taskLifecycle.markExecutionStarted(taskId, CandidateGitStore.sha256(task.getBaselineJson()),
+            "CONTROLLED_EXECUTION_STARTED", requestId);
+    }
+
+    private Long taskIdForRun(String runId) {
+        PlatformRun run = runMapper.selectOneByQuery(QueryWrapper.create().eq("id", runId));
+        if (run == null || run.getTaskId() == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "Run 的 Task 不存在");
+        }
+        return run.getTaskId();
     }
 
     private void stopSandboxIfPresent(String runId) {

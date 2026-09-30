@@ -14,9 +14,8 @@ export default defineConfigWithVueTs(
     '**/dist-ssr/**',
     '**/coverage/**',
 
+    // src/api 由 npm run openapi2ts 全量重生成，任何手写文件放这里都会在下次生成时被清掉。
     'src/api/**',
-
-    '!src/api/agentToken.ts',
   ]),
 
   pluginVue.configs['flat/essential'],

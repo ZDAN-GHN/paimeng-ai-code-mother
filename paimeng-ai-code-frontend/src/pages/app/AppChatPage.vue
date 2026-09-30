@@ -297,7 +297,7 @@ import {
   deleteApp as deleteAppApi,
 } from '@/api/appController'
 import { listAppChatHistory } from '@/api/chatHistoryController'
-import { getAgentToken } from '@/api/agentToken'
+import { getAgentToken } from '@/utils/agentToken'
 import { CodeGenTypeEnum, formatCodeGenType } from '@/utils/codeGenTypes'
 import {
   streamAgentTurn,

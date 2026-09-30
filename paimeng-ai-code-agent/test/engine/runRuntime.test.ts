@@ -53,7 +53,25 @@ interface RecordedCall {
 
 class FakeGateway implements RunLeaseGateway {
   public readonly calls: RecordedCall[] = []
+  public readonly clarificationRequests: { blockingQuestion: string, fenceToken: string }[] = []
+  public clarificationRejects = false
   private nextFenceToken = 1
+
+  public async requestClarification(input: {
+    applicationId: string
+    runId: string
+    fenceToken: string
+    blockingQuestion: string
+    requestId: string
+  }): Promise<void> {
+    if (this.clarificationRejects) {
+      throw new Error('Platform rejected the clarification request')
+    }
+    this.clarificationRequests.push({
+      blockingQuestion: input.blockingQuestion,
+      fenceToken: input.fenceToken,
+    })
+  }
 
   public constructor(
     private readonly behaviour: {
@@ -152,8 +170,9 @@ class FakeGateway implements RunLeaseGateway {
 /** 可脚本化的假引擎：按给定行为收敛，不触碰网络或真实工具。 */
 function createFakeEngine(
   behaviour: (request: AgentEngineRunRequest) => Promise<{
-    status: 'completed' | 'aborted' | 'failed'
+    status: 'completed' | 'aborted' | 'failed' | 'blocked-for-clarification'
     failureSummary?: string
+    blockingQuestion?: string
   }>,
 ): AgentEngineAdapter {
   return { engineName: 'fake', run: behaviour }
@@ -447,4 +466,57 @@ test('skips the renewal timer when the platform allows no renewals', async () =>
     gateway.calls.some((call) => call.operation === 'renewLease'),
     false,
   )
+})
+
+test('an engine clarification request is reported to Platform while the lease is still held', async () => {
+  const gateway = new FakeGateway()
+  const { runtime } = createRuntime(
+    gateway,
+    createFakeEngine(async () => ({
+      status: 'blocked-for-clarification',
+      blockingQuestion: '生成的页面需要支持哪些角色？',
+    })),
+  )
+
+  const result = await runtime.execute()
+
+  assert.equal(result.status, 'blocked-for-clarification')
+  assert.equal(result.blockingQuestion, '生成的页面需要支持哪些角色？')
+  assert.equal(gateway.clarificationRequests.length, 1)
+  assert.equal(gateway.clarificationRequests[0]?.blockingQuestion, '生成的页面需要支持哪些角色？')
+  // 关键顺序：阻断请求必须携带仍有效的 fence token，Platform 侧才会接受。
+  assert.equal(gateway.clarificationRequests[0]?.fenceToken, '1')
+  // 阻断不等于成功：不得冻结 Snapshot、不得按 SUCCEEDED 上报。
+  assert.equal(gateway.calls.some((call) => call.operation === 'freezeSnapshot'), false)
+  assert.equal(gateway.calls.some((call) => call.outcome === 'SUCCEEDED'), false)
+})
+
+test('a clarification request without a question is an engine defect, not a valid block', async () => {
+  const gateway = new FakeGateway()
+  const { runtime } = createRuntime(
+    gateway,
+    createFakeEngine(async () => ({ status: 'blocked-for-clarification' })),
+  )
+
+  const result = await runtime.execute()
+
+  assert.equal(result.status, 'failed')
+  assert.equal(result.reasonCode, 'RUNTIME_CLARIFICATION_QUESTION_MISSING')
+  assert.equal(gateway.clarificationRequests.length, 0)
+})
+
+test('a rejected clarification request stops the run instead of silently continuing', async () => {
+  const gateway = new FakeGateway()
+  gateway.clarificationRejects = true
+  const { runtime } = createRuntime(
+    gateway,
+    createFakeEngine(async () => ({ status: 'blocked-for-clarification', blockingQuestion: '问题？' })),
+  )
+
+  const result = await runtime.execute()
+
+  // Platform 没接受阻断时，不能把「仍可写」当成「已停」：必须按失败收尾。
+  assert.equal(result.status, 'blocked-for-clarification')
+  assert.equal(result.reasonCode, 'RUNTIME_CLARIFICATION_NOT_CONFIRMED')
+  assert.equal(gateway.calls.some((call) => call.outcome === 'SUCCEEDED'), false)
 })

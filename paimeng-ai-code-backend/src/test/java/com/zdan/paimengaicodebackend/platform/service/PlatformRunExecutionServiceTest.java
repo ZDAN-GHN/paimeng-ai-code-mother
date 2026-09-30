@@ -22,6 +22,7 @@ import com.zdan.paimengaicodebackend.platform.domain.PlatformLogicalRelationVali
 import com.zdan.paimengaicodebackend.platform.domain.PlatformRunLeaseService;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformRunState;
 import com.zdan.paimengaicodebackend.platform.domain.PlatformRunTransitionService;
+import com.zdan.paimengaicodebackend.platform.domain.PlatformTaskLifecycleService;
 import com.zdan.paimengaicodebackend.platform.domain.TaskExecutionBaselineCodec;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRun;
 import com.zdan.paimengaicodebackend.platform.entity.PlatformRunLease;
@@ -68,6 +69,7 @@ class PlatformRunExecutionServiceTest {
     private TaskExecutionBaselineCodec baselineCodec;
     private PlatformRunRecoveryService recoveryService;
     private CandidateSnapshotService snapshotService;
+    private PlatformTaskLifecycleService taskLifecycle;
     private PlatformRunExecutionService executionService;
 
     @BeforeEach
@@ -82,6 +84,7 @@ class PlatformRunExecutionServiceTest {
         baselineCodec = mock(TaskExecutionBaselineCodec.class);
         recoveryService = mock(PlatformRunRecoveryService.class);
         snapshotService = mock(CandidateSnapshotService.class);
+        taskLifecycle = mock(PlatformTaskLifecycleService.class);
         PlatformRun run = new PlatformRun();
         run.setId(RUN_ID);
         run.setApplicationId(APPLICATION_ID);
@@ -103,7 +106,8 @@ class PlatformRunExecutionServiceTest {
             taskMapper,
             baselineCodec,
             recoveryService,
-            snapshotService
+            snapshotService,
+            taskLifecycle
         );
     }
 

@@ -55,6 +55,19 @@ export interface RunLeaseGateway extends SandboxCommandGateway {
     fenceToken: string
     requestId: string
   }): Promise<void>
+  /**
+   * 请求按决定性业务歧义阻断。
+   *
+   * 必须在仍持有 Lease 时调用：Platform 侧的顺序是「停容器 → 释放 Lease → Run 进终态 →
+   * Task 落 blocked」，Lease 先放掉就会被拒绝。
+   */
+  requestClarification(input: {
+    applicationId: string
+    runId: string
+    fenceToken: string
+    blockingQuestion: string
+    requestId: string
+  }): Promise<void>
   freezeSnapshot(input: {
     applicationId: string
     runId: string
@@ -96,7 +109,9 @@ export interface RunRuntimeOptions {
 }
 
 export interface RunRuntimeResult {
-  readonly status: 'completed' | 'aborted' | 'failed'
+  readonly status: 'completed' | 'aborted' | 'failed' | 'blocked-for-clarification'
+  /** `status === 'blocked-for-clarification'` 时携带的唯一业务问题。 */
+  readonly blockingQuestion?: string | undefined
   readonly reasonCode: string
   readonly failureSummary?: string | undefined
 }
@@ -236,6 +251,31 @@ export class RunRuntime {
     return this.reportEngineOutcome(outcome)
   }
 
+  /**
+   * 在仍持有 Lease 的窗口内上报阻断请求。
+   *
+   * 刻意不吞掉失败：Platform 若拒绝（租约失效、问题不合格、Run 已终结），这次执行必须
+   * 让调用方知道阻断没有生效，否则上层会把「仍可写」误当成「已停」。
+   */
+  private async requestClarificationQuietly(blockingQuestion: string): Promise<boolean> {
+    const fenceToken = this.fenceToken
+    if (fenceToken === undefined) return false
+    try {
+      await this.options.client.requestClarification({
+        applicationId: this.options.applicationId,
+        runId: this.options.runId,
+        fenceToken,
+        blockingQuestion,
+        requestId: `block-${randomUUID()}`,
+      })
+      return true
+    } catch (error: unknown) {
+      // 平台未接受阻断时不能继续按成功跑：容器必须停，Workspace 不再可信。
+      await this.reportOutcomeQuietly('FAILED', 'RUNTIME_CLARIFICATION_REJECTED')
+      return false
+    }
+  }
+
   private async reportEngineOutcome(outcome: AgentEngineRunOutcome): Promise<RunRuntimeResult> {
     if (this.lostWriteAuthority) {
       // 续租耗尽是 Runtime 主动放弃写入权，与引擎自身结论无关。
@@ -244,6 +284,34 @@ export class RunRuntime {
         status: 'aborted',
         reasonCode: 'RUNTIME_LEASE_RENEWAL_EXHAUSTED',
         failureSummary: 'Lease renewal exhausted; write authority was relinquished',
+      }
+    }
+
+    if (outcome.status === 'blocked-for-clarification') {
+      const blockingQuestion = outcome.blockingQuestion
+      if (blockingQuestion === undefined || blockingQuestion.length === 0) {
+        // 引擎声称要提问却没给出问题：这是引擎缺陷，不能当成一次合法阻断。
+        await this.reportOutcomeQuietly('FAILED', 'RUNTIME_CLARIFICATION_QUESTION_MISSING')
+        return {
+          status: 'failed',
+          reasonCode: 'RUNTIME_CLARIFICATION_QUESTION_MISSING',
+          failureSummary: 'Engine reported a clarification request without a question',
+        }
+      }
+      // 不冻结 Snapshot、不按成功上报：Platform 阻断后原 Task 保持 blocked，
+      // 这次执行的半成品 Workspace 随之作废。
+      const requested = await this.requestClarificationQuietly(blockingQuestion)
+      if (!requested) {
+        return {
+          status: 'blocked-for-clarification',
+          reasonCode: 'RUNTIME_CLARIFICATION_NOT_CONFIRMED',
+          blockingQuestion,
+        }
+      }
+      return {
+        status: 'blocked-for-clarification',
+        reasonCode: 'RUNTIME_BLOCKED_FOR_CLARIFICATION',
+        blockingQuestion,
       }
     }
 

@@ -5,6 +5,7 @@ import { PiEventNormalizer } from './piEventNormalizer.js'
 import type { AgentEngineAdapter, AgentEngineRunOutcome, AgentEngineRunRequest } from '../engine/agentEngineAdapter.js'
 import { createIsolatedModels, type PiEngineOptions } from './piModelCatalog.js'
 import { createSandboxToolDefinitions, SANDBOX_TOOL_NAMES } from './sandboxToolAssembly.js'
+import { createClarificationRequestTool } from './clarificationRequestTool.js'
 import type { SandboxOperations } from '../engine/sandboxOperations.js'
 
 export { createIsolatedModels, type PiEngineOptions } from './piModelCatalog.js'
@@ -22,11 +23,24 @@ export function classifyPiFailure(message: string | undefined): string {
 }
 
 /** One core Agent per Run, containing only tools bound to the fenced Platform gateway. */
-export function createIsolatedPiAgent(model: Model<Api>, operations: SandboxOperations, streamFn: StreamFn): Agent {
+/**
+ * @param requestClarification 收到已校验的业务问题时调用；不传则本次执行不带提问能力。
+ *   Sandbox 工具的白名单校验不受它影响：提问工具改变的是「执行是否继续」，
+ *   且调用后立即 terminate，Agent 拿不到用它改写 Workspace 的机会。
+ */
+export function createIsolatedPiAgent(
+  model: Model<Api>,
+  operations: SandboxOperations,
+  streamFn: StreamFn,
+  requestClarification?: (question: string) => void,
+): Agent {
   const tools = createSandboxToolDefinitions(operations)
   const names = tools.map((tool) => tool.name).sort()
   if (JSON.stringify(names) !== JSON.stringify([...SANDBOX_TOOL_NAMES].sort())) {
     throw new Error('Pi agent tools differ from the sandbox allowlist')
+  }
+  if (requestClarification !== undefined) {
+    tools.push(createClarificationRequestTool(requestClarification) as unknown as (typeof tools)[number])
   }
   return new Agent({
     initialState: {
@@ -61,8 +75,14 @@ export class PiEngineAdapter implements AgentEngineAdapter {
       const model = models.getModel(this.options.provider, this.options.modelId)
       if (!model) throw new Error('Configured Pi model is unavailable')
 
+      let blockingQuestion: string | undefined
       const agent = createIsolatedPiAgent(
-        model, request.operations, this.streamFn ?? models.streamSimple.bind(models),
+        model,
+        request.operations,
+        this.streamFn ?? models.streamSimple.bind(models),
+        (question) => {
+          blockingQuestion = question
+        },
       )
       const normalizer = new PiEventNormalizer()
       unsubscribe = agent.subscribe((event) => {
@@ -76,6 +96,11 @@ export class PiEngineAdapter implements AgentEngineAdapter {
 
       await agent.prompt(request.prompt)
       if (request.signal.aborted) return { status: 'aborted' }
+      // 先于成功判定：提问会终止本轮，若按「自然跑完」处理就会去冻结 Snapshot 并把
+      // 半成品当作通过验证的候选提交。
+      if (blockingQuestion !== undefined) {
+        return { status: 'blocked-for-clarification', blockingQuestion }
+      }
 
       const lastAssistant = agent.state.messages.findLast((message) => message.role === 'assistant')
       if (!lastAssistant || lastAssistant.stopReason === 'error' || lastAssistant.stopReason === 'aborted') {

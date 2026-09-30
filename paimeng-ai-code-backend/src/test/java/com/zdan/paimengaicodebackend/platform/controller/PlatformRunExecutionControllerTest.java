@@ -2,7 +2,11 @@ package com.zdan.paimengaicodebackend.platform.controller;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -13,7 +17,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.zdan.paimengaicodebackend.exception.BusinessException;
 import com.zdan.paimengaicodebackend.exception.ErrorCode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zdan.paimengaicodebackend.exception.GlobalExceptionHandler;
+import com.zdan.paimengaicodebackend.platform.domain.PlatformLoopbackCallerGuard;
+import com.zdan.paimengaicodebackend.platform.dto.PlatformRunBlockRequest;
 import com.zdan.paimengaicodebackend.platform.service.PlatformRunExecutionService;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformExecutionCapabilitiesVO;
 import com.zdan.paimengaicodebackend.platform.vo.PlatformRunCommandResultVO;
@@ -47,13 +54,15 @@ class PlatformRunExecutionControllerTest {
     private static final long FENCE_TOKEN = 3L;
 
     private PlatformRunExecutionService executionService;
+    private final ObjectMapper mapper = new ObjectMapper();
+
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         executionService = mock(PlatformRunExecutionService.class);
         mockMvc = MockMvcBuilders
-            .standaloneSetup(new PlatformRunExecutionController(executionService))
+            .standaloneSetup(new PlatformRunExecutionController(executionService, new PlatformLoopbackCallerGuard()))
             .setControllerAdvice(new GlobalExceptionHandler())
             .build();
     }
@@ -284,5 +293,71 @@ class PlatformRunExecutionControllerTest {
         capabilities.setNetworkAccessAvailable(false);
         capabilities.setReadonlyRootFilesystem(true);
         return capabilities;
+    }
+
+    /**
+     * 阻断请求走执行通道而不是工作项通道：它要求调用方仍持有该 Run 的 Lease。
+     *
+     * <p>这两件事必须同时成立——端点位置错了，Runtime 就只能绕过围栏；位置对了，
+     * 也不代表围栏被跳过。
+     */
+    @Test
+    void blockRequestRequiresAHeldLeaseAndValidatesTheQuestionBeforeTearingDownTheRun() throws Exception {
+        PlatformRunBlockRequest request = new PlatformRunBlockRequest();
+        request.setApplicationId("460017668615995392");
+        request.setRunId("run-7001");
+        request.setFenceToken("3");
+        request.setBlockingQuestion("生成的页面需要支持哪些角色？");
+        request.setRequestId("block-1");
+
+        mockMvc.perform(post("/platform/runs/execution/blocks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(request)))
+            .andExpect(jsonPath("$.code").value(0));
+
+        verify(executionService).blockForClarification(
+            "460017668615995392", "run-7001", 3L, "生成的页面需要支持哪些角色？", "block-1");
+    }
+
+    @Test
+    void blockRequestFromANonLoopbackCallerIsRejected() throws Exception {
+        PlatformRunBlockRequest request = new PlatformRunBlockRequest();
+        request.setApplicationId("460017668615995392");
+        request.setRunId("run-7001");
+        request.setFenceToken("3");
+        request.setBlockingQuestion("问题？");
+        request.setRequestId("block-2");
+
+        mockMvc.perform(post("/platform/runs/execution/blocks")
+                .with(builder -> {
+                    builder.setRemoteAddr("10.0.0.7");
+                    return builder;
+                })
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(request)))
+            .andExpect(jsonPath("$.code").value(ErrorCode.FORBIDDEN_ERROR.getCode()));
+
+        verify(executionService, never()).blockForClarification(
+            anyString(), anyString(), any(), anyString(), anyString());
+    }
+
+    @Test
+    void aMalformedFenceTokenIsRejectedBeforeTheRunIsTouched() throws Exception {
+        PlatformRunBlockRequest request = new PlatformRunBlockRequest();
+        request.setApplicationId("460017668615995392");
+        request.setRunId("run-7001");
+        // JavaScript 无法无损承载 long：fence token 必须以字符串传输，用 number 会被误拒。
+        request.setFenceToken("9007199254740993");
+        request.setBlockingQuestion("问题？");
+        request.setRequestId("block-3");
+
+        mockMvc.perform(post("/platform/runs/execution/blocks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(request)))
+            .andExpect(jsonPath("$.code").value(0));
+
+        verify(executionService).blockForClarification(
+            eq("460017668615995392"), eq("run-7001"), eq(9007199254740993L),
+            anyString(), anyString());
     }
 }
