@@ -1,0 +1,19 @@
+import { beforeAll, afterAll, describe, expect, it, vi } from 'vitest';
+import { loadEnvFile } from 'node:process';
+import { testDatabaseUrl } from '../test-database-url';
+import { randomUUID } from 'node:crypto';
+import { eq } from 'drizzle-orm';
+vi.mock('@/server/business',()=>({getApp:async(id:string)=>({id,codeGenType:'html'})}));
+import { db, getPool, now } from '@/server/db';
+import { nextSnowflakeId } from '@/server/snowflake';
+import { users, apps, leases, generations, messages, histories } from '@/server/schema';
+import { beginGeneration, generationFor, setGeneration, loadMessages } from '@/server/generation-store';
+import type { User } from '@/shared/contracts';
+loadEnvFile('.env');process.env.DATABASE_URL=testDatabaseUrl(process.env.DATABASE_URL??'');
+let actor:User;let appId:string;
+describe('真实数据库生成任务并发与恢复',()=>{
+ beforeAll(async()=>{const userId=await nextSnowflakeId();await db().insert(users).values({id:userId,userAccount:'ts_lease_'+randomUUID(),userPassword:'unused',userName:'租约测试',userRole:'user',createTime:now(),updateTime:now()});actor={id:userId.toString(),userAccount:'test',userName:'测试',userRole:'user',userAvatar:null,userProfile:null,createTime:now(),updateTime:now()};const id=await nextSnowflakeId();await db().insert(apps).values({id,appName:'测试',initPrompt:'租约测试',codeGenType:'html',userId,createTime:now(),updateTime:now()});appId=id.toString();});
+ afterAll(async()=>{await db().delete(leases).where(eq(leases.appId,BigInt(appId)));await db().delete(messages).where(eq(messages.appId,BigInt(appId)));await db().delete(histories).where(eq(histories.appId,BigInt(appId)));await db().delete(generations).where(eq(generations.appId,BigInt(appId)));await db().delete(apps).where(eq(apps.id,BigInt(appId)));await db().delete(users).where(eq(users.id,BigInt(actor.id)));await getPool().end();});
+ it('并发提交仅有一个获得应用写租约',async()=>{const requests=[randomUUID(),randomUUID()];const outcomes=await Promise.allSettled(requests.map(id=>beginGeneration(appId,id,actor,{id:id+'-user',role:'user',parts:[{type:'text',text:'生成'}]})));expect(outcomes.filter(r=>r.status==='fulfilled')).toHaveLength(1);expect(await loadMessages(appId)).toHaveLength(1);const [lease]=await db().select().from(leases).where(eq(leases.appId,BigInt(appId)));expect(requests).toContain(lease.generationId);});
+ it('取消保留写租约直到任务退出，成功回调不能覆盖取消状态',async()=>{const [lease]=await db().select().from(leases).where(eq(leases.appId,BigInt(appId)));await setGeneration(lease.generationId,'cancelled');expect(await db().select().from(leases).where(eq(leases.appId,BigInt(appId)))).toHaveLength(1);await setGeneration(lease.generationId,'ready');expect(await generationFor(appId)).toMatchObject({status:'cancelled'});});
+});

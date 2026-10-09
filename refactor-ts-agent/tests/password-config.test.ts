@@ -1,0 +1,15 @@
+import { describe, expect, it } from 'vitest';
+import { hashPassword, verifyPassword } from '@/server/password';
+import { createHash } from 'node:crypto';
+import { getConfig } from '@/server/config';
+import { guardRequest, body } from '@/server/http';
+describe('密码和边界',()=>{
+ it('新密码使用带随机盐的 scrypt，正确密码可验证',async()=>{const one=await hashPassword('password123');const two=await hashPassword('password123');expect(one).not.toBe(two);expect(await verifyPassword('password123',one)).toBe(true);expect(await verifyPassword('wrongpassword',one)).toBe(false);});
+ it('旧 Java MD5 密码可验证，错误密码被拒绝',async()=>{const legacy=createHash('md5').update('ZDAN-GHNpassword123').digest('hex');expect(await verifyPassword('password123',legacy)).toBe(true);expect(await verifyPassword('password321',legacy)).toBe(false);});
+ it('旧数据库连接被拒绝',()=>{const previous=process.env.DATABASE_URL;try{process.env.DATABASE_URL='mysql://x:y@localhost:3306/paimeng_ai_code_mother';expect(()=>getConfig()).toThrow('独立');}finally{if(previous===undefined)delete process.env.DATABASE_URL;else process.env.DATABASE_URL=previous;}});
+ it('拒绝跨来源写入及预览 host 访问管理接口',()=>{expect(()=>guardRequest(new Request('http://localhost:3000/api/app/add',{method:'POST',headers:{origin:'http://127.0.0.1:3001'}}))).toThrow();expect(()=>guardRequest(new Request('http://127.0.0.1:3001/api/user/get/login'))).toThrow();expect(()=>guardRequest(new Request('http://localhost:3000/api/app/add',{method:'POST',headers:{origin:'http://localhost:3000'}}))).not.toThrow();});
+ it('新摘要只接受严格格式，附加字段或任意盐均不能通过验证',async()=>{const stored=await hashPassword('password123');expect(await verifyPassword('password123',stored+'$ignored')).toBe(false);expect(await verifyPassword('password123',stored.replace(/\$[a-f0-9]{32}\$/,'$arbitrary$'))).toBe(false);});
+ it('来源配置和请求比较同时约束协议，禁止不具有 HTTP(S) 来源的配置',()=>{const previous=process.env.APP_ORIGIN;try{process.env.APP_ORIGIN='ftp://localhost:3000';expect(()=>getConfig()).toThrow('HTTP(S)');process.env.APP_ORIGIN='https://localhost:3000';expect(()=>guardRequest(new Request('http://localhost:3000/api/user/get/login'))).toThrow();expect(()=>guardRequest(new Request('https://localhost:3000/api/user/get/login'))).not.toThrow();}finally{if(previous===undefined)delete process.env.APP_ORIGIN;else process.env.APP_ORIGIN=previous;}});
+ it('JSON 请求按实际 UTF-8 字节而不是字符数限制大小',async()=>{const raw=JSON.stringify({text:'汉'.repeat(35000)});expect(raw.length).toBeLessThan(100000);await expect(body(new Request('http://localhost:3000/api/app/add',{method:'POST',body:raw}))).rejects.toMatchObject({status:413});expect(await body(new Request('http://localhost:3000/api/app/add',{method:'POST',body:'{"text":"汉字"}'}))).toEqual({text:'汉字'});});
+ it('流式请求超过限额时立即取消读取',async()=>{let cancelled=false;let pulls=0;const stream=new ReadableStream<Uint8Array>({pull(controller){pulls++;controller.enqueue(new Uint8Array(60000));},cancel(){cancelled=true;}});const req=new Request('http://localhost:3000/api/app/add',{method:'POST',body:stream,duplex:'half'} as RequestInit);await expect(body(req)).rejects.toMatchObject({status:413});expect(cancelled).toBe(true);expect(pulls).toBeLessThanOrEqual(3);});
+});

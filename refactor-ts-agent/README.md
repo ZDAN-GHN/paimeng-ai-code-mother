@@ -1,0 +1,107 @@
+# 在独立目录运行 React 与 TypeScript 应用
+
+本目录包含 Next.js、React、TypeScript、Vercel AI SDK、MySQL 和 Drizzle 的独立应用。运行新应用无需启动旧 Java 后端或旧 Vue 平台。所有命令都在 `refactor-ts-agent/` 内执行。
+
+## 启动开发环境
+
+需要 Node.js 24.15 或更新的 24 版本、npm、Docker，以及可运行 Chromium 沙箱的 Linux 环境。Docker 守护进程必须已启动。
+
+1. 复制 `.env.example` 为 `.env`。本地默认使用 `MYSQL_ROOT_PASSWORD=root`，应用专用账号为 `paimeng_ts`，密码为 `root`。`DATABASE_URL` 已填写专用开发库地址，`REDIS_URL` 已填写无密码本地 Redis 地址。已有 `.env` 的真实模型配置保留。
+2. 执行 `npm ci`。
+3. 执行 `npm run assets:import`。此命令只读取旧平台的派蒙图片，写入新应用的 `public/`。
+4. 执行 `npm run infra:up`。固定命名的 MySQL 和 Redis 容器启动并等待健康检查。该命令读取 `.env`，不生成或改写凭据。
+5. 执行 `npm run db:migrate`。迁移完成后显示“独立 TS 数据库迁移完成”。重复执行会核对已有迁移的校验和。
+6. 执行 `docker pull node:24-alpine`。Vue 生成工程使用该镜像进行隔离构建。
+7. 执行 `npx playwright install chromium`。发布封面截图和浏览器测试都需要 Chromium。若系统缺少浏览器依赖，按 Playwright 的报错安装系统依赖。
+8. 在一个终端执行 `npm run preview`，在另一个终端执行 `npm run dev`。
+9. 打开 `http://localhost:3000`，注册并登录。
+
+`.env.example` 默认使用真实模型。配置真实模型前，可以在本地 `.env` 中显式设置 `AI_MODE=fixture`，运行确定的验收样本。fixture 使用真实 SDK 工具循环，但不代表真实模型质量已验证。
+
+平台统一入口为 `http://localhost:3000`。普通页面使用 `/`、`/user/login`、`/user/register`、`/app/chat/{id}` 和 `/app/edit/{id}`。管理员页面使用同一入口下的 `/admin/userManage`、`/admin/appManage` 和 `/admin/chatManage`，登录角色决定是否显示管理菜单，服务端再次校验权限。
+
+`http://127.0.0.1:3001` 只提供 AI 生成网站的预览、发布副本及封面，不是管理员前端，也不是另一套用户平台。预览在平台页面中通过 iframe 打开，使用不同主机名隔离登录 Cookie。日常操作只需打开统一平台入口。默认本地配置下，打开 `127.0.0.1:3000` 的平台页面会自动跳转到 `localhost:3000`，保留页面路径与查询参数。API 不执行此跳转，直接来自别名或预览来源的写请求仍会被来源校验拒绝。
+
+需要管理员时，执行 `npm run db:admin -- 账号`。此命令只修改独立 TS 数据库。应用创建者通过应用编辑页修改名称或删除应用。管理员通过应用管理页管理其他用户的应用，不能代替创建者生成、下载或发布。
+
+## 使用固定的本地数据库容器
+
+MySQL 容器固定为 `paimeng-ts-refactor-mysql-1`，宿主连接地址为 `127.0.0.1:3306`。本地管理账号为 `root`，密码为 `root`。应用继续使用专用账号 `paimeng_ts`，本地密码同样为 `root`，仅访问专用开发库与测试库。开发库为 `paimeng_ai_code_mother_ts`，集成测试库为 `paimeng_ai_code_mother_ts_test`，两个库位于同一个 MySQL 容器。MySQL 数据继续保存在 `runtime/mysql/`。
+
+已有 MySQL 数据目录初始化后，修改 `.env` 不会自动修改数据库内的账号密码。密码变更需要在此专用容器内同步账号后再重启应用，本次已完成同步并保留已有数据。
+
+Redis 容器固定为 `paimeng-ts-refactor-redis-1`，宿主连接地址为 `127.0.0.1:6381`，使用逻辑库 0。按本地开发要求不设置密码，连接字符串为 `redis://127.0.0.1:6381/0`。Redis 镜像固定到已验证的官方镜像摘要。
+
+本地弱密码和无密码 Redis 只用于这两个回环端口的开发服务。容器内的 Redis 关闭 protected mode，以接受 Docker 转发连接；宿主端口仍只绑定 `127.0.0.1`。这些默认值不用于公网或生产环境。
+
+Redis 启用 AOF 持久化，数据存入固定命名卷 `paimeng-ts-refactor-redis-data`。两个容器仅发布到宿主回环地址，并设置 `unless-stopped` 重启策略。Docker 守护进程启动时会恢复未被手动停止的容器。MySQL 已使用默认宿主端口 3306。Redis 的默认端口 6379 当前由旧项目的 `paimeng-redis` 占用，因此新 Redis 暂时保留 6381；停止旧容器需要单独确认，数据卷会保留。
+
+重复执行 `npm run infra:up` 会复用固定容器与数据。执行 `npm run infra:status` 查看状态，执行 `npm run infra:stop` 停止两个容器但保留数据。重新开发时再次执行 `npm run infra:up`。删除 `runtime/mysql/` 或执行删除卷的 Docker 命令会丢失数据库数据，日常启动和停止不需要这些操作。
+
+执行 `npm run verify:infra`，检查宿主端口、MySQL root 登录、应用账号临时表读写，以及 Redis 无密码连接和键值读写。需要验证 Redis 重启持久化时，执行 `npm run verify:infra -- --restart-redis`。该命令只重启本项目 Redis，并在验证后删除自己创建的唯一测试键。
+
+Redis 已作为本地开发服务提供连接。当前平台会话、消息和生成任务仍保存在 MySQL，未改为依赖 Redis。旧项目的数据库及缓存服务不受影响。
+
+## 业务主键与升级
+
+用户、应用和文本聊天记录的新主键使用雪花 ID，保留原 MyBatis Flex 1.11.1 的起始时间与位布局。计算和数据库读写使用 `bigint`，HTTP 返回十进制字符串。三个业务主键取消自增，已有记录不重编号。例如原应用 `42` 继续使用 `runtime/code_output/html_42/`。内部消息排序列 `ts_message.sequence` 仍然自增。
+
+本地 TS 平台使用数据中心 0、机器 0，并通过同一 MySQL 中的 `ts_snowflake_state` 持久化发号。并发进程、模块热重载和重启共享已提交的发号下界。业务事务开始前先提交发号短事务；失败可以留下空号，不能复用已预留号码。雪花 ID 有时间顺序，不是随机 ID，也不替代接口归属鉴权。
+
+已有 TS 数据库升级时，先停止平台写入。执行 `npm run verify:id-migration -- prepare`、`npm run db:migrate`、`npm run verify:id-migration -- verify`，再恢复平台。验证脚本比较既有记录和应用 `42` 的源码摘要，不输出密码或会话令牌。首次空库直接执行 `npm run db:migrate`。已执行的迁移保持原校验和，新策略由 `003_snowflake_ids.sql` 提供。
+
+执行 `npx vitest run tests/snowflake.test.ts tests/integration/snowflake-ids.test.ts`，核对位布局、序列耗尽、时钟回拨、三类主键、事务回滚、独立进程并发及导入。先执行 `npm run db:test:setup`，测试仅连接专用测试库，不调用模型。Drizzle 的 `.$defaultFn()` 是同步字段钩子，不能直接调用当前异步持久化发号器。
+
+## 配置真实模型
+
+在忽略的 `.env` 内设置 `AI_MODE=provider`、`AI_API_KEY`、`AI_MODEL` 和 `AI_BASE_URL`。模型服务必须支持 OpenAI 兼容聊天及工具调用接口。配置只由服务端读取。
+
+缺少模型配置时，生成请求返回明确错误。服务端不会自动改用 fixture。生产运行默认禁止 fixture。正式运行使用 provider，以下生产验收命令中的 `ALLOW_TEST_FIXTURE=1` 仅供本地测试。
+
+## 运行完整测试
+
+1. 保持专用 MySQL 运行，执行 `npm run db:test:setup`。此命令只在上述 Compose 容器内创建独立测试库、授予专用用户权限，并执行测试库迁移。
+2. 执行 `npm run type-check`。
+3. 执行 `npm test`。完整测试需要 MySQL、Docker 镜像和 Chromium，不会因缺少依赖而跳过相关检查。
+4. 保持开发服务和预览服务运行，并将本地模型设为 fixture。执行 `npm run test:e2e`。浏览器场景只创建带唯一前缀的验收账号及应用。
+5. 执行 `npm run verify:boundary`，核对旧项目与已有删除状态。
+
+集成测试在数据库操作前统一解析 URL，只将专用开发库或测试库映射到 `paimeng_ai_code_mother_ts_test`。URL 可保留 `charset` 查询参数，其他查询选项拒绝，防止测试连接目标含糊。测试只清理自己创建的记录。浏览器测试使用开发库 `paimeng_ai_code_mother_ts`，保留验收样本。运行浏览器测试时一次只启动一个测试命令，避免报告目录被另一轮测试覆盖。
+
+浏览器截图写入 `runtime/evidence/`，HTML 报告写入 `playwright-report/`。这些运行文件已被忽略。只验证默认入口跳转、注册登录、会话 Cookie 隔离与来源拒绝时，执行 `npm run test:e2e -- tests/e2e/platform-origin.spec.ts`。这两项浏览器回归测试不调用模型，也不需要预览服务运行。
+
+验证短窗口、手机及横屏中的发送区域，以及点击发送和 `Ctrl + Enter` 时，执行 `npm run test:e2e -- tests/e2e/chat-composer.spec.ts`。测试使用独立样本账号和应用，通过浏览器拦截生成接口并返回 SDK 消息流，不调用真实模型。它验证发送操作和回复显示，不代表供应商模型生成质量已验证。聊天区域按动态视口高度限制消息区，输入框和发送按钮保持可见。
+
+## 验证生产构建与重启
+
+以下过程使用专用本地验收数据，不进行生产部署。停止开发进程后再构建，避免开发服务与生产构建同时写入 `.next/`。
+
+1. 在开发或本地验收服务仍运行时，执行 `AI_MODE=fixture npm run verify:restart -- prepare`。脚本保存专用样本的会话、完整工具消息、生成状态及预览摘要。
+2. 停止本目录的开发服务。保留 MySQL 和预览服务。
+3. 执行 `ALLOW_TEST_FIXTURE=1 npm run build`。
+4. 执行 `AI_MODE=fixture ALLOW_TEST_FIXTURE=1 npm start`，保持该进程运行。
+5. 在另一个终端执行 `AI_MODE=fixture npm run verify:restart -- verify`。脚本核对保存的数据，下载源代码，并提交下一轮对话。
+6. 执行 `npm run test:e2e`，验证构建后的页面及接口。
+
+重新执行整套重启验证时，从 prepare 开始。快照包含本地验收会话 Cookie，文件使用仅当前用户可读写的权限，并位于忽略的运行目录。不要分享快照。
+
+正式使用 provider 时，执行 `npm run build` 和 `npm start`。运行目录、数据库与模型配置仍由当前应用目录和服务端环境提供。Next.js 的构建追踪排除 `runtime/` 和 `.env`，运行数据不会打包进构建输出。
+
+## 导入旧数据副本
+
+本项目只接受 `paimeng_ai_code_mother_ts` 或 `paimeng_ai_code_mother_ts_test` 数据库名。它不会自动连接旧数据库。
+
+1. 停止新平台写入，并冻结旧库的最终快照。从旧库导出经过审查的 JSON 副本，放入新应用 `runtime/import/snapshot.json`。格式为 `{users:[],apps:[],chatHistory:[]}`，字段与原表对应。
+2. 所有 ID 使用十进制字符串。日期使用 `YYYY-MM-DD HH:mm:ss`。可空字段明确使用 null。
+3. 执行 `npm run db:import -- runtime/import/snapshot.json`。引用、日期、ID、账号冲突或字段无效时，导入整体失败，不覆盖目标记录。原 ID 与本节点发号下界同事务提交，成功后再恢复平台写入。
+4. 如需预览旧产物，明确复制到本目录的 `runtime/code_output/{类型}_{ID}/`。发布副本复制到 `runtime/deploy/{deployKey}/`。保留旧六字符发布键或新 UUID，禁止将旧目录软链接到新运行目录。
+
+旧密码摘要只在新库登录成功后升级为 scrypt。旧库和旧 Spring 会话保持原样，用户在新应用重新登录。
+
+## 查阅实现与限制
+
+[接口与模块契约](docs/implementation-contract.md) 描述权限、消息及任务状态。[迁移差异](docs/migration-contracts.md) 说明原路径和有意变更。[产物与隔离限制](docs/artifacts.md) 记录构建依赖、预览与本地封面行为。[决策与验收记录](docs/migrations/ts-unified/decisions.tsv) 保存实施证据。
+
+本次保留 HTML、多文件和 Vue 工程生成模式及八个页面 URL。样式使用集中式 CSS，未采用计划中提出的 CSS Modules。关键桌面和移动流程经过浏览器验证，未做逐像素对比验收。
+
+原 Java、Vue、Maven、SQL 与根目录配置保持原样。本次不删除旧入口、不切换旧服务、不提交或推送。真实模型配置由本地 `.env` 提供。本轮已观察到真实模型思考和工具调用，尚未完成生成到预览的全流程验收。外部 COS 对象存储缺少凭据，仍未验证。封面当前存储在本目录的 `runtime/covers/`。

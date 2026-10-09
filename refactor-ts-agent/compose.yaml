@@ -1,0 +1,33 @@
+name: paimeng-ts-refactor
+services:
+  mysql:
+    container_name: paimeng-ts-refactor-mysql-1
+    image: mysql:8.0.46
+    restart: unless-stopped
+    ports: ["127.0.0.1:3306:3306"]
+    environment:
+      MYSQL_DATABASE: paimeng_ai_code_mother_ts
+      MYSQL_USER: paimeng_ts
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+    volumes: ["./runtime/mysql:/var/lib/mysql"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  redis:
+    container_name: paimeng-ts-refactor-redis-1
+    image: redis:8-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+    restart: unless-stopped
+    ports: ["127.0.0.1:6381:6379"]
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--protected-mode", "no"]
+    volumes: ["redis-data:/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+volumes:
+  redis-data:
+    name: paimeng-ts-refactor-redis-data

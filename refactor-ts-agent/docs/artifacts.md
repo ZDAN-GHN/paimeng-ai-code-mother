@@ -1,0 +1,76 @@
+# 产物、构建与预览限制
+
+## 文件工作目录
+
+文件工具由 `src/server/workspace.ts` 提供。应用目录固定为 `runtime/code_output/{codeGenType}_{appId}/`，类型限于 `html`、`multi_file` 和 `vue_project`。应用 ID 由服务端绑定，模型不能选择其他应用目录。
+
+源文件限制为单文件 256 KiB、总计 16 MiB、最多 256 个文件。写入前计算替换后的总大小及数量，超限时保留原文件。写入通过专用临时文件与重命名完成。
+
+路径拒绝绝对路径、目录遍历、反斜杠、空字节、超过 20 层的目录，以及 `.env*`、`.paimeng-*`、`node_modules`、`dist`、`.git`、`.next`、`.nuxt`、`.cache`、`.npmrc`、`.yarnrc`、`.yarnrc.yml` 和 `.ssh`。工具拒绝符号链接及特殊文件。运行目录属于新应用，不共享旧项目的可写目录。
+
+应用生成、源码工具、构建、下载、发布与删除使用数据库中的应用写入锁及任务租约。旧任务失去租约后不能继续写入。文件安全假设运行目录不被另一个具有宿主文件权限的进程恶意修改。它不是用于抵御已获得宿主账号权限的攻击者的隔离机制。
+
+## Vue 构建依赖
+
+`BUILD_DEPENDENCIES` 在 `src/server/artifacts.ts` 中固定允许依赖和版本。生成工程只能使用以下版本。
+
+- `vue` 使用 `3.5.17`。
+- `vite` 使用 `7.0.0`。
+- `@vitejs/plugin-vue` 使用 `6.0.0`。
+- `vue-router` 使用 `4.5.1`。
+- `pinia` 使用 `3.0.3`。
+- `axios` 使用 `1.11.0`。
+- `ant-design-vue` 使用 `4.2.6`。
+- `typescript` 使用 `5.9.3`。
+- `vue-tsc` 使用 `2.2.10`。
+- `@types/node` 使用 `22.15.32`。
+
+Vue、Vite 和 Vue 插件必需。外部 tarball、Git 依赖、文件依赖、版本范围及其他依赖均拒绝。顶层版本固定，传递依赖由 npm 解析，当前没有保留生成工程的可复现依赖锁或离线依赖缓存。
+
+## 两阶段容器构建
+
+依赖安装阶段只能看到服务端重建的 `package.json`。该文件只包含批准的依赖，不包含生成的生命周期脚本、npm 配置或可执行源码。容器联网执行 `npm install --ignore-scripts`，以下载依赖。
+
+安装完成后，服务端复制已校验的源码，忽略源工程的 `package.json` 和 `package-lock.json`。第二个容器使用 `--network=none`，直接执行 Vite CLI。生成的 Vite 配置在这个断网容器中运行。生成工程的 `npm run build` 脚本不执行。
+
+两个阶段都使用非 root 用户、只读根文件系统、全部移除的 Linux capabilities、`no-new-privileges`、128 个进程上限、768 MiB 内存上限、一个 CPU，以及 256 MiB 的临时文件系统。每阶段最长 180 秒。容器只挂载独立临时构建目录，不挂载平台源码、数据库文件、Docker socket 或 `.env`。平台数据库和模型环境变量不传入容器。
+
+构建取消或超时会停止命令并清理容器和临时目录。Docker 守护进程由平台宿主访问，生成代码无法访问其 socket。该边界仍依赖宿主 Docker 和内核安全，不代表无漏洞的通用多租户沙箱。
+
+HTML 和多文件类型不执行容器构建。它们必须提供包含 HTML 标签的 `index.html`，浏览器脚本只在隔离预览来源执行。
+
+## 构建与发布产物
+
+Vue 构建输出必须包含普通文件 `dist/index.html`。输出复制拒绝符号链接及敏感路径，限制单文件 20 MiB、总计 64 MiB、最多 1024 个文件。构建成功后通过临时目录替换当前 `dist/`，失败不替换已存在的成功产物。
+
+发布通过独立 UUID 目录和重命名完成，不覆盖旧发布目录。兼容读取旧 Java 使用的六位字母数字发布键。发布内容位于 `runtime/deploy/{deployKey}/`。
+
+ZIP 下载包含经过路径校验的真实源文件，不包含 `dist/`、`node_modules/` 或环境文件。文件名使用应用 ID。下载及发布仅允许创建者，管理员不能代替其他用户执行这两项操作。
+
+## 独立预览服务
+
+`src/server/preview.ts` 创建 HTTP 服务，`scripts/preview.ts` 负责在配置的回环地址启动它。该服务不提供管理 API，也不授予管理端 Cookie 或跨域凭据权限。
+
+- `/preview/{类型}_{ID}/` 提供生成源码或 Vue 的 `dist/`。
+- `/deploy/{deployKey}/` 提供已发布副本。
+- `/covers/{deployKey}.png` 提供本地封面。
+
+服务仅接受 GET 和 HEAD，以及配置的 Host。它拒绝路径遍历、符号链接、隐藏文件和特殊文件。无扩展名路径可以使用 SPA 回退。响应包含 MIME 限制、`no-store` 和内容安全策略，约束连接、工作线程、表单、对象与父级嵌入来源。
+
+预览使用不同主机名，以隔离管理端 Cookie。iframe 的可视化编辑消息同时验证来源和发送窗口。预览桥接只接受指定的编辑命令，向管理端返回选中元素的选择器、标签和文本。
+
+预览和发布内容在本地服务中是公开可读的。来源隔离不等于私人文件授权。当前本地 HTTP 模式不适合直接对公网开放，公网运行需要另行设计 HTTPS、域名、资源访问控制和部署配置。
+
+## 本地封面
+
+`captureCover` 只接受有效发布键，不接受任意 URL。Chromium 启用浏览器沙箱，禁用 service worker，并拦截目标发布路径以外的请求。截图先写入临时 PNG，再重命名到 `runtime/covers/{deployKey}.png`。
+
+截图失败不会撤销已经完成的发布，服务端记录失败并保留原封面。封面目前存储在本地，未配置 COS 上传，也未验证外部对象存储。
+
+## 已执行的验证
+
+`tests/workspace.test.ts` 验证真实路径、符号链接、单文件大小、总字节与文件数上限。`tests/artifacts.test.ts` 使用真实 Docker 构建，验证生成的安装和构建脚本不执行、平台环境变量不可见，以及执行配置时不存在非回环网络接口。
+
+`tests/preview.test.ts` 使用真实 HTTP 和 Chromium，验证请求边界、旧六字符发布键、PNG 文件头及封面访问。浏览器场景验证 HTML、多文件 JavaScript 交互、Vue 构建预览、元素选择、下载与发布。
+
+这些测试证明列出的行为，不替代内核、Docker、Chromium 或 npm 供应链的独立安全审计。
