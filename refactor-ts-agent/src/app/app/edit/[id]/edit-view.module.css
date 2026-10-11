@@ -1,0 +1,9 @@
+.editPage{padding:24px;max-width:1000px;margin:0 auto}
+.pageHeader{display:flex;align-items:center;gap:12px;margin-bottom:24px}
+.pageHeader h1{margin:0;font-size:24px;font-weight:600}
+.editContainer{border-radius:8px}
+.coverPreview{margin-top:12px;padding:12px;border:1px solid #e8e8e8;border-radius:6px;background:#fafafa}
+.formTip{font-size:12px;color:#999;margin-top:4px}
+.infoCard{margin-top:24px}
+.editPage :global(.ant-card-head){background:#fafafa}
+.editPage :global(.ant-descriptions-item-label){background:#fafafa;font-weight:500}

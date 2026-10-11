@@ -6,7 +6,7 @@ import { eq } from 'drizzle-orm';
 import type { UIMessage } from 'ai';
 import { db, getPool, now } from '@/server/db';
 import { nextSnowflakeId } from '@/server/snowflake';
-import { users, apps, histories, messages, leases, generations } from '@/server/schema';
+import { users, apps, histories, messages, leases, generations, rateLimits } from '@/server/schema';
 import { publicUser } from '@/server/auth';
 import { beginGeneration, finishGeneration, generationFor, heartbeat, loadMessages, saveMessage, setGeneration, withAppWriter } from '@/server/generation-store';
 import { deleteApp, getApp, listApps, listHistory, updateApp, download, publish } from '@/server/business';
@@ -21,6 +21,9 @@ const assistant = (id: string): UIMessage => ({
   id: `${id}-assistant`, role: 'assistant', metadata: { complete: true },
   parts: [{ type: 'step-start' }, { type: 'reasoning', text: '完整推理', state: 'done' }, { type: 'tool-writeFiles', toolCallId: 'call-1', input: { files: [] }, output: { written: ['index.html'] }, state: 'output-available' }, { type: 'text', text: '最后一段\n已完成。', state: 'done' }],
 });
+
+// The rate limit window lives outside the generation rows, so tests must clear it explicitly.
+async function clearRateLimit() { await db().delete(rateLimits).where(eq(rateLimits.limitKey, 'user:' + actor.id)); }
 
 describe('后端关键不变量（独立 MySQL 测试库）', () => {
   beforeAll(async () => {
@@ -37,8 +40,7 @@ describe('后端关键不变量（独立 MySQL 测试库）', () => {
   afterEach(async () => {
     for (const table of [leases, generations, messages, histories]) await db().delete(table).where(eq(table.appId, BigInt(appId)));
     await db().delete(apps).where(eq(apps.id, BigInt(appId)));
-    // Keep rate limiting independent between these literal behavior tests.
-    await db().delete(generations).where(eq(generations.userId, BigInt(actor.id)));
+    await clearRateLimit();
   });
   afterAll(async () => { await db().delete(users).where(eq(users.id, BigInt(actor.id))); await getPool().end(); });
 
@@ -53,6 +55,7 @@ describe('后端关键不变量（独立 MySQL 测试库）', () => {
     const rows = await db().select().from(histories).where(eq(histories.appId, BigInt(appId)));
     expect(rows.map(row => row.messageType)).toEqual(['user', 'ai']);
     expect(rows[1].message).toContain('最后一段\n已完成。');
+    await clearRateLimit();
     const next = randomUUID();
     expect(await beginGeneration(appId, next, actor, input(next))).toEqual([input(id), assistant(id)]);
     await finishGeneration(id, 'failed', '重复回调', assistant(id));
@@ -97,6 +100,7 @@ describe('后端关键不变量（独立 MySQL 测试库）', () => {
     await expect(heartbeat(old)).rejects.toMatchObject({ status: 409 });
     expect(await generationFor(appId)).toMatchObject({ status: 'cancelled' });
     expect(await db().select().from(leases).where(eq(leases.appId, BigInt(appId)))).toEqual([]);
+    await clearRateLimit();
     const next = randomUUID();
     await beginGeneration(appId, next, actor, input(next));
     let writes = 0;
@@ -106,6 +110,32 @@ describe('后端关键不变量（独立 MySQL 测试库）', () => {
     expect(writes).toBe(0);
     expect(await loadMessages(appId)).toEqual([input(old), input(next)]);
     expect(await db().select().from(leases).where(eq(leases.appId, BigInt(appId)))).toMatchObject([{ generationId: next }]);
+  });
+
+  it('同一用户 60 秒内跨应用只允许一次生成，窗口过期后允许下一次', async () => {
+    const secondId = await nextSnowflakeId();
+    const thirdId = await nextSnowflakeId();
+    for (const id of [secondId, thirdId]) await db().insert(apps).values({ id, initPrompt: '跨应用限流', codeGenType: 'html', userId: BigInt(actor.id), createTime: now(), updateTime: now() });
+    const secondApp = secondId.toString(); const thirdApp = thirdId.toString();
+    try {
+      // The shared rate limit row makes the per-user check atomic across different apps.
+      const results = await Promise.allSettled([
+        beginGeneration(secondApp, randomUUID(), actor, input(randomUUID())),
+        beginGeneration(thirdApp, randomUUID(), actor, input(randomUUID())),
+      ]);
+      expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+      const rows = await db().select().from(generations).where(eq(generations.userId, BigInt(actor.id)));
+      expect(rows).toHaveLength(1);
+      await expect(beginGeneration(appId, randomUUID(), actor, input(randomUUID()))).rejects.toMatchObject({ status: 429 });
+      await clearRateLimit();
+      const next = randomUUID();
+      await expect(beginGeneration(appId, next, actor, input(next))).resolves.toBeDefined();
+    } finally {
+      for (const id of [secondApp, thirdApp]) {
+        for (const table of [leases, generations, messages, histories]) await db().delete(table).where(eq(table.appId, BigInt(id)));
+        await db().delete(apps).where(eq(apps.id, BigInt(id)));
+      }
+    }
   });
 
   it('终止为 failed 的任务不能被后续 ready 覆盖', async () => {

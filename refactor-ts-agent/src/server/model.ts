@@ -1,11 +1,28 @@
 import 'server-only';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { generateText, Output } from 'ai';
+import { z } from 'zod';
 import { getConfig } from './config';
-import type { CodeGenType } from '@/shared/contracts';
+import { codeGenTypes, type CodeGenType } from '@/shared/contracts';
 import { BusinessError } from './http';
 export async function modelFor(type:CodeGenType,prompt:string){
  const config=getConfig();
  if(config.aiMode==='fixture'){const {fixtureModel}=await import('./fixture-model');return fixtureModel(type,prompt);}
  if(!config.aiApiKey||!config.aiModel)throw new BusinessError(503,50300,'请配置 AI_API_KEY 和 AI_MODEL 后再生成');
  return createOpenAICompatible({name:'configured',baseURL:config.aiBaseUrl,apiKey:config.aiApiKey}).chatModel(config.aiModel);
+}
+
+export async function routeCodeGenType(prompt: string): Promise<CodeGenType> {
+ if (getConfig().aiMode === 'fixture') {
+  // Deterministic routing is confined to the explicitly configured test model.
+  return /商城|管理|登录|购物|评论|vue|复杂交互/i.test(prompt) ? 'vue_project' : /多页面|多个页面|多文件|分离.*css/i.test(prompt) ? 'multi_file' : 'html';
+ }
+ const result = await generateText({
+  model: await modelFor('html', prompt),
+  output: Output.object({ schema: z.object({ codeGenType: z.enum(codeGenTypes) }) }),
+  system: '你是代码生成方案路由器。简单静态展示页面选择 html（单 HTML，内联 CSS/JS）；多个页面但没有复杂交互选择 multi_file（分离 HTML/CSS/JS）；复杂多页面、交互或数据管理选择 vue_project。根据用户需求选择最合适的类型。只返回 JSON 对象，字段必须为 codeGenType，其值只能是 html、multi_file 或 vue_project。例如 {"codeGenType":"html"}。不要返回其他字段或解释。',
+  prompt,
+  abortSignal: AbortSignal.timeout(60000),
+ });
+ return result.output.codeGenType;
 }

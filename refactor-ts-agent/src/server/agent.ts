@@ -8,12 +8,15 @@ import { buildApp } from './artifacts';
 import { readProjectFile, writeProjectFile, listProjectFiles, modifyProjectFile, deleteProjectFile } from './workspace';
 import { beginGeneration, heartbeat, saveMessage, setGeneration, finishGeneration, generationFor, withAppWriter } from './generation-store';
 import { BusinessError } from './http';
+import { validatePrompt } from './prompt-safety';
+import { clientIp } from './rate-limit';
+import { BUILD_DEPENDENCIES } from './build-contract';
 
 const controllers = new Map<string, AbortController>();
 const inputSchema = z.object({
   appId: idSchema,
   requestId: z.uuid(),
-  message: z.object({ id: z.string().min(1).max(64), role: z.literal('user'), parts: z.array(z.object({ type: z.literal('text'), text: z.string().min(1).max(16000) }).strict()).min(1).max(8) }).strict(),
+  message: z.object({ id: z.string().min(1).max(64), role: z.literal('user'), parts: z.array(z.object({ type: z.literal('text'), text: z.string().min(1).max(1000) }).strict()).min(1).max(8) }).strict(),
 }).strict();
 
 export async function cancelGeneration(appId: string, user: User) {
@@ -30,8 +33,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
   const input = inputSchema.parse(raw);
   const app = await getApp(input.appId, user, true);
   const prompt = input.message.parts.map(p => p.text).join('\n');
-  if (!prompt.trim()) throw new BusinessError(400, 40000, '消息不能为空');
-  if (prompt.length > 16000) throw new BusinessError(400, 40000, '消息过长');
+  validatePrompt(prompt);
   const model = await modelFor(app.codeGenType, prompt);
   const incoming: UIMessage = { ...input.message, id: `${input.requestId}-user` };
   const controller = new AbortController();
@@ -50,15 +52,15 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
     modifyFile: tool({ description: '通过唯一精确匹配修改文件', inputSchema: z.object({ path: z.string(), oldText: z.string().min(1), newText: z.string() }), execute: async ({ path, oldText, newText }) => write(async () => { await modifyProjectFile(app, path, oldText, newText); changed = true; return { modified: path }; }) }),
     deleteFile: tool({ description: '删除当前应用单个文件，不允许删除目录', inputSchema: z.object({ path: z.string() }), execute: async ({ path }) => write(async () => { await deleteProjectFile(app, path); changed = true; return { deleted: path }; }) }),
   };
-  const agent = new ToolLoopAgent({ model, tools, stopWhen: isStepCount(30), instructions: `你是应用生成 Agent。当前应用类型 ${app.codeGenType}。所有读写必须使用工具，禁止仅输出代码而不写入文件。只能修改当前应用。禁止写密钥或 .env。HTML 与多文件应用必须有 index.html。Vue 工程必须使用 Vue、Vite，base './'，package.json 依赖只能使用允许的版本，禁止安装脚本和任意 shell。完成后简短说明改动。初始化需求 ${app.initPrompt}` });
+  const agent = new ToolLoopAgent({ model, tools, stopWhen: isStepCount(30), instructions: `你是应用生成 Agent。当前应用类型 ${app.codeGenType}。所有读写必须使用工具，禁止仅输出代码而不写入文件。只能修改当前应用。禁止写密钥或 .env。HTML 与多文件应用必须有 index.html。Vue 工程必须使用 Vue、Vite，base './'，必须包含 package.json、index.html、vite.config.js 和 src/main.js。package.json 必须包含 Vue、Vite 和 Vue 插件，依赖只允许以下精确版本，禁止 ^、~、latest ${JSON.stringify(BUILD_DEPENDENCIES)}。禁止安装脚本和任意 shell。工具返回错误时根据错误修正并重试。文件保存完成后服务端会自动构建 Vue 工程并提供 dist/index.html 预览，无需调用 shell。完成后简短说明改动。初始化需求 ${app.initPrompt}` });
   let validated: UIMessage[];
   let acquired = false;
   try {
     check();
-    const history = await beginGeneration(app.id, input.requestId, user, incoming);
+    const history = await beginGeneration(app.id, input.requestId, user, incoming, clientIp(req.headers));
     acquired = true;
     check();
-    validated = await validateUIMessages({ messages: [...history, incoming], tools });
+    validated = await validateUIMessages({ messages: [...history.slice(-19), incoming], tools });
   } catch (error) {
     req.signal.removeEventListener('abort', abortRequest);
     if (acquired) await finishGeneration(input.requestId, controller.signal.aborted ? 'cancelled' : 'failed', '生成初始化失败');
@@ -87,7 +89,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
           onEnd: event => { responseMessage = event.responseMessage; },
           onError: failure => { streamError = failure; return '模型响应失败'; },
           execute: ({ writer: modelWriter }) => {
-            modelWriter.merge(result.toUIMessageStream({ sendReasoning: true, onError: failure => { streamError = failure; return '模型响应失败'; } }));
+            modelWriter.merge(result.toUIMessageStream({ sendReasoning: true, onError: failure => failure instanceof Error ? failure.message.slice(0, 1000) : '工具或模型响应失败' }));
           },
         });
         // Read the UI stream itself, rather than racing writer.merge against a
@@ -97,6 +99,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
           while (true) {
             const chunk = await reader.read();
             if (chunk.done) break;
+            if (chunk.value.type === 'error' && !streamError) streamError = new Error(chunk.value.errorText);
             writer.write(chunk.value);
           }
         } finally { reader.releaseLock(); }

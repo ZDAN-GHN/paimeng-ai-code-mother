@@ -27,6 +27,7 @@ JSON 成功响应为 `{code:0,data,message:"ok"}`。失败返回业务错误码�
 ## 应用 API 与权限
 
 - POST `/api/app/add` 接收 `{initPrompt,codeGenType?}`，返回应用 ID。
+- 首页只传初始需求；未指定类型时同步调用模型路由，简单展示、多文件静态页面、复杂交互分别选择 HTML、多文件、Vue 工程。显式类型仍供 API 和测试使用。初始需求上限为 1000 字。
 - GET `/api/app/get/vo?id=` 返回公开应用信息。
 - POST `/api/app/my/list/page/vo` 返回当前用户的应用分页。POST `/api/app/good/list/page/vo` 返回优先级至少 99 的精选应用。
 - POST `/api/app/update` 接收 `{id,appName}`，只允许创建者修改名称。
@@ -34,7 +35,9 @@ JSON 成功响应为 `{code:0,data,message:"ok"}`。失败返回业务错误码�
 - POST `/api/app/deploy` 接收 `{appId}`，GET `/api/app/download/{appId}` 返回 ZIP。这两项只允许创建者。
 - 管理员使用 `/api/app/admin/list/page/vo`、`/api/app/admin/get/vo?id=`、`/api/app/admin/update` 和 `/api/app/admin/delete`。
 
-管理员更新可修改名称、封面及优先级。管理员可读取应用消息和任务状态，不能为其他创建者生成、取消、下载或发布。应用编辑页只对创建者开放，其他应用通过管理页处理。
+管理员更新可修改名称、封面及优先级。管理员可读取应用消息和任务状态，不能为其他创建者生成、取消、下载或发布。应用编辑页允许创建者或管理员进入，管理员保存调用管理接口。普通及管理员更新均记录 `editTime`，与 `updateTime` 分开保留。
+
+应用查询支持名称、封面、初始提示词、发布密钥、生成类型、优先级及归属筛选。排序字段来自显式合法列名单，包括部署时间、编辑时间及用户 ID；历史分页遵从合法排序字段与方向，不接受任意 SQL 字符串。
 
 ## Agent 消息与任务
 
@@ -48,11 +51,16 @@ POST `/api/app/chat/gen/code` 接收 `{appId,message:UIMessage,requestId:UUID}`�
 
 消息、任务及应用历史要求创建者或管理员权限。生成与取消只允许创建者。
 
-任务状态包括 `generating`、`building`、`ready`、`failed` 和 `cancelled`。每个应用只有一个活动任务。同一个请求 UUID 不重复执行。每个用户十分钟内最多提交十次生成请求。
+任务状态包括 `generating`、`building`、`ready`、`failed` 和 `cancelled`。每个应用只有一个活动任务。同一个请求 UUID 不重复执行。生成限流默认按用户每 60 秒 1 次，跨应用共享，可用 `CHAT_RATE_LIMIT_TYPE`（`API`/`USER`/`IP`）、`CHAT_RATE_LIMIT_RATE`、`CHAT_RATE_LIMIT_INTERVAL`、`CHAT_RATE_LIMIT_MESSAGE` 覆盖。计数保存在 `ts_rate_limit`，与任务创建在同一事务内，位置在重复请求与租约检查之后，锁顺序为 users → apps → ts_rate_limit。
+
+`IP` 类型沿用旧版转发头信任模型，要求可信前置代理覆盖 `X-Forwarded-For`/`X-Real-IP` 并阻止直连；无这两个头时直连请求共用 `ip:unknown`。超限请求随事务回滚，不消耗次数。
+生成输入沿用旧版护轨：总文本不超过 1000 字、不能为空，并拒绝原敏感词和注入模式。可视化定位上下文包含在这个总长度内。模型读取服务端权威历史，当前请求在内最多二十条 UI 消息；完整工具消息及全部历史仍持久保存，供页面恢复和查询。
 
 完整助手消息、终态与租约释放在一个事务中完成。取消请求会中止模型与构建，清理完成前保留租约。超时标记失败，失去租约的旧进程不能覆盖新任务。服务重启后，已完成历史直接恢复，异常中断的活动租约到期后由状态读取或下一次提交回收。
 
-React 聊天页使用 AI SDK POST 流式协议。页面加载只展示初始化需求，不自动提交生成。刷新后加载服务端完整历史，工具结果保留。生成 ready 后重新读取应用信息，使用其 `previewUrl`。
+React 聊天页使用 AI SDK POST 流式协议。创建者首次进入空历史、无任务的新应用时自动提交初始需求一次；已存在任务、历史或历史加载失败时不会自动提交。刷新后加载服务端完整历史，工具结果保留。公开应用信息独立于私有历史和任务请求加载。
+
+`previewUrl` 根据实际 HTML 或 Vue 构建入口是否有效判断，不以最新任务的 ready 状态为门槛。旧应用及下一轮失败、取消后仍有效的既有产物可继续预览；生成、发布和下载之间仍受写入租约保护。`sourceAvailable` 独立表示可下载源码；Vue 每次发布都在写锁内重新构建当前源码，构建失败时保留旧预览并拒绝此次发布。
 
 ## 文件与产物模块
 

@@ -1,0 +1,3 @@
+CREATE TABLE IF NOT EXISTS ts_rate_limit (
+ limitKey VARCHAR(191) NOT NULL PRIMARY KEY, windowStart DATETIME(3) NOT NULL, hits INT NOT NULL
+) COLLATE=utf8mb4_unicode_ci;

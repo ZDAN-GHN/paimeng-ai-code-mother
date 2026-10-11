@@ -51,6 +51,19 @@ describe('真实预览 HTTP 边界', () => {
     expect((await rawGet(`/deploy/${key}/`, undefined, 'POST')).status).toBe(405);
     expect((await rawGet(`/deploy/${key}/`, { host: 'localhost:3000' })).status).toBe(403);
   });
+  it('编辑桥接用类标记悬浮和选中，上报 id/class/pagePath 且不改写内联样式', async () => {
+    const response = await rawGet(`/preview/html_${app.id}/`);
+    expect(response.body).toContain('paimeng-edit-hover');
+    expect(response.body).toContain('paimeng-edit-selected');
+    expect(response.body).toContain('classList.add');
+    expect(response.body).toContain('classList.remove');
+    expect(response.body).toContain('pagePath:location.pathname');
+    expect(response.body).toContain('id:element.id');
+    expect(response.body).toContain("className:");
+    expect(response.body).toContain('CLEAR_ALL_EFFECTS');
+    expect(response.body).not.toContain('style.outline');
+    expect(response.body).not.toContain("removeProperty('outline')");
+  });
   it('拒绝穿越、隐藏文件与软链接，保留 6 字符旧发布键', async () => {
     expect(deployedUrl('ABC123')).toContain('/deploy/ABC123/');
     expect((await rawGet('/deploy/ABC123/')).body).toContain('旧发布键');

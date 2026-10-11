@@ -3,10 +3,11 @@ import { loadEnvFile } from 'node:process';
 import { testDatabaseUrl } from '../test-database-url';
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
-import type { LanguageModelV4Prompt } from '@ai-sdk/provider';
+import type { LanguageModelV4Prompt, LanguageModelV4StreamPart } from '@ai-sdk/provider';
+import type { UIMessage } from 'ai';
 import { db, getPool, now } from '@/server/db';
 import { nextSnowflakeId } from '@/server/snowflake';
-import { users, apps, histories, messages, leases, generations } from '@/server/schema';
+import { users, apps, histories, messages, leases, generations, rateLimits } from '@/server/schema';
 import { publicUser } from '@/server/auth';
 import { generationFor, loadMessages } from '@/server/generation-store';
 import { chatResponse, cancelGeneration } from '@/server/agent';
@@ -16,6 +17,9 @@ const control = vi.hoisted(() => ({
   finish: null as null | { entered: () => void; release: Promise<void> },
   build: null as null | ((signal: AbortSignal) => Promise<void>),
   writes: 0,
+  toolFailure: false,
+  fatalFailure: false,
+  builds: 0,
   prompts: [] as LanguageModelV4Prompt[],
 }));
 vi.mock('@/server/generation-store', async importOriginal => {
@@ -26,9 +30,9 @@ vi.mock('@/server/generation-store', async importOriginal => {
   } };
 });
 vi.mock('@/server/artifacts', () => ({
-  buildApp: async (_app: unknown, signal: AbortSignal) => { if (control.build) await control.build(signal); },
+  buildApp: async (_app: unknown, signal: AbortSignal) => { control.builds++; if (control.build) await control.build(signal); },
   workspace: () => '/nonexistent-ts-backend-test-workspace', previewUrl: () => 'http://127.0.0.1:3001/preview/test/',
-  deployedUrl: () => 'http://127.0.0.1:3001/deploy/test/', deployApp: vi.fn(), captureCover: vi.fn(), downloadApp: vi.fn(),
+  deployedUrl: () => 'http://127.0.0.1:3001/deploy/test/', deployApp: vi.fn(), captureCover: vi.fn(), downloadApp: vi.fn(), hasPreview: async () => true,
 }));
 vi.mock('@/server/workspace', () => ({
   readProjectFile: async () => 'file', listProjectFiles: async () => ['index.html'],
@@ -36,9 +40,21 @@ vi.mock('@/server/workspace', () => ({
 }));
 vi.mock('@/server/model', async () => {
   const { fixtureModel } = await import('@/server/fixture-model');
-  return { modelFor: async (...args: Parameters<typeof fixtureModel>) => {
+  const { MockLanguageModelV4, simulateReadableStream } = await import('ai/test');
+  return { routeCodeGenType: async () => 'html' as const, modelFor: async (...args: Parameters<typeof fixtureModel>) => {
     const model = fixtureModel(...args); const stream = model.doStream.bind(model);
-    model.doStream = async options => { control.prompts.push(options.prompt); return stream(options); };
+    let first = true;
+    model.doStream = async options => {
+      control.prompts.push(options.prompt);
+      if (first && (control.toolFailure || control.fatalFailure)) {
+        first = false;
+        const failure = new MockLanguageModelV4({ doStream: async () => ({ stream: simulateReadableStream<LanguageModelV4StreamPart>({ chunks: control.fatalFailure
+          ? [{ type: 'stream-start', warnings: [] }, { type: 'error', error: new Error('测试模型连接断开') }]
+          : [{ type: 'stream-start', warnings: [] }, { type: 'tool-call', toolCallId: 'invalid-write', toolName: 'writeFiles', input: '{"files":' }, { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage: { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } } }] }) }) });
+        return failure.doStream(options);
+      }
+      return stream(options);
+    };
     return model;
   } };
 });
@@ -64,7 +80,7 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
     actor = publicUser(row);
   });
   beforeEach(async () => {
-    control.finish = null; control.build = null; control.writes = 0; control.prompts = [];
+    control.finish = null; control.build = null; control.writes = 0; control.prompts = []; control.toolFailure = false; control.fatalFailure = false; control.builds = 0;
     const id = await nextSnowflakeId();
     await db().insert(apps).values({ id, initPrompt: '服务器可信需求', codeGenType: 'html', userId: BigInt(actor.id), createTime: now(), updateTime: now() });
     appId = id.toString();
@@ -73,8 +89,35 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
     vi.restoreAllMocks();
     for (const table of [leases, generations, messages, histories]) await db().delete(table).where(eq(table.appId, BigInt(appId)));
     await db().delete(apps).where(eq(apps.id, BigInt(appId)));
+    // Keep the per-user 60 second generation window independent between tests.
+    await db().delete(rateLimits).where(eq(rateLimits.limitKey, 'user:' + actor.id));
   });
   afterAll(async () => { await db().delete(users).where(eq(users.id, BigInt(actor.id))); await getPool().end(); });
+
+  it('工具参数错误被模型重试修复后仍构建并完成，不向客户端发送整次失败', async () => {
+    control.toolFailure = true;
+    const id = randomUUID();
+    const body = await (await chatResponse(request(), payload(id), actor)).text();
+    await cleaned(id, 'ready');
+    expect(control.builds).toBe(1);
+    expect(control.writes).toBe(1);
+    expect(body).toContain('tool-input-error');
+    expect(body).not.toContain('"type":"error"');
+    const stored = await loadMessages(appId);
+    expect(stored[1].parts).toContainEqual(expect.objectContaining({ type: 'tool-writeFiles', state: 'output-error' }));
+    expect(stored[1].parts).toContainEqual(expect.objectContaining({ type: 'tool-writeFiles', state: 'output-available' }));
+    expect(stored[1].parts).toContainEqual({ type: 'text', text: finalText, state: 'done' });
+  });
+
+  it('模型流真正失败仍落库为 failed，并跳过构建', async () => {
+    control.fatalFailure = true;
+    const id = randomUUID();
+    const body = await (await chatResponse(request(), payload(id), actor)).text();
+    await cleaned(id, 'failed');
+    expect(control.builds).toBe(0);
+    expect(body).toContain('"type":"error"');
+    expect(await generationFor(appId)).toMatchObject({ error: '测试模型连接断开' });
+  });
 
   it('没有客户端消费也完成工具消息，最终持久化完成前下一任务仍被拒绝；下一轮模型获得完整权威历史', async () => {
     const entered = Promise.withResolvers<void>(); const release = Promise.withResolvers<void>();
@@ -94,6 +137,8 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
     expect(stored[1].id).toBe(`${id}-assistant`);
     expect(stored[1].parts).toContainEqual({ type: 'text', text: finalText, state: 'done' });
     expect(stored[1].parts).toContainEqual(expect.objectContaining({ type: 'tool-writeFiles', state: 'output-available', output: { written: ['index.html'] } }));
+    // The second round for the same user must fall outside the 60 second window.
+    await db().delete(rateLimits).where(eq(rateLimits.limitKey, 'user:' + actor.id));
     const next = randomUUID();
     await (await chatResponse(request(), payload(next), actor)).text();
     expect(await loadMessages(appId)).toHaveLength(4);
@@ -153,5 +198,41 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
     await entered.promise; expect(fireTimeout).toBeTypeOf('function'); fireTimeout!();
     await response.text(); await cleaned(id, 'failed');
     expect(await generationFor(appId)).toMatchObject({ error: '生成超时' });
+  });
+
+  it('模型上下文最多携带二十条消息，权威历史与工具上下文完整保存', async () => {
+    const history: UIMessage[] = [];
+    for (let index = 0; index < 24; index++) {
+      if (index === 23) history.push({
+        id: `hist-${index}`, role: 'assistant', metadata: { complete: true },
+        parts: [
+          { type: 'step-start' },
+          { type: 'tool-writeFiles', toolCallId: 'hist-tool-1', input: { files: [{ path: 'index.html', content: '<!doctype html><html><body>历史工具产物</body></html>' }] }, output: { written: ['index.html'] }, state: 'output-available' },
+          { type: 'text', text: `历史助手消息 [${index}]`, state: 'done' },
+        ],
+      });
+      else if (index % 2 === 0) history.push({ id: `hist-${index}`, role: 'user', parts: [{ type: 'text', text: `历史用户消息 [${index}]` }] });
+      else history.push({ id: `hist-${index}`, role: 'assistant', metadata: { complete: true }, parts: [{ type: 'step-start' }, { type: 'text', text: `历史助手消息 [${index}]`, state: 'done' }] });
+    }
+    for (const message of history) await db().insert(messages).values({ id: message.id, appId: BigInt(appId), body: message, createTime: now() });
+
+    const id = randomUUID();
+    await (await chatResponse(request(), payload(id), actor)).text();
+    await cleaned(id, 'ready');
+
+    const firstPrompt = JSON.stringify(control.prompts[0]);
+    expect(firstPrompt).not.toContain('历史用户消息 [0]');
+    expect(firstPrompt).not.toContain('历史助手消息 [1]');
+    expect(firstPrompt).not.toContain('历史用户消息 [4]');
+    expect(firstPrompt).toContain('历史助手消息 [5]');
+    expect(firstPrompt).toContain('历史助手消息 [23]');
+
+    const stored = await loadMessages(appId);
+    expect(stored).toHaveLength(26);
+    expect(stored.map(message => message.id).slice(0, 24)).toEqual(history.map(message => message.id));
+    expect(stored.some(message => message.parts.some(part => part.type === 'tool-writeFiles'))).toBe(true);
+    expect(stored[stored.length - 1].parts).toContainEqual(expect.objectContaining({ type: 'tool-writeFiles', state: 'output-available' }));
+    const rows = await db().select().from(histories).where(eq(histories.appId, BigInt(appId)));
+    expect(rows.map(row => row.messageType)).toEqual(['user', 'ai']);
   });
 });

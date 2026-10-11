@@ -13,16 +13,18 @@
 5. 执行 `npm run db:migrate`。迁移完成后显示“独立 TS 数据库迁移完成”。重复执行会核对已有迁移的校验和。
 6. 执行 `docker pull node:24-alpine`。Vue 生成工程使用该镜像进行隔离构建。
 7. 执行 `npx playwright install chromium`。发布封面截图和浏览器测试都需要 Chromium。若系统缺少浏览器依赖，按 Playwright 的报错安装系统依赖。
-8. 在一个终端执行 `npm run preview`，在另一个终端执行 `npm run dev`。
+8. 执行 `npm run dev:all` 同时启动管理端与预览进程，输出按 `[app]`、`[preview]` 前缀合并，按 Ctrl-C 一起停止；也可以在一个终端执行 `npm run preview`，在另一个终端执行 `npm run dev`。两个进程的端口分别取自 `APP_ORIGIN` 与 `PREVIEW_ORIGIN`，端口已被占用时 `dev:all` 会直接报错退出。
 9. 打开 `http://localhost:3000`，注册并登录。
 
 `.env.example` 默认使用真实模型。配置真实模型前，可以在本地 `.env` 中显式设置 `AI_MODE=fixture`，运行确定的验收样本。fixture 使用真实 SDK 工具循环，但不代表真实模型质量已验证。
 
 平台统一入口为 `http://localhost:3000`。普通页面使用 `/`、`/user/login`、`/user/register`、`/app/chat/{id}` 和 `/app/edit/{id}`。管理员页面使用同一入口下的 `/admin/userManage`、`/admin/appManage` 和 `/admin/chatManage`，登录角色决定是否显示管理菜单，服务端再次校验权限。
 
+生成限流默认沿用旧版策略，按用户每 60 秒允许 1 次，跨应用共享。`CHAT_RATE_LIMIT_TYPE` 可选 `API`、`USER`、`IP`，其中 `API` 表示整个生成接口共用一个窗口；`CHAT_RATE_LIMIT_RATE` 与 `CHAT_RATE_LIMIT_INTERVAL` 覆盖次数（1-1000）与窗口秒数（1-86400）。`IP` 类型沿用旧版做法，按 `X-Forwarded-For` 首段计数、缺失时用 `X-Real-IP`，因此必须由可信前置代理覆盖这两个请求头并阻止直连应用，否则调用方更换该头即可绕过限制；两个头都缺失时，直连请求会共用 `ip:unknown` 窗口。`CHAT_RATE_LIMIT_MESSAGE` 覆盖提示文案，留空时按窗口与次数生成默认文案。
+
 `http://127.0.0.1:3001` 只提供 AI 生成网站的预览、发布副本及封面，不是管理员前端，也不是另一套用户平台。预览在平台页面中通过 iframe 打开，使用不同主机名隔离登录 Cookie。日常操作只需打开统一平台入口。默认本地配置下，打开 `127.0.0.1:3000` 的平台页面会自动跳转到 `localhost:3000`，保留页面路径与查询参数。API 不执行此跳转，直接来自别名或预览来源的写请求仍会被来源校验拒绝。
 
-需要管理员时，执行 `npm run db:admin -- 账号`。此命令只修改独立 TS 数据库。应用创建者通过应用编辑页修改名称或删除应用。管理员通过应用管理页管理其他用户的应用，不能代替创建者生成、下载或发布。
+需要管理员时，执行 `npm run db:admin -- 账号`。此命令只修改独立 TS 数据库。应用创建者通过应用详情或编辑页修改名称或删除应用。管理员可在应用编辑页或应用管理页编辑其他用户的应用，不能代替创建者生成、下载或部署。
 
 ## 使用固定的本地数据库容器
 
@@ -54,7 +56,7 @@ Redis 已作为本地开发服务提供连接。当前平台会话、消息和�
 
 ## 配置真实模型
 
-在忽略的 `.env` 内设置 `AI_MODE=provider`、`AI_API_KEY`、`AI_MODEL` 和 `AI_BASE_URL`。模型服务必须支持 OpenAI 兼容聊天及工具调用接口。配置只由服务端读取。
+在忽略的 `.env` 内设置 `AI_MODE=provider`、`AI_API_KEY`、`AI_MODEL` 和 `AI_BASE_URL`。模型服务必须支持 OpenAI 兼容聊天、工具调用及 JSON mode。首页创建应用时同步调用模型选择生成类型，生成及修改时再执行工具循环。配置只由服务端读取。
 
 缺少模型配置时，生成请求返回明确错误。服务端不会自动改用 fixture。生产运行默认禁止 fixture。正式运行使用 provider，以下生产验收命令中的 `ALLOW_TEST_FIXTURE=1` 仅供本地测试。
 
@@ -70,7 +72,7 @@ Redis 已作为本地开发服务提供连接。当前平台会话、消息和�
 
 浏览器截图写入 `runtime/evidence/`，HTML 报告写入 `playwright-report/`。这些运行文件已被忽略。只验证默认入口跳转、注册登录、会话 Cookie 隔离与来源拒绝时，执行 `npm run test:e2e -- tests/e2e/platform-origin.spec.ts`。这两项浏览器回归测试不调用模型，也不需要预览服务运行。
 
-验证短窗口、手机及横屏中的发送区域，以及点击发送和 `Ctrl + Enter` 时，执行 `npm run test:e2e -- tests/e2e/chat-composer.spec.ts`。测试使用独立样本账号和应用，通过浏览器拦截生成接口并返回 SDK 消息流，不调用真实模型。它验证发送操作和回复显示，不代表供应商模型生成质量已验证。聊天区域按动态视口高度限制消息区，输入框和发送按钮保持可见。
+验证短窗口、手机及横屏中的发送区域，以及点击发送和快捷键时，执行 `npm run test:e2e -- tests/e2e/chat-composer.spec.ts`。普通 Enter 发送，Shift + Enter 换行，Ctrl / Command + Enter 也可发送。测试使用独立样本账号和应用，通过浏览器拦截生成接口并返回 SDK 消息流，不调用真实模型。它验证发送操作和回复显示，不代表供应商模型生成质量已验证。聊天区域按动态视口高度限制消息区，输入框和发送按钮保持可见。
 
 ## 验证生产构建与重启
 
@@ -92,9 +94,11 @@ Redis 已作为本地开发服务提供连接。当前平台会话、消息和�
 本项目只接受 `paimeng_ai_code_mother_ts` 或 `paimeng_ai_code_mother_ts_test` 数据库名。它不会自动连接旧数据库。
 
 1. 停止新平台写入，并冻结旧库的最终快照。从旧库导出经过审查的 JSON 副本，放入新应用 `runtime/import/snapshot.json`。格式为 `{users:[],apps:[],chatHistory:[]}`，字段与原表对应。
-2. 所有 ID 使用十进制字符串。日期使用 `YYYY-MM-DD HH:mm:ss`。可空字段明确使用 null。
+2. 所有 ID 使用十进制字符串。日期使用 `YYYY-MM-DD HH:mm:ss`（可含毫秒）。可空字段明确使用 null。应用 `editTime` 原值会保留，旧快照未包含该字段时为 null。
 3. 执行 `npm run db:import -- runtime/import/snapshot.json`。引用、日期、ID、账号冲突或字段无效时，导入整体失败，不覆盖目标记录。原 ID 与本节点发号下界同事务提交，成功后再恢复平台写入。
-4. 如需预览旧产物，明确复制到本目录的 `runtime/code_output/{类型}_{ID}/`。发布副本复制到 `runtime/deploy/{deployKey}/`。保留旧六字符发布键或新 UUID，禁止将旧目录软链接到新运行目录。
+4. 如需同时迁移旧文件，执行 `npm run db:import -- runtime/import/snapshot.json --artifacts <旧项目根目录> --covers <已导出的封面目录>`。脚本只读旧目录，迁移快照关联的 `code_output`、`code_deploy` 和 `{deployKey}.png` 封面，拒绝覆盖新平台已有目标。加 `--strict` 可在文件缺失时中止。详细约定与文件/数据库回滚边界见 [迁移说明](docs/migration-contracts.md)。旧封面需预先导出到本地，脚本不请求 COS。
+
+有效旧产物无需补造 ready 任务即可预览。重复部署复用原发布密钥；Vue 每次部署会先构建当前源码，构建失败时保留旧预览并拒绝这次部署。
 
 旧密码摘要只在新库登录成功后升级为 scrypt。旧库和旧 Spring 会话保持原样，用户在新应用重新登录。
 

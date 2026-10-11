@@ -5,6 +5,7 @@ import { join, relative, isAbsolute } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { getConfig } from './config';
+import { validateVueManifest } from './build-contract';
 import { idSchema, codeGenTypes, type AppInfo } from '@/shared/contracts';
 
 export type WorkspaceApp = Pick<AppInfo, 'id' | 'codeGenType'>;
@@ -116,6 +117,7 @@ export async function readProjectFile(app: WorkspaceApp, path: string) {
 export async function writeProjectFile(app: WorkspaceApp, path: string, content: string) {
   const size = Buffer.byteLength(content);
   if (size > MAX_FILE_BYTES) throw new Error('文件内容超过限制');
+  if (app.codeGenType === 'vue_project' && path === 'package.json') validateVueManifest(content);
   const file = await resolveFile(app, path, true);
   const snapshot = await inspectProject(app);
   const existing = snapshot.files.find(entry => entry.path === path);

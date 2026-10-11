@@ -13,6 +13,7 @@
     "infra:stop": "docker compose --env-file .env -f compose.yaml stop",
     "verify:infra": "tsx --env-file=.env scripts/verify-infra.ts",
     "dev": "next dev --hostname 127.0.0.1 --port 3000",
+    "dev:all": "tsx scripts/dev.ts",
     "build": "next build --webpack",
     "start": "next start --hostname 127.0.0.1 --port 3000",
     "type-check": "next typegen && tsc --noEmit",
@@ -26,7 +27,9 @@
     "verify:boundary": "tsx scripts/verify-boundary.ts",
     "verify:id-migration": "tsx --env-file=.env scripts/verify-id-migration.ts",
     "verify:restart": "tsx --env-file=.env scripts/verify-restart.ts",
-    "preview": "tsx --conditions=react-server --env-file=.env scripts/preview.ts"
+    "preview": "tsx --conditions=react-server --env-file=.env scripts/preview.ts",
+    "test:e2e:isolated": "tsx scripts/test-e2e.ts",
+    "verify:parity": "node scripts/verify-parity.mjs"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "3.0.65",
@@ -43,6 +46,9 @@
     "playwright": "1.63.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "react-markdown": "10.1.0",
+    "rehype-highlight": "7.0.2",
+    "remark-gfm": "4.0.1",
     "server-only": "0.0.1",
     "zod": "4.6.5"
   },
@@ -56,5 +62,8 @@
     "tsx": "4.20.6",
     "typescript": "5.9.3",
     "vitest": "5.0.3"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true
   }
 }

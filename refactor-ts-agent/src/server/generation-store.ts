@@ -5,6 +5,7 @@ import { db, now, type Transaction } from './db';
 import { apps, generations, histories, leases, messages, users } from './schema';
 import { BusinessError } from './http';
 import { nextSnowflakeId } from './snowflake';
+import { enforceChatRateLimit } from './rate-limit';
 import type { GenerationStatus, User } from '@/shared/contracts';
 
 const activeStatuses = ['generating', 'building'];
@@ -69,7 +70,7 @@ export async function saveMessage(appId: string, message: UIMessage, generationI
   await withAppWriter(appId, tx => storeMessage(tx, appId, message), generationId);
 }
 
-export async function beginGeneration(appId: string, id: string, user: User, message: UIMessage) {
+export async function beginGeneration(appId: string, id: string, user: User, message: UIMessage, clientAddress = 'unknown') {
   const [busy] = await db().select().from(leases).where(eq(leases.appId, BigInt(appId))).limit(1);
   if (busy && busy.expiresAt > now()) throw new BusinessError(409, 40900, '应用已有正在运行的生成任务');
   const historyId = await nextSnowflakeId();
@@ -84,9 +85,7 @@ export async function beginGeneration(appId: string, id: string, user: User, mes
     const [lease] = await tx.select().from(leases).where(eq(leases.appId, app.id)).limit(1);
     if (lease && lease.expiresAt > now()) throw new BusinessError(409, 40900, '应用已有正在运行的生成任务');
     if (lease) await recoverLease(tx, lease);
-    const since = new Date(Date.now() - 60000).toISOString().slice(0, 23).replace('T', ' ');
-    const [recent] = await tx.select({ count: sql<number>`count(*)` }).from(generations).where(and(eq(generations.userId, actor.id), gte(generations.createTime, since)));
-    if (Number(recent.count) >= 10) throw new BusinessError(429, 42900, '生成请求过于频繁，请稍后重试');
+    await enforceChatRateLimit(tx, actor.id.toString(), clientAddress);
     // History is loaded only after acquiring the writer lock, never from a client
     // or from a snapshot taken while the preceding generation was completing.
     const history = await messagesFrom(tx, appId);

@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
 
-const origin = 'http://localhost:3000';
+const origin = process.env.APP_ORIGIN ?? 'http://localhost:3000';
 const prompt = '发送操作回归测试';
 
 test.beforeEach(async ({ page }) => {
@@ -13,6 +13,7 @@ test.beforeEach(async ({ page }) => {
   expect((await page.request.post('/api/user/login', { headers, data: credentials })).status()).toBe(200);
   const created = await page.request.post('/api/app/add', { headers, data: { initPrompt: prompt, codeGenType: 'html' } });
   expect(created.status()).toBe(200);
+  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'composer-existing-task', status: 'cancelled' } } }));
   await page.goto('/app/chat/' + (await created.json()).data);
   await expect(page.getByLabel('对话消息')).toHaveValue(prompt);
   await expect(page.getByLabel('对话消息')).toBeEnabled();
@@ -62,3 +63,29 @@ for (const action of ['button', 'shortcut'] as const) {
     expect(requests).toBe(1);
   });
 }
+
+test('错误提示可关闭，同一失败任务轮询刷新后保持关闭，新任务错误仍出现', async ({ page }) => {
+  const errorAlert = page.locator('.ant-alert-error[role="alert"]');
+  let task = { id: 'failed-task-one', status: 'failed', error: '测试构建失败一' };
+  let polls = 0;
+  await page.unroute('**/api/app/generation?*');
+  await page.route('**/api/app/generation?*', route => { polls++; return route.fulfill({ json: { code: 0, data: task } }); });
+  await page.reload();
+  await expect(errorAlert).toContainText('测试构建失败一');
+  await page.getByRole('button', { name: '关闭错误提示' }).click();
+  await expect(errorAlert).toHaveCount(0);
+  const before = polls;
+  await page.route('**/api/app/chat/gen/code', async route => {
+    task = { ...task, status: 'generating' };
+    const response = createUIMessageStreamResponse({ stream: createUIMessageStream({ execute: ({ writer }) => { writer.setOutcome({ status: 'completed' }); } }) });
+    await route.fulfill({ status: response.status, headers: Object.fromEntries(response.headers), body: await response.text() });
+  });
+  await page.getByRole('button', { name: /^发\s*送$/ }).click();
+  await expect.poll(() => polls).toBeGreaterThan(before + 1);
+  await page.getByRole('button', { name: '关闭错误提示' }).click();
+  const afterClose = polls;
+  await expect.poll(() => polls).toBeGreaterThan(afterClose + 1);
+  await expect(errorAlert).toHaveCount(0);
+  task = { id: 'failed-task-two', status: 'failed', error: '测试构建失败二' };
+  await expect(errorAlert).toContainText('测试构建失败二');
+});

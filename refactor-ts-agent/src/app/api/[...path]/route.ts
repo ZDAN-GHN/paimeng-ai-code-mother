@@ -21,7 +21,7 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/messages'){const user=await requireUser(req);const id=idSchema.parse(query.get('appId'));await business.getApp(id,user,true,true);return success(await loadMessages(id));}
    if(path==='app/generation'){const user=await requireUser(req);const id=idSchema.parse(query.get('appId'));await business.getApp(id,user,true,true);return success(await generationFor(id));}
    if(path.startsWith('app/download/')){const user=await requireUser(req);const id=idSchema.parse(path.slice('app/download/'.length));return await business.download(id,user);}
-   if(path.startsWith('chatHistory/app/')){const user=await requireUser(req);const id=idSchema.parse(path.slice('chatHistory/app/'.length));return success(await business.listHistory({appId:id,pageSize:Number(query.get('pageSize')??10),pageNum:Number(query.get('pageNum')??1)},user,false,query.get('lastCreateTime')??undefined));}
+   if(path.startsWith('chatHistory/app/')){const user=await requireUser(req);const id=idSchema.parse(path.slice('chatHistory/app/'.length));return success(await business.listHistory({appId:id,pageSize:Number(query.get('pageSize')??10),pageNum:Number(query.get('pageNum')??1),sortField:query.get('sortField')??undefined,sortOrder:query.get('sortOrder')??undefined},user,false,query.get('lastCreateTime')??undefined));}
   }
   if(method==='POST'){
    if(path==='user/register')return success(await register(value));

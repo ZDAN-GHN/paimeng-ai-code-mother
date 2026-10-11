@@ -1,19 +1,16 @@
 import 'server-only';
 import { spawn } from 'node:child_process';
-import { copyFile, readdir, lstat, writeFile, rename, rm } from 'node:fs/promises';
+import { copyFile, readdir, lstat, writeFile, rename, rm, realpath, readFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import archiver from 'archiver';
 import { PassThrough, Readable } from 'node:stream';
 import { getConfig } from './config';
+import { validateVueManifest } from './build-contract';
 import { workspace, ensureRuntime, ensureWorkspace, ensureSafeDirectory, listProjectFiles, readProjectFile, validateDeployKey, type WorkspaceApp } from './workspace';
 export { workspace } from './workspace';
 
-export const BUILD_DEPENDENCIES: Record<string, string> = {
-  vue: '3.5.17', vite: '7.0.0', '@vitejs/plugin-vue': '6.0.0',
-  'vue-router': '4.5.1', pinia: '3.0.3', axios: '1.11.0',
-  'ant-design-vue': '4.2.6', typescript: '5.9.3', 'vue-tsc': '2.2.10', '@types/node': '22.15.32',
-};
+export { BUILD_DEPENDENCIES } from './build-contract';
 
 async function copySafeTree(source: string, destination: string, depth = 0, budget = { bytes: 0, files: 0 }) {
   if (depth > 20) throw new Error('产物目录过深');
@@ -83,12 +80,7 @@ export async function buildApp(app: WorkspaceApp, signal?: AbortSignal) {
     if (!/<html[\s>]/i.test(index)) throw new Error('生成结果缺少有效 HTML 页面');
     return;
   }
-  const manifest = JSON.parse(await readProjectFile(app, 'package.json')) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
-  const dependencies = { ...manifest.dependencies, ...manifest.devDependencies };
-  for (const [name, version] of Object.entries(dependencies)) {
-    if (!Object.hasOwn(BUILD_DEPENDENCIES, name) || BUILD_DEPENDENCIES[name] !== version) throw new Error(`不允许的构建依赖 ${name}@${version}，请使用固定的允许版本`);
-  }
-  if (!dependencies.vue || !dependencies.vite || !dependencies['@vitejs/plugin-vue']) throw new Error('Vue 工程必须包含允许版本的 Vue、Vite 和 Vue 插件');
+  const dependencies = validateVueManifest(await readProjectFile(app, 'package.json'));
   const runtime = await ensureRuntime();
   const builds = await ensureSafeDirectory(join(runtime, 'builds'));
   const stage = await ensureSafeDirectory(join(builds, randomUUID()));
@@ -136,11 +128,24 @@ export function deployedUrl(key: string) {
   return `${getConfig().previewOrigin}/deploy/${validateDeployKey(key)}/`;
 }
 
-export async function deployApp(app: WorkspaceApp) {
+export async function hasPreview(app: WorkspaceApp) {
+  const directory = join(workspace(app), ...(app.codeGenType === 'vue_project' ? ['dist'] : []));
+  const index = join(directory, 'index.html');
+  try {
+    if (await realpath(directory) !== directory || await realpath(index) !== index) return false;
+    const info = await lstat(index);
+    return info.isFile() && info.size > 0 && info.size <= 20 * 1024 * 1024 && /<html[\s>]/i.test(await readFile(index, 'utf8'));
+  } catch { return false; }
+}
+
+export async function deployApp(app: WorkspaceApp & { deployKey?: string | null }) {
   const runtime = await ensureRuntime();
   const deploy = await ensureSafeDirectory(join(runtime, 'deploy'));
-  const key = randomUUID();
-  const stage = join(deploy, '.paimeng-' + key);
+  const key = app.deployKey ? validateDeployKey(app.deployKey) : randomUUID();
+  const stage = join(deploy, '.paimeng-' + randomUUID());
+  const destination = join(deploy, key);
+  const backup = join(deploy, '.paimeng-old-' + randomUUID());
+  let backedUp = false;
   try {
     if (app.codeGenType === 'vue_project') await copySafeTree(join(workspace(app), 'dist'), stage);
     else {
@@ -153,7 +158,15 @@ export async function deployApp(app: WorkspaceApp) {
     }
     const index = await lstat(join(stage, 'index.html'));
     if (!index.isFile() || index.isSymbolicLink()) throw new Error('发布内容缺少 index.html');
-    await rename(stage, join(deploy, key));
+    try {
+      const info = await lstat(destination);
+      if (info.isSymbolicLink() || !info.isDirectory() || await realpath(destination) !== destination) throw new Error('旧发布目录不安全');
+      await rename(destination, backup);
+      backedUp = true;
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    try { await rename(stage, destination); }
+    catch (error) { if (backedUp) { await rename(backup, destination); backedUp = false; } throw error; }
+    if (backedUp) await rm(backup, { recursive: true, force: true });
     return key;
   } catch (error) { await rm(stage, { recursive: true, force: true }); throw error; }
 }
