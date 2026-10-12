@@ -13,6 +13,7 @@ const config: NextConfig = {
     }];
   },
   outputFileTracingRoot: process.cwd(),
+  outputFileTracingIncludes: { '/*': ['./templates/**/*'] },
   outputFileTracingExcludes: {
     '/*': ['./runtime/**/*', './.env', './.env.*'],
     'next-server': ['runtime/**/*', '.env', '.env.*'],

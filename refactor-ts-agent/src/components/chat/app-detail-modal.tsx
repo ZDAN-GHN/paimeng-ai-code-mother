@@ -7,6 +7,7 @@ const codeGenTypeLabels: Record<string, string> = {
   html: '原生 HTML 模式',
   multi_file: '原生多文件模式',
   vue_project: 'Vue项目模式',
+  react_project: 'React项目模式',
 };
 
 export function formatCodeGenType(type?: string | null) {
@@ -48,6 +49,7 @@ export function AppDetailModal({ open, app, showActions, onClose, onEdit, onDele
         <span className="info-label">生成类型：</span>
         {app?.codeGenType ? <Tag color="blue">{formatCodeGenType(app.codeGenType)}</Tag> : <span>未知类型</span>}
       </div>
+      {app?.template && <div className="info-item"><span className="info-label">工程模板：</span><Tag>{app.template.id}@{app.template.version}</Tag></div>}
       {showActions && <div className="app-detail-actions">
         <Space>
           <Button type="primary" icon={<EditOutlined aria-hidden="true" />} onClick={onEdit}>修改</Button>

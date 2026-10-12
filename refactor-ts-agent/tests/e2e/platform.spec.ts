@@ -3,9 +3,11 @@ import { randomUUID } from 'node:crypto';
 import mysql from 'mysql2/promise';
 import { loadEnvFile } from 'node:process';
 import { testDatabaseUrl } from '../test-database-url';
+import type { CodeGenType } from '@/shared/contracts';
 loadEnvFile('.env');
 const password = 'password123';
-const origin = 'http://localhost:3000';
+const origin = process.env.APP_ORIGIN ?? 'http://localhost:3000';
+const previewOrigin = process.env.PREVIEW_ORIGIN ?? 'http://127.0.0.1:3001';
 const uniqueAccount = () => 'ts_browser_' + randomUUID().slice(0, 8);
 async function testConnection(): Promise<mysql.Connection> {
   const raw = process.env.DATABASE_URL;
@@ -22,7 +24,7 @@ async function registerSample(page: Page, account: string) {
   const response = await page.request.post('/api/user/register', { headers: { origin }, data: { userAccount: account, userPassword: password, checkPassword: password } });
   expect(response.ok()).toBe(true);
 }
-async function createSample(page: Page, prompt: string, type: 'html' | 'multi_file' | 'vue_project' = 'html') {
+async function createSample(page: Page, prompt: string, type: CodeGenType = 'html') {
   const response = await page.request.post('/api/app/add', { headers: { origin }, data: { initPrompt: prompt, codeGenType: type } });
   expect(response.ok()).toBe(true);
   const { data: id } = await response.json();
@@ -80,7 +82,9 @@ test('浏览器完成注册、登录、生成、编辑、预览、发布和下�
   await page.getByRole('dialog').getByRole('button', { name: /^关\s*闭$/ }).click();
   await expect(page.getByRole('link', { name: '访问作品' })).toBeVisible();
   const info = (await (await page.request.get('/api/app/get/vo?id=' + appId)).json()).data;
-  expect(info.cover).toMatch(/^http:\/\/127\.0\.0\.1:3001\/covers\/.+\.png$/);
+  const coverUrl = new URL(info.cover);
+  expect(coverUrl.origin).toBe(previewOrigin);
+  expect(coverUrl.pathname).toMatch(/^\/covers\/.+\.png$/);
   expect((await page.request.get(info.cover)).status()).toBe(200);
   await page.reload();
   await expect(page.getByText('可预览', { exact: true })).toBeVisible();
@@ -126,15 +130,15 @@ test('普通用户不能打开管理员页面，管理员可查询和编辑', as
   await page.getByRole('dialog').getByRole('button', { name: 'OK', exact: true }).click();
   await expect(page.getByRole('cell', { name: '精选', exact: true })).toBeVisible();
   await expect(appRow.getByRole('cell', { name: '精选', exact: true })).toBeVisible();
-  const ownerContext = await browser.newContext({ baseURL: 'http://localhost:3000' });
+  const ownerContext = await browser.newContext({ baseURL: origin });
   const foreignName = '管理员重命名_' + account.slice(-8);
   let foreignId: string;
   try {
     const foreignAccount = uniqueAccount();
-    const origin = { origin: 'http://localhost:3000' };
-    expect((await ownerContext.request.post('/api/user/register', { headers: origin, data: { userAccount: foreignAccount, userPassword: password, checkPassword: password } })).ok()).toBe(true);
-    expect((await ownerContext.request.post('/api/user/login', { headers: origin, data: { userAccount: foreignAccount, userPassword: password } })).ok()).toBe(true);
-    const created = await ownerContext.request.post('/api/app/add', { headers: origin, data: { initPrompt: '其他用户应用_' + account.slice(-8), codeGenType: 'html' } });
+    const headers = { origin };
+    expect((await ownerContext.request.post('/api/user/register', { headers, data: { userAccount: foreignAccount, userPassword: password, checkPassword: password } })).ok()).toBe(true);
+    expect((await ownerContext.request.post('/api/user/login', { headers, data: { userAccount: foreignAccount, userPassword: password } })).ok()).toBe(true);
+    const created = await ownerContext.request.post('/api/app/add', { headers, data: { initPrompt: '其他用户应用_' + account.slice(-8), codeGenType: 'html' } });
     expect(created.ok()).toBe(true);
     foreignId = (await created.json()).data;
   } finally { await ownerContext.close(); }
@@ -159,6 +163,7 @@ test('普通用户不能打开管理员页面，管理员可查询和编辑', as
   await expect(page.getByRole('heading', { name: '对话管理', exact: true })).toBeVisible();
   await page.getByLabel('应用 ID', { exact: true }).fill(appId);
   await page.getByRole('button', { name: /^搜\s*索$/ }).click();
+  await expect(page.getByRole('button', { name: /tool-writeFiles/ })).toHaveCount(1);
   await page.getByRole('button', { name: /tool-writeFiles/ }).click();
   await expect(page.getByRole('dialog').getByText(/文件已生成/)).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'OK', exact: true }).click();
@@ -173,7 +178,7 @@ test('普通用户不能打开管理员页面，管理员可查询和编辑', as
   await page.screenshot({ path: 'runtime/evidence/home-desktop.png', fullPage: true });
 });
 
-for (const type of ['multi_file', 'vue_project'] as const) {
+for (const type of ['multi_file', 'vue_project', 'react_project'] as const) {
   test(`${type} 模式使用真实构建和预览`, async ({ page }) => {
     test.setTimeout(180000);
     const account = uniqueAccount();

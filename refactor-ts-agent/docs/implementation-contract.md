@@ -26,9 +26,9 @@ JSON 成功响应为 `{code:0,data,message:"ok"}`。失败返回业务错误码�
 
 ## 应用 API 与权限
 
-- POST `/api/app/add` 接收 `{initPrompt,codeGenType?}`，返回应用 ID。
-- 首页只传初始需求；未指定类型时同步调用模型路由，简单展示、多文件静态页面、复杂交互分别选择 HTML、多文件、Vue 工程。显式类型仍供 API 和测试使用。初始需求上限为 1000 字。
-- GET `/api/app/get/vo?id=` 返回公开应用信息。
+- POST `/api/app/add` 接收 `{initPrompt,codeGenType?,templateId?}`，返回应用 ID。`templateId` 只接受已注册模板，未知模板返回 400 `不支持的工程模板`；显式模板与 `codeGenType` 冲突时返回 400 `模板与应用类型不匹配`。Vue 应用未指定模板时默认 `vue-ts`，React 应用默认 `react-ts`，初始化只在此时发生一次。
+- 首页只传初始需求；未指定类型时同步调用模型路由，简单展示、多文件静态页面、复杂交互分别选择 HTML、多文件、前端工程。工程类型里需求明确要求 React 或 Vue 时按需求选，未指明技术栈时默认 Vue，因此路由可以返回 `react_project` 并自动使用 React 模板。用户也可以在首页技术栈下拉里显式指定模板，此时以用户选择为准。显式类型仍供 API 和测试使用。初始需求上限为 1000 字。
+- GET `/api/app/get/vo?id=` 返回公开应用信息，其中 `template` 给出工程模板 id 与版本，旧工程为 null。
 - POST `/api/app/my/list/page/vo` 返回当前用户的应用分页。POST `/api/app/good/list/page/vo` 返回优先级至少 99 的精选应用。
 - POST `/api/app/update` 接收 `{id,appName}`，只允许创建者修改名称。
 - POST `/api/app/delete` 接收 `{id}`，允许创建者或管理员逻辑删除应用。
@@ -45,7 +45,7 @@ POST `/api/app/chat/gen/code` 接收 `{appId,message:UIMessage,requestId:UUID}`�
 
 - GET `/api/app/messages?appId=` 返回完整 `UIMessage[]`，包括工具输入、输出、状态及文本。
 - GET `/api/app/generation?appId=` 返回当前 `Generation` 或 null。
-- POST `/api/app/generation/cancel` 接收 `{appId}`，请求取消当前任务。
+- POST `/api/app/generation/cancel` 接收 `{appId}`，请求取消当前任务。只在模型仍在写文件时生效；文件已写完进入构建后忽略该请求，构建继续完成，避免丢弃已经生成好的代码。
 - GET `/api/chatHistory/app/{appId}?pageSize=10&lastCreateTime=` 返回原文本历史分页。
 - POST `/api/chatHistory/admin/list/page/vo` 返回管理员历史分页。
 
@@ -56,11 +56,13 @@ POST `/api/app/chat/gen/code` 接收 `{appId,message:UIMessage,requestId:UUID}`�
 `IP` 类型沿用旧版转发头信任模型，要求可信前置代理覆盖 `X-Forwarded-For`/`X-Real-IP` 并阻止直连；无这两个头时直连请求共用 `ip:unknown`。超限请求随事务回滚，不消耗次数。
 生成输入沿用旧版护轨：总文本不超过 1000 字、不能为空，并拒绝原敏感词和注入模式。可视化定位上下文包含在这个总长度内。模型读取服务端权威历史，当前请求在内最多二十条 UI 消息；完整工具消息及全部历史仍持久保存，供页面恢复和查询。
 
-完整助手消息、终态与租约释放在一个事务中完成。取消请求会中止模型与构建，清理完成前保留租约。超时标记失败，失去租约的旧进程不能覆盖新任务。服务重启后，已完成历史直接恢复，异常中断的活动租约到期后由状态读取或下一次提交回收。
+完整助手消息、终态与租约释放在一个事务中完成。取消请求只中止仍在写文件的模型阶段。模型结束后构建是确定性收尾：客户端断开（刷新或关闭页面）和取消请求都不再中止构建，只有租约失效或构建超时才会停止，否则会丢弃已生成的代码。清理完成前保留租约。超时标记失败，失去租约的旧进程不能覆盖新任务。服务重启后，已完成历史直接恢复，异常中断的活动租约到期后由状态读取或下一次提交回收。
 
 React 聊天页使用 AI SDK POST 流式协议。创建者首次进入空历史、无任务的新应用时自动提交初始需求一次；已存在任务、历史或历史加载失败时不会自动提交。刷新后加载服务端完整历史，工具结果保留。公开应用信息独立于私有历史和任务请求加载。
 
 `previewUrl` 根据实际 HTML 或 Vue 构建入口是否有效判断，不以最新任务的 ready 状态为门槛。旧应用及下一轮失败、取消后仍有效的既有产物可继续预览；生成、发布和下载之间仍受写入租约保护。`sourceAvailable` 独立表示可下载源码；Vue 每次发布都在写锁内重新构建当前源码，构建失败时保留旧预览并拒绝此次发布。
+
+POST `/api/app/build` 接收 `{appId}`，按应用现有源码重建前端预览产物，不改变任务状态、不发布。只允许创建者调用，`HTML`/`multi_file` 应用或已有有效预览时直接返回当前 `previewUrl`，没有源码时返回 409，构建失败原样返回错误。同一应用 60 秒内只尝试一次，避免源码本身有错时反复构建。聊天页在源码存在但预览产物缺失时自动调用一次该接口，因此取消生成或构建中断不再需要用户手动点「部署」才能看到预览。
 
 ## 文件与产物模块
 

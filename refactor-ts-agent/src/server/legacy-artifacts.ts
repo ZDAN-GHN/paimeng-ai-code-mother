@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, relative } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { idSchema, codeGenTypes } from '@/shared/contracts';
+import type { CodeGenType } from '@/shared/contracts';
 import { validateDeployKey } from './workspace';
 
 export const LEGACY_ARTIFACT_LIMITS = { depth: 20, files: 4096, fileBytes: 20 * 1024 * 1024, totalBytes: 256 * 1024 * 1024 } as const;
@@ -11,7 +12,7 @@ const blockedDirectories = new Set(['node_modules', '.git', '.next', '.nuxt', '.
 const sensitiveNames = /^(?:\.env|\.paimeng-|\.npmrc$|\.yarnrc|\.ssh$)/;
 
 export type LegacyArtifactKind = 'source' | 'deploy' | 'cover';
-export type LegacyArtifactApp = { id: string; codeGenType: 'html' | 'multi_file' | 'vue_project'; deployKey: string | null; cover: string | null };
+export type LegacyArtifactApp = { id: string; codeGenType: CodeGenType; deployKey: string | null; cover: string | null };
 export type LegacyArtifactEntry = { kind: LegacyArtifactKind; appId: string; deployKey: string | null; source: string; target: string };
 export type LegacyArtifactMissing = { kind: LegacyArtifactKind; appId: string; deployKey: string | null; source: string };
 export type LegacyArtifactPlan = { entries: LegacyArtifactEntry[]; missing: LegacyArtifactMissing[]; covers: { appId: string; deployKey: string; cover: string }[] };

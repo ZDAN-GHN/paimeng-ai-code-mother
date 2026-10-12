@@ -39,6 +39,8 @@ describe('应用类型路由（F01）', () => {
     expect(await routeCodeGenType('多页面展示站')).toBe('multi_file');
     expect(await routeCodeGenType('分离 CSS 与 JS 的多文件站')).toBe('multi_file');
     expect(await routeCodeGenType('个人博客展示')).toBe('html');
+    expect(await routeCodeGenType('用 React 做一个后台数据管理系统')).toBe('react_project');
+    expect(await routeCodeGenType('react 组件文档站')).toBe('react_project');
     expect(captured).toHaveLength(0);
   });
 
@@ -59,6 +61,12 @@ describe('应用类型路由（F01）', () => {
     expect(requestBody).toContain('codeGenType');
     expect(requestBody).toContain('multi_file');
     expect(requestBody).toContain('vue_project');
+    expect(requestBody).toContain('react_project');
+
+    // 需求指明 React 时同样由路由返回 React 工程类型。
+    content = '{"codeGenType":"react_project"}';
+    await expect(routeCodeGenType('用 React 实现数据仪表盘')).resolves.toBe('react_project');
+    expect(captured).toHaveLength(2);
   });
 
   it('provider 模式拒绝模型返回的越界类型', async () => {

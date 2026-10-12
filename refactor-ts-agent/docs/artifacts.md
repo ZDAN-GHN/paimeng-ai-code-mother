@@ -25,17 +25,17 @@
 - `vue-tsc` 使用 `2.2.10`。
 - `@types/node` 使用 `22.15.32`。
 
-Vue、Vite 和 Vue 插件必需。外部 tarball、Git 依赖、文件依赖、版本范围及其他依赖均拒绝。顶层版本固定，传递依赖由 npm 解析，当前没有保留生成工程的可复现依赖锁或离线依赖缓存。
+Vue、Vite 和 Vue 插件必需。React 工程使用另一套允许依赖（`react`、`react-dom`、`vite`、`@vitejs/plugin-react` 必需，另含 `react-router-dom`、`axios`、`antd`、`typescript`、`@types/react`、`@types/react-dom`、`@types/node`），外部 tarball、Git 依赖、文件依赖、版本范围及其他依赖均拒绝。顶层版本固定，传递依赖由 npm 解析。工程模板自带 `package-lock.json`，模板应用的依赖集合必须与模板版本完全一致且锁文件逐字节相同；旧的无模板 Vue 工程没有可复现依赖锁或离线依赖缓存。
 
 ## 两阶段容器构建
 
-依赖安装阶段只能看到服务端重建的 `package.json`。该文件只包含批准的依赖，不包含生成的生命周期脚本、npm 配置或可执行源码。容器联网执行 `npm install --ignore-scripts`，以下载依赖。
+依赖安装阶段只能看到服务端重建的 `package.json`。该文件只包含批准的依赖，不包含生成的生命周期脚本、npm 配置或可执行源码。模板工程使用模板原版 `package.json` 与 `package-lock.json` 执行 `npm ci --ignore-scripts`，其余工程执行 `npm install --ignore-scripts`。
 
-安装完成后，服务端复制已校验的源码，忽略源工程的 `package.json` 和 `package-lock.json`。第二个容器使用 `--network=none`，直接执行 Vite CLI。生成的 Vite 配置在这个断网容器中运行。生成工程的 `npm run build` 脚本不执行。
+安装完成后，服务端复制已校验的源码，忽略源工程的 `package.json` 和 `package-lock.json`。第二个容器使用 `--network=none`，模板工程先执行模板定义的检查命令（Vue 为 `vue-tsc --noEmit`，React 为 `tsc --noEmit`），再统一直接执行 Vite CLI。生成的 Vite 配置在这个断网容器中运行。生成工程的 `npm run build` 脚本不执行。
 
 两个阶段都使用非 root 用户、只读根文件系统、全部移除的 Linux capabilities、`no-new-privileges`、128 个进程上限、768 MiB 内存上限、一个 CPU，以及 256 MiB 的临时文件系统。每阶段最长 180 秒。容器只挂载独立临时构建目录，不挂载平台源码、数据库文件、Docker socket 或 `.env`。平台数据库和模型环境变量不传入容器。
 
-构建取消或超时会停止命令并清理容器和临时目录。Docker 守护进程由平台宿主访问，生成代码无法访问其 socket。该边界仍依赖宿主 Docker 和内核安全，不代表无漏洞的通用多租户沙箱。
+构建因任务失效、租约丢失或构建超时而停止时会终止命令并清理容器和临时目录；客户端断开不会中止构建。Docker 守护进程由平台宿主访问，生成代码无法访问其 socket。该边界仍依赖宿主 Docker 和内核安全，不代表无漏洞的通用多租户沙箱。
 
 HTML 和多文件类型不执行容器构建。它们必须提供包含 HTML 标签的 `index.html`，浏览器脚本只在隔离预览来源执行。
 

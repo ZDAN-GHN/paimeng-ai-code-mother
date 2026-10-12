@@ -4,6 +4,7 @@ import { readFile, lstat, realpath } from 'node:fs/promises';
 import { join, relative, isAbsolute, extname } from 'node:path';
 import { getConfig } from './config';
 import { ensureRuntime, validateDeployKey } from './workspace';
+import { isProjectCodeGenType } from '@/shared/contracts';
 
 const mime: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'application/javascript; charset=utf-8',
@@ -126,9 +127,10 @@ export async function createPreviewServer() {
         const key = match[2];
         if (match[1] === 'deploy') directory = join(root, 'deploy', validateDeployKey(key));
         else {
-          const project = key.match(/^(html|multi_file|vue_project)_([1-9]\d{0,19})$/);
+          const project = key.match(/^(html|multi_file|vue_project|react_project)_([1-9]\d{0,19})$/);
           if (!project) throw new Error('应用标识不合法');
-          directory = join(root, 'code_output', key, ...(project[1] === 'vue_project' ? ['dist'] : []));
+          const needsDist = isProjectCodeGenType(project[1]);
+          directory = join(root, 'code_output', key, ...(needsDist ? ['dist'] : []));
         }
         if (!match[3]) { res.writeHead(308, { Location: url.pathname + '/' }); res.end(); return; }
         asset = match[3].slice(1) || 'index.html';

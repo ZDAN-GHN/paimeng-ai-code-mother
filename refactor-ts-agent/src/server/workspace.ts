@@ -5,8 +5,9 @@ import { join, relative, isAbsolute } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { getConfig } from './config';
-import { validateVueManifest } from './build-contract';
-import { idSchema, codeGenTypes, type AppInfo } from '@/shared/contracts';
+import { validateProjectManifest } from './build-contract';
+import { readTemplateIdentity, assertTemplateFileMutable, validateTemplateManifest } from './templates';
+import { idSchema, codeGenTypes, isProjectCodeGenType, type AppInfo } from '@/shared/contracts';
 
 export type WorkspaceApp = Pick<AppInfo, 'id' | 'codeGenType'>;
 export const MAX_FILE_BYTES = 256 * 1024;
@@ -117,8 +118,13 @@ export async function readProjectFile(app: WorkspaceApp, path: string) {
 export async function writeProjectFile(app: WorkspaceApp, path: string, content: string) {
   const size = Buffer.byteLength(content);
   if (size > MAX_FILE_BYTES) throw new Error('文件内容超过限制');
-  if (app.codeGenType === 'vue_project' && path === 'package.json') validateVueManifest(content);
   const file = await resolveFile(app, path, true);
+  const template = await readTemplateIdentity(workspace(app));
+  assertTemplateFileMutable(template, path);
+  if (isProjectCodeGenType(app.codeGenType) && path === 'package.json') {
+    if (template) validateTemplateManifest(template, content);
+    else validateProjectManifest(app.codeGenType, content);
+  }
   const snapshot = await inspectProject(app);
   const existing = snapshot.files.find(entry => entry.path === path);
   if (snapshot.files.length + (existing ? 0 : 1) > MAX_PROJECT_FILES || snapshot.bytes - (existing?.size ?? 0) + size > MAX_PROJECT_BYTES) throw new Error('工程超过文件数量或大小限制');
@@ -145,5 +151,7 @@ export async function modifyProjectFile(app: WorkspaceApp, path: string, oldText
 }
 
 export async function deleteProjectFile(app: WorkspaceApp, path: string) {
-  await unlink(await resolveFile(app, path));
+  const file = await resolveFile(app, path);
+  assertTemplateFileMutable(await readTemplateIdentity(workspace(app)), path, true);
+  await unlink(file);
 }

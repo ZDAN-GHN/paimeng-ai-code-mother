@@ -1,0 +1,48 @@
+:root {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #134e4a;
+  background: #f0fdfa;
+  font-synthesis: none;
+  --primary: #0f766e;
+  --border: #cbd5e1;
+  --muted: #475569;
+  --danger: #b91c1c;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+button, input { font: inherit; }
+button { cursor: pointer; min-height: 44px; }
+button, input { border-radius: 8px; border: 1px solid var(--border); }
+button:focus-visible, input:focus-visible { outline: 3px solid var(--primary); outline-offset: 3px; }
+.task-app { width: min(100% - 40px, 720px); margin: 72px auto; }
+.eyebrow { color: var(--primary); font-size: 14px; font-weight: 600; margin: 0 0 12px; }
+h1 { font-size: clamp(32px, 5vw, 44px); line-height: 1.2; letter-spacing: -1px; margin: 0; }
+.intro { color: var(--muted); line-height: 1.6; margin: 16px 0 32px; }
+.task-card { border: 1px solid var(--border); background: white; border-radius: 16px; padding: 28px; }
+.task-form > label { display: block; font-weight: 600; margin-bottom: 10px; }
+.input-row { display: flex; gap: 12px; }
+.input-row input { flex: 1; min-width: 0; padding: 12px; color: inherit; }
+.primary-button { background: var(--primary); color: white; padding: 10px 24px; border-color: var(--primary); }
+.primary-button:hover { background: #115e59; }
+.list-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-top: 28px; }
+.remaining { color: var(--muted); margin: 0; font-variant-numeric: tabular-nums; }
+.filters { display: flex; gap: 8px; }
+.filters button { background: white; color: var(--muted); padding: 8px 12px; }
+.filters button[aria-pressed="true"] { background: #ccfbf1; border-color: var(--primary); color: #115e59; font-weight: 600; }
+.task-list { list-style: none; padding: 0; margin: 20px 0 0; }
+.task-item { display: flex; align-items: center; gap: 12px; border-top: 1px solid #e2e8f0; padding: 12px 0; }
+.task-label { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; min-height: 44px; cursor: pointer; line-height: 1.5; }
+.task-label span { overflow-wrap: anywhere; }
+.task-label input { width: 20px; height: 20px; flex-shrink: 0; accent-color: var(--primary); }
+.completed .task-label span { text-decoration: line-through; color: var(--muted); }
+.remove-button { color: var(--danger); background: white; border-color: transparent; padding: 8px; flex-shrink: 0; }
+.remove-button:hover { background: #fef2f2; }
+.error { color: var(--danger); line-height: 1.5; margin: 12px 0 0; }
+.empty-state { padding: 28px 0; color: var(--muted); line-height: 1.6; }
+.storage-note { color: var(--muted); text-align: center; font-size: 14px; margin-top: 24px; }
+@media (max-width: 480px) {
+  .task-app { margin: 36px auto; width: calc(100% - 32px); }
+  .task-card { padding: 20px; }
+  .input-row { gap: 8px; }
+  .primary-button { padding-inline: 16px; }
+}

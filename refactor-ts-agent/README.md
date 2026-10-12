@@ -102,6 +102,16 @@ Redis 已作为本地开发服务提供连接。当前平台会话、消息和�
 
 旧密码摘要只在新库登录成功后升级为 scrypt。旧库和旧 Spring 会话保持原样，用户在新应用重新登录。
 
+## 工程模板
+
+`templates/<id>/<version>/` 是完整可运行的工程，AI 在复制出的工程上继续开发。新建 Vue 应用默认使用 `vue-ts@1.0.0`，新建 React 应用默认使用 `react-ts@1.0.0`；两个模板都自带一个「今日计划」任务清单示例，不需要模型先搭空工程。
+
+- `src/shared/templates.ts` 的 `projectTemplates` 声明模板 id、版本、生成类型与运行形态；当前只有静态前端模板（Vue 与 React）。首页技术栈下拉里可显式选择模板；选「自动选择」时由模型按需求复杂度路由，需求指明 React 或 Vue 就按需求选，未指明技术栈的复杂应用默认 Vue。
+- 初始化只在创建应用时发生一次，工程内 `.paimeng-template.json` 记录所用模板版本。已经有工程的应用不会被模板覆盖，模板升级需要单独的迁移流程。
+- `templates/<id>/<version>/` 的 `AGENTS.md` 是给模型的开发说明：先读工程再改源码、保留入口文件与 `vite.config.ts`、不增删依赖。Vue 模板入口是 `src/main.ts`，React 模板入口是 `src/main.tsx`。
+- 模板工程只允许保留该模板版本的依赖集合；改锁文件、删入口、改 `vite.config.js` 或缩减依赖会被工具拒绝。构建仍走容器隔离，但模板工程用 `npm ci` 安装，再按模板定义的命令做类型检查（Vue 用 `vue-tsc --noEmit`，React 用 `tsc --noEmit`）与 `vite build`。
+- 新增模板：把目录放到 `templates/<id>/<version>/`，在 `projectTemplates` 注册，并在 `src/server/templates.ts` 的 `definitions` 里补文件清单、入口与类型检查命令。依赖必须落在该技术栈的允许集合内（Vue 为 `BUILD_DEPENDENCIES`，React 为 `REACT_DEPENDENCIES`）。
+
 ## 查阅实现与限制
 
 [接口与模块契约](docs/implementation-contract.md) 描述权限、消息及任务状态。[迁移差异](docs/migration-contracts.md) 说明原路径和有意变更。[产物与隔离限制](docs/artifacts.md) 记录构建依赖、预览与本地封面行为。[决策与验收记录](docs/migrations/ts-unified/decisions.tsv) 保存实施证据。

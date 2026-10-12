@@ -1,5 +1,6 @@
 import 'server-only';
-import { and, asc, desc, eq, inArray, like, lt, sql, type SQL } from 'drizzle-orm';
+import { rm } from 'node:fs/promises';
+import { and, asc, desc, eq, like, lt, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { apps, users, histories, generations, leases, sessions, messages } from './schema';
 import { db, now } from './db';
@@ -8,9 +9,12 @@ import { withAppWriter } from './generation-store';
 import { publicUser } from './auth';
 import { BusinessError } from './http';
 import { previewUrl, deployedUrl, deployApp, captureCover, downloadApp, hasPreview, buildApp } from './artifacts';
-import { listProjectFiles } from './workspace';
+import { listProjectFiles, workspace } from './workspace';
 import { routeCodeGenType } from './model';
-import { codeGenTypes, idSchema, pageSchema, type User, type AppInfo, type PageQuery } from '@/shared/contracts';
+import { appTemplate, initializeTemplate } from './template-workspace';
+import { defaultTemplateFor, resolveTemplate } from './templates';
+import { codeGenTypes, idSchema, isProjectCodeGenType, pageSchema, type User, type AppInfo, type PageQuery } from '@/shared/contracts';
+import type { TemplateInfo } from '@/shared/templates';
 
 export async function getApp(id:string,user?:User,ownerOnly=false,allowAdmin=false):Promise<AppInfo>{
  const [row]=await db().select().from(apps).where(and(eq(apps.id,BigInt(idSchema.parse(id))),eq(apps.isDelete,0))).limit(1);
@@ -23,13 +27,23 @@ async function appView(row:typeof apps.$inferSelect,connection:Pick<ReturnType<t
  const app:AppInfo={...row,id:String(row.id),userId:String(row.userId),codeGenType:z.enum(codeGenTypes).parse(row.codeGenType),user:creator?publicUser(creator):undefined};
  app.previewUrl=await hasPreview(app)?previewUrl(app):null;
  try{app.sourceAvailable=(await listProjectFiles(app)).length>0;}catch{app.sourceAvailable=false;}
+ const template=await appTemplate(app);app.template=template?{id:template.id,version:template.version}:null;
  app.deployUrl=app.deployKey?deployedUrl(app.deployKey):null;
  return app;
 }
 export async function createApp(raw:unknown,user:User){
- const value=z.object({initPrompt:z.string().trim().min(1).max(1000),codeGenType:z.enum(codeGenTypes).optional()}).parse(raw);
- const type=value.codeGenType??await routeCodeGenType(value.initPrompt);
- const id=await nextSnowflakeId();await db().insert(apps).values({id,initPrompt:value.initPrompt,codeGenType:type,appName:value.initPrompt.slice(0,12),userId:BigInt(user.id),createTime:now(),updateTime:now()});return id.toString();
+ const value=z.object({initPrompt:z.string().trim().min(1).max(1000),codeGenType:z.enum(codeGenTypes).optional(),templateId:z.string().trim().min(1).optional()}).parse(raw);
+ let selected: TemplateInfo | null = null;
+ if(value.templateId){try{selected=resolveTemplate(value.templateId);}catch{throw new BusinessError(400,40000,`不支持的工程模板 ${value.templateId}`);}}
+ if(selected&&value.codeGenType&&value.codeGenType!==selected.codeGenType)throw new BusinessError(400,40000,'模板与应用类型不匹配');
+ const type=selected?.codeGenType??value.codeGenType??await routeCodeGenType(value.initPrompt);
+ const template=selected??defaultTemplateFor(type);
+ const id=await nextSnowflakeId();
+ const app={id:id.toString(),codeGenType:type};
+ const initialized=template?await initializeTemplate(app,template):false;
+ try{await db().insert(apps).values({id,initPrompt:value.initPrompt,codeGenType:type,appName:value.initPrompt.slice(0,12),userId:BigInt(user.id),createTime:now(),updateTime:now()});}
+ catch(error){if(initialized)await rm(workspace(app),{recursive:true,force:true});throw error;}
+ return id.toString();
 }
 export async function listApps(raw:unknown,scope:'my'|'good'|'admin',user?:User){
  const q=pageSchema.parse(raw);if(scope!=='admin'&&q.pageSize>20)throw new BusinessError(400,40000,'每页最多查询 20 个应用');const predicates:SQL[]=[eq(apps.isDelete,0)];
@@ -56,12 +70,33 @@ export async function deleteApp(raw:unknown,user:User){
 }
 export async function assertIdle(id:string){const [lease]=await db().select().from(leases).where(eq(leases.appId,BigInt(id))).limit(1);if(lease&&lease.expiresAt>now())throw new BusinessError(409,40900,'应用正在生成，请先取消或等待完成');}
 export async function download(id:string,user:User){await getApp(id,user,true);return withAppWriter(id,async(tx,row)=>{if(String(row.userId)!==user.id)throw new BusinessError(403,40300,'无权限下载该应用');return downloadApp(await appView(row,tx));});}
+const rebuildCooldown=60000;
+const rebuilds=new Map<string,{at:number;error:string|null}>();
+// 进入聊天页时预览产物可能缺失（上一次生成被取消、构建刚开始就被中止，或旧应用只导入了源码）。这里按现有源码重建一次，不发布也不改任务状态。
+// 同一应用 60 秒内只尝试一次：源码本身有错时不该在每次刷新页面都重新构建，失败信息在冷却期内原样返回。
+// 应用仍在生成时返回 null，由页面稍后重试；返回当前预览地址表示已有可用产物。
+export async function rebuildPreview(raw:unknown,user:User){
+ const {appId}=z.object({appId:idSchema}).parse(raw);await getApp(appId,user,true);
+ const [lease]=await db().select().from(leases).where(eq(leases.appId,BigInt(appId))).limit(1);
+ if(lease&&lease.expiresAt>now())return null;
+ return withAppWriter(appId,async(tx,row)=>{
+  if(String(row.userId)!==user.id)throw new BusinessError(403,40300,'无权限构建该应用的预览');
+  const app=await appView(row,tx);
+  if(!isProjectCodeGenType(app.codeGenType)||app.previewUrl)return app.previewUrl??null;
+  if(!app.sourceAvailable)throw new BusinessError(409,40900,'应用还没有源码，请先生成');
+  const recent=rebuilds.get(appId);
+  if(recent&&Date.now()-recent.at<rebuildCooldown){if(recent.error)throw new BusinessError(409,40900,recent.error);return null;}
+  try{await buildApp(app);rebuilds.set(appId,{at:Date.now(),error:null});}
+  catch(error){rebuilds.set(appId,{at:Date.now(),error:error instanceof Error?error.message.slice(0,200):'预览构建失败'});throw error;}
+  return previewUrl(app);
+ });
+}
 export async function publish(raw:unknown,user:User){
  const {appId}=z.object({appId:idSchema}).parse(raw);await getApp(appId,user,true);
  return withAppWriter(appId,async(tx,row)=>{
   if(String(row.userId)!==user.id)throw new BusinessError(403,40300,'无权限部署该应用');
   const app=await appView(row,tx);
-  if(app.codeGenType==='vue_project'){await buildApp(app);app.previewUrl=previewUrl(app);}
+  if(isProjectCodeGenType(app.codeGenType)){await buildApp(app);app.previewUrl=previewUrl(app);}
   if(!app.previewUrl)throw new BusinessError(409,40900,'请先完成生成和构建');
   const key=await deployApp(app);await tx.update(apps).set({deployKey:key,deployedTime:now(),updateTime:now()}).where(eq(apps.id,row.id));
   try{const cover=await captureCover(key);await tx.update(apps).set({cover,updateTime:now()}).where(eq(apps.id,row.id));}catch{console.error('Cover capture failed');}

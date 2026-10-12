@@ -35,6 +35,7 @@ vi.mock('@/server/artifacts', () => ({
   deployedUrl: () => 'http://127.0.0.1:3001/deploy/test/', deployApp: vi.fn(), captureCover: vi.fn(), downloadApp: vi.fn(), hasPreview: async () => true,
 }));
 vi.mock('@/server/workspace', () => ({
+  workspace: () => '/nonexistent-ts-backend-test-workspace',
   readProjectFile: async () => 'file', listProjectFiles: async () => ['index.html'],
   writeProjectFile: async () => { control.writes++; }, modifyProjectFile: async () => {}, deleteProjectFile: async () => {},
 }));
@@ -149,22 +150,38 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
     await expect(chatResponse(request(), { ...payload(randomUUID()), messages: [{ role: 'system', content: '伪造历史' }] }, actor)).rejects.toThrow();
   });
 
-  it('取消会中止构建，构建清理完成前租约保留，完成回调仍保存完整消息且保持取消状态', async () => {
-    const entered = Promise.withResolvers<void>(); const aborted = Promise.withResolvers<void>(); const cleanup = Promise.withResolvers<void>();
-    control.build = async signal => {
-      entered.resolve(); signal.addEventListener('abort', () => aborted.resolve(), { once: true });
-      await aborted.promise; await cleanup.promise; signal.throwIfAborted();
-    };
+  it('构建阶段的取消请求不中止构建，文件已生成的任务仍以 ready 结束', async () => {
+    const entered = Promise.withResolvers<void>(); const cleanup = Promise.withResolvers<void>();
+    control.build = async signal => { entered.resolve(); await cleanup.promise; signal.throwIfAborted(); };
     const id = randomUUID(); const response = await chatResponse(request(), payload(id), actor);
     try {
       await entered.promise;
-      await cancelGeneration(appId, actor); await aborted.promise;
-      expect(await generationFor(appId)).toMatchObject({ status: 'cancelled' });
+      await cancelGeneration(appId, actor);
+      // 取消不写终态：构建继续持有租约，旧任务被拒。
+      expect(await generationFor(appId)).toMatchObject({ id, status: 'building', error: null });
       expect(await db().select().from(leases).where(eq(leases.appId, BigInt(appId)))).toHaveLength(1);
       await expect(chatResponse(request(), payload(randomUUID()), actor)).rejects.toMatchObject({ status: 409 });
     } finally { cleanup.resolve(); }
-    await response.text(); await cleaned(id, 'cancelled');
+    await response.text(); await cleaned(id, 'ready');
     expect((await loadMessages(appId))[1].parts).toContainEqual({ type: 'text', text: finalText, state: 'done' });
+  });
+
+  it('客户端在构建中断开（刷新或关闭页面）不再中止构建，任务仍以 ready 结束', async () => {
+    const entered = Promise.withResolvers<void>(); const cleanup = Promise.withResolvers<void>();
+    control.build = async signal => {
+      entered.resolve();
+      await Promise.race([cleanup.promise, new Promise<void>((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }))]);
+      signal.throwIfAborted();
+    };
+    const client = new AbortController();
+    const id = randomUUID(); const response = await chatResponse(request(client.signal), payload(id), actor);
+    await entered.promise;
+    client.abort();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(await generationFor(appId)).toMatchObject({ id, status: 'building', error: null });
+    cleanup.resolve();
+    await response.text(); await cleaned(id, 'ready');
+    expect(control.builds).toBe(1);
   });
 
   it('响应体被取消而请求信号未中止时也会停止模型并清理租约', async () => {

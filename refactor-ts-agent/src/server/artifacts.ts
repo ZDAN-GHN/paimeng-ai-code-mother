@@ -6,8 +6,11 @@ import { randomUUID } from 'node:crypto';
 import archiver from 'archiver';
 import { PassThrough, Readable } from 'node:stream';
 import { getConfig } from './config';
-import { validateVueManifest } from './build-contract';
+import { validateProjectManifest } from './build-contract';
+import { readTemplateFile, templateTypecheck, validateTemplateManifest } from './templates';
+import { appTemplate } from './template-workspace';
 import { workspace, ensureRuntime, ensureWorkspace, ensureSafeDirectory, listProjectFiles, readProjectFile, validateDeployKey, type WorkspaceApp } from './workspace';
+import { isProjectCodeGenType } from '@/shared/contracts';
 export { workspace } from './workspace';
 
 export { BUILD_DEPENDENCIES } from './build-contract';
@@ -75,12 +78,17 @@ export async function buildApp(app: WorkspaceApp, signal?: AbortSignal) {
   signal?.throwIfAborted();
   const root = await ensureWorkspace(app);
   const files = await listProjectFiles(app);
-  if (app.codeGenType !== 'vue_project') {
+  if (!isProjectCodeGenType(app.codeGenType)) {
     const index = await readProjectFile(app, 'index.html');
     if (!/<html[\s>]/i.test(index)) throw new Error('生成结果缺少有效 HTML 页面');
     return;
   }
-  const dependencies = validateVueManifest(await readProjectFile(app, 'package.json'));
+  const template = await appTemplate(app);
+  const manifest = await readProjectFile(app, 'package.json');
+  const dependencies = template ? validateTemplateManifest(template, manifest) : validateProjectManifest(app.codeGenType, manifest);
+  const lockedManifest = template ? await readTemplateFile(template, 'package.json') : null;
+  const lock = template ? await readTemplateFile(template, 'package-lock.json') : null;
+  if (lock && await readProjectFile(app, 'package-lock.json') !== lock) throw new Error('模板依赖锁已改变，请恢复对应模板版本的 package-lock.json');
   const runtime = await ensureRuntime();
   const builds = await ensureSafeDirectory(join(runtime, 'builds'));
   const stage = await ensureSafeDirectory(join(builds, randomUUID()));
@@ -89,16 +97,18 @@ export async function buildApp(app: WorkspaceApp, signal?: AbortSignal) {
   const existing = join(root, 'dist');
   let backedUp = false;
   try {
-    await writeFile(join(stage, 'package.json'), JSON.stringify({ name: 'isolated-generated-app', version: '1.0.0', private: true, type: 'module', dependencies }));
+    await writeFile(join(stage, 'package.json'), lockedManifest ?? JSON.stringify({ name: 'isolated-generated-app', version: '1.0.0', private: true, type: 'module', dependencies }));
+    if (lock) await writeFile(join(stage, 'package-lock.json'), lock);
     // Install has network access, but never sees generated executable code or npm configuration.
-    await containerRun(stage, ['npm', 'install', '--ignore-scripts', '--no-audit', '--no-fund'], true, signal);
+    await containerRun(stage, ['npm', lock ? 'ci' : 'install', '--ignore-scripts', '--no-audit', '--no-fund'], true, signal);
     for (const file of files) {
       if (file === 'package.json' || file === 'package-lock.json') continue;
       let parent = stage;
       for (const part of file.split('/').slice(0, -1)) parent = await ensureSafeDirectory(join(parent, part));
       await copyFile(join(root, file), join(stage, file));
     }
-    await containerRun(stage, ['node', 'node_modules/vite/bin/vite.js', 'build'], false, signal);
+    if (template) await containerRun(stage, [...templateTypecheck(template)], false, signal);
+    await containerRun(stage, ['node', 'node_modules/vite/bin/vite.js', 'build', '--base=./'], false, signal);
     signal?.throwIfAborted();
     const dist = join(stage, 'dist');
     const index = await lstat(join(dist, 'index.html'));
@@ -129,7 +139,7 @@ export function deployedUrl(key: string) {
 }
 
 export async function hasPreview(app: WorkspaceApp) {
-  const directory = join(workspace(app), ...(app.codeGenType === 'vue_project' ? ['dist'] : []));
+  const directory = join(workspace(app), ...(isProjectCodeGenType(app.codeGenType) ? ['dist'] : []));
   const index = join(directory, 'index.html');
   try {
     if (await realpath(directory) !== directory || await realpath(index) !== index) return false;
@@ -147,7 +157,7 @@ export async function deployApp(app: WorkspaceApp & { deployKey?: string | null 
   const backup = join(deploy, '.paimeng-old-' + randomUUID());
   let backedUp = false;
   try {
-    if (app.codeGenType === 'vue_project') await copySafeTree(join(workspace(app), 'dist'), stage);
+    if (isProjectCodeGenType(app.codeGenType)) await copySafeTree(join(workspace(app), 'dist'), stage);
     else {
       await ensureSafeDirectory(stage);
       for (const file of await listProjectFiles(app)) {

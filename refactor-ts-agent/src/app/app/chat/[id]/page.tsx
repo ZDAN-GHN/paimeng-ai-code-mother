@@ -7,7 +7,7 @@ import { App, Button, Input, Alert, Tag, Space, Spin, Avatar } from 'antd';
 import { SendOutlined, DownloadOutlined, CloudUploadOutlined, EditOutlined, StopOutlined, InfoCircleOutlined, ExportOutlined, UserOutlined } from '@ant-design/icons';
 import { api } from '@/client/api';
 import { useAuth } from '@/components/providers';
-import type { AppInfo, Generation } from '@/shared/contracts';
+import { type AppInfo, type Generation, isProjectCodeGenType } from '@/shared/contracts';
 import { MarkdownMessage } from '@/components/chat/markdown-message';
 import { AppDetailModal, formatCodeGenType } from '@/components/chat/app-detail-modal';
 import { DeploySuccessModal } from '@/components/chat/deploy-success-modal';
@@ -51,6 +51,7 @@ function Chat({ id }: { id: string }) {
   const [selected, setSelected] = useState<Selected | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
   const [visibleHistory, setVisibleHistory] = useState(historyPageSize);
   const [detailOpen, setDetailOpen] = useState(false);
   const [deployModal, setDeployModal] = useState<{ open: boolean; url: string }>({ open: false, url: '' });
@@ -58,6 +59,9 @@ function Chat({ id }: { id: string }) {
   const messageList = useRef<HTMLDivElement>(null);
   const mounted = useRef(false);
   const submitting = useRef(false);
+  const rebuildCount = useRef(0);
+  const rebuildAt = useRef(0);
+  const rebuildTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialPromptHandled = useRef(false);
   const loadingOlder = useRef(false);
   const canEdit = !!user && user.id === app?.userId;
@@ -120,7 +124,7 @@ function Chat({ id }: { id: string }) {
         if (live) setHistorySettled(true);
       }
     })();
-    return () => { live = false; mounted.current = false; void stop(); };
+    return () => { live = false; mounted.current = false; if (rebuildTimer.current) clearTimeout(rebuildTimer.current); void stop(); };
   }, [id, setMessages, stop]);
 
   useEffect(() => {
@@ -187,6 +191,25 @@ function Chat({ id }: { id: string }) {
     if (canEdit && !messages.length && !task && !generating && app.initPrompt.trim()) void submit(app.initPrompt);
   }, [appLoaded, historyLoaded, authLoading, app, canEdit, messages.length, task, generating, submit]);
 
+  // 源码在但预览产物缺失（上一次构建被中止、取消生成、或只导入了源码的旧应用）时自动重建，
+  // 否则用户只能看到空态。服务端仍在生成时返回 null，稍后刷新重试，最多六次。
+  useEffect(() => {
+    if (!appLoaded || !canEdit || !app || generating || rebuilding || rebuildCount.current >= 6) return;
+    if (app.previewUrl || app.sourceAvailable !== true || !isProjectCodeGenType(app.codeGenType)) return;
+    // 首次进入会自动提交初始需求，预览交给这次生成，不在这里抢先构建。
+    if (!task && !messages.length) return;
+    if (Date.now() - rebuildAt.current < 3000) return;
+    rebuildAt.current = Date.now(); rebuildCount.current += 1;
+    setRebuilding(true);
+    void (async () => {
+      let retry = false;
+      try { retry = !(await api<string | null>('app/build', { appId: id })); }
+      catch (e) { if (mounted.current) message.error((e as Error).message); }
+      finally { if (mounted.current) setRebuilding(false); await refresh(); }
+      if (retry && mounted.current) rebuildTimer.current = setTimeout(() => { void refresh(); }, 5000);
+    })();
+  }, [appLoaded, canEdit, app, generating, rebuilding, task, messages.length, id, message, refresh]);
+
   async function cancel() {
     setCancelling(true);
     try {
@@ -215,6 +238,8 @@ function Chat({ id }: { id: string }) {
   }
 
   const taskErrorKey = task?.error ? `${task.id}:${task.error}` : '';
+  // 模型写完文件后进入构建：构建是确定性收尾，取消不再生效，按钮改为状态提示。
+  const building = task?.status === 'building';
   const problem = error || chatError?.message || (taskErrorKey !== dismissedTaskError ? task?.error : null);
   const visibleMessages = messages.slice(-visibleHistory);
   const sourceAvailable = app?.sourceAvailable ?? !!app?.previewUrl;
@@ -274,7 +299,7 @@ function Chat({ id }: { id: string }) {
             onChange={e => setInput(e.target.value)} disabled={!canEdit || !loaded} autoSize={{ minRows: 3, maxRows: 6 }} maxLength={textareaMax}
             onKeyDown={e => { if (e.nativeEvent.isComposing) return; if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); } }} />
           <div className="prompt-actions"><span className="composer-hint">Enter 发送，Shift + Enter 换行</span>
-            {generating ? <Button danger icon={<StopOutlined aria-hidden="true" />} loading={cancelling} onClick={() => { void cancel(); }}>停止生成</Button> :
+            {generating ? <Button danger icon={<StopOutlined aria-hidden="true" />} loading={cancelling} disabled={building} title={building ? '代码已生成，正在完成构建，构建无法取消' : undefined} onClick={() => { void cancel(); }}>{building ? '构建中' : '停止生成'}</Button> :
               <Button type="primary" icon={<SendOutlined aria-hidden="true" />} disabled={!canEdit || !loaded || !input.trim()} onClick={() => { void submit(); }}>发送</Button>}
           </div>
         </div>
@@ -285,7 +310,7 @@ function Chat({ id }: { id: string }) {
           {canPreview && <Button size="small" type="link" icon={<ExportOutlined aria-hidden="true" />} onClick={() => { if (app?.previewUrl) window.open(app.previewUrl, '_blank', 'noopener'); }}>新窗口打开</Button>}
           {app?.deployUrl && <a href={app.deployUrl} target="_blank" rel="noopener noreferrer">访问作品</a>}
         </Space></div>
-        {generating ? <div className="preview-loading" role="status"><Spin size="large" /><p>正在生成网站...</p></div> :
+        {generating || rebuilding ? <div className="preview-loading" role="status"><Spin size="large" /><p>{generating ? '正在生成网站...' : '正在重建预览...'}</p></div> :
           canPreview ? <iframe ref={iframe} className="preview-frame" title="应用预览" src={previewSrc} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={() => editorMessage({ type: 'TOGGLE_EDIT_MODE', editMode: editing })} /> :
           <div className="preview-placeholder"><div className="preview-placeholder-icon">🌐</div><p>网站文件生成完成后将在这里展示</p></div>}
       </section>

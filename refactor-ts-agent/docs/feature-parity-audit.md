@@ -10,7 +10,7 @@
 
 | 编号 | 当前实现 | 验证证据与边界 |
 | --- | --- | --- |
-| F01 | 首页仅提交初始需求；后端通过模型 JSON 路由选择三种生成类型，保留显式类型 API。 | `src/server/model.ts`；`tests/integration/feature-parity.test.ts` 与 `tests/e2e/home-parity.spec.ts`。模型请求格式测试覆盖 JSON 字段；真实模型路由质量未验证。 |
+| F01 | 首页仅提交初始需求；后端通过模型 JSON 路由选择生成类型（HTML、多文件、Vue 工程、React 工程），保留显式类型与显式模板 API。 | `src/server/model.ts`；`tests/integration/feature-parity.test.ts` 与 `tests/e2e/home-parity.spec.ts`。模型请求格式测试覆盖 JSON 字段与四种取值；真实模型路由质量未验证。 |
 | F02 | 公开应用信息独立加载，私有历史或任务失败不再清空公开详情。 | `tests/e2e/chat-parity.spec.ts` 非本人公开应用与失败历史用例通过。 |
 | F03 | 以有效预览入口判断可预览性；源码可用性独立于预览和任务。失败、取消或无任务的旧应用可保留有效产物。Vue 发布重新构建当前源码。 | `tests/artifacts.test.ts`、`tests/e2e/chat-parity.spec.ts` 仅源码及旧源码加预览用例；真实旧快照迁移后的完整流程未验证。 |
 | F04 | 重复发布复用合法 deployKey，暂存复制与目录替换失败时恢复原发布目录。 | `src/server/artifacts.ts` 及产物测试；真实生产链接未验证。 |
@@ -31,6 +31,14 @@
 | F19 | 限流默认保持旧版策略（按用户每 60 秒 1 次，跨应用共享），并新增 `.env` 可配置的 `CHAT_RATE_LIMIT_TYPE`（`API`/`USER`/`IP`，对应旧版三种策略）、`CHAT_RATE_LIMIT_RATE`、`CHAT_RATE_LIMIT_INTERVAL`、`CHAT_RATE_LIMIT_MESSAGE`；计数写入 `ts_rate_limit` 并与任务创建同事务。 | `src/server/rate-limit.ts`、`src/server/generation-store.ts`、`migrations/005_rate_limit.sql` 与 `tests/integration/rate-limit.test.ts`；没有为浏览器测试放宽生产规则。 |
 | F20 | 首页恢复共 N 个应用、共 N 个案例。 | `tests/e2e/home-parity.spec.ts` 两分页总数用例通过。 |
 | F21 | schema、视图、旧记录导入保留 editTime；普通及管理员更新同时记录 editTime 和 updateTime。004 迁移修改既有列精度及默认值，不重复添加 001 已有列。 | `migrations/004_app_edit_time.sql`、后端契约及旧记录导入测试。 |
+
+### 原版之外的扩展
+
+| 扩展 | 内容 | 现状 |
+| --- | --- | --- |
+| 工程模板 | 新建 Vue 应用默认从完整可运行的 `vue-ts@1.0.0` 工程模板开始，React 应用默认从 `react-ts@1.0.0` 开始，AI 在模板上先读工程再改源码；模板版本固定依赖与锁文件，类型检查命令按模板区分（`vue-tsc` / `tsc`）。 | `templates/vue-ts/1.0.0/`、`templates/react-ts/1.0.0/`、`src/server/templates.ts`、`src/server/template-workspace.ts`；`tests/templates.test.ts`、`tests/integration/template-generation.test.ts` 与浏览器 `vue_project`、`react_project` 用例通过。原版没有该能力。 |
+| 取消生成 | 聊天页提供「停止生成」，调用 `POST /api/app/generation/cancel`。只在模型写文件阶段生效；文件写完进入构建后按钮显示「构建中」并忽略取消，构建完成后仍可预览。 | `src/app/app/chat/[id]/page.tsx`、`src/server/agent.ts`；`tests/integration/agent-persistence.test.ts` 覆盖模型阶段取消、构建阶段取消与客户端断开，`tests/integration/generation-disconnect-build.test.ts` 用真实容器构建验证断开后仍产出 `dist`。原版没有该能力。 |
+| 预览自动重建 | 进入聊天页时若源码存在而预览产物缺失，自动调用 `POST /api/app/build` 按现有源码重建一次（同一应用 60 秒冷却），无需重新生成或手动部署。 | `src/app/app/chat/[id]/page.tsx`、`src/server/business.ts`、`src/app/api/[...path]/route.ts`；`tests/integration/preview-rebuild.test.ts` 覆盖模板应用真实构建、HTML 应用跳过、无源码 409 与非创建者 403。原版没有该能力。 |
 
 ### 视觉项
 

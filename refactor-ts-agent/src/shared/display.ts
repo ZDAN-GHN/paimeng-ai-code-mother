@@ -5,6 +5,7 @@ export const codeGenTypeLabels: Record<CodeGenType, string> = {
   html: '原生 HTML 模式',
   multi_file: '原生多文件模式',
   vue_project: 'Vue项目模式',
+  react_project: 'React项目模式',
 };
 
 export const codeGenTypeOptions = codeGenTypes.map(value => ({ value, label: codeGenTypeLabels[value] }));

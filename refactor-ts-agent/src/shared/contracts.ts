@@ -1,10 +1,17 @@
 import { z } from 'zod';
-export const codeGenTypes = ['html', 'multi_file', 'vue_project'] as const;
+import type { TemplateIdentity } from './templates';
+export const codeGenTypes = ['html', 'multi_file', 'vue_project', 'react_project'] as const;
 export type CodeGenType = typeof codeGenTypes[number];
+/** 需要容器构建并产出 dist/ 的前端工程类型。 */
+export const projectCodeGenTypes = ['vue_project', 'react_project'] as const;
+export type ProjectCodeGenType = typeof projectCodeGenTypes[number];
+export function isProjectCodeGenType(value: string): value is ProjectCodeGenType {
+  return (projectCodeGenTypes as readonly string[]).includes(value);
+}
 export const idSchema = z.string().regex(/^[1-9]\d{0,19}$/).refine(v => BigInt(v) <= 18446744073709551615n, 'ID 超出范围');
 export const roleSchema = z.enum(['user', 'admin']);
 export type User = {id:string;userAccount:string;userName:string|null;userAvatar:string|null;userProfile:string|null;userRole:'user'|'admin';createTime:string;updateTime:string};
-export type AppInfo = {id:string;appName:string|null;cover:string|null;initPrompt:string;codeGenType:CodeGenType;deployKey:string|null;deployedTime:string|null;editTime?:string|null;priority:number;userId:string;createTime:string;updateTime:string;user?:User;sourceAvailable?:boolean;previewUrl?:string|null;deployUrl?:string|null};
+export type AppInfo = {id:string;appName:string|null;cover:string|null;initPrompt:string;codeGenType:CodeGenType;deployKey:string|null;deployedTime:string|null;editTime?:string|null;priority:number;userId:string;createTime:string;updateTime:string;user?:User;sourceAvailable?:boolean;previewUrl?:string|null;deployUrl?:string|null;template?:TemplateIdentity|null};
 export type Page<T> = {records:T[];totalRow:number;pageNumber:number;pageSize:number};
 export type ApiResult<T> = {code:number;data:T;message:string};
 export type GenerationStatus = 'generating'|'building'|'ready'|'failed'|'cancelled';
