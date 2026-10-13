@@ -246,6 +246,32 @@ describe('模型配置存储', () => {
     expect(cleared?.apiKeyEnv).toBe('AI_API_KEY');
   });
 
+  it('自定义请求头随配置保存、读取、编辑与清除，旧记录缺列时按空集合读取', async () => {
+    await seedFromEnv();
+    const withHeaders: ModelProviderWriteInput = {
+      ...provider({ id: 'env-default' }),
+      headers: { 'User-Agent': 'paimeng-ai-code-mother/1.0', 'X-Title': 'paimeng' },
+    };
+
+    await expect(upsertProvider(withHeaders, { expectedRevision: '1' })).resolves.toMatchObject({ revision: '2' });
+    expect((await readConfigSnapshot()).providers[0]?.headers).toEqual({ 'User-Agent': 'paimeng-ai-code-mother/1.0', 'X-Title': 'paimeng' });
+    const [row] = await db().select().from(modelProviders).where(eq(modelProviders.id, 'env-default'));
+    expect(row?.headers).toEqual({ 'User-Agent': 'paimeng-ai-code-mother/1.0', 'X-Title': 'paimeng' });
+
+    await expect(
+      upsertProvider({ ...provider({ id: 'env-default' }), headers: { 'X-Title': 'edited' } }, { expectedRevision: '2' }),
+    ).resolves.toMatchObject({ revision: '3' });
+    expect((await readConfigSnapshot()).providers[0]?.headers).toEqual({ 'X-Title': 'edited' });
+
+    await expect(upsertProvider(provider({ id: 'env-default' }), { expectedRevision: '3' })).resolves.toMatchObject({ revision: '4' });
+    expect((await readConfigSnapshot()).providers[0]?.headers).toEqual({});
+    const [cleared] = await db().select().from(modelProviders).where(eq(modelProviders.id, 'env-default'));
+    expect(cleared?.headers).toEqual({});
+
+    await db().update(modelProviders).set({ headers: null }).where(eq(modelProviders.id, 'env-default'));
+    expect((await readConfigSnapshot()).providers[0]?.headers).toEqual({});
+  });
+
   it('新建直接密钥为空时被拒绝', async () => {
     await seedFromEnv();
     await expect(

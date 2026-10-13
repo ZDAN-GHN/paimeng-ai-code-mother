@@ -10,7 +10,7 @@
 2. 执行 `npm ci`。
 3. 执行 `npm run assets:import`。此命令只读取旧平台的派蒙图片，写入新应用的 `public/`。
 4. 执行 `npm run infra:up`。固定命名的 MySQL 和 Redis 容器启动并等待健康检查。该命令读取 `.env`，不生成或改写凭据。
-5. 执行 `npm run db:migrate`。迁移完成后显示“独立 TS 数据库迁移完成”。重复执行会核对已有迁移的校验和。迁移包含 `006_model_registry.sql`（模型配置表与状态行）与 `007_provider_api_format.sql`（提供商 API 格式、可空密钥引用与密文字段）；随后执行一次 `npm run db:init-models`，把现有 `.env` 的模型配置写入数据库（仅当表仍为空且版本为零；幂等，已有配置不会被覆盖）。
+5. 执行 `npm run db:migrate`。迁移完成后显示“独立 TS 数据库迁移完成”。重复执行会核对已有迁移的校验和。迁移包含 `006_model_registry.sql`（模型配置表与状态行）、`007_provider_api_format.sql`（提供商 API 格式、可空密钥引用与密文字段）与 `008_provider_headers.sql`（提供商自定义请求头 JSON 列）；随后执行一次 `npm run db:init-models`，把现有 `.env` 的模型配置写入数据库（仅当表仍为空且版本为零；幂等，已有配置不会被覆盖）。
 6. 执行 `docker pull node:24-alpine`。Vue 生成工程使用该镜像进行隔离构建。
 7. 执行 `npx playwright install chromium`。发布封面截图和浏览器测试都需要 Chromium。若系统缺少浏览器依赖，按 Playwright 的报错安装系统依赖。
 8. 执行 `npm run dev:all` 同时启动管理端与预览进程，输出按 `[app]`、`[preview]` 前缀合并，按 Ctrl-C 一起停止；也可以在一个终端执行 `npm run preview`，在另一个终端执行 `npm run dev`。两个进程的端口分别取自 `APP_ORIGIN` 与 `PREVIEW_ORIGIN`，端口已被占用时 `dev:all` 会直接报错退出。
@@ -62,15 +62,17 @@ Redis 已作为本地开发服务提供连接。当前平台会话、消息和�
 
 ## 模型统一管理
 
-模型配置保存在 MySQL。表结构由 `migrations/006_model_registry.sql` 创建、`migrations/007_provider_api_format.sql` 补充提供商 API 格式与密钥字段，`npm run db:migrate` 执行；迁移后执行一次 `npm run db:init-models`，把当前 `.env` 的 `AI_BASE_URL` / `AI_MODEL` / `AI_API_KEY` 写入数据库。初始化只在配置仍为初始空态时进行，已有配置不会被覆盖。表已迁移且为空时，解析会临时用环境变量构造两个别名以兼容升级；读取失败不等于表空，不会回退到环境变量；DB 初始化后 DB 是唯一来源。
+模型配置保存在 MySQL。表结构由 `migrations/006_model_registry.sql` 创建、`migrations/007_provider_api_format.sql` 补充提供商 API 格式与密钥字段、`migrations/008_provider_headers.sql` 新增自定义请求头列，`npm run db:migrate` 执行；迁移后执行一次 `npm run db:init-models`，把当前 `.env` 的 `AI_BASE_URL` / `AI_MODEL` / `AI_API_KEY` 写入数据库。初始化只在配置仍为初始空态时进行，已有配置不会被覆盖。表已迁移且为空时，解析会临时用环境变量构造两个别名以兼容升级；读取失败不等于表空，不会回退到环境变量；DB 初始化后 DB 是唯一来源。
 
 注册表支持两个业务别名：`codegen.default`（应用生成 Agent，需流式与工具调用）和 `route.classify`（生成类型分类，需结构化输出）。管理员在 `/admin/modelManage` 编辑提供商与别名；“保存”约 5 秒内对后续请求生效，“保存并立即生效”会在事务中递增共享刷新序号，让其他实例在下一次解析时跳过 TTL。在途生成任务继续使用开始时解析的绑定。
 
 提供商按 API 格式构造模型：`openai-chat`（OpenAI 兼容 `/chat/completions`，支持 `includeUsage`、`supportsStructuredOutputs`、`supportsMultiPartToolContent` 三个布尔选项，以及命名选项 `thinkingSwitch`）、`openai-responses`（OpenAI Responses API `/responses`）、`anthropic-messages`（Anthropic Messages API `/messages`）。后两种格式没有可配置协议选项，管理端会隐藏相应开关；提交该格式不支持的选项会返回 400。`thinkingSwitch` 只对 `openai-chat` 生效，取值 `none`（默认，不追加）、`enabled`、`disabled`；非 `none` 时在请求体追加 DeepSeek 的 `thinking: {"type": …}`。
 
+每个提供商可额外配置一组自定义请求头（`headers`），单独存在 `ts_model_provider.headers`（JSON），与协议选项分开。名称须是 RFC 7230 token（字母、数字及 `!#$%&'*+-.^_|~` 与反引号），大小写不敏感去重；值须是首尾无空白的可打印/扩展 ASCII（可编码为 ByteString）；最多 32 条，名称最多 128、值最多 1024 字符。`authorization`、`proxy-authorization`、`x-api-key`、`x-goog-api-key`、`api-key`、`host`、`content-length`、`connection`、`transfer-encoding`、`te`、`trailer`、`upgrade`、`keep-alive`、`proxy-authenticate`、`cookie`、`set-cookie` 由系统生成，不能自定义；鉴权仍走密钥来源，避免 SDK 与探测鉴权不一致。自定义头对三种格式的生成、流式与结构化调用都生效，也随「测试连接」「获取模型」的 `GET /models` 一起发送；上游错误回显这些值时，响应片段先脱敏再截断。示例：`User-Agent: paimeng-ai-code-mother/1.0`（本应用自己的标识，不是伪装成其他客户端）。OpenCode Go 那种每对话动态稳定的会话头（如 `x-opencode-session`）不是固定值，暂未接入。
+
 别名弹窗的「思考强度」写入 `settings.reasoning`，取值 `none`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`，留空表示不指定（不传思考参数）。SDK 的统一 `reasoning` 参数由 `src/server/models/adapters.ts` 的自定义 middleware 注入，各格式映射为：`openai-chat` → `reasoning_effort`；`openai-responses` → `reasoning.effort`（适配层同时打开 `forceReasoning`，否则上游会忽略未知模型名的思考配置）；`anthropic-messages` → `thinking` 预算（按 `max_tokens` 比例换算，最低 1024）。上游不支持的等级由上游自行拒绝，本项目不做收窄。
 
-提供商弹窗的「测试连接」与别名弹窗的「获取模型」都会请求上游 `GET {baseUrl}/models`（`openai-chat` / `openai-responses` 用 `Authorization: Bearer`，`anthropic-messages` 用 `x-api-key` + `anthropic-version`），每次点击都会重新请求上游（带 `cache-control: no-cache`，不使用缓存）、10 秒超时、不跟随重定向、错误信息不回显密钥；「获取模型」的结果只填充当前对话框的候选列表（最多 1000 条，命中上限时界面会提示可能被截断），不落库。密钥来源为“直接输入”且表单留空时，探测沿用数据库里已保存的密文。「获取模型」失败的原因会显示在别名的「上游模型名」下方。
+提供商弹窗的「测试连接」与别名弹窗的「获取模型」都会请求上游 `GET {baseUrl}/models`（`openai-chat` / `openai-responses` 用 `Authorization: Bearer`，`anthropic-messages` 用 `x-api-key` + `anthropic-version`），每次点击都会重新请求上游（带 `cache-control: no-cache`，不使用缓存）、10 秒超时、不跟随重定向、错误信息不回显密钥与自定义请求头的值；「获取模型」的结果只填充当前对话框的候选列表（最多 1000 条，命中上限时界面会提示可能被截断），不落库。密钥来源为“直接输入”且表单留空时，探测沿用数据库里已保存的密文。「获取模型」失败的原因会显示在别名的「上游模型名」下方。
 
 生成的时长预算都在 `.env`：`GENERATION_TIMEOUT_MS`（毫秒，默认 `0`，表示不限制整次生成任务；旧版写死 10 分钟）；`MODEL_REPLY_TIMEOUT_MS`（毫秒，默认 `900000`）限制单次模型回复的时长，超时中止并记为「单次回复超时」；每个模型请求的失败重试次数由 `MODEL_RETRY_LIMIT`（默认 `2`，0-5）控制。上游输出到达 token 上限（`finishReason = length`）不再判为失败：文件已经落盘就继续构建，模型可以在下一轮对话里根据构建结果补齐。
 

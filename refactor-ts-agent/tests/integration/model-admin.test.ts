@@ -213,7 +213,7 @@ describe('模型管理 API', () => {
     expect(typeof data.instance.degraded).toBe('boolean');
 
     expect(Object.keys(data.providers[0]!).sort()).toEqual([
-      'apiFormat', 'apiKeyConfigured', 'apiKeyEnv', 'apiKeySource', 'baseUrl', 'createTime', 'displayName', 'enabled', 'id', 'options', 'updateTime',
+      'apiFormat', 'apiKeyConfigured', 'apiKeyEnv', 'apiKeySource', 'baseUrl', 'createTime', 'displayName', 'enabled', 'headers', 'id', 'options', 'updateTime',
     ]);
     expect(JSON.stringify(data)).not.toContain(secretValue);
   });
@@ -240,7 +240,7 @@ describe('模型管理 API', () => {
     if (!inline) throw new Error('未找到直接输入的提供商');
     expect(inline).toMatchObject({ apiKeySource: 'inline', apiKeyConfigured: true });
     expect(Object.keys(inline).sort()).toEqual([
-      'apiFormat', 'apiKeyConfigured', 'apiKeySource', 'baseUrl', 'createTime', 'displayName', 'enabled', 'id', 'options', 'updateTime',
+      'apiFormat', 'apiKeyConfigured', 'apiKeySource', 'baseUrl', 'createTime', 'displayName', 'enabled', 'headers', 'id', 'options', 'updateTime',
     ]);
 
     // 再次提交空密钥表示保持已保存的密钥，不会被当成新建而拒绝。

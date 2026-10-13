@@ -30,6 +30,9 @@ import {
   modelProviderOptionChoices,
   modelProviderOptionLabels,
   modelProviderOptionKeys,
+  providerHeaderLimit,
+  providerHeaderNameSchema,
+  providerHeaderValueSchema,
   providerOptionKeysByFormat,
   providerOptionsSchema,
   providerModelListLimit,
@@ -60,6 +63,8 @@ function modelListLimitHint(count: number): string {
 
 type AdminOutcome<T> = { ok: true; data: T } | { ok: false; status: number; message: string };
 
+type ProviderHeaderRow = { name: string; value: string };
+
 type ProviderFormValues = {
   id: string;
   displayName: string;
@@ -69,6 +74,7 @@ type ProviderFormValues = {
   apiKeyEnv: string;
   apiKey: string;
   options: ModelProviderOptions;
+  requestHeaders: ProviderHeaderRow[];
   enabled: boolean;
 };
 
@@ -775,6 +781,69 @@ function ModelConfigManager() {
                 );
               }}
             </Form.Item>
+            <Form.Item
+              label="自定义请求头"
+              tooltip="随每个上游请求发送的普通 HTTP 头，例如 User-Agent、HTTP-Referer、X-Title；鉴权与传输头由系统生成，不能在这里覆盖"
+            >
+              <Form.List name="requestHeaders">
+                {(fields, { add, remove }) => (
+                  <Space orientation="vertical" size={8} style={{ width: '100%' }}>
+                    {fields.map((field) => (
+                      <Space key={field.key} size={8} align="start">
+                        <Form.Item
+                          name={[field.name, 'name']}
+                          rules={[
+                            { required: true, message: '请输入请求头名称' },
+                            {
+                              validator: (_rule, value) => {
+                                if (value === undefined || value === null || value === '') return Promise.resolve();
+                                const parsed = providerHeaderNameSchema.safeParse(value);
+                                if (!parsed.success) {
+                                  return Promise.reject(new Error(parsed.error.issues[0]?.message ?? '请求头名称不合法'));
+                                }
+                                const rows: ProviderHeaderRow[] = providerForm.getFieldValue('requestHeaders') ?? [];
+                                const target = String(value).trim().toLowerCase();
+                                const duplicated = rows.filter((row) => (row?.name ?? '').trim().toLowerCase() === target).length > 1;
+                                return duplicated ? Promise.reject(new Error('请求头名称重复')) : Promise.resolve();
+                              },
+                            },
+                          ]}
+                        >
+                          <Input aria-label="请求头名称" placeholder="User-Agent" />
+                        </Form.Item>
+                        <Form.Item
+                          name={[field.name, 'value']}
+                          rules={[
+                            { required: true, message: '请输入请求头值' },
+                            {
+                              validator: (_rule, value) => {
+                                if (value === undefined || value === null || value === '') return Promise.resolve();
+                                const parsed = providerHeaderValueSchema.safeParse(value);
+                                return parsed.success
+                                  ? Promise.resolve()
+                                  : Promise.reject(new Error(parsed.error.issues[0]?.message ?? '请求头值不合法'));
+                              },
+                            },
+                          ]}
+                        >
+                          <Input aria-label="请求头值" placeholder="paimeng-ai-code-mother/1.0" />
+                        </Form.Item>
+                        <Button danger onClick={() => remove(field.name)} aria-label="删除请求头">
+                          删除
+                        </Button>
+                      </Space>
+                    ))}
+                    <Button
+                      onClick={() => add({ name: '', value: '' })}
+                      disabled={fields.length >= providerHeaderLimit}
+                      aria-label="添加请求头"
+                    >
+                      添加请求头
+                    </Button>
+                  </Space>
+                )}
+              </Form.List>
+            </Form.Item>
             <Form.Item name="enabled" label="启用" valuePropName="checked">
               <Switch aria-label="启用" />
             </Form.Item>
@@ -988,6 +1057,7 @@ function emptyProviderValues(): ProviderFormValues {
     apiKeyEnv: baseModelApiKeyEnv,
     apiKey: '',
     options: {},
+    requestHeaders: [],
     enabled: true,
   };
 }
@@ -1002,6 +1072,7 @@ function providerFormValues(provider: ModelProviderView): ProviderFormValues {
     apiKeyEnv: provider.apiKeySource === 'env' ? provider.apiKeyEnv : baseModelApiKeyEnv,
     apiKey: '',
     options: { ...provider.options },
+    requestHeaders: providerHeaderRows(provider.headers),
     enabled: provider.enabled,
   };
 }
@@ -1034,6 +1105,22 @@ function pickProviderOptions(apiFormat: ProviderApiFormat, options: ModelProvide
   return parsed.success ? parsed.data : {};
 }
 
+/** 把已保存的请求头拆成表单行，编辑重开时保留原值。 */
+function providerHeaderRows(headers: Record<string, string> | undefined): ProviderHeaderRow[] {
+  return Object.entries(headers ?? {}).map(([name, value]) => ({ name, value }));
+}
+
+/** 把表单行转成请求头 record，并丢掉名称为空的行（新增后未填写的空行不提交）。 */
+function providerHeadersFromRows(rows: ProviderHeaderRow[] | undefined): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const row of rows ?? []) {
+    const name = row?.name?.trim() ?? '';
+    if (!name) continue;
+    headers[name] = row?.value ?? '';
+  }
+  return headers;
+}
+
 function toProviderInput(values: ProviderFormValues): ModelProviderWriteInput {
   const common = {
     id: values.id.trim(),
@@ -1041,6 +1128,7 @@ function toProviderInput(values: ProviderFormValues): ModelProviderWriteInput {
     apiFormat: values.apiFormat,
     baseUrl: values.baseUrl.trim(),
     options: pickProviderOptions(values.apiFormat, values.options),
+    headers: providerHeadersFromRows(values.requestHeaders),
     enabled: Boolean(values.enabled),
   };
   return values.apiKeySource === 'env'
@@ -1056,6 +1144,7 @@ function providerWriteFromView(provider: ModelProviderView): ModelProviderWriteI
     apiFormat: provider.apiFormat,
     baseUrl: provider.baseUrl,
     options: provider.options,
+    headers: provider.headers ?? {},
     enabled: provider.enabled,
   };
   return provider.apiKeySource === 'env'

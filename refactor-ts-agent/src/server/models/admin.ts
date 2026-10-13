@@ -148,6 +148,6 @@ export async function probeProviderModels(raw: unknown): Promise<ProviderModelsV
     const urlIssue = modelBaseUrlIssue(provider.baseUrl, policy);
     if (urlIssue) throw new BusinessError(400, 40000, `模型地址不合法：${urlIssue}`);
     const apiKey = await probeApiKey(provider, policy);
-    return { models: await fetchProviderModels({ apiFormat: provider.apiFormat, baseUrl: provider.baseUrl }, apiKey) };
+    return { models: await fetchProviderModels({ apiFormat: provider.apiFormat, baseUrl: provider.baseUrl, headers: provider.headers ?? {} }, apiKey) };
   });
 }

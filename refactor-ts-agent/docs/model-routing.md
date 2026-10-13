@@ -8,7 +8,7 @@
 
 已落地的组件与行为：
 
-- `migrations/006_model_registry.sql` 创建 `ts_model_provider`、`ts_model_alias`、`ts_model_config_state` 三张表，并插入固定状态行 `models`（`revision=0`、`refreshEpoch=0`）。迁移只建表与状态行，不读取密钥、不写死上游模型名。`migrations/007_provider_api_format.sql` 把 `adapter` 改名为 `apiFormat`（旧值 `openai-compatible` 映射为 `openai-chat`，未知值会让迁移失败而不静默改写）、允许 `apiKeyEnv` 为空并新增 `apiKeyCiphertext`。两者都通过 `npm run db:migrate` 执行。
+- `migrations/006_model_registry.sql` 创建 `ts_model_provider`、`ts_model_alias`、`ts_model_config_state` 三张表，并插入固定状态行 `models`（`revision=0`、`refreshEpoch=0`）。迁移只建表与状态行，不读取密钥、不写死上游模型名。`migrations/007_provider_api_format.sql` 把 `adapter` 改名为 `apiFormat`（旧值 `openai-compatible` 映射为 `openai-chat`，未知值会让迁移失败而不静默改写）、允许 `apiKeyEnv` 为空并新增 `apiKeyCiphertext`，`migrations/008_provider_headers.sql` 新增自定义请求头列 `headers`（JSON）。三者都通过 `npm run db:migrate` 执行。
 - 迁移后执行一次 `npm run db:init-models`。该命令幂等：仅当配置仍为初始空态（提供商与别名均为空、`revision=0`、`refreshEpoch=0`）时，从现有 `AI_BASE_URL` / `AI_MODEL` / `AI_API_KEY` 建立一个提供商与两个别名；已有配置不会被覆盖。
 - 表已迁移且为空时，解析会临时用环境变量构造两个别名以兼容升级。此回退要求迁移后的表可读且为空；读取失败不等于为空，不会回退到环境变量。一旦 DB 初始化成功（存在配置行或版本非零），DB 即成为唯一来源。
 - 解析路径：`src/server/models/registry.ts` 提供 `resolveBinding` / `resolveModel`；`src/server/model.ts` 的 `modelFor` 解析 `codegen.default`，`routeCodeGenType` 解析 `route.classify`。`src/server/agent.ts` 在任务开始时解析一次并把绑定冻结到整个工具循环，在途任务不受后续配置变更影响。
@@ -16,7 +16,7 @@
 
 环境变量：
 
-- 密钥来源二选一：`apiKeySource='env'` 时 DB 只存引用名（`apiKeyEnv`），允许引用的名单默认为 `AI_API_KEY`，其余通过 `MODEL_API_KEY_ENV_ALLOWLIST`（逗号分隔）显式加入；`apiKeySource='inline'` 时明文不入库，服务端用 AES-256-GCM 加密后只存 `apiKeyCiphertext`（`v1:<iv>:<tag>:<ciphertext>`），主密钥来自 `MODEL_SECRET_KEY`（64 位十六进制、32 字节 base64 或任意口令，scrypt 派生），未设置时自动生成 `runtime/model-secret.key`（0600）。管理接口只返回 `apiKeySource` 与是否已配置，不回显明文或密文。
+- 密钥来源二选一：`apiKeySource='env'` 时 DB 只存引用名（`apiKeyEnv`），允许引用的名单默认为 `AI_API_KEY`，其余通过 `MODEL_API_KEY_ENV_ALLOWLIST`（逗号分隔）显式加入；`apiKeySource='inline'` 时明文不入库，服务端用 AES-256-GCM 加密后只存 `apiKeyCiphertext`（`v1:<iv>:<tag>:<ciphertext>`），主密钥来自 `MODEL_SECRET_KEY`（64 位十六进制、32 字节 base64 或任意口令，scrypt 派生），未设置时自动生成 `runtime/model-secret.key`（0600）。管理接口只返回 `apiKeySource` 与是否已配置，不回显明文或密文。自定义请求头是普通配置（明文入库），不要放密钥；密钥始终用专用密钥字段。
 - 地址只允许无内嵌凭据、无查询、无片段的 HTTP(S)。`http:` 对**本机与局域网字面量**（`localhost`/`*.localhost`、`127.0.0.0/8`、`10/8`、`172.16/12`、`192.168/16`、`::1`、IPv6 链路本地 `fe80::/10` 与 ULA `fc00::/7`）直接放行——自建网关常见形态 `http://127.0.0.1:8787/v1` 不需要额外配置；判定只看字面量、不做 DNS 解析，也**不含** `169.254/16`（避免把云元数据地址当本机）。其余 `http:` origin 需写进 `MODEL_INTERNAL_BASE_URL_ORIGINS`（逗号分隔）；`https:` 不受该名单限制。
 - 管理端可以在已部署的密钥引用之间热切换，无需重启。**轮换某个环境变量的值**（例如替换 `AI_API_KEY` 的密钥）需要更新进程环境并重启进程；DB 配置变更本身不要求重启。
 
@@ -39,7 +39,7 @@
 
 ## DB 结构
 
-实际迁移为 `migrations/006_model_registry.sql`（建表与状态行）与 `migrations/007_provider_api_format.sql`（API 格式与密钥字段）。
+实际迁移为 `migrations/006_model_registry.sql`（建表与状态行）、`migrations/007_provider_api_format.sql`（API 格式与密钥字段）与 `migrations/008_provider_headers.sql`（自定义请求头列）。
 
 ### `ts_model_provider`：提供商连接
 
@@ -52,6 +52,7 @@
 | `apiKeyEnv` | VARCHAR(128)，可空 | 引用环境变量时的变量名，例如 `AI_API_KEY`；直接输入密钥时为空 |
 | `apiKeyCiphertext` | VARCHAR(2048)，可空 | 直接输入密钥的密文 `v1:<iv>:<tag>:<ciphertext>`，引用环境变量时为空 |
 | `options` | JSON | 有 schema 的协议兼容选项 |
+| `headers` | JSON，可空 | 自定义请求头，键值均为字符串；旧记录为 NULL 时按空集合读取 |
 | `enabled` | BOOLEAN | 是否可供新请求使用 |
 | `createTime`、`updateTime` | DATETIME(3) | 创建与修改时间 |
 
@@ -59,7 +60,9 @@
 
 `options` 按 API 格式白名单化：`openai-chat` 支持布尔项 `includeUsage`、`supportsStructuredOutputs`、`supportsMultiPartToolContent` 与命名项 `thinkingSwitch`（`none`/`enabled`/`disabled`，非 `none` 时用 `transformRequestBody` 在请求体追加 `thinking:{type}`，用于 DeepSeek Chat 格式的思考开关）；`openai-responses` 与 `anthropic-messages` 没有可配置的协议选项（当前 SDK 的这两个 provider 没有对应设置），提交不支持的选项会被拒绝。需要特殊请求或响应处理时，增加有测试的命名兼容配置，再由管理端选择；不在 DB 存 JavaScript 函数或任意执行脚本。新增 API 格式或适配器代码仍需要部署。
 
-提供商连通性探测走 `POST /api/model/admin/provider/models`：按当前填写（密钥留空时用库里已保存的密文）向上游发一次 `GET {baseUrl}/models`，`openai-chat`/`openai-responses` 用 `Authorization: Bearer`，`anthropic-messages` 用 `x-api-key` + `anthropic-version: 2023-06-01`；解析 `{data:[{id, display_name?}]}` 并归一为 `{id, label}`，最多 1000 条（`providerModelListLimit`，命中上限时管理界面会提示可能被截断）。每次点击都会重新请求上游（`cache-control: no-cache`，不使用缓存）；10 秒超时、不跟随重定向、错误不回显密钥（响应片段也会做密钥替换）、上游失败返回 502/50200。该探测只验证地址与密钥能列模型，不代表所选模型与格式可推理；结果只用于管理界面候选列表，不落库。
+提供商可选一组自定义请求头（`headers`），存在 `ts_model_provider.headers`（JSON），与 `options` 分开。名称必须是 RFC token，大小写不敏感去重；值必须是首尾无空白的可打印/扩展 ASCII，且能编码为 ByteString（即 ByteString 范围），避免保存成功但发送时抛错；最多 32 条，名称 128、值 1024 字符。`authorization`、`proxy-authorization`、`x-api-key`、`x-goog-api-key`、`api-key`、`host`、`content-length`、`connection`、`transfer-encoding`、`te`、`trailer`、`upgrade`、`keep-alive`、`proxy-authenticate`、`cookie`、`set-cookie` 由系统生成，提交即拒绝（大小写不敏感）。适配层把这组头同时传给 `createOpenAICompatible` / `createOpenAI` / `createAnthropic`，并在 `src/server/models/adapters.ts` 的自定义 middleware 里合并到每次调用的参数头中，因为 AI SDK 会为每次调用注入带自己后缀的 `user-agent`，仅靠 provider 配置会被覆盖；生成、流式、结构化（含 `route.classify`）与探测共用同一组头。头在构造时复制并冻结进任务快照，之后修改配置不影响在途绑定。
+
+提供商连通性探测走 `POST /api/model/admin/provider/models`：按当前填写（密钥留空时用库里已保存的密文）向上游发一次 `GET {baseUrl}/models`，并带上该提供商已保存的自定义请求头（密钥仍由密钥来源生成，自定义头不能覆盖鉴权头）；`openai-chat`/`openai-responses` 用 `Authorization: Bearer`，`anthropic-messages` 用 `x-api-key` + `anthropic-version: 2023-06-01`；解析 `{data:[{id, display_name?}]}` 并归一为 `{id, label}`，最多 1000 条（`providerModelListLimit`，命中上限时管理界面会提示可能被截断）。每次点击都会重新请求上游（`cache-control: no-cache`，不使用缓存）；10 秒超时、不跟随重定向、错误不回显密钥或自定义头值（响应片段先对两者脱敏再截断）、上游失败返回 502/50200。该探测只验证地址与密钥能列模型，不代表所选模型与格式可推理；结果只用于管理界面候选列表，不落库。
 
 ### `ts_model_alias`：项目别名映射
 

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type Locator } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -95,6 +95,34 @@ async function readConfig(page: Page): Promise<AdminConfig> {
 
 function providerRow(page: Page) {
   return page.getByRole('row').filter({ has: page.getByRole('cell', { name: 'https://api.example.test/v1', exact: true }) });
+}
+
+function providerRowByBaseUrl(page: Page, baseUrl: string) {
+  return page.getByRole('row').filter({ has: page.getByRole('cell', { name: baseUrl, exact: true }) });
+}
+
+async function readProviderHeaders(connection: mysql.Connection): Promise<Record<string, string>> {
+  const [rows] = await connection.query("SELECT headers FROM ts_model_provider WHERE id='env-default'");
+  const value = (rows as { headers: unknown }[])[0]?.headers;
+  return typeof value === 'string' ? (JSON.parse(value) as Record<string, string>) : (value as Record<string, string>);
+}
+
+// MySQL JSON 列不保证键顺序，断言请求头时按名值映射比较，不能依赖行顺序。
+async function dialogHeaders(dialog: Locator): Promise<Record<string, string>> {
+  const names = await dialog.getByLabel('请求头名称').evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value));
+  const values = await dialog.getByLabel('请求头值').evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value));
+  const headers: Record<string, string> = {};
+  names.forEach((name, index) => {
+    if (name.trim().length > 0) headers[name.trim()] = values[index] ?? '';
+  });
+  return headers;
+}
+
+async function deleteHeaderRow(dialog: Locator, name: string) {
+  const names = await dialog.getByLabel('请求头名称').evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value));
+  const index = names.indexOf(name);
+  if (index < 0) throw new Error(`未找到名为 ${name} 的请求头`);
+  await dialog.getByLabel('删除请求头').nth(index).click();
 }
 
 function aliasRow(page: Page, alias: string) {
@@ -373,6 +401,109 @@ test('从下拉里选中的上游模型名会写进数据库', async ({ page }) 
     } finally {
       await stored.end();
     }
+  } finally {
+    await connection.end();
+    await new Promise<void>(resolve => upstream.close(() => resolve()));
+  }
+});
+
+test('自定义请求头可增删、保存后随探测请求发送', async ({ page }) => {
+  const captured: { path: string; userAgent?: string; xTitle?: string }[] = [];
+  const upstream = createServer((request, response) => {
+    captured.push({
+      path: request.url ?? '',
+      userAgent: request.headers['user-agent'] as string | undefined,
+      xTitle: request.headers['x-title'] as string | undefined,
+    });
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ data: [{ id: 'mimo-v2.6-flash' }] }));
+  });
+  await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  const upstreamBase = `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/v1`;
+  const connection = await testConnection();
+  try {
+    await seedModelConfig(connection, upstreamBase);
+    await adminLogin(page, uniqueAccount());
+    await page.goto('/admin/modelManage');
+
+    const row = providerRowByBaseUrl(page, upstreamBase);
+    await row.getByRole('button', { name: /^编\s*辑$/ }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', { name: '添加请求头' }).click();
+    await dialog.getByLabel('请求头名称').fill('User-Agent');
+    await dialog.getByLabel('请求头值').fill('paimeng-ai-code-mother/1.0');
+    await dialog.getByRole('button', { name: '添加请求头' }).click();
+    await dialog.getByLabel('请求头名称').nth(1).fill('X-Title');
+    await dialog.getByLabel('请求头值').nth(1).fill('paimeng');
+    await dialog.getByRole('button', { name: /保\s*存$/ }).click();
+    await expect(page.getByText('提供商已保存', { exact: true })).toBeVisible();
+    // 等第一条提示从 DOM 移除，否则第二次保存时两条同名提示同时存在会触发严格模式冲突。
+    await expect(page.getByText('提供商已保存', { exact: true })).toHaveCount(0);
+
+    const stored = await testConnection();
+    try {
+      expect(await readProviderHeaders(stored)).toEqual({
+        'User-Agent': 'paimeng-ai-code-mother/1.0',
+        'X-Title': 'paimeng',
+      });
+    } finally {
+      await stored.end();
+    }
+
+    // 重开编辑器必须回填已保存的请求头。
+    await row.getByRole('button', { name: /^编\s*辑$/ }).click();
+    const reopened = page.getByRole('dialog');
+    await expect
+      .poll(() => dialogHeaders(reopened))
+      .toEqual({ 'User-Agent': 'paimeng-ai-code-mother/1.0', 'X-Title': 'paimeng' });
+
+    // 测试连接直接提交表单草稿，探测请求必须带上自定义头。
+    await reopened.getByRole('button', { name: '测试连接' }).click();
+    await expect(reopened.getByText(/连接正常/)).toBeVisible({ timeout: 30000 });
+    const formProbe = captured.at(-1);
+    expect(formProbe?.path).toContain('/models');
+    expect(formProbe?.userAgent).toContain('paimeng-ai-code-mother/1.0');
+    expect(formProbe?.xTitle).toBe('paimeng');
+    await reopened.getByRole('button', { name: /取\s*消$/ }).click();
+
+    // 别名的「获取模型」走库里已保存的提供商，验证存储的请求头同样生效。
+    await aliasRow(page, 'codegen.default').getByRole('button', { name: /^编\s*辑$/ }).click();
+    const aliasDialog = page.getByRole('dialog');
+    await aliasDialog.getByRole('button', { name: '获取模型' }).click();
+    await expect(page.getByText('已获取 1 个上游模型', { exact: true })).toBeVisible({ timeout: 30000 });
+    const storedProbe = captured.at(-1);
+    expect(storedProbe?.userAgent).toContain('paimeng-ai-code-mother/1.0');
+    expect(storedProbe?.xTitle).toBe('paimeng');
+    await aliasDialog.getByRole('button', { name: /取\s*消$/ }).click();
+
+    // 删除 User-Agent 一条并保存，库里应只剩 X-Title。
+    await row.getByRole('button', { name: /^编\s*辑$/ }).click();
+    const editDialog = page.getByRole('dialog');
+    await expect.poll(() => dialogHeaders(editDialog)).toEqual({ 'User-Agent': 'paimeng-ai-code-mother/1.0', 'X-Title': 'paimeng' });
+    await deleteHeaderRow(editDialog, 'User-Agent');
+    await editDialog.getByRole('button', { name: /保\s*存$/ }).click();
+    await expect(page.getByText('提供商已保存', { exact: true })).toBeVisible();
+
+    const afterDelete = await testConnection();
+    try {
+      expect(await readProviderHeaders(afterDelete)).toEqual({ 'X-Title': 'paimeng' });
+    } finally {
+      await afterDelete.end();
+    }
+
+    // 切换 API 格式不应丢掉请求头。
+    await row.getByRole('button', { name: /^编\s*辑$/ }).click();
+    const formatDialog = page.getByRole('dialog');
+    await formatDialog.getByLabel('API 格式').click();
+    await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').getByText(/OpenAI Responses/).click();
+    await expect.poll(() => dialogHeaders(formatDialog)).toEqual({ 'X-Title': 'paimeng' });
+
+    // 新增提供商表单不能残留上一次编辑的请求头。
+    await formatDialog.getByRole('button', { name: /取\s*消$/ }).click();
+    await page.getByRole('button', { name: '新增提供商' }).click();
+    const createDialog = page.getByRole('dialog');
+    await expect(createDialog.getByLabel('请求头名称')).toHaveCount(0);
+    await createDialog.getByRole('button', { name: /取\s*消$/ }).click();
   } finally {
     await connection.end();
     await new Promise<void>(resolve => upstream.close(() => resolve()));

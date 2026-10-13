@@ -10,6 +10,8 @@ type Captured = {
   apiKey: string | undefined;
   anthropicVersion: string | undefined;
   cacheControl: string | undefined;
+  xTitle: string | undefined;
+  userAgent: string | undefined;
 };
 
 let server: Server;
@@ -29,6 +31,8 @@ beforeAll(async () => {
       apiKey: request.headers['x-api-key'] as string | undefined,
       anthropicVersion: request.headers['anthropic-version'] as string | undefined,
       cacheControl: request.headers['cache-control'] as string | undefined,
+      xTitle: request.headers['x-title'] as string | undefined,
+      userAgent: request.headers['user-agent'] as string | undefined,
     });
     handler(response);
   });
@@ -49,6 +53,16 @@ function json(response: ServerResponse, status: number, payload: unknown): void 
 async function probeMessage(apiFormat: 'openai-chat' | 'openai-responses' | 'anthropic-messages', timeoutMs?: number): Promise<string> {
   try {
     await fetchProviderModels({ apiFormat, baseUrl }, secret, timeoutMs === undefined ? {} : { timeoutMs });
+  } catch (error) {
+    if (error instanceof BusinessError) return error.message;
+    throw error;
+  }
+  throw new Error('预期上游探测失败，但成功了');
+}
+
+async function probeMessageWithHeaders(headers: Record<string, string>): Promise<string> {
+  try {
+    await fetchProviderModels({ apiFormat: 'openai-chat', baseUrl, headers }, secret);
   } catch (error) {
     if (error instanceof BusinessError) return error.message;
     throw error;
@@ -125,6 +139,44 @@ describe('fetchProviderModels', () => {
     expect(models).toHaveLength(1000);
     expect(models.at(-1)?.id).toBe('model-999');
     expect(captured.at(-1)?.cacheControl).toBe('no-cache');
+  });
+
+  it('把提供商的普通自定义请求头附加到探测请求，且鉴权头始终优先', async () => {
+    captured = [];
+    handler = response => json(response, 200, { data: [{ id: 'deepseek-flash' }] });
+
+    await fetchProviderModels(
+      { apiFormat: 'openai-chat', baseUrl, headers: { 'User-Agent': 'paimeng-ai-code-mother/1.0', 'X-Title': 'paimeng' } },
+      secret,
+    );
+    expect(captured.at(-1)).toMatchObject({
+      path: '/models',
+      authorization: `Bearer ${secret}`,
+      userAgent: 'paimeng-ai-code-mother/1.0',
+      xTitle: 'paimeng',
+      cacheControl: 'no-cache',
+    });
+
+    await fetchProviderModels({ apiFormat: 'openai-chat', baseUrl, headers: { authorization: 'Bearer attacker' } }, secret);
+    expect(captured.at(-1)?.authorization).toBe(`Bearer ${secret}`);
+  });
+
+  it('探测错误会脱敏所有自定义请求头值，且先脱敏再截断避免片段泄露', async () => {
+    const firstValue = 'custom-header-secret-value';
+    const secondValue = 'second-custom-header-value';
+    handler = response => {
+      response.writeHead(500, { 'content-type': 'text/plain' });
+      response.end(`${'x'.repeat(180)}${firstValue}:${secondValue}:${secret}`);
+    };
+
+    const message = await probeMessageWithHeaders({ 'X-Title': firstValue, 'X-Second': secondValue });
+
+    expect(message.startsWith('上游返回 500：')).toBe(true);
+    expect(message).not.toContain(firstValue);
+    expect(message).not.toContain(firstValue.slice(0, 12));
+    expect(message).not.toContain(secondValue);
+    expect(message).not.toContain(secret);
+    expect(message).toContain('***');
   });
 
   it('超时与连接失败都归一化为无法连接上游', async () => {

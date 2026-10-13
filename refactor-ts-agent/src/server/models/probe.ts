@@ -9,8 +9,8 @@ export type ProviderModel = { id: string; label: string };
 const probeTimeoutMs = 10000;
 const errorSnippetLimit = 200;
 
-/** 探测目标：只取拼请求需要的字段，不接触密钥。 */
-export type ProviderProbeTarget = { apiFormat: ProviderApiFormat; baseUrl: string };
+/** 探测目标：只取拼请求需要的字段（含自定义请求头），不接触密钥。 */
+export type ProviderProbeTarget = { apiFormat: ProviderApiFormat; baseUrl: string; headers?: Record<string, string> };
 
 /** 可选覆盖探测超时，默认 10 秒；测试用短超时。 */
 export type ProviderProbeOptions = { timeoutMs?: number };
@@ -36,9 +36,9 @@ function probeHeaders(apiFormat: ProviderApiFormat, apiKey: string): Record<stri
   return { authorization: `Bearer ${apiKey}`, accept: 'application/json' };
 }
 
-/** 上游的错误片段可能把请求头原样回显，统一把密钥替换掉再返回给管理端。 */
-function redactSecret(text: string, secret: string): string {
-  return secret ? text.split(secret).join('***') : text;
+/** 上游的错误片段可能把请求头原样回显，先把密钥与所有自定义头值替换掉再截断，避免片段泄露。 */
+function redactSecrets(text: string, secrets: readonly string[]): string {
+  return secrets.reduce((redacted, secret) => redacted.split(secret).join('***'), text);
 }
 
 /** 归一化上游模型列表：OpenAI/DeepSeek 只有 id，Anthropic 还有 display_name。 */
@@ -66,7 +66,8 @@ export async function fetchProviderModels(target: ProviderProbeTarget, apiKey: s
     response = await fetch(modelsEndpoint(target.baseUrl), {
       method: 'GET',
       // 显式禁用缓存：管理员点一次就要看到上游此刻的真实列表，中间层也不该替我们缓存。
-      headers: { ...probeHeaders(target.apiFormat, apiKey), 'cache-control': 'no-cache' },
+      // 自定义头在前、鉴权头在后：鉴权与传输头由系统生成，自定义只能追加普通头。
+      headers: { ...(target.headers ?? {}), ...probeHeaders(target.apiFormat, apiKey), 'cache-control': 'no-cache' },
       cache: 'no-store',
       redirect: 'manual',
       signal: AbortSignal.timeout(timeoutMs),
@@ -84,7 +85,9 @@ export async function fetchProviderModels(target: ProviderProbeTarget, apiKey: s
     if (response.status === 404) {
       throw new BusinessError(502, 50200, '该地址没有 /models 接口，可以手动填写上游模型名');
     }
-    const snippet = redactSecret(await response.text().then(text => text.trim().slice(0, errorSnippetLimit)).catch(() => ''), apiKey);
+    const secrets = [apiKey, ...Object.values(target.headers ?? {})].filter(secret => secret.length > 0);
+    const body = await response.text().catch(() => '');
+    const snippet = redactSecrets(body, secrets).trim().slice(0, errorSnippetLimit);
     throw new BusinessError(502, 50200, `上游返回 ${response.status}${snippet ? `：${snippet}` : ''}`);
   }
   const payload: unknown = await response.json().catch(() => null);

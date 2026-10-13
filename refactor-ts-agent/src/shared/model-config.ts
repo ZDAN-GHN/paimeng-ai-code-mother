@@ -114,12 +114,85 @@ export function providerOptionsIssue(apiFormat: ProviderApiFormat, options: Mode
   return `${providerApiFormatLabels[apiFormat]} 不支持选项 ${unsupported.join('、')}，请清空该格式不支持的选项`;
 }
 
+/** 自定义请求头条数上限。 */
+export const providerHeaderLimit = 32;
+/** 自定义请求头名称长度上限。 */
+export const providerHeaderNameLimit = 128;
+/** 自定义请求头值长度上限。 */
+export const providerHeaderValueLimit = 1024;
+
+/**
+ * 由系统生成的鉴权与传输头。鉴权头由当前密钥来源生成，传输头会破坏 HTTP 语义；
+ * 两者都不允许自定义覆盖，否则 SDK 请求与连通性探测会出现不同鉴权或畸形传输。
+ */
+export const protectedProviderHeaderNames = [
+  'authorization',
+  'proxy-authorization',
+  'x-api-key',
+  'x-goog-api-key',
+  'api-key',
+  'host',
+  'content-length',
+  'connection',
+  'transfer-encoding',
+  'te',
+  'trailer',
+  'upgrade',
+  'keep-alive',
+  'proxy-authenticate',
+  'cookie',
+  'set-cookie',
+] as const;
+
+export function isProtectedProviderHeader(name: string): boolean {
+  return (protectedProviderHeaderNames as readonly string[]).includes(name.trim().toLowerCase());
+}
+
+/** 请求头名称：RFC 7230 token 字符集，拒绝控制字符与 CRLF，且不能是系统生成的鉴权/传输头。 */
+export const providerHeaderNameSchema = z
+  .string()
+  .min(1, '请求头名称不能为空')
+  .max(providerHeaderNameLimit, `请求头名称最长 ${providerHeaderNameLimit} 个字符`)
+  .regex(/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/, '请求头名称只能包含 token 允许的字符')
+  .refine(name => !isProtectedProviderHeader(name), '该请求头由系统生成，不能自定义');
+
+/** 请求头值：限定为 Node fetch 能编码为 ByteString 的字符，拒绝控制字符、CRLF 与首尾空白，避免保存成功但发送失败。 */
+export const providerHeaderValueSchema = z
+  .string()
+  .min(1, '请求头值不能为空')
+  .max(providerHeaderValueLimit, `请求头值最长 ${providerHeaderValueLimit} 个字符`)
+  .regex(/^[\x20-\x7e\x80-\xff]+$/, '请求头值包含非法字符')
+  .refine(value => value.trim() === value, '请求头值首尾不能有空白字符');
+
+/** 自定义请求头集合：名称大小写不敏感去重，数量不超过 providerHeaderLimit。 */
+export const providerHeadersSchema = z
+  .record(z.string(), providerHeaderValueSchema)
+  .superRefine((headers, ctx) => {
+    const names = Object.keys(headers);
+    if (names.length > providerHeaderLimit) {
+      ctx.addIssue({ code: 'custom', message: `自定义请求头最多 ${providerHeaderLimit} 条` });
+    }
+    const seen = new Set<string>();
+    for (const name of names) {
+      const parsed = providerHeaderNameSchema.safeParse(name);
+      if (!parsed.success) {
+        ctx.addIssue({ code: 'custom', message: parsed.error.issues[0]?.message ?? '请求头名称不合法' });
+        continue;
+      }
+      const lower = name.toLowerCase();
+      if (seen.has(lower)) ctx.addIssue({ code: 'custom', message: `请求头 ${name} 与已有名称大小写重复` });
+      seen.add(lower);
+    }
+  });
+export type ModelProviderHeaders = z.infer<typeof providerHeadersSchema>;
+
 const providerFields = {
   id: modelProviderIdSchema,
   displayName: z.string().min(1).max(128),
   apiFormat: z.enum(providerApiFormats),
   baseUrl: modelBaseUrlSchema,
   options: providerOptionsSchema,
+  headers: providerHeadersSchema.optional(),
   enabled: z.boolean(),
 };
 
@@ -324,6 +397,7 @@ export function toModelProviderView(provider: ModelProvider, apiKeyConfigured: b
     apiFormat: provider.apiFormat,
     baseUrl: provider.baseUrl,
     options: provider.options,
+    headers: provider.headers ?? {},
     enabled: provider.enabled,
     createTime: provider.createTime,
     updateTime: provider.updateTime,

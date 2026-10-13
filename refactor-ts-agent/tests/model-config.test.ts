@@ -14,6 +14,9 @@ import {
   aliasSettingsSchema,
   providerOptionKeysByFormat,
   providerApiFormats,
+  providerHeaderLimit,
+  providerHeaderNameLimit,
+  providerHeaderValueLimit,
   providerOptionsIssue,
   reasoningLevels,
   requiredModelAliases,
@@ -177,6 +180,52 @@ describe('API 格式、选项与密钥来源', () => {
       policy,
     );
     expect(issues.some(issue => issue.includes('不支持选项 thinkingSwitch'))).toBe(true);
+  });
+});
+
+describe('提供商自定义请求头', () => {
+  const withHeaders = (headers: unknown): unknown => ({ ...provider(), headers });
+
+  it('可选：缺省与空集合都合法，普通自定义头通过', () => {
+    expect(modelProviderInputSchema.safeParse(provider()).success).toBe(true);
+    expect(modelProviderInputSchema.safeParse(withHeaders({})).success).toBe(true);
+    const valid = { 'User-Agent': 'paimeng-ai-code-mother/1.0', 'HTTP-Referer': 'https://example.test', 'X-Title': 'paimeng' };
+    expect(modelProviderInputSchema.safeParse(withHeaders(valid)).success).toBe(true);
+    expect(modelProviderWriteSchema.safeParse({ ...providerWrite(), headers: { 'X-Title': 'paimeng' } }).success).toBe(true);
+  });
+
+  it('拒绝由系统生成的鉴权与传输头（名称大小写不敏感）', () => {
+    for (const name of ['authorization', 'Authorization', 'X-Api-Key', 'x-goog-api-key', 'Host', 'Content-Length', 'Connection', 'Transfer-Encoding']) {
+      expect(modelProviderInputSchema.safeParse(withHeaders({ [name]: 'x' })).success).toBe(false);
+    }
+  });
+
+  it('拒绝名称大小写重复', () => {
+    const result = modelProviderInputSchema.safeParse(withHeaders({ 'X-Title': 'a', 'x-title': 'b' }));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.some(issue => issue.message.includes('重复'))).toBe(true);
+  });
+
+  it('拒绝非法名称字符与 CRLF 注入', () => {
+    for (const name of ['Bad Name', 'X-Title\nInjected', 'X-Title:evil', '']) {
+      expect(modelProviderInputSchema.safeParse(withHeaders({ [name]: 'v' })).success).toBe(false);
+    }
+  });
+
+  it('拒绝控制字符、CRLF 与首尾空白的请求头值', () => {
+    for (const value of ['bad\nvalue', 'bad\rvalue', 'bad\u0000value', ' padded', 'padded ', '']) {
+      expect(modelProviderInputSchema.safeParse(withHeaders({ 'X-Title': value })).success).toBe(false);
+    }
+    expect(modelProviderInputSchema.safeParse(withHeaders({ 'X-Title': 'ok value' })).success).toBe(true);
+  });
+
+  it('限制请求头数量与名称/值长度', () => {
+    const tooMany = Object.fromEntries(Array.from({ length: providerHeaderLimit + 1 }, (_value, index) => [`X-H-${index}`, 'v']));
+    expect(modelProviderInputSchema.safeParse(withHeaders(tooMany)).success).toBe(false);
+    expect(modelProviderInputSchema.safeParse(withHeaders({ [`X-${'a'.repeat(providerHeaderNameLimit)}`]: 'v' })).success).toBe(false);
+    expect(modelProviderInputSchema.safeParse(withHeaders({ 'X-Title': 'v'.repeat(providerHeaderValueLimit + 1) })).success).toBe(false);
+    expect(modelProviderInputSchema.safeParse(withHeaders({ 'X-Title': 'v'.repeat(providerHeaderValueLimit) })).success).toBe(true);
   });
 });
 

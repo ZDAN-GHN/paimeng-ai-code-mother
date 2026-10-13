@@ -12,6 +12,9 @@ type CapturedRequest = {
   authorization: string | undefined;
   apiKey: string | undefined;
   anthropicVersion: string | undefined;
+  userAgent: string | undefined;
+  xTitle: string | undefined;
+  httpReferer: string | undefined;
   body: Record<string, unknown>;
 };
 
@@ -118,6 +121,9 @@ beforeAll(async () => {
         authorization: req.headers.authorization,
         apiKey: typeof req.headers['x-api-key'] === 'string' ? req.headers['x-api-key'] : undefined,
         anthropicVersion: typeof req.headers['anthropic-version'] === 'string' ? req.headers['anthropic-version'] : undefined,
+        userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined,
+        xTitle: typeof req.headers['x-title'] === 'string' ? req.headers['x-title'] : undefined,
+        httpReferer: typeof req.headers['http-referer'] === 'string' ? req.headers['http-referer'] : undefined,
         body,
       });
       const reply = (payload: unknown) => {
@@ -402,5 +408,91 @@ describe('buildAliasModels', () => {
     await generateText({ model: bindingOf(models, 'codegen.default').model, prompt: '开关' });
 
     expect(captured.at(-1)?.body.thinking).toEqual({ type: 'disabled' });
+  });
+
+  const customHeaders = { 'User-Agent': 'paimeng-ai-code-mother/1.0', 'http-referer': 'https://example.test', 'X-Title': 'paimeng' };
+
+  it('openai-chat 生成请求透传自定义请求头，鉴权头仍由系统生成', async () => {
+    process.env.AI_API_KEY = 'local-secret';
+    respond = (_body, reply) => replyJson(reply, completion({ role: 'assistant', content: '带请求头' }));
+    const models = buildAliasModels([{ ...providerFixture, baseUrl, headers: customHeaders }], [aliasFixture()]);
+
+    await generateText({ model: bindingOf(models, 'codegen.default').model, prompt: '请求头' });
+
+    const request = captured.at(-1);
+    // SDK 会在自定义 User-Agent 之后追加自己的标识（ai-sdk-provider-utils/node），这里只要求本应用标识被发出。
+    expect(request?.userAgent).toContain('paimeng-ai-code-mother/1.0');
+    expect(request?.httpReferer).toBe('https://example.test');
+    expect(request?.xTitle).toBe('paimeng');
+    expect(request?.authorization).toBe('Bearer local-secret');
+  });
+
+  it('流式请求同样透传自定义请求头', async () => {
+    process.env.AI_API_KEY = 'local-secret';
+    respond = (_body, reply) => replyJson(reply, streamChunks('流式带请求头'));
+    const models = buildAliasModels([{ ...providerFixture, baseUrl, headers: customHeaders }], [aliasFixture()]);
+
+    const result = streamText({ model: bindingOf(models, 'codegen.default').model, prompt: 'stream' });
+    let text = '';
+    for await (const delta of result.textStream) text += delta;
+
+    expect(text).toBe('流式带请求头');
+    expect(captured.at(-1)?.userAgent).toContain('paimeng-ai-code-mother/1.0');
+    expect(captured.at(-1)?.xTitle).toBe('paimeng');
+  });
+
+  it('route.classify 结构化请求也透传自定义请求头', async () => {
+    process.env.AI_API_KEY = 'local-secret';
+    respond = (_body, reply) => replyJson(reply, completion({ role: 'assistant', content: '{"codeGenType":"html"}' }));
+    const models = buildAliasModels(
+      [{ ...providerFixture, baseUrl, headers: customHeaders, options: { supportsStructuredOutputs: true } }],
+      [aliasFixture({ alias: 'route.classify', capabilities: { streaming: false, toolCalling: false, structuredOutput: true } })],
+    );
+
+    await generateText({
+      model: bindingOf(models, 'route.classify').model,
+      output: Output.object({ schema: z.object({ codeGenType: z.enum(['html']) }) }),
+      prompt: '分类',
+    });
+
+    expect(captured.at(-1)?.xTitle).toBe('paimeng');
+    expect(captured.at(-1)?.userAgent).toContain('paimeng-ai-code-mother/1.0');
+  });
+
+  it('openai-responses 格式透传自定义请求头', async () => {
+    process.env.AI_API_KEY = 'local-secret';
+    forceJson = true;
+    respond = (_body, reply) => replyJson(reply, responsesCompletion('响应带请求头'));
+    const models = buildAliasModels([{ ...providerFixture, apiFormat: 'openai-responses', baseUrl, headers: customHeaders }], [aliasFixture()]);
+
+    await generateText({ model: bindingOf(models, 'codegen.default').model, prompt: '请求头' });
+
+    expect(captured.at(-1)?.xTitle).toBe('paimeng');
+    expect(captured.at(-1)?.userAgent).toContain('paimeng-ai-code-mother/1.0');
+    expect(captured.at(-1)?.authorization).toBe('Bearer local-secret');
+  });
+
+  it('anthropic-messages 格式透传自定义请求头，且不影响 x-api-key 与版本头', async () => {
+    process.env.AI_API_KEY = 'local-secret';
+    respond = (_body, reply) => replyJson(reply, anthropicCompletion('消息带请求头'));
+    const models = buildAliasModels([{ ...providerFixture, apiFormat: 'anthropic-messages', baseUrl, headers: customHeaders }], [aliasFixture()]);
+
+    await generateText({ model: bindingOf(models, 'codegen.default').model, prompt: '请求头' });
+
+    const request = captured.at(-1);
+    expect(request?.xTitle).toBe('paimeng');
+    expect(request?.apiKey).toBe('local-secret');
+    expect(request?.anthropicVersion).toBe('2023-06-01');
+  });
+
+  it('未配置自定义请求头时不发送这些头', async () => {
+    process.env.AI_API_KEY = 'local-secret';
+    respond = (_body, reply) => replyJson(reply, completion({ role: 'assistant', content: '无请求头' }));
+    const models = buildAliasModels([{ ...providerFixture, baseUrl }], [aliasFixture()]);
+
+    await generateText({ model: bindingOf(models, 'codegen.default').model, prompt: '无' });
+
+    expect(captured.at(-1)?.xTitle).toBeUndefined();
+    expect(captured.at(-1)?.httpReferer).toBeUndefined();
   });
 });

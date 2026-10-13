@@ -67,6 +67,19 @@ function reasoningMiddleware(level: ReasoningLevel): LanguageModelV4Middleware {
   };
 }
 
+/**
+ * 自定义请求头中间件：把提供商配置的请求头合进每次调用参数，且放在最后。
+ * AI SDK 会在每次调用时注入自己的 `user-agent`，provider 层的 headers 会被
+ * `combineHeaders` 里后到的调用头覆盖，导致用户配的 User-Agent 静默失效；
+ * 这里让自定义头最后合并，保证用户配置优先于 SDK 默认值。
+ */
+function providerHeadersMiddleware(headers: Readonly<Record<string, string>>): LanguageModelV4Middleware {
+  return {
+    specificationVersion: 'v4',
+    transformParams: async ({ params }) => ({ ...params, headers: { ...params.headers, ...headers } }),
+  };
+}
+
 /** 按 API 格式构造底层模型；未知格式在写入时已被拒绝，这里只做兜底。 */
 function buildProviderModel(provider: ModelProvider, modelName: string, apiKey: string): LanguageModelV4 {
   switch (provider.apiFormat) {
@@ -76,6 +89,7 @@ function buildProviderModel(provider: ModelProvider, modelName: string, apiKey: 
         name: provider.id,
         baseURL: provider.baseUrl,
         apiKey,
+        headers: provider.headers,
         includeUsage: provider.options.includeUsage,
         supportsStructuredOutputs: provider.options.supportsStructuredOutputs,
         supportsMultiPartToolContent: provider.options.supportsMultiPartToolContent,
@@ -87,9 +101,9 @@ function buildProviderModel(provider: ModelProvider, modelName: string, apiKey: 
     }
     case 'openai-responses':
       // 带上 fetch 改写：DeepSeek 的 Responses 接口用 response.reasoning_text.* 发思考内容，SDK 只认 summary 事件。
-      return createOpenAI({ baseURL: provider.baseUrl, apiKey, fetch: responsesReasoningFetch }).responses(modelName);
+      return createOpenAI({ baseURL: provider.baseUrl, apiKey, headers: provider.headers, fetch: responsesReasoningFetch }).responses(modelName);
     case 'anthropic-messages':
-      return createAnthropic({ baseURL: provider.baseUrl, apiKey }).messages(modelName);
+      return createAnthropic({ baseURL: provider.baseUrl, apiKey, headers: provider.headers }).messages(modelName);
     default:
       throw new ModelConfigInvalidError(`提供商 ${provider.id} 的 API 格式 ${provider.apiFormat} 尚未支持`);
   }
@@ -116,6 +130,9 @@ function buildLanguageModel(provider: ModelProvider, alias: ModelAlias): Languag
     middleware.push(defaultSettingsMiddleware({ settings }));
     if (reasoning) middleware.push(reasoningMiddleware(reasoning));
   }
+  // 请求头在构造时复制固化，之后修改配置不会影响已绑定的旧模型。
+  const customHeaders = Object.freeze({ ...provider.headers });
+  if (Object.keys(customHeaders).length > 0) middleware.push(providerHeadersMiddleware(customHeaders));
   const wrapped = wrapLanguageModel({
     model: buildProviderModel(provider, alias.modelName, resolveModelApiKey(provider)),
     middleware,

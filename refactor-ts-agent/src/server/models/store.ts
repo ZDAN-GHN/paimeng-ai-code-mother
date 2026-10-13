@@ -57,6 +57,7 @@ export function toStoredProvider(write: ModelProviderWriteInput, existing: Model
     apiFormat: write.apiFormat,
     baseUrl: write.baseUrl,
     options: write.options,
+    headers: write.headers ?? {},
     enabled: write.enabled,
   };
   if (write.apiKeySource === 'env') {
@@ -87,6 +88,7 @@ function providerFromRow(row: typeof modelProviders.$inferSelect): ModelProvider
     apiFormat: row.apiFormat,
     baseUrl: row.baseUrl,
     options: row.options,
+    headers: row.headers ?? {},
     enabled: row.enabled === 1,
   };
   return {
@@ -183,6 +185,7 @@ async function upsertProviderRow(tx: Transaction, provider: ModelProviderInput, 
     apiKeyEnv: provider.apiKeySource === 'env' ? provider.apiKeyEnv : null,
     apiKeyCiphertext: provider.apiKeySource === 'inline' ? provider.apiKeyCiphertext : null,
     options: provider.options,
+    headers: provider.headers ?? {},
     enabled: provider.enabled ? 1 : 0,
     updateTime: now(),
   };
