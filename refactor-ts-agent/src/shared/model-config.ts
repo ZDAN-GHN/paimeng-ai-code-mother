@@ -1,0 +1,431 @@
+import { z } from 'zod';
+
+/** 业务必需别名：缺失或禁用的完整配置会被写入事务拒绝。 */
+export const requiredModelAliases = ['codegen.default', 'route.classify'] as const;
+export type RequiredModelAlias = typeof requiredModelAliases[number];
+
+/** 第一版支持的 API 格式；值写入 ts_model_provider.apiFormat。 */
+export const providerApiFormats = ['openai-chat', 'openai-responses', 'anthropic-messages'] as const;
+export type ProviderApiFormat = typeof providerApiFormats[number];
+
+/** 管理端展示名：中文用途 + 协议入口。 */
+export const providerApiFormatLabels: Record<ProviderApiFormat, string> = {
+  'openai-chat': 'OpenAI Chat Completions（/chat/completions）',
+  'openai-responses': 'OpenAI Responses API（/responses）',
+  'anthropic-messages': 'Anthropic Messages API（/messages）',
+};
+
+/** 密钥来源：引用环境变量，或直接输入（服务端加密后入库）。 */
+export const providerKeySources = ['env', 'inline'] as const;
+export type ProviderKeySource = typeof providerKeySources[number];
+
+/** 显式初始化命令创建的默认提供商标识，创建后不可改名。 */
+export const defaultModelProviderId = 'env-default';
+
+/** 始终允许作为模型密钥引用的环境变量；其余名称必须显式加入部署允许名单。 */
+export const baseModelApiKeyEnv = 'AI_API_KEY';
+
+export function allowedModelApiKeyEnvs(configured: readonly string[]): readonly string[] {
+  return [baseModelApiKeyEnv, ...configured];
+}
+
+export function isAllowedModelApiKeyEnv(name: string, configured: readonly string[]): boolean {
+  return allowedModelApiKeyEnvs(configured).includes(name);
+}
+
+/** 单行状态表主键，`revision` 与 `refreshEpoch` 都写在这一行上。 */
+export const modelConfigStateId = 'models';
+
+export const decimalVersionSchema = z.string().regex(/^(?:0|[1-9][0-9]*)$/, '版本号必须是十进制字符串').refine(value => /^(?:0|[1-9][0-9]*)$/.test(value) && BigInt(value) <= 18446744073709551615n, '版本号超出范围');
+export type ModelConfigVersion = { revision: string; refreshEpoch: string };
+
+export const modelIdentifierSchema = z.string().min(1).max(64).regex(/^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/, '标识只能包含小写字母、数字、点、下划线和短横线');
+export const modelAliasNameSchema = modelIdentifierSchema;
+export const modelProviderIdSchema = modelIdentifierSchema;
+export const modelApiKeyEnvSchema = z.string().max(128, '环境变量名最长 128 个字符').regex(/^[A-Z][A-Z0-9_]*$/, '环境变量名只能包含大写字母、数字和下划线');
+export const modelBaseUrlSchema = z.string().min(1).max(2048);
+
+/** 思考强度等级：AI SDK 的统一参数 `reasoning`，各 API 格式由提供方自行映射。 */
+export const reasoningLevels = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type ReasoningLevel = typeof reasoningLevels[number];
+
+/** 思考强度中文标签；不指定时完全不发送该参数。 */
+export const reasoningLevelLabels: Record<ReasoningLevel, string> = {
+  none: '关闭思考',
+  minimal: '最低',
+  low: '低',
+  medium: '中',
+  high: '高',
+  xhigh: '更高',
+  max: '最高',
+};
+
+/** DeepSeek Chat 格式的思考开关（请求体 `thinking: {type}`）；不指定时不发送该字段。 */
+export const thinkingSwitchValues = ['enabled', 'disabled'] as const;
+export type ThinkingSwitch = typeof thinkingSwitchValues[number];
+
+export const thinkingSwitchLabels: Record<ThinkingSwitch, string> = {
+  enabled: '强制开启思考',
+  disabled: '强制关闭思考',
+};
+
+const providerOptionFlags = {
+  includeUsage: z.boolean().optional(),
+  supportsStructuredOutputs: z.boolean().optional(),
+  supportsMultiPartToolContent: z.boolean().optional(),
+  thinkingSwitch: z.enum(thinkingSwitchValues).optional(),
+};
+
+/** 管理端可编辑的兼容选项键，由 schema 派生，避免两处名单漂移。 */
+export const modelProviderOptionKeys = Object.keys(providerOptionFlags) as (keyof typeof providerOptionFlags)[];
+export type ModelProviderOptionKey = typeof modelProviderOptionKeys[number];
+
+/** 管理端展示用的选项名。 */
+export const modelProviderOptionLabels: Record<ModelProviderOptionKey, string> = {
+  includeUsage: '统计用量',
+  supportsStructuredOutputs: '支持结构化输出',
+  supportsMultiPartToolContent: '支持多段工具内容',
+  thinkingSwitch: '思考开关（DeepSeek Chat）',
+};
+
+/** 取值不是布尔开关的选项键；界面要用下拉而不是开关渲染。 */
+export const modelProviderChoiceOptionKeys: readonly ModelProviderOptionKey[] = ['thinkingSwitch'];
+
+/** 非布尔选项的下拉取值（空值表示不发送该字段）。 */
+export const modelProviderOptionChoices: Record<'thinkingSwitch', readonly { value: ThinkingSwitch; label: string }[]> = {
+  thinkingSwitch: thinkingSwitchValues.map(value => ({ value, label: thinkingSwitchLabels[value] })),
+};
+
+export const providerOptionsSchema = z.strictObject(providerOptionFlags).default({});
+export type ModelProviderOptions = z.infer<typeof providerOptionsSchema>;
+
+/** 每种 API 格式允许的选项键；没有对应语义的格式留空，界面据此隐藏开关。 */
+export const providerOptionKeysByFormat: Record<ProviderApiFormat, readonly ModelProviderOptionKey[]> = {
+  'openai-chat': ['includeUsage', 'supportsStructuredOutputs', 'supportsMultiPartToolContent', 'thinkingSwitch'],
+  'openai-responses': [],
+  'anthropic-messages': [],
+};
+
+/** 校验选项名是否被该格式支持；合规时返回 null。 */
+export function providerOptionsIssue(apiFormat: ProviderApiFormat, options: ModelProviderOptions): string | null {
+  const allowed = providerOptionKeysByFormat[apiFormat];
+  const unsupported = Object.keys(options).filter(key => !allowed.includes(key as ModelProviderOptionKey));
+  if (!unsupported.length) return null;
+  return `${providerApiFormatLabels[apiFormat]} 不支持选项 ${unsupported.join('、')}，请清空该格式不支持的选项`;
+}
+
+const providerFields = {
+  id: modelProviderIdSchema,
+  displayName: z.string().min(1).max(128),
+  apiFormat: z.enum(providerApiFormats),
+  baseUrl: modelBaseUrlSchema,
+  options: providerOptionsSchema,
+  enabled: z.boolean(),
+};
+
+/** 直接输入密钥的明文上限；加密后的密文固定留在 apiKeyCiphertext(2048) 之内。 */
+export const modelApiKeySecretSchema = z.string().max(1024, '直接输入的密钥最长 1024 个字符');
+/** 直接输入密钥的密文，格式 `v1:<iv>:<tag>:<ciphertext>`。 */
+export const modelApiKeyCiphertextSchema = z.string().min(1).max(2048);
+
+/** 写入口径：引用环境变量，或提交明文密钥（空串表示保持已保存的密钥）。 */
+export const modelProviderWriteSchema = z.discriminatedUnion('apiKeySource', [
+  z.strictObject({ ...providerFields, apiKeySource: z.literal('env'), apiKeyEnv: modelApiKeyEnvSchema }),
+  z.strictObject({ ...providerFields, apiKeySource: z.literal('inline'), apiKey: modelApiKeySecretSchema }),
+]);
+export type ModelProviderWriteInput = z.infer<typeof modelProviderWriteSchema>;
+
+/** 存储口径：直接输入的密钥只保留密文，明文不进入任何持久层类型。 */
+export const modelProviderInputSchema = z.discriminatedUnion('apiKeySource', [
+  z.strictObject({ ...providerFields, apiKeySource: z.literal('env'), apiKeyEnv: modelApiKeyEnvSchema }),
+  z.strictObject({ ...providerFields, apiKeySource: z.literal('inline'), apiKeyCiphertext: modelApiKeyCiphertextSchema }),
+]);
+export type ModelProviderInput = z.infer<typeof modelProviderInputSchema>;
+export type ModelProvider = ModelProviderInput & { createTime: string; updateTime: string };
+
+export const aliasCapabilitiesSchema = z.strictObject({
+  streaming: z.boolean(),
+  toolCalling: z.boolean(),
+  structuredOutput: z.boolean(),
+});
+export type ModelAliasCapabilities = z.infer<typeof aliasCapabilitiesSchema>;
+
+export const aliasSettingsSchema = z.strictObject({
+  temperature: z.number().min(0).max(2).optional(),
+  topP: z.number().min(0).max(1).optional(),
+  maxOutputTokens: z.number().int().min(1).max(1000000).optional(),
+  reasoning: z.enum(reasoningLevels).optional(),
+}).default({});
+export type ModelAliasSettings = z.infer<typeof aliasSettingsSchema>;
+
+export const modelAliasInputSchema = z.strictObject({
+  alias: modelAliasNameSchema,
+  providerId: modelProviderIdSchema,
+  modelName: z.string().min(1).max(256),
+  capabilities: aliasCapabilitiesSchema,
+  settings: aliasSettingsSchema,
+  enabled: z.boolean(),
+});
+export type ModelAliasInput = z.infer<typeof modelAliasInputSchema>;
+export type ModelAlias = ModelAliasInput & { createTime: string; updateTime: string };
+
+export type ModelConfigSnapshot = ModelConfigVersion & {
+  providers: ModelProvider[];
+  aliases: ModelAlias[];
+};
+
+export type ModelConfigPolicy = {
+  allowedApiKeyEnvs: readonly string[];
+  internalOrigins: readonly string[];
+};
+
+/** 必需的声明能力；只校验配置声明，不代表上游一定支持。 */
+const requiredCapabilities: Record<RequiredModelAlias, (capabilities: ModelAliasCapabilities) => boolean> = {
+  'codegen.default': capabilities => capabilities.streaming && capabilities.toolCalling,
+  'route.classify': capabilities => capabilities.structuredOutput,
+};
+
+function originOf(value: string): string | null {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+/** 返回内部来源条目的问题；合规时返回 null。只接受不带凭据、查询、片段和路径的 HTTP(S) 来源。 */
+export function modelInternalOriginIssue(value: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return '必须是绝对 URL';
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return '只允许 HTTP(S)';
+  if (url.username || url.password) return '不能包含内嵌凭据';
+  if (url.search) return '不能包含查询参数';
+  if (url.hash) return '不能包含片段';
+  if (url.pathname !== '/' && url.pathname !== '') return '只能是来源，不能带路径';
+  return null;
+}
+
+/** 校验部署配置的允许名单；只报告条目序号，不回显条目内容。 */
+export function modelConfigListIssues(apiKeyEnvs: readonly string[], internalOrigins: readonly string[]): string[] {
+  const issues: string[] = [];
+  apiKeyEnvs.forEach((name, index) => {
+    if (!modelApiKeyEnvSchema.safeParse(name).success) issues.push(`MODEL_API_KEY_ENV_ALLOWLIST 第 ${index + 1} 项不是合法的环境变量名`);
+  });
+  internalOrigins.forEach((origin, index) => {
+    const issue = modelInternalOriginIssue(origin);
+    if (issue) issues.push(`MODEL_INTERNAL_BASE_URL_ORIGINS 第 ${index + 1} 项${issue}`);
+  });
+  return issues;
+}
+
+/** 返回地址不合规的原因；合规时返回 null。HTTPS 默认放行，HTTP 仅放行部署显式允许的来源。 */
+export function modelBaseUrlIssue(value: string, policy: { internalOrigins: readonly string[] }): string | null {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return '模型地址必须是绝对 URL';
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return '模型地址只允许 HTTP(S)';
+  if (url.username || url.password) return '模型地址不能包含内嵌凭据';
+  if (url.search) return '模型地址不能包含查询参数';
+  if (url.hash) return '模型地址不能包含片段';
+  if (url.protocol === 'https:') return null;
+  const allowed = policy.internalOrigins.some(origin => originOf(origin) === url.origin);
+  return allowed ? null : '非 HTTPS 模型地址只允许部署显式允许的来源';
+}
+
+/** 校验完整候选配置：必需别名、引用完整性、密钥引用与地址规则。 */
+export function modelConfigIssues(
+  providers: readonly ModelProviderInput[],
+  aliases: readonly ModelAliasInput[],
+  policy: ModelConfigPolicy,
+): string[] {
+  const issues: string[] = [];
+  const providerIds = new Set<string>();
+  for (const provider of providers) {
+    if (providerIds.has(provider.id)) issues.push(`提供商标识重复：${provider.id}`);
+    providerIds.add(provider.id);
+    const urlIssue = modelBaseUrlIssue(provider.baseUrl, policy);
+    if (urlIssue) issues.push(`提供商 ${provider.id} 的地址不合法：${urlIssue}`);
+    if (provider.apiKeySource === 'env' && !isAllowedModelApiKeyEnv(provider.apiKeyEnv, policy.allowedApiKeyEnvs)) {
+      issues.push(`提供商 ${provider.id} 引用了未允许的环境变量 ${provider.apiKeyEnv}`);
+    }
+    const optionsIssue = providerOptionsIssue(provider.apiFormat, provider.options);
+    if (optionsIssue) issues.push(`提供商 ${provider.id}：${optionsIssue}`);
+  }
+  const providersById = new Map(providers.map(provider => [provider.id, provider]));
+  const aliasNames = new Set<string>();
+  for (const alias of aliases) {
+    if (aliasNames.has(alias.alias)) issues.push(`别名重复：${alias.alias}`);
+    aliasNames.add(alias.alias);
+    const provider = providersById.get(alias.providerId);
+    if (!provider) issues.push(`别名 ${alias.alias} 指向不存在的提供商 ${alias.providerId}`);
+    else if (alias.enabled && !provider.enabled) issues.push(`启用中的别名 ${alias.alias} 不能指向已禁用的提供商 ${alias.providerId}`);
+  }
+  for (const required of requiredModelAliases) {
+    const alias = aliases.find(candidate => candidate.alias === required);
+    if (!alias) {
+      issues.push(`缺少必需别名 ${required}`);
+      continue;
+    }
+    if (!alias.enabled) issues.push(`必需别名 ${required} 不能禁用`);
+    const provider = providersById.get(alias.providerId);
+    if (provider && !provider.enabled) issues.push(`必需别名 ${required} 不能指向已禁用的提供商 ${alias.providerId}`);
+    if (!requiredCapabilities[required](alias.capabilities)) issues.push(`必需别名 ${required} 声明的能力不满足业务要求`);
+  }
+  return issues;
+}
+
+const providerViewFields = {
+  ...providerFields,
+  createTime: z.string(),
+  updateTime: z.string(),
+  apiKeyConfigured: z.boolean(),
+};
+
+/** 管理端响应校验：只暴露密钥来源与是否已配置，不含明文、密文或密文长度。 */
+export const modelProviderViewSchema = z.discriminatedUnion('apiKeySource', [
+  z.strictObject({ ...providerViewFields, apiKeySource: z.literal('env'), apiKeyEnv: modelApiKeyEnvSchema }),
+  z.strictObject({ ...providerViewFields, apiKeySource: z.literal('inline') }),
+]);
+
+export type ModelProviderView = z.infer<typeof modelProviderViewSchema>;
+
+/** 由存储口径构造视图；直接输入的密钥只保留来源与「已配置」布尔值。 */
+export function toModelProviderView(provider: ModelProvider, apiKeyConfigured: boolean): ModelProviderView {
+  const common = {
+    id: provider.id,
+    displayName: provider.displayName,
+    apiFormat: provider.apiFormat,
+    baseUrl: provider.baseUrl,
+    options: provider.options,
+    enabled: provider.enabled,
+    createTime: provider.createTime,
+    updateTime: provider.updateTime,
+    apiKeyConfigured,
+  };
+  return provider.apiKeySource === 'env'
+    ? { ...common, apiKeySource: 'env', apiKeyEnv: provider.apiKeyEnv }
+    : { ...common, apiKeySource: 'inline' };
+}
+
+export const modelAliasViewSchema = modelAliasInputSchema.extend({
+  createTime: z.string(),
+  updateTime: z.string(),
+});
+
+/** 管理端可选的 API 格式及其选项键，界面不硬编码这些名单。 */
+export const modelProviderFormatViewSchema = z.strictObject({
+  value: z.enum(providerApiFormats),
+  label: z.string(),
+  optionKeys: z.array(z.enum(modelProviderOptionKeys)),
+});
+export type ModelProviderFormatView = z.infer<typeof modelProviderFormatViewSchema>;
+
+export const modelProviderFormatViews: readonly ModelProviderFormatView[] = providerApiFormats.map(value => ({
+  value,
+  label: providerApiFormatLabels[value],
+  optionKeys: [...providerOptionKeysByFormat[value]],
+}));
+
+/** 处理本次请求的实例自己的模型缓存状态，不代表其他实例。 */
+export type ModelInstanceStatus = {
+  revision: string | null;
+  refreshEpoch: string | null;
+  source: 'database' | 'environment' | null;
+  degraded: boolean;
+  readAt: number | null;
+  loadedAt: number | null;
+  lastError: string | null;
+};
+
+/** POST `/api/model/admin/config` 的响应：DB 配置 + 本实例状态 + UI 可选名单。 */
+export type ModelAdminConfig = {
+  revision: string;
+  refreshEpoch: string;
+  initialized: boolean;
+  providers: ModelProviderView[];
+  aliases: ModelAlias[];
+  requiredAliases: readonly RequiredModelAlias[];
+  providerFormats: readonly ModelProviderFormatView[];
+  allowedApiKeyEnvs: readonly string[];
+  instance: ModelInstanceStatus;
+};
+
+export const modelAdminConfigSchema = z.strictObject({});
+
+/** 处理本次请求的实例自己的模型缓存状态，不代表其他实例。 */
+export const modelInstanceStatusSchema = z.strictObject({
+  revision: decimalVersionSchema.nullable(),
+  refreshEpoch: decimalVersionSchema.nullable(),
+  source: z.enum(['database', 'environment']).nullable(),
+  degraded: z.boolean(),
+  readAt: z.number().nullable(),
+  loadedAt: z.number().nullable(),
+  lastError: z.string().nullable(),
+});
+
+/** POST `/api/model/admin/config` 的响应：DB 配置 + 本实例状态 + UI 可选名单。 */
+export const modelAdminConfigViewSchema = z.strictObject({
+  revision: decimalVersionSchema,
+  refreshEpoch: decimalVersionSchema,
+  initialized: z.boolean(),
+  providers: z.array(modelProviderViewSchema),
+  aliases: z.array(modelAliasViewSchema),
+  requiredAliases: z.array(z.enum(requiredModelAliases)),
+  providerFormats: z.array(modelProviderFormatViewSchema),
+  allowedApiKeyEnvs: z.array(z.string()),
+  instance: modelInstanceStatusSchema,
+});
+export type ModelAdminConfigView = z.infer<typeof modelAdminConfigViewSchema>;
+
+/** 写操作响应：写入后的配置版本。 */
+export const modelConfigVersionSchema = z.strictObject({
+  revision: decimalVersionSchema,
+  refreshEpoch: decimalVersionSchema,
+});
+
+export const modelProviderUpsertSchema = z.strictObject({
+  provider: modelProviderWriteSchema,
+  expectedRevision: decimalVersionSchema,
+  applyImmediately: z.boolean().optional(),
+});
+export type ModelProviderUpsertPayload = z.infer<typeof modelProviderUpsertSchema>;
+
+export const modelAliasUpsertSchema = z.strictObject({
+  alias: modelAliasInputSchema,
+  expectedRevision: decimalVersionSchema,
+  applyImmediately: z.boolean().optional(),
+});
+export type ModelAliasUpsertPayload = z.infer<typeof modelAliasUpsertSchema>;
+
+export const modelProviderDeleteSchema = z.strictObject({
+  id: modelProviderIdSchema,
+  expectedRevision: decimalVersionSchema,
+});
+export type ModelProviderDeletePayload = z.infer<typeof modelProviderDeleteSchema>;
+
+export const modelAliasDeleteSchema = z.strictObject({
+  alias: modelAliasNameSchema,
+  expectedRevision: decimalVersionSchema,
+});
+export type ModelAliasDeletePayload = z.infer<typeof modelAliasDeleteSchema>;
+
+export const modelConfigApplySchema = z.strictObject({
+  expectedRevision: decimalVersionSchema,
+});
+export type ModelConfigApplyPayload = z.infer<typeof modelConfigApplySchema>;
+
+/** POST `/api/model/admin/provider/models` 的请求：与保存提供商同一份写入口径，密钥留空表示沿用已保存的密钥。 */
+export const modelProviderProbeSchema = z.strictObject({ provider: modelProviderWriteSchema });
+export type ModelProviderProbePayload = z.infer<typeof modelProviderProbeSchema>;
+
+/** 上游可用模型的下拉选项：id 用于提交，label 用于展示。 */
+export const providerModelSchema = z.strictObject({ id: z.string().min(1), label: z.string().min(1) });
+export const providerModelsViewSchema = z.strictObject({ models: z.array(providerModelSchema) });
+export type ProviderModelsView = z.infer<typeof providerModelsViewSchema>;

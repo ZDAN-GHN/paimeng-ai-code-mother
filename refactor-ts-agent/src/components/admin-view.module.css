@@ -10,4 +10,7 @@
 .textGray{color:#999}
 .featuredBtn{background:#faad14;border-color:#faad14;color:white}
 .featuredBtn:hover{background:#d48806!important;border-color:#d48806!important;color:white!important}
+.sectionHeading{display:flex;align-items:center;gap:12px;margin:24px 0 12px}
+.sectionHeading h2{margin:0;font-size:18px}
+.statusHint{color:#999;font-size:12px}
 .adminPage :global(.ant-table-tbody > tr > td){vertical-align:middle}

@@ -10,7 +10,7 @@
 2. 执行 `npm ci`。
 3. 执行 `npm run assets:import`。此命令只读取旧平台的派蒙图片，写入新应用的 `public/`。
 4. 执行 `npm run infra:up`。固定命名的 MySQL 和 Redis 容器启动并等待健康检查。该命令读取 `.env`，不生成或改写凭据。
-5. 执行 `npm run db:migrate`。迁移完成后显示“独立 TS 数据库迁移完成”。重复执行会核对已有迁移的校验和。
+5. 执行 `npm run db:migrate`。迁移完成后显示“独立 TS 数据库迁移完成”。重复执行会核对已有迁移的校验和。迁移包含 `006_model_registry.sql`（模型配置表与状态行）与 `007_provider_api_format.sql`（提供商 API 格式、可空密钥引用与密文字段）；随后执行一次 `npm run db:init-models`，把现有 `.env` 的模型配置写入数据库（仅当表仍为空且版本为零；幂等，已有配置不会被覆盖）。
 6. 执行 `docker pull node:24-alpine`。Vue 生成工程使用该镜像进行隔离构建。
 7. 执行 `npx playwright install chromium`。发布封面截图和浏览器测试都需要 Chromium。若系统缺少浏览器依赖，按 Playwright 的报错安装系统依赖。
 8. 执行 `npm run dev:all` 同时启动管理端与预览进程，输出按 `[app]`、`[preview]` 前缀合并，按 Ctrl-C 一起停止；也可以在一个终端执行 `npm run preview`，在另一个终端执行 `npm run dev`。两个进程的端口分别取自 `APP_ORIGIN` 与 `PREVIEW_ORIGIN`，端口已被占用时 `dev:all` 会直接报错退出。
@@ -59,6 +59,24 @@ Redis 已作为本地开发服务提供连接。当前平台会话、消息和�
 在忽略的 `.env` 内设置 `AI_MODE=provider`、`AI_API_KEY`、`AI_MODEL` 和 `AI_BASE_URL`。模型服务必须支持 OpenAI 兼容聊天、工具调用及 JSON mode。首页创建应用时同步调用模型选择生成类型，生成及修改时再执行工具循环。配置只由服务端读取。
 
 缺少模型配置时，生成请求返回明确错误。服务端不会自动改用 fixture。生产运行默认禁止 fixture。正式运行使用 provider，以下生产验收命令中的 `ALLOW_TEST_FIXTURE=1` 仅供本地测试。
+
+## 模型统一管理
+
+模型配置保存在 MySQL。表结构由 `migrations/006_model_registry.sql` 创建、`migrations/007_provider_api_format.sql` 补充提供商 API 格式与密钥字段，`npm run db:migrate` 执行；迁移后执行一次 `npm run db:init-models`，把当前 `.env` 的 `AI_BASE_URL` / `AI_MODEL` / `AI_API_KEY` 写入数据库。初始化只在配置仍为初始空态时进行，已有配置不会被覆盖。表已迁移且为空时，解析会临时用环境变量构造两个别名以兼容升级；读取失败不等于表空，不会回退到环境变量；DB 初始化后 DB 是唯一来源。
+
+注册表支持两个业务别名：`codegen.default`（应用生成 Agent，需流式与工具调用）和 `route.classify`（生成类型分类，需结构化输出）。管理员在 `/admin/modelManage` 编辑提供商与别名；“保存”约 5 秒内对后续请求生效，“保存并立即生效”会在事务中递增共享刷新序号，让其他实例在下一次解析时跳过 TTL。在途生成任务继续使用开始时解析的绑定。
+
+提供商按 API 格式构造模型：`openai-chat`（OpenAI 兼容 `/chat/completions`，支持 `includeUsage`、`supportsStructuredOutputs`、`supportsMultiPartToolContent` 三个布尔选项，以及命名选项 `thinkingSwitch`）、`openai-responses`（OpenAI Responses API `/responses`）、`anthropic-messages`（Anthropic Messages API `/messages`）。后两种格式没有可配置协议选项，管理端会隐藏相应开关；提交该格式不支持的选项会返回 400。`thinkingSwitch` 只对 `openai-chat` 生效，取值 `none`（默认，不追加）、`enabled`、`disabled`；非 `none` 时在请求体追加 DeepSeek 的 `thinking: {"type": …}`。
+
+别名弹窗的「思考强度」写入 `settings.reasoning`，取值 `none`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`，留空表示不指定（不传思考参数）。SDK 的统一 `reasoning` 参数由 `src/server/models/adapters.ts` 的自定义 middleware 注入，各格式映射为：`openai-chat` → `reasoning_effort`；`openai-responses` → `reasoning.effort`（适配层同时打开 `forceReasoning`，否则上游会忽略未知模型名的思考配置）；`anthropic-messages` → `thinking` 预算（按 `max_tokens` 比例换算，最低 1024）。上游不支持的等级由上游自行拒绝，本项目不做收窄。
+
+提供商弹窗的「测试连接」与别名弹窗的「获取模型」都会请求上游 `GET {baseUrl}/models`（`openai-chat` / `openai-responses` 用 `Authorization: Bearer`，`anthropic-messages` 用 `x-api-key` + `anthropic-version`），10 秒超时、不跟随重定向、错误信息不回显密钥；「获取模型」的结果只填充当前对话框的候选列表，不落库。密钥来源为“直接输入”且表单留空时，探测沿用数据库里已保存的密文。「获取模型」失败的原因会显示在别名的「上游模型名」下方。
+
+密钥有两种来源。引用环境变量时只存引用名（`apiKeyEnv`），默认允许 `AI_API_KEY`，其余通过 `MODEL_API_KEY_ENV_ALLOWLIST`（逗号分隔）加入；直接输入时明文不落库，服务端用 AES-256-GCM 加密后只存密文（`apiKeyCiphertext`，格式 `v1:<iv>:<tag>:<ciphertext>`），主密钥取自 `MODEL_SECRET_KEY`（64 位十六进制、32 字节 base64 或任意口令，scrypt 派生），未设置时自动生成 `runtime/model-secret.key`（权限 600）。管理接口只返回 `apiKeySource` 与当前实例是否已配置，绝不返回明文或密文；编辑态密钥留空表示保持已保存的值。该密钥文件丢失后已保存的密钥无法解密，需要在管理端重新输入。
+
+地址只允许无内嵌凭据、无查询、无片段的 HTTP(S)；`http:` 仅当 origin 出现在 `MODEL_INTERNAL_BASE_URL_ORIGINS`（逗号分隔，回环地址也需显式列出）时放行。管理端可在已部署的密钥引用之间热切换；轮换环境变量里的密钥值需要更新进程环境并重启进程。
+
+页面提示“保存成功”只代表服务端完成本地 schema、密钥引用与业务能力校验，不代表上游密钥或模型可用。「测试连接」/「获取模型」只验证地址与密钥能列出模型，不代表所选模型和格式一定能推理。
 
 ## 运行完整测试
 

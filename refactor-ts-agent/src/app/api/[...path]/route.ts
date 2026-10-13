@@ -4,6 +4,7 @@ import { login, logout, register, requireUser, requireAdmin } from '@/server/aut
 import * as business from '@/server/business';
 import { generationFor, loadMessages } from '@/server/generation-store';
 import { chatResponse, cancelGeneration } from '@/server/agent';
+import { applyModelConfigNow, deleteModelAlias, deleteModelProvider, probeProviderModels, readModelAdminConfig, upsertModelAlias, upsertModelProvider } from '@/server/models/admin';
 import { idSchema } from '@/shared/contracts';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
@@ -38,6 +39,13 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/chat/gen/code')return await chatResponse(req,value,user);
    if(path==='app/generation/cancel')return success(await cancelGeneration(z.object({appId:idSchema}).parse(value).appId,user));
    await requireAdmin(req);
+   if(path==='model/admin/config')return success(await readModelAdminConfig(value));
+   if(path==='model/admin/provider/upsert')return success(await upsertModelProvider(value));
+   if(path==='model/admin/provider/models')return success(await probeProviderModels(value));
+   if(path==='model/admin/alias/upsert')return success(await upsertModelAlias(value));
+   if(path==='model/admin/provider/delete')return success(await deleteModelProvider(value));
+   if(path==='model/admin/alias/delete')return success(await deleteModelAlias(value));
+   if(path==='model/admin/apply')return success(await applyModelConfigNow(value));
    if(path==='user/list/page/vo')return success(await business.listUsers(value));
    if(path==='user/update')return success(await business.updateUser(value));
    if(path==='user/delete')return success(await business.deleteUser(value,user));

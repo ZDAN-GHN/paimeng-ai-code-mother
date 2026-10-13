@@ -25,6 +25,7 @@
     "db:test:setup": "tsx --env-file=.env scripts/test-database.ts",
     "db:import": "tsx --conditions=react-server --env-file=.env scripts/import-legacy.ts",
     "db:admin": "tsx --env-file=.env scripts/admin.ts",
+    "db:init-models": "tsx --conditions=react-server --env-file=.env scripts/initialize-models.ts",
     "check:ui": "tsx scripts/check-ui-patterns.ts",
     "check:e2e": "tsx scripts/check-e2e-patterns.ts",
     "verify:boundary": "tsx scripts/verify-boundary.ts",
@@ -35,6 +36,8 @@
     "verify:parity": "node scripts/verify-parity.mjs"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "4.0.78",
+    "@ai-sdk/openai": "4.0.91",
     "@ai-sdk/openai-compatible": "3.0.65",
     "@ai-sdk/provider": "4.0.24",
     "@ai-sdk/react": "4.0.133",

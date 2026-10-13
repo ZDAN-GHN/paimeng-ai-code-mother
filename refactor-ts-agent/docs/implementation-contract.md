@@ -71,3 +71,27 @@ POST `/api/app/build` 接收 `{appId}`，按应用现有源码重建前端预览
 `src/server/artifacts.ts` 提供 `buildApp`、`deployApp`、`downloadApp`、`previewUrl`、`deployedUrl` 和 `captureCover`。源码与发布文件位于本目录的 `runtime/`，不写入旧产物。
 
 `src/server/preview.ts` 创建独立静态预览 HTTP 服务，启动入口为 `scripts/preview.ts`。封面及生成页面与管理端使用不同主机名。配置由 `src/server/config.ts` 校验。Vue 构建只在隔离 Docker 环境运行，详细限制见 [产物、构建与预览限制](artifacts.md)。
+
+## 模型配置与解析
+
+模型配置保存在 MySQL 的 `ts_model_provider`、`ts_model_alias`、`ts_model_config_state` 三张表（`migrations/006_model_registry.sql`，`migrations/007_provider_api_format.sql` 补充提供商的 `apiFormat`、可空 `apiKeyEnv` 与 `apiKeyCiphertext`）。部署顺序为 `npm run db:migrate` 后执行一次 `npm run db:init-models`；初始化只在配置仍为空且版本为零时把环境变量写入 DB，已有配置不会被覆盖。表已迁移且为空时，解析临时用环境变量构造两个别名；读取失败不等于表空，不会回退环境变量。DB 初始化后 DB 是唯一来源。
+
+两个业务别名固定为 `codegen.default` 与 `route.classify`；`src/server/model.ts` 分别解析，`src/server/agent.ts` 在任务开始时解析一次并把绑定冻结到整个工具循环。注册表 `src/server/models/registry.ts` 每个进程缓存不可变快照，普通保存经 5 秒 TTL 生效，TTL 从一致读事务开始计时；手动生效通过共享 `refreshEpoch` 让其他实例在下一次解析时跳过 TTL。快照读取在单个 REPEATABLE READ 只读事务中完成。
+
+配置写入在事务中锁定 `ts_model_config_state` 的 `models` 行并检查 `expectedRevision`，版本以十进制字符串传输。版本冲突返回 409（`40901`），引用冲突/必需别名保护返回 409（`40902`），载荷校验失败返回 400（`40000`），DB 不可用返回 503（`50300`）。引用中的提供商不能删除，必需别名不能删除、禁用或指向已禁用提供商。
+
+管理接口（管理员会话，POST，含 Origin 校验）：
+
+| 方法与路径 | 功能 |
+| --- | --- |
+| POST `/api/model/admin/config` | 读取完整配置与当前实例状态 |
+| POST `/api/model/admin/provider/upsert` | 新建或修改提供商，载荷含 `expectedRevision`、可选 `applyImmediately` |
+| POST `/api/model/admin/alias/upsert` | 新建或修改别名 |
+| POST `/api/model/admin/provider/delete` | 删除未被引用的提供商 |
+| POST `/api/model/admin/alias/delete` | 删除非必需别名 |
+| POST `/api/model/admin/apply` | 已保存配置立即生效 |
+| POST `/api/model/admin/provider/models` | 按当前填写（或已保存）的地址与密钥请求上游 `GET {baseUrl}/models`，返回 `{models: [{id, label}]}` |
+
+所有写操作返回 `{revision, refreshEpoch}`。提供商按 `apiFormat`（`openai-chat` / `openai-responses` / `anthropic-messages`）构造模型；协议选项按格式白名单校验，提交该格式不支持的选项返回 400/40000（布尔选项 `includeUsage`、`supportsStructuredOutputs`、`supportsMultiPartToolContent` 只属于 `openai-chat`；命名选项 `thinkingSwitch`（`none`/`enabled`/`disabled`）同样只属于 `openai-chat`，非 `none` 时在请求体追加 `thinking:{type}`）。别名的 `settings.reasoning`（`none`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`）经适配层的自定义 middleware 注入 SDK 统一参数，映射为 `openai-chat` 的 `reasoning_effort`、`openai-responses` 的 `reasoning.effort`（同时打开 `forceReasoning`）、`anthropic-messages` 的 `thinking` 预算。密钥有两种来源：`apiKeySource='env'` 只存引用名（`apiKeyEnv`，须在允许名单内，`AI_API_KEY` 始终允许，其余通过 `MODEL_API_KEY_ENV_ALLOWLIST` 加入）；`apiKeySource='inline'` 的明文不落库，用 AES-256-GCM 加密后只存 `apiKeyCiphertext`，主密钥取自 `MODEL_SECRET_KEY`，未设置时自动生成 `runtime/model-secret.key`（0600）。接口只返回 `apiKeySource` 与当前实例是否已配置，绝不返回明文或密文；编辑态密钥留空表示保持已保存的值。地址只允许无内嵌凭据、无查询、无片段的 HTTP(S)，`http:` 仅在 origin 出现在 `MODEL_INTERNAL_BASE_URL_ORIGINS` 时放行。探测接口入参非法返回 400/40000，上游不可用返回 502/50200，错误信息不回显密钥；密钥来源为 `inline` 且载荷留空时，服务端沿用已保存的密文。管理页面 `/admin/modelManage` 的“保存成功”只代表服务端本地校验通过，不代表上游密钥或模型可用。
+
+DB 读取失败时，冷启动无快照返回 503；已有快照时可在距上次一致读开始 60 秒内降级沿用；已观察到更高 `refreshEpoch` 却加载失败时返回 503，不用旧配置冒充生效。失败后有约 1 秒退避，只暂缓整份快照重载，不阻断共享刷新序号探测，因此退避窗口内出现的更高 `refreshEpoch` 不会被旧绑定掩盖。
