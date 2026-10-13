@@ -9,3 +9,4 @@ playwright-report/
 test-results/
 *.tsbuildinfo
 next-env.d.ts
+.pi/
