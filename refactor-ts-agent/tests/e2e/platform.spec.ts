@@ -4,10 +4,11 @@ import mysql from 'mysql2/promise';
 import { loadEnvFile } from 'node:process';
 import { testDatabaseUrl } from '../test-database-url';
 import type { CodeGenType } from '@/shared/contracts';
+import { appOrigin, previewOrigin as serverPreviewOrigin } from './support/app-origin';
 loadEnvFile('.env');
 const password = 'password123';
-const origin = process.env.APP_ORIGIN ?? 'http://localhost:3000';
-const previewOrigin = process.env.PREVIEW_ORIGIN ?? 'http://127.0.0.1:3001';
+const origin = appOrigin();
+const previewOrigin = serverPreviewOrigin();
 const uniqueAccount = () => 'ts_browser_' + randomUUID().slice(0, 8);
 async function testConnection(): Promise<mysql.Connection> {
   const raw = process.env.DATABASE_URL;

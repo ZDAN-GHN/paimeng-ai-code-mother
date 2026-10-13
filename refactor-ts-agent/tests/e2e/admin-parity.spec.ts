@@ -1,8 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
+import { appOrigin } from './support/app-origin';
 
 test.describe.configure({ timeout: 120000 });
-// 允许在 3000 被占用时用 ADMIN_PARITY_BASE 指向本 worktree 的临时服务，默认与 playwright.config.ts 一致。
-test.use({ baseURL: process.env.ADMIN_PARITY_BASE ?? 'http://localhost:3000' });
+test.use({ baseURL: appOrigin() });
 
 const admin = { id: '1', userAccount: 'admin', userName: '超级管理员', userAvatar: null, userProfile: null, userRole: 'admin', createTime: '2026-01-01 00:00:00', updateTime: '2026-01-01 00:00:00' };
 const creator = { id: '2', userAccount: 'creator', userName: '作者甲', userAvatar: 'https://cdn.example/avatar.png', userProfile: '平台作者', userRole: 'user', createTime: '2026-01-02 00:00:00', updateTime: '2026-01-02 00:00:00' };

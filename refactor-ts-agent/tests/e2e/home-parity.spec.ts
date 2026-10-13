@@ -1,10 +1,11 @@
 import { test, expect, devices, type Page } from '@playwright/test';
 import type { AppInfo, User } from '../../src/shared/contracts';
+import { previewOrigin } from './support/app-origin';
 
 const blogTemplate='创建一个现代化的个人博客网站，包含文章列表、详情页、分类标签、搜索功能、评论系统和个人简介页面。采用简洁的设计风格，支持响应式布局，文章支持Markdown格式，首页展示最新文章和热门推荐。';
 const creator:User={id:'1',userAccount:'alice',userName:'爱丽丝',userAvatar:null,userProfile:null,userRole:'user',createTime:'2026-01-01 00:00:00',updateTime:'2026-01-01 00:00:00'};
 const ownerApp:AppInfo={id:'11',appName:'我的博客',cover:null,initPrompt:'创建一个个人博客网站',codeGenType:'html',deployKey:null,deployedTime:null,priority:0,userId:'1',createTime:'2026-01-01 00:00:00',updateTime:'2026-01-01 00:00:00',user:creator,deployUrl:null};
-const featuredApp:AppInfo={...ownerApp,id:'22',appName:'精选商城',deployKey:'html_22',deployedTime:'2026-01-02 00:00:00',deployUrl:'http://127.0.0.1:3001/deploy/html_22/'};
+const featuredApp:AppInfo={...ownerApp,id:'22',appName:'精选商城',deployKey:'html_22',deployedTime:'2026-01-02 00:00:00',deployUrl:`${previewOrigin()}/deploy/html_22/`};
 
 function pageOf(records:AppInfo[],total=records.length){return {records,totalRow:total,pageNumber:1,pageSize:6};}
 async function mockSession(page:Page,user:User|null){

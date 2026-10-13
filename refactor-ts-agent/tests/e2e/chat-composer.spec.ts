@@ -1,8 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
+import { appOrigin } from './support/app-origin';
 
-const origin = process.env.APP_ORIGIN ?? 'http://localhost:3000';
+const origin = appOrigin();
 const prompt = '发送操作回归测试';
 
 test.beforeEach(async ({ page }) => {

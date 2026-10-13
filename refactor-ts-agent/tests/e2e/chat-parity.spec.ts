@@ -1,8 +1,9 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
+import { appOrigin, previewOrigin as serverPreviewOrigin } from './support/app-origin';
 
 const appId = '900001';
-const previewOrigin = 'http://127.0.0.1:3001';
+const previewOrigin = serverPreviewOrigin();
 const previewUrl = `${previewOrigin}/preview/html_${appId}/`;
 const deployUrl = `${previewOrigin}/deploy/parity-deploy/`;
 
@@ -70,7 +71,7 @@ async function mockPreview(page: Page) {
 window.addEventListener('message', function (event) {
   if (event.data && event.data.type === 'TOGGLE_EDIT_MODE' && event.data.editMode === true) {
     setTimeout(function () {
-      parent.postMessage({ type: 'ELEMENT_SELECTED', elementInfo: { tagName: 'H1', id: 'hero', className: 'title main', textContent: '预览标题', selector: 'body>h1#hero', pagePath: '/preview/html_${appId}/' } }, 'http://localhost:3000');
+      parent.postMessage({ type: 'ELEMENT_SELECTED', elementInfo: { tagName: 'H1', id: 'hero', className: 'title main', textContent: '预览标题', selector: 'body>h1#hero', pagePath: '/preview/html_${appId}/' } }, '${appOrigin()}');
     }, 30);
   }
 });
@@ -146,7 +147,7 @@ test('可视化编辑保留悬停/选中定位上下文并传入模型请求', a
   await expect(alert).toContainText('页面路径: /preview/html_' + appId + '/');
   await expect(alert).toContainText('选择器: body>h1#hero');
 
-  await page.evaluate(() => window.postMessage({ type: 'ELEMENT_SELECTED', elementInfo: { tagName: 'H1', id: 'wrong', className: '', textContent: '', selector: 'body>h1', pagePath: '/' } }, 'http://localhost:3000'));
+  await page.evaluate(target => window.postMessage({ type: 'ELEMENT_SELECTED', elementInfo: { tagName: 'H1', id: 'wrong', className: '', textContent: '', selector: 'body>h1', pagePath: '/' } }, target), appOrigin());
   await page.waitForTimeout(100);
   await expect(alert).not.toContainText('#wrong');
 

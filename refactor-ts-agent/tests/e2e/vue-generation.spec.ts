@@ -1,9 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
+import { appOrigin } from './support/app-origin';
 
 test('Vue 代码生成后自动构建，预览真实页面并运行 Vue 点击交互', async ({ page }) => {
   test.setTimeout(180000);
-  const origin = process.env.APP_ORIGIN ?? 'http://localhost:3000';
+  const origin = appOrigin();
   const credentials = { userAccount: 'ts_vue_build_' + randomUUID().slice(0, 8), userPassword: 'vue-build-regression-password', checkPassword: 'vue-build-regression-password' };
   const headers = { origin };
   expect((await page.request.post('/api/user/register', { headers, data: credentials })).status()).toBe(200);

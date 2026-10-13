@@ -1,7 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
+import { previewOrigin as serverPreviewOrigin } from './support/app-origin';
 
 const appId = '466907259650179072';
-const previewOrigin = process.env.PREVIEW_ORIGIN ?? 'http://127.0.0.1:3001';
+const previewOrigin = serverPreviewOrigin();
 const previewUrl = previewOrigin.replace(/\/$/, '') + '/preview/vue_project_' + appId + '/';
 const history = [{ id: 'preview-user-1', role: 'user', parts: [{ type: 'text', text: '生成企业官网' }] }];
 
