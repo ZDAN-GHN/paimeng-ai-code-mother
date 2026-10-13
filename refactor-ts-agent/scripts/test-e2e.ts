@@ -11,6 +11,10 @@ function testPort(name: string, fallback: number) {
 const appPort = testPort('E2E_APP_PORT', 3000);
 const previewPort = testPort('E2E_PREVIEW_PORT', 3001);
 if (appPort === previewPort) throw new Error('隔离 E2E 的应用与预览端口不能相同');
+const appMode = process.env.E2E_APP_MODE ?? 'production';
+if (appMode !== 'production' && appMode !== 'dev') {
+  throw new Error('E2E_APP_MODE 只能是 production 或 dev（dev 用于检查只在开发构建里出现的 antd/React 告警）');
+}
 const appOrigin = `http://localhost:${appPort}`;
 const previewOrigin = `http://127.0.0.1:${previewPort}`;
 const defaultBudgetMs = 25 * 60 * 1000;
@@ -138,13 +142,23 @@ try {
   if (!Number.isFinite(budgetMs) || budgetMs <= 0 || budgetMs > 2147483647) throw new Error('E2E_TIMEOUT_MS 必须为有限正数且不能超过计时器范围');
   budgetTimer = setTimeout(() => controller.abort(new Error('隔离 E2E 总预算超时')), budgetMs);
   for (const port of [appPort, previewPort]) {
-    if (await withinBudget(portOpen(port))) throw new Error(`端口 ${port} 已被占用，隔离 E2E 拒绝复用未知服务`);
+    if (await withinBudget(portOpen(port))) {
+      throw new Error(`端口 ${port} 已被占用：隔离 E2E 不会复用别人的服务（你自己的 npm run dev 通常占着 3000）。换个端口重跑，例如 E2E_APP_PORT=3020 E2E_PREVIEW_PORT=3021 npm run test:e2e:isolated（不要用 pkill -f 清理：模式串会匹配到你自己的命令行并把当前 shell 杀掉）`);
+    }
   }
   console.log(`隔离预览 ${previewOrigin}，隔离应用 ${appOrigin}，测试库强制指向 _test`);
-  exitCode = await withinBudget(start('npm', ['run', 'build'], fixtureEnv).completion);
-  if (exitCode !== 0) throw new Error(`构建失败，退出码 ${exitCode}`);
+  if (appMode === 'dev') {
+    // dev 模式跳过生产构建：antd/React 的告警只在开发构建里存在，生产构建会把它们剥离。
+    // 你自己的工作区通常已经占着一个 dev server，Next 16 用 <distDir>/dev/lock 做单例锁，换个 distDir 才能并行。
+    console.log('E2E_APP_MODE=dev：跳过生产构建，用独立 distDir 启动开发服务器');
+    const devEnv: NodeJS.ProcessEnv = { ...fixtureEnv, NEXT_DIST_DIR: '.next/dev-check' };
+    start('npx', ['next', 'dev', '--hostname', '127.0.0.1', '--port', String(appPort)], devEnv, true);
+  } else {
+    exitCode = await withinBudget(start('npm', ['run', 'build'], fixtureEnv).completion);
+    if (exitCode !== 0) throw new Error(`构建失败，退出码 ${exitCode}`);
+    start('npm', ['run', 'start', '--', '--port', String(appPort)], fixtureEnv, true);
+  }
   start('npm', ['run', 'preview'], fixtureEnv, true);
-  start('npm', ['run', 'start', '--', '--port', String(appPort)], fixtureEnv, true);
   await waitForPort(previewPort);
   await waitForPort(appPort);
   await withinBudget(waitForAppHealth());
