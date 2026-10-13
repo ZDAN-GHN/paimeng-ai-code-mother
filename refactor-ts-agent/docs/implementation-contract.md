@@ -56,13 +56,13 @@ POST `/api/app/chat/gen/code` 接收 `{appId,message:UIMessage,requestId:UUID}`�
 `IP` 类型沿用旧版转发头信任模型，要求可信前置代理覆盖 `X-Forwarded-For`/`X-Real-IP` 并阻止直连；无这两个头时直连请求共用 `ip:unknown`。超限请求随事务回滚，不消耗次数。
 生成输入沿用旧版护轨：总文本不超过 1000 字、不能为空，并拒绝原敏感词和注入模式。可视化定位上下文包含在这个总长度内。模型读取服务端权威历史，当前请求在内最多二十条 UI 消息；完整工具消息及全部历史仍持久保存，供页面恢复和查询。
 
-完整助手消息、终态与租约释放在一个事务中完成。取消请求只中止仍在写文件的模型阶段。模型结束后构建是确定性收尾：客户端断开（刷新或关闭页面）和取消请求都不再中止构建，只有租约失效或构建超时才会停止，否则会丢弃已生成的代码。清理完成前保留租约。超时标记失败，失去租约的旧进程不能覆盖新任务。服务重启后，已完成历史直接恢复，异常中断的活动租约到期后由状态读取或下一次提交回收。
+完整助手消息、终态与租约释放在一个事务中完成。取消请求只中止仍在写文件的模型阶段。模型结束后构建是确定性收尾：客户端断开（刷新或关闭页面）和取消请求都不再中止构建，只有租约失效或构建超时才会停止，否则会丢弃已生成的代码。清理完成前保留租约。超时标记失败，失去租约的旧进程不能覆盖新任务。服务重启后，已完成历史直接恢复，异常中断的活动租约到期后由状态读取或下一次提交回收。整次生成的时长上限由 `GENERATION_TIMEOUT_MS` 决定（默认 `0` 表示不限制；旧版写死 10 分钟），单次模型回复（一个 step）超过 `MODEL_REPLY_TIMEOUT_MS`（默认 `900000`，15 分钟）会以「单次回复超时（N 秒）」中止，每个模型请求失败按 `MODEL_RETRY_LIMIT`（默认 `2`）重试；上游输出到达 token 上限（`finishReason = length`）不再判为失败，而是继续构建，模型可在下一轮对话里根据构建结果补齐。
 
 React 聊天页使用 AI SDK POST 流式协议。创建者首次进入空历史、无任务的新应用时自动提交初始需求一次；已存在任务、历史或历史加载失败时不会自动提交。刷新后加载服务端完整历史，工具结果保留。公开应用信息独立于私有历史和任务请求加载。
 
 `previewUrl` 根据实际 HTML 或 Vue 构建入口是否有效判断，不以最新任务的 ready 状态为门槛。旧应用及下一轮失败、取消后仍有效的既有产物可继续预览；生成、发布和下载之间仍受写入租约保护。`sourceAvailable` 独立表示可下载源码；Vue 每次发布都在写锁内重新构建当前源码，构建失败时保留旧预览并拒绝此次发布。
 
-POST `/api/app/build` 接收 `{appId}`，按应用现有源码重建前端预览产物，不改变任务状态、不发布。只允许创建者调用，`HTML`/`multi_file` 应用或已有有效预览时直接返回当前 `previewUrl`，没有源码时返回 409，构建失败原样返回错误。同一应用 60 秒内只尝试一次，避免源码本身有错时反复构建。聊天页在源码存在但预览产物缺失时自动调用一次该接口，因此取消生成或构建中断不再需要用户手动点「部署」才能看到预览。
+POST `/api/app/build` 接收 `{appId}`，按应用现有源码重建前端预览产物，不改变任务状态、不发布。只允许创建者调用，`HTML`/`multi_file` 应用或已有有效预览时直接返回当前 `previewUrl`，没有源码时返回 409，构建失败原样返回错误。同一应用 60 秒内只尝试一次，避免源码本身有错时反复构建。聊天页在源码存在但预览产物缺失时自动调用一次该接口，因此取消生成或构建中断不再需要用户手动点「部署」才能看到预览。任务结论与应用可用状态分开呈现：预览已经可用时，历史失败只显示为提示条（说明当前预览由已有代码构建，可以继续预览、编辑或部署），状态标签按能否预览显示，不把历史失败当成当前阻塞。
 
 ## 文件与产物模块
 
@@ -90,8 +90,8 @@ POST `/api/app/build` 接收 `{appId}`，按应用现有源码重建前端预览
 | POST `/api/model/admin/provider/delete` | 删除未被引用的提供商 |
 | POST `/api/model/admin/alias/delete` | 删除非必需别名 |
 | POST `/api/model/admin/apply` | 已保存配置立即生效 |
-| POST `/api/model/admin/provider/models` | 按当前填写（或已保存）的地址与密钥请求上游 `GET {baseUrl}/models`，返回 `{models: [{id, label}]}` |
+| POST `/api/model/admin/provider/models` | 按当前填写（或已保存）的地址与密钥请求上游 `GET {baseUrl}/models`（每次调用都实时请求，带 `cache-control: no-cache`），返回 `{models: [{id, label}]}`，最多 1000 条 |
 
-所有写操作返回 `{revision, refreshEpoch}`。提供商按 `apiFormat`（`openai-chat` / `openai-responses` / `anthropic-messages`）构造模型；协议选项按格式白名单校验，提交该格式不支持的选项返回 400/40000（布尔选项 `includeUsage`、`supportsStructuredOutputs`、`supportsMultiPartToolContent` 只属于 `openai-chat`；命名选项 `thinkingSwitch`（`none`/`enabled`/`disabled`）同样只属于 `openai-chat`，非 `none` 时在请求体追加 `thinking:{type}`）。别名的 `settings.reasoning`（`none`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`）经适配层的自定义 middleware 注入 SDK 统一参数，映射为 `openai-chat` 的 `reasoning_effort`、`openai-responses` 的 `reasoning.effort`（同时打开 `forceReasoning`）、`anthropic-messages` 的 `thinking` 预算。密钥有两种来源：`apiKeySource='env'` 只存引用名（`apiKeyEnv`，须在允许名单内，`AI_API_KEY` 始终允许，其余通过 `MODEL_API_KEY_ENV_ALLOWLIST` 加入）；`apiKeySource='inline'` 的明文不落库，用 AES-256-GCM 加密后只存 `apiKeyCiphertext`，主密钥取自 `MODEL_SECRET_KEY`，未设置时自动生成 `runtime/model-secret.key`（0600）。接口只返回 `apiKeySource` 与当前实例是否已配置，绝不返回明文或密文；编辑态密钥留空表示保持已保存的值。地址只允许无内嵌凭据、无查询、无片段的 HTTP(S)，`http:` 对本机/局域网字面量（`localhost`、`127.0.0.0/8`、`10/8`、`172.16/12`、`192.168/16`、`::1`，只判字面量、不解析域名、不含 `169.254/16`）直接放行，其它 origin 需出现在 `MODEL_INTERNAL_BASE_URL_ORIGINS`。探测接口入参非法返回 400/40000，上游不可用返回 502/50200，错误信息不回显密钥；密钥来源为 `inline` 且载荷留空时，服务端沿用已保存的密文。管理页面 `/admin/modelManage` 的“保存成功”只代表服务端本地校验通过，不代表上游密钥或模型可用。
+所有写操作返回 `{revision, refreshEpoch}`。提供商按 `apiFormat`（`openai-chat` / `openai-responses` / `anthropic-messages`）构造模型；协议选项按格式白名单校验，提交该格式不支持的选项返回 400/40000（布尔选项 `includeUsage`、`supportsStructuredOutputs`、`supportsMultiPartToolContent` 只属于 `openai-chat`；命名选项 `thinkingSwitch`（`none`/`enabled`/`disabled`）同样只属于 `openai-chat`，非 `none` 时在请求体追加 `thinking:{type}`）。别名的 `settings.reasoning`（`none`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`）经适配层的自定义 middleware 注入 SDK 统一参数，映射为 `openai-chat` 的 `reasoning_effort`、`openai-responses` 的 `reasoning.effort`（同时打开 `forceReasoning`）、`anthropic-messages` 的 `thinking` 预算；DeepSeek 的 Responses 格式用 `response.reasoning_text.*` 事件与 `content[].reasoning_text` 承载思考，SDK 只认 `response.reasoning_summary_text.*`，因此该格式的响应先经 `src/server/models/responses-reasoning.ts` 改写（只改写 `delta` 事件，`.done` 透传，非流式把 `content` 复制成 `summary`）。密钥有两种来源：`apiKeySource='env'` 只存引用名（`apiKeyEnv`，须在允许名单内，`AI_API_KEY` 始终允许，其余通过 `MODEL_API_KEY_ENV_ALLOWLIST` 加入）；`apiKeySource='inline'` 的明文不落库，用 AES-256-GCM 加密后只存 `apiKeyCiphertext`，主密钥取自 `MODEL_SECRET_KEY`，未设置时自动生成 `runtime/model-secret.key`（0600）。接口只返回 `apiKeySource` 与当前实例是否已配置，绝不返回明文或密文；编辑态密钥留空表示保持已保存的值。地址只允许无内嵌凭据、无查询、无片段的 HTTP(S)，`http:` 对本机/局域网字面量（`localhost`、`127.0.0.0/8`、`10/8`、`172.16/12`、`192.168/16`、`::1`，只判字面量、不解析域名、不含 `169.254/16`）直接放行，其它 origin 需出现在 `MODEL_INTERNAL_BASE_URL_ORIGINS`。探测接口入参非法返回 400/40000，上游不可用返回 502/50200，错误信息不回显密钥；密钥来源为 `inline` 且载荷留空时，服务端沿用已保存的密文。管理页面 `/admin/modelManage` 的“保存成功”只代表服务端本地校验通过，不代表上游密钥或模型可用。
 
 DB 读取失败时，冷启动无快照返回 503；已有快照时可在距上次一致读开始 60 秒内降级沿用；已观察到更高 `refreshEpoch` 却加载失败时返回 503，不用旧配置冒充生效。失败后有约 1 秒退避，只暂缓整份快照重载，不阻断共享刷新序号探测，因此退避窗口内出现的更高 `refreshEpoch` 不会被旧绑定掩盖。

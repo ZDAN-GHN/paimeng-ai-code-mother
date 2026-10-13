@@ -7,6 +7,7 @@ import { customProvider, defaultSettingsMiddleware, wrapLanguageModel, type Lang
 import { getConfig } from '../config';
 import { isAllowedModelApiKeyEnv, type ModelAlias, type ModelAliasSettings, type ModelProvider, type ProviderKeySource, type ReasoningLevel } from '@/shared/model-config';
 import { ModelConfigInvalidError } from './errors';
+import { responsesReasoningFetch } from './responses-reasoning';
 import { decryptModelSecret } from './secrets';
 
 export { ModelConfigInvalidError } from './errors';
@@ -85,7 +86,8 @@ function buildProviderModel(provider: ModelProvider, modelName: string, apiKey: 
       return compatible.chatModel(modelName);
     }
     case 'openai-responses':
-      return createOpenAI({ baseURL: provider.baseUrl, apiKey }).responses(modelName);
+      // 带上 fetch 改写：DeepSeek 的 Responses 接口用 response.reasoning_text.* 发思考内容，SDK 只认 summary 事件。
+      return createOpenAI({ baseURL: provider.baseUrl, apiKey, fetch: responsesReasoningFetch }).responses(modelName);
     case 'anthropic-messages':
       return createAnthropic({ baseURL: provider.baseUrl, apiKey }).messages(modelName);
     default:

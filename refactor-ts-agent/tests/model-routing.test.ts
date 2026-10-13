@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateText } from 'ai';
 import { modelFor, routeCodeGenType } from '@/server/model';
 import { createModelRegistry, modelRegistry } from '@/server/models/registry';
+import { BusinessError } from '@/server/http';
 import type { ModelAlias, ModelConfigSnapshot, ModelProvider } from '@/shared/model-config';
 
 // 用受控注册表替换单例：provider 路由测试需要冻结绑定，但不应访问数据库。
@@ -103,6 +104,23 @@ describe('应用类型路由（F01）', () => {
     content = '{"codeGenType":"react_project"}';
     await expect(routeCodeGenType('用 React 实现数据仪表盘')).resolves.toBe('react_project');
     expect(captured).toHaveLength(2);
+  });
+
+  it('路由上游失败时返回 502/50200，提示改哪个别名且不泄露密钥', async () => {
+    process.env.AI_MODE = 'provider';
+    vi.mocked(modelRegistry).mockReturnValue(configuredRegistry());
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      type: 'error',
+      error: { type: 'FreeTierError', message: "OpenCode's free tier can only be used from within OpenCode. key=sk-abcdef1234567890" },
+    }), { status: 403, headers: { 'content-type': 'application/json' } })) as typeof globalThis.fetch;
+
+    const failure = await routeCodeGenType('做一个博客').then(() => null, (error: unknown) => error as BusinessError);
+    expect(failure).toBeInstanceOf(BusinessError);
+    expect(failure?.status).toBe(502);
+    expect(failure?.code).toBe(50200);
+    expect(failure?.message).toContain('route.classify');
+    expect(failure?.message).toContain('模型管理');
+    expect(failure?.message).not.toContain('sk-abcdef1234567890');
   });
 
   it('provider 模式生成解析 codegen.default，与路由别名相互独立', async () => {

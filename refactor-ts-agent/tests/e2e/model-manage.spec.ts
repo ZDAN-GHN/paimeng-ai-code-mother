@@ -1,5 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import mysql from 'mysql2/promise';
 import { loadEnvFile } from 'node:process';
 import { testDatabaseUrl } from '../test-database-url';
@@ -55,12 +57,12 @@ async function emptyModelConfig(connection: mysql.Connection) {
   );
 }
 
-async function seedModelConfig(connection: mysql.Connection) {
+async function seedModelConfig(connection: mysql.Connection, baseUrl = 'https://api.example.test/v1') {
   await connection.execute('DELETE FROM ts_model_alias');
   await connection.execute('DELETE FROM ts_model_provider');
   await connection.execute(
     'INSERT INTO ts_model_provider (id, displayName, apiFormat, baseUrl, apiKeyEnv, options, enabled, createTime, updateTime) VALUES (?,?,?,?,?,?,?,NOW(3),NOW(3))',
-    ['env-default', '默认提供商', 'openai-chat', 'https://api.example.test/v1', 'AI_API_KEY', JSON.stringify({}), 1],
+    ['env-default', '默认提供商', 'openai-chat', baseUrl, 'AI_API_KEY', JSON.stringify({}), 1],
   );
   const aliasInsert =
     'INSERT INTO ts_model_alias (alias, providerId, modelName, capabilities, settings, enabled, createTime, updateTime) VALUES (?,?,?,?,?,?,NOW(3),NOW(3))';
@@ -331,5 +333,49 @@ test('连通性检测与获取模型在界面上给出反馈', async ({ page }) 
   await expect(modelName).toHaveValue('deepseek');
   await aliasDialog.getByRole('button', { name: '获取模型' }).click();
   await expect(aliasDialog.getByText(/无法连接上游/)).toBeVisible({ timeout: 30000 });
+});
+
+test('从下拉里选中的上游模型名会写进数据库', async ({ page }) => {
+  const upstream = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ data: [{ id: 'mimo-v2.6-flash' }, { id: 'deepseek-flash' }] }));
+  });
+  await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  const upstreamBase = `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/v1`;
+  const connection = await testConnection();
+  try {
+    await seedModelConfig(connection, upstreamBase);
+    await adminLogin(page, uniqueAccount());
+    await page.goto('/admin/modelManage');
+
+    await aliasRow(page, 'codegen.default').getByRole('button', { name: /^编\s*辑$/ }).click();
+    const dialog = page.getByRole('dialog');
+    const modelName = dialog.getByLabel('上游模型名', { exact: true });
+    await modelName.fill('mimo');
+    await dialog.getByRole('button', { name: '获取模型' }).click();
+    await expect(page.getByText('已获取 2 个上游模型', { exact: true })).toBeVisible({ timeout: 30000 });
+
+    // 下拉选中项必须真正写进表单：若 Form.Item 的直接子节点不是控件（例如外面又包了一层 Space.Compact），
+    // antd 注入的 value/onChange 会被丢掉，输入框里留下手输的 mimo，保存后数据库还是旧值。
+    await modelName.click();
+    await page
+      .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option')
+      .filter({ hasText: 'mimo-v2.6-flash' })
+      .click();
+    await expect(modelName).toHaveValue('mimo-v2.6-flash');
+    await dialog.getByRole('button', { name: /保\s*存$/ }).click();
+    await expect(page.getByText('别名已保存', { exact: true })).toBeVisible();
+
+    const stored = await testConnection();
+    try {
+      const [rows] = await stored.query("SELECT modelName FROM ts_model_alias WHERE alias='codegen.default'");
+      expect((rows as { modelName: string }[])[0]?.modelName).toBe('mimo-v2.6-flash');
+    } finally {
+      await stored.end();
+    }
+  } finally {
+    await connection.end();
+    await new Promise<void>(resolve => upstream.close(() => resolve()));
+  }
 });
 

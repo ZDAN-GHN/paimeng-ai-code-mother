@@ -12,7 +12,7 @@
 - 迁移后执行一次 `npm run db:init-models`。该命令幂等：仅当配置仍为初始空态（提供商与别名均为空、`revision=0`、`refreshEpoch=0`）时，从现有 `AI_BASE_URL` / `AI_MODEL` / `AI_API_KEY` 建立一个提供商与两个别名；已有配置不会被覆盖。
 - 表已迁移且为空时，解析会临时用环境变量构造两个别名以兼容升级。此回退要求迁移后的表可读且为空；读取失败不等于为空，不会回退到环境变量。一旦 DB 初始化成功（存在配置行或版本非零），DB 即成为唯一来源。
 - 解析路径：`src/server/models/registry.ts` 提供 `resolveBinding` / `resolveModel`；`src/server/model.ts` 的 `modelFor` 解析 `codegen.default`，`routeCodeGenType` 解析 `route.classify`。`src/server/agent.ts` 在任务开始时解析一次并把绑定冻结到整个工具循环，在途任务不受后续配置变更影响。
-- 管理接口：`src/server/models/admin.ts` 与 `src/app/api/[...path]/route.ts` 暴露 `/api/model/admin/*`；管理页面为 `/admin/modelManage`。页面“保存成功”只代表服务端本地 schema、密钥引用与业务能力校验通过，不代表上游密钥或模型可用；第一版不发起付费连通性探测。
+- 管理接口：`src/server/models/admin.ts` 与 `src/app/api/[...path]/route.ts` 暴露 `/api/model/admin/*`；管理页面为 `/admin/modelManage`。页面“保存成功”只代表服务端本地 schema、密钥引用与业务能力校验通过，不代表上游密钥或模型可用；连通性探测只在管理员点击「测试连接」/「获取模型」时发起（见下文）。
 
 环境变量：
 
@@ -59,7 +59,7 @@
 
 `options` 按 API 格式白名单化：`openai-chat` 支持布尔项 `includeUsage`、`supportsStructuredOutputs`、`supportsMultiPartToolContent` 与命名项 `thinkingSwitch`（`none`/`enabled`/`disabled`，非 `none` 时用 `transformRequestBody` 在请求体追加 `thinking:{type}`，用于 DeepSeek Chat 格式的思考开关）；`openai-responses` 与 `anthropic-messages` 没有可配置的协议选项（当前 SDK 的这两个 provider 没有对应设置），提交不支持的选项会被拒绝。需要特殊请求或响应处理时，增加有测试的命名兼容配置，再由管理端选择；不在 DB 存 JavaScript 函数或任意执行脚本。新增 API 格式或适配器代码仍需要部署。
 
-提供商连通性探测走 `POST /api/model/admin/provider/models`：按当前填写（密钥留空时用库里已保存的密文）向上游发一次 `GET {baseUrl}/models`，`openai-chat`/`openai-responses` 用 `Authorization: Bearer`，`anthropic-messages` 用 `x-api-key` + `anthropic-version: 2023-06-01`；解析 `{data:[{id, display_name?}]}` 并归一为 `{id, label}`，最多 200 条。10 秒超时、不跟随重定向、错误不回显密钥（响应片段也会做密钥替换）、上游失败返回 502/50200。该探测只验证地址与密钥能列模型，不代表所选模型与格式可推理；结果只用于管理界面候选列表，不落库。
+提供商连通性探测走 `POST /api/model/admin/provider/models`：按当前填写（密钥留空时用库里已保存的密文）向上游发一次 `GET {baseUrl}/models`，`openai-chat`/`openai-responses` 用 `Authorization: Bearer`，`anthropic-messages` 用 `x-api-key` + `anthropic-version: 2023-06-01`；解析 `{data:[{id, display_name?}]}` 并归一为 `{id, label}`，最多 1000 条（`providerModelListLimit`，命中上限时管理界面会提示可能被截断）。每次点击都会重新请求上游（`cache-control: no-cache`，不使用缓存）；10 秒超时、不跟随重定向、错误不回显密钥（响应片段也会做密钥替换）、上游失败返回 502/50200。该探测只验证地址与密钥能列模型，不代表所选模型与格式可推理；结果只用于管理界面候选列表，不落库。
 
 ### `ts_model_alias`：项目别名映射
 
@@ -86,6 +86,7 @@
 | `anthropic-messages` | `thinking: {type: 'enabled', budget_tokens}` | 预算按 `max_tokens` 比例换算，最低 1024 |
 
 上游是否接受某个等级由上游决定；本项目只做枚举校验，不按厂商收窄。DeepSeek 三种格式的对照见 `README.md` 与官方文档（Responses 用 `reasoning.effort`，Chat 用 `reasoning_effort` + `thinking`，Anthropic 兼容端点用 `output_config.effort`）。
+DeepSeek 的 Responses 格式把思考文本放在 `output[].content`（`type: 'reasoning_text'`）、流式事件叫 `response.reasoning_text.delta`，而 AI SDK 只解析 `response.reasoning_summary_text.delta` 与 `summary`，所以该格式的响应会先经 `src/server/models/responses-reasoning.ts` 兼容改写（SSE 只改写 `delta` 事件并把 `content_index` 映射为 `summary_index`，`.done` 事件原样透传，非流式把 `content` 复制成 `summary`）再交给 SDK；单测在 `tests/models/responses-reasoning.test.ts`。Chat 格式不需要这层改写，`reasoning_content` 由 `@ai-sdk/openai-compatible` 原生解析。
 
 ### `ts_model_config_state`：共享版本
 
@@ -163,7 +164,7 @@ API 中版本值以十进制字符串传输，避免 JavaScript 大整数精度�
 - “保存”提示“已保存，后续请求通常在 5 秒内使用新配置”；“立即生效”提示“后续请求将使用新配置，正在生成的任务继续”。
 - 可选“保存并立即生效”：同一事务同时递增版本和刷新序号，避免两步操作中另一管理员写入。
 
-第一版不自动发起付费连通性探测。保存时执行本地 schema、密钥引用和业务能力校验；真实模型的工具调用、流式与结构化质量另行验证。管理端不提供填写 API key 明文的输入框。
+第一版不自动发起付费连通性探测，只在管理员显式点击「测试连接」/「获取模型」时探测。保存时执行本地 schema、密钥引用和业务能力校验；真实模型的工具调用、流式与结构化质量另行验证。管理端支持引用环境变量与直接输入密钥两种来源，直接输入的明文不落库（AES-256-GCM 加密后只存密文）。
 
 ## API 草案
 

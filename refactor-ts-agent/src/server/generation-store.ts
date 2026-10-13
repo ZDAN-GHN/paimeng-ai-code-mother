@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, asc, desc, eq, gte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import type { UIMessage } from 'ai';
 import { db, now, type Transaction } from './db';
 import { apps, generations, histories, leases, messages, users } from './schema';
@@ -115,7 +115,33 @@ export async function heartbeat(id: string) {
   return task?.status;
 }
 
+let lastSweepAt = 0;
+const sweepCooldownMs = 10000;
+
+/**
+ * 进程死掉后任务会一直停在 generating/building（心跳停止但没人写终态），界面就会永久轮询。
+ * 读取任务时顺手清理已过期的租约；单个应用的锁冲突或应用已删除都不应影响这次读取。
+ */
+export async function sweepStaleLeases(limit = 10) {
+  const expired = await db().select().from(leases).where(lte(leases.expiresAt, now())).orderBy(asc(leases.expiresAt)).limit(limit);
+  for (const lease of expired) {
+    try {
+      await db().transaction(async tx => {
+        await lockedApp(tx, String(lease.appId));
+        const [current] = await tx.select().from(leases).where(eq(leases.appId, lease.appId)).limit(1);
+        if (current && current.expiresAt <= now()) await recoverLease(tx, current);
+      });
+    } catch {
+      // 尽力而为：清理失败时保留原状，等待下次读取或下一次生成提交时再处理。
+    }
+  }
+}
+
 export async function generationFor(appId: string) {
+  if (Date.now() - lastSweepAt > sweepCooldownMs) {
+    lastSweepAt = Date.now();
+    await sweepStaleLeases();
+  }
   const [lease] = await db().select().from(leases).where(eq(leases.appId, BigInt(appId)));
   if (lease && lease.expiresAt <= now()) {
     await db().transaction(async tx => {

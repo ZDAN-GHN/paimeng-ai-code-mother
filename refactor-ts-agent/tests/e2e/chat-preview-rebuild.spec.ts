@@ -55,3 +55,19 @@ for (const item of skipped) {
     expect(fixture.builds()).toBe(0);
   });
 }
+
+test('已有预览时失败任务只作提示，不再当成当前阻塞', async ({ page }) => {
+  await setup(page, { preview: true, task: { id: 'task-failed', status: 'failed', error: '生成失败' } });
+  await page.goto('/app/chat/' + appId);
+  await expect(page.locator('.ant-tag').filter({ hasText: '可预览' })).toBeVisible();
+  await expect(page.locator('.ant-alert-warning')).toContainText('上次生成失败：生成失败');
+  await expect(page.locator('.ant-alert-error')).toHaveCount(0);
+  await expect(page.locator('.preview-frame')).toBeAttached();
+});
+
+test('没有预览时失败任务仍然按错误展示', async ({ page }) => {
+  await setup(page, { preview: false, source: false, task: { id: 'task-failed', status: 'failed', error: '生成失败' } });
+  await page.goto('/app/chat/' + appId);
+  await expect(page.locator('.ant-alert-error')).toContainText('生成失败');
+  await expect(page.locator('.ant-tag').filter({ hasText: '失败' })).toBeVisible();
+});

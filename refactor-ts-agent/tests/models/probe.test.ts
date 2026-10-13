@@ -9,6 +9,7 @@ type Captured = {
   authorization: string | undefined;
   apiKey: string | undefined;
   anthropicVersion: string | undefined;
+  cacheControl: string | undefined;
 };
 
 let server: Server;
@@ -27,6 +28,7 @@ beforeAll(async () => {
       authorization: request.headers.authorization,
       apiKey: request.headers['x-api-key'] as string | undefined,
       anthropicVersion: request.headers['anthropic-version'] as string | undefined,
+      cacheControl: request.headers['cache-control'] as string | undefined,
     });
     handler(response);
   });
@@ -114,13 +116,15 @@ describe('fetchProviderModels', () => {
     await expect(probeMessage('openai-chat')).resolves.toBe('上游没有返回可用的模型列表');
   });
 
-  it('模型数量上限为 200 条', async () => {
-    handler = response => json(response, 200, { data: Array.from({ length: 250 }, (_value, index) => ({ id: `model-${index}` })) });
+  it('模型数量上限为 1000 条，并显式声明请求不缓存', async () => {
+    captured = [];
+    handler = response => json(response, 200, { data: Array.from({ length: 1200 }, (_value, index) => ({ id: `model-${index}` })) });
 
     const models = await fetchProviderModels({ apiFormat: 'openai-chat', baseUrl }, secret);
 
-    expect(models).toHaveLength(200);
-    expect(models.at(-1)?.id).toBe('model-199');
+    expect(models).toHaveLength(1000);
+    expect(models.at(-1)?.id).toBe('model-999');
+    expect(captured.at(-1)?.cacheControl).toBe('no-cache');
   });
 
   it('超时与连接失败都归一化为无法连接上游', async () => {

@@ -32,6 +32,7 @@ import {
   modelProviderOptionKeys,
   providerOptionKeysByFormat,
   providerOptionsSchema,
+  providerModelListLimit,
   providerModelsViewSchema,
   reasoningLevelLabels,
   reasoningLevels,
@@ -51,6 +52,11 @@ import {
   type ProviderKeySource,
   type ReasoningLevel,
 } from '@/shared/model-config';
+
+/** 上游列表在服务端按 providerModelListLimit 截断，命中上限时明确告知，避免管理员以为模型丢了。 */
+function modelListLimitHint(count: number): string {
+  return count >= providerModelListLimit ? `（已达到 ${providerModelListLimit} 条上限，其余未显示）` : '';
+}
 
 type AdminOutcome<T> = { ok: true; data: T } | { ok: false; status: number; message: string };
 
@@ -202,7 +208,7 @@ function ModelConfigManager() {
         setUpstreamModels(outcome.data.models);
         const ids = outcome.data.models.slice(0, 20).map((model) => model.id).join('、');
         const suffix = outcome.data.models.length > 20 ? ' 等' : '';
-        setProbeText(`连接正常，共 ${outcome.data.models.length} 个模型：${ids}${suffix}`);
+        setProbeText(`连接正常，共 ${outcome.data.models.length} 个模型${modelListLimitHint(outcome.data.models.length)}：${ids}${suffix}`);
       } else {
         setProbeText(outcome.message);
       }
@@ -232,7 +238,7 @@ function ModelConfigManager() {
     setProbing(false);
     if (outcome.ok) {
       setUpstreamModels(outcome.data.models);
-      message.success(`已获取 ${outcome.data.models.length} 个上游模型`);
+      message.success(`已获取 ${outcome.data.models.length} 个上游模型${modelListLimitHint(outcome.data.models.length)}`);
       return;
     }
     setProbeText(outcome.message);
@@ -829,27 +835,27 @@ function ModelConfigManager() {
                 }))}
               />
             </Form.Item>
-            <Form.Item
-              name="modelName"
-              label="上游模型名"
-              tooltip="可以直接输入，也可以先点“获取模型”从上游 /models 拉取候选"
-              rules={[{ required: true, message: '请输入上游模型名' }, { max: 256, message: '最多 256 个字符' }]}
-            >
-              <Space.Compact style={{ width: '100%' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 24 }}>
+              <Form.Item
+                name="modelName"
+                label="上游模型名"
+                tooltip="可以直接输入，也可以先点“获取模型”从上游 /models 拉取候选"
+                rules={[{ required: true, message: '请输入上游模型名' }, { max: 256, message: '最多 256 个字符' }]}
+                style={{ flex: 1, minWidth: 0, marginBottom: 0 }}
+              >
                 <AutoComplete
-                  style={{ flex: 1 }}
+                  style={{ width: '100%' }}
+                  placeholder="例如 deepseek-flash"
                   options={upstreamModels.map((model) => ({ value: model.id, label: model.label }))}
                   filterOption={(input, option) =>
                     `${option?.value ?? ''} ${option?.label ?? ''}`.toLowerCase().includes(input.toLowerCase())
                   }
-                >
-                  <Input aria-label="上游模型名" placeholder="例如 deepseek-flash" />
-                </AutoComplete>
-                <Button onClick={() => void loadAliasModels()} loading={probing}>
-                  获取模型
-                </Button>
-              </Space.Compact>
-            </Form.Item>
+                />
+              </Form.Item>
+              <Button onClick={() => void loadAliasModels()} loading={probing}>
+                获取模型
+              </Button>
+            </div>
             {probeText ? <div className={styles.textGray}>{probeText}</div> : null}
             <Form.Item label="能力">
               <Space size={16} wrap>

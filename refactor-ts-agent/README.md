@@ -70,7 +70,9 @@ Redis 已作为本地开发服务提供连接。当前平台会话、消息和�
 
 别名弹窗的「思考强度」写入 `settings.reasoning`，取值 `none`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`，留空表示不指定（不传思考参数）。SDK 的统一 `reasoning` 参数由 `src/server/models/adapters.ts` 的自定义 middleware 注入，各格式映射为：`openai-chat` → `reasoning_effort`；`openai-responses` → `reasoning.effort`（适配层同时打开 `forceReasoning`，否则上游会忽略未知模型名的思考配置）；`anthropic-messages` → `thinking` 预算（按 `max_tokens` 比例换算，最低 1024）。上游不支持的等级由上游自行拒绝，本项目不做收窄。
 
-提供商弹窗的「测试连接」与别名弹窗的「获取模型」都会请求上游 `GET {baseUrl}/models`（`openai-chat` / `openai-responses` 用 `Authorization: Bearer`，`anthropic-messages` 用 `x-api-key` + `anthropic-version`），10 秒超时、不跟随重定向、错误信息不回显密钥；「获取模型」的结果只填充当前对话框的候选列表，不落库。密钥来源为“直接输入”且表单留空时，探测沿用数据库里已保存的密文。「获取模型」失败的原因会显示在别名的「上游模型名」下方。
+提供商弹窗的「测试连接」与别名弹窗的「获取模型」都会请求上游 `GET {baseUrl}/models`（`openai-chat` / `openai-responses` 用 `Authorization: Bearer`，`anthropic-messages` 用 `x-api-key` + `anthropic-version`），每次点击都会重新请求上游（带 `cache-control: no-cache`，不使用缓存）、10 秒超时、不跟随重定向、错误信息不回显密钥；「获取模型」的结果只填充当前对话框的候选列表（最多 1000 条，命中上限时界面会提示可能被截断），不落库。密钥来源为“直接输入”且表单留空时，探测沿用数据库里已保存的密文。「获取模型」失败的原因会显示在别名的「上游模型名」下方。
+
+生成的时长预算都在 `.env`：`GENERATION_TIMEOUT_MS`（毫秒，默认 `0`，表示不限制整次生成任务；旧版写死 10 分钟）；`MODEL_REPLY_TIMEOUT_MS`（毫秒，默认 `900000`）限制单次模型回复的时长，超时中止并记为「单次回复超时」；每个模型请求的失败重试次数由 `MODEL_RETRY_LIMIT`（默认 `2`，0-5）控制。上游输出到达 token 上限（`finishReason = length`）不再判为失败：文件已经落盘就继续构建，模型可以在下一轮对话里根据构建结果补齐。
 
 密钥有两种来源。引用环境变量时只存引用名（`apiKeyEnv`），默认允许 `AI_API_KEY`，其余通过 `MODEL_API_KEY_ENV_ALLOWLIST`（逗号分隔）加入；直接输入时明文不落库，服务端用 AES-256-GCM 加密后只存密文（`apiKeyCiphertext`，格式 `v1:<iv>:<tag>:<ciphertext>`），主密钥取自 `MODEL_SECRET_KEY`（64 位十六进制、32 字节 base64 或任意口令，scrypt 派生），未设置时自动生成 `runtime/model-secret.key`（权限 600）。管理接口只返回 `apiKeySource` 与当前实例是否已配置，绝不返回明文或密文；编辑态密钥留空表示保持已保存的值。该密钥文件丢失后已保存的密钥无法解密，需要在管理端重新输入。
 

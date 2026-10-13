@@ -445,6 +445,9 @@ export type ModelConfigApplyPayload = z.infer<typeof modelConfigApplySchema>;
 export const modelProviderProbeSchema = z.strictObject({ provider: modelProviderWriteSchema });
 export type ModelProviderProbePayload = z.infer<typeof modelProviderProbeSchema>;
 
+/** 上游模型下拉的条数上限：服务端按它截断，界面按它提示列表可能被截断。 */
+export const providerModelListLimit = 1000;
+
 /** 上游可用模型的下拉选项：id 用于提交，label 用于展示。 */
 export const providerModelSchema = z.strictObject({ id: z.string().min(1), label: z.string().min(1) });
 export const providerModelsViewSchema = z.strictObject({ models: z.array(providerModelSchema) });

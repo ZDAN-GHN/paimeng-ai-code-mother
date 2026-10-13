@@ -11,6 +11,7 @@ import { validatePrompt } from './prompt-safety';
 import { clientIp } from './rate-limit';
 import { BUILD_DEPENDENCIES, REACT_DEPENDENCIES } from './build-contract';
 import { templateEntry } from './templates';
+import { getConfig } from './config';
 
 const controllers = new Map<string, AbortController>();
 const inputSchema = z.object({
@@ -41,6 +42,18 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
   const controller = new AbortController();
   const building = new AbortController();
   const abortRequest = () => controller.abort();
+  const { generationTimeoutMs, modelReplyTimeoutMs, modelRetryLimit } = getConfig();
+  // 整体生成时长上限；0 表示不限制。单次模型回复的时长由下面的 step 看门狗单独限制。
+  const armGenerationTimeout = (target: AbortController) => generationTimeoutMs > 0
+    ? setTimeout(() => target.abort(new Error('生成超时')), generationTimeoutMs)
+    : undefined;
+  // 一次回复（一个 step）从开始到结束超过预算就中止，避免单次回复无限拖长。
+  let replyTimer: ReturnType<typeof setTimeout> | undefined;
+  const armReplyTimer = () => {
+    clearTimeout(replyTimer);
+    replyTimer = setTimeout(() => controller.abort(new Error(`单次回复超时（${Math.round(modelReplyTimeoutMs / 1000)} 秒）`)), modelReplyTimeoutMs);
+  };
+  const clearReplyTimer = () => { clearTimeout(replyTimer); replyTimer = undefined; };
   req.signal.addEventListener('abort', abortRequest, { once: true });
   if (req.signal.aborted) abortRequest();
   let changed = false;
@@ -62,7 +75,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
     : app.codeGenType === 'react_project'
       ? `React 工程必须使用 React、React DOM、Vite 和 React 插件，base './'，必须包含 package.json、index.html、vite.config.js 和 src/main.jsx。package.json 必须包含这些插件与 React 类型包，依赖只允许以下精确版本，禁止 ^、~、latest ${JSON.stringify(REACT_DEPENDENCIES)}。`
       : `HTML 与多文件应用必须有 index.html。Vue 工程必须使用 Vue、Vite，base './'，必须包含 package.json、index.html、vite.config.js 和 src/main.js。package.json 必须包含 Vue、Vite 和 Vue 插件，依赖只允许以下精确版本，禁止 ^、~、latest ${JSON.stringify(BUILD_DEPENDENCIES)}。`;
-  const agent = new ToolLoopAgent({ model, tools, stopWhen: isStepCount(30), instructions: `你是应用生成 Agent。当前应用类型 ${app.codeGenType}。所有读写必须使用工具，禁止仅输出代码而不写入文件。只能修改当前应用。禁止写密钥或 .env。${projectInstructions} 禁止安装脚本和任意 shell。工具返回错误时根据错误修正并重试。文件保存完成后服务端会自动构建前端工程并提供 dist/index.html 预览，无需调用 shell。完成后简短说明改动。初始化需求 ${app.initPrompt}` });
+  const agent = new ToolLoopAgent({ model, tools, stopWhen: isStepCount(30), maxRetries: modelRetryLimit, instructions: `你是应用生成 Agent。当前应用类型 ${app.codeGenType}。所有读写必须使用工具，禁止仅输出代码而不写入文件。只能修改当前应用。禁止写密钥或 .env。${projectInstructions} 禁止安装脚本和任意 shell。工具返回错误时根据错误修正并重试。文件保存完成后服务端会自动构建前端工程并提供 dist/index.html 预览，无需调用 shell。完成后简短说明改动。初始化需求 ${app.initPrompt}` });
   let validated: UIMessage[];
   let acquired = false;
   try {
@@ -77,7 +90,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
     throw error;
   }
   controllers.set(input.requestId, controller);
-  let timeout = setTimeout(() => controller.abort(new Error('生成超时')), 10 * 60 * 1000);
+  let timeout = armGenerationTimeout(controller);
   const pulse = setInterval(() => {
     void heartbeat(input.requestId).then(status => {
       if (status === 'cancelled') controller.abort();
@@ -96,7 +109,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
       let error: string | null = null;
       try {
         check();
-        const result = await agent.stream({ messages: await convertToModelMessages(validated, { tools, ignoreIncompleteToolCalls: true }), abortSignal: controller.signal });
+        const result = await agent.stream({ messages: await convertToModelMessages(validated, { tools, ignoreIncompleteToolCalls: true }), abortSignal: controller.signal, onStepStart: armReplyTimer, onStepEnd: clearReplyTimer });
         const uiStream = createUIMessageStream({
           originalMessages: validated,
           generateId: () => `${input.requestId}-assistant`,
@@ -121,14 +134,16 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
         check();
         if (streamError) throw streamError;
         const finish = await result.finishReason;
-        if (finish !== 'stop') throw new Error(`Agent 未正常结束 ${finish}`);
+        // 上游输出到达 token 上限（length）不再判为致命错误：文件已经落盘，交给构建校验，
+        // 模型可以在下一轮对话里根据构建结果继续补齐；其它非正常结束仍然失败。
+        if (finish !== 'stop' && finish !== 'length') throw new Error(`Agent 未正常结束 ${finish}`);
         if (!changed) throw new Error('Agent 未保存任何文件');
         if (!await setGeneration(input.requestId, 'building')) throw new Error('生成任务已停止');
         // 模型阶段已经结束：构建不再随客户端断开（刷新、关闭页面、请求体取消）中止，
         // 只有任务失效、租约丢失或构建超时才停止，否则用户会丢掉已生成的代码。
         phase = building.signal;
         clearTimeout(timeout);
-        timeout = setTimeout(() => building.abort(new Error('生成超时')), 10 * 60 * 1000);
+        timeout = armGenerationTimeout(building);
         await write(() => buildApp(app, building.signal));
         check();
         status = 'ready';
@@ -147,6 +162,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
         } finally {
           clearInterval(pulse);
           clearTimeout(timeout);
+          clearReplyTimer();
           controllers.delete(input.requestId);
           req.signal.removeEventListener('abort', abortRequest);
         }

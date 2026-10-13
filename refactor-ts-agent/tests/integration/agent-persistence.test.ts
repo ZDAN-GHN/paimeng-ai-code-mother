@@ -19,6 +19,7 @@ const control = vi.hoisted(() => ({
   writes: 0,
   toolFailure: false,
   fatalFailure: false,
+  lengthFinish: false,
   builds: 0,
   prompts: [] as LanguageModelV4Prompt[],
 }));
@@ -49,12 +50,27 @@ vi.mock('@/server/model', async () => {
       control.prompts.push(options.prompt);
       if (first && (control.toolFailure || control.fatalFailure)) {
         first = false;
-        const failure = new MockLanguageModelV4({ doStream: async () => ({ stream: simulateReadableStream<LanguageModelV4StreamPart>({ chunks: control.fatalFailure
+        const usage = { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } };
+        const chunks: LanguageModelV4StreamPart[] = control.fatalFailure
           ? [{ type: 'stream-start', warnings: [] }, { type: 'error', error: new Error('测试模型连接断开') }]
-          : [{ type: 'stream-start', warnings: [] }, { type: 'tool-call', toolCallId: 'invalid-write', toolName: 'writeFiles', input: '{"files":' }, { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage: { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } } }] }) }) });
+          : [{ type: 'stream-start', warnings: [] }, { type: 'tool-call', toolCallId: 'invalid-write', toolName: 'writeFiles', input: '{"files":' }, { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage }];
+        const failure = new MockLanguageModelV4({ doStream: async () => ({ stream: simulateReadableStream<LanguageModelV4StreamPart>({ chunks }) }) });
         return failure.doStream(options);
       }
-      return stream(options);
+      const result = await stream(options);
+      if (!control.lengthFinish) return result;
+      // 用户报的场景：文件已经写好，最后一次回复被上游 token 上限截断（finishReason length）。
+      const parts: LanguageModelV4StreamPart[] = [];
+      const reader = result.stream.getReader();
+      try {
+        while (true) {
+          const next = await reader.read();
+          if (next.done) break;
+          const part = next.value;
+          parts.push(part.type === 'finish' && part.finishReason.unified === 'stop' ? { ...part, finishReason: { unified: 'length', raw: undefined } } : part);
+        }
+      } finally { reader.releaseLock(); }
+      return { ...result, stream: simulateReadableStream<LanguageModelV4StreamPart>({ chunks: parts }) };
     };
     return model;
   } };
@@ -81,13 +97,14 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
     actor = publicUser(row);
   });
   beforeEach(async () => {
-    control.finish = null; control.build = null; control.writes = 0; control.prompts = []; control.toolFailure = false; control.fatalFailure = false; control.builds = 0;
+    control.finish = null; control.build = null; control.writes = 0; control.prompts = []; control.toolFailure = false; control.fatalFailure = false; control.lengthFinish = false; control.builds = 0;
     const id = await nextSnowflakeId();
     await db().insert(apps).values({ id, initPrompt: '服务器可信需求', codeGenType: 'html', userId: BigInt(actor.id), createTime: now(), updateTime: now() });
     appId = id.toString();
   });
   afterEach(async () => {
     vi.restoreAllMocks();
+    delete process.env.GENERATION_TIMEOUT_MS;
     for (const table of [leases, generations, messages, histories]) await db().delete(table).where(eq(table.appId, BigInt(appId)));
     await db().delete(apps).where(eq(apps.id, BigInt(appId)));
     // Keep the per-user 60 second generation window independent between tests.
@@ -118,6 +135,15 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
     expect(control.builds).toBe(0);
     expect(body).toContain('"type":"error"');
     expect(await generationFor(appId)).toMatchObject({ error: '测试模型连接断开' });
+  });
+
+  it('上游输出到 token 上限（length）不再判为失败，文件照常落盘并继续构建', async () => {
+    control.lengthFinish = true;
+    const id = randomUUID();
+    await (await chatResponse(request(), payload(id), actor)).text();
+    await cleaned(id, 'ready');
+    expect(control.writes).toBe(1);
+    expect(control.builds).toBe(1);
   });
 
   it('没有客户端消费也完成工具消息，最终持久化完成前下一任务仍被拒绝；下一轮模型获得完整权威历史', async () => {
@@ -201,6 +227,7 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
   });
 
   it('实际十分钟定时器的回调把超时分类为 failed 而非用户取消，并回收租约', async () => {
+    process.env.GENERATION_TIMEOUT_MS = '600000';
     const entered = Promise.withResolvers<void>(); let fireTimeout: (() => void) | undefined;
     const realTimeout = globalThis.setTimeout;
     vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) => {

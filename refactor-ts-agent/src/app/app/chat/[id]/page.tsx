@@ -129,7 +129,7 @@ function Chat({ id }: { id: string }) {
 
   useEffect(() => {
     if (!generating) return;
-    const timer = setInterval(() => { void refresh(); }, 750);
+    const timer = setInterval(() => { void refresh(); }, 1500);
     return () => clearInterval(timer);
   }, [generating, refresh]);
   useEffect(() => {
@@ -140,12 +140,18 @@ function Chat({ id }: { id: string }) {
   }, [messages, visibleHistory]);
 
   const previewOrigin = app?.previewUrl ? new URL(app.previewUrl).origin : null;
+  // iframe 加载完成前它的文档还是 about:blank（源继承自本页），此时向预览源发消息会被浏览器拒绝并报错。
+  const previewLoaded = useRef(false);
   const editorMessage = useCallback((value: Record<string, unknown>) => {
-    if (previewOrigin) iframe.current?.contentWindow?.postMessage(value, previewOrigin);
+    if (!previewLoaded.current || !previewOrigin) return;
+    iframe.current?.contentWindow?.postMessage(value, previewOrigin);
   }, [previewOrigin]);
+  useEffect(() => { previewLoaded.current = false; }, [app?.previewUrl, task?.id]);
   useEffect(() => {
     editorMessage({ type: 'TOGGLE_EDIT_MODE', editMode: editing });
-    if (!editing) { setSelected(null); editorMessage({ type: 'CLEAR_ALL_EFFECTS' }); }
+    if (editing) return;
+    setSelected(null);
+    editorMessage({ type: 'CLEAR_ALL_EFFECTS' });
   }, [editing, editorMessage]);
   useEffect(() => {
     function receive(event: MessageEvent) {
@@ -240,10 +246,24 @@ function Chat({ id }: { id: string }) {
   const taskErrorKey = task?.error ? `${task.id}:${task.error}` : '';
   // 模型写完文件后进入构建：构建是确定性收尾，取消不再生效，按钮改为状态提示。
   const building = task?.status === 'building';
-  const problem = error || chatError?.message || (taskErrorKey !== dismissedTaskError ? task?.error : null);
   const visibleMessages = messages.slice(-visibleHistory);
   const sourceAvailable = app?.sourceAvailable ?? !!app?.previewUrl;
   const canPreview = !!app?.previewUrl;
+  const requestError = error || chatError?.message || null;
+  const taskError = taskErrorKey !== dismissedTaskError ? task?.error ?? null : null;
+  // 「最近一次生成任务的结果」和「应用现在能不能打开」是两件事：预览已经可用时，历史失败只作提示，
+  // 不再当成当前阻塞（用户反馈：页面已经有预览了，却还一直显示生成失败）。
+  const alert = requestError
+    ? { type: 'error' as const, title: requestError, dismiss: () => { setError(''); clearError(); } }
+    : taskError
+      ? canPreview
+        ? { type: 'warning' as const, title: `上次生成失败：${taskError}。当前预览由已有代码构建，可以直接预览、编辑或部署；重新发送需求可继续修复。`, dismiss: () => { setDismissedTaskError(taskErrorKey); } }
+        : { type: 'error' as const, title: taskError, dismiss: () => { setDismissedTaskError(taskErrorKey); } }
+      : null;
+  // 状态标签表示应用当前能不能打开；最近一次任务的结论由上面的提示条说明。
+  const taskRunning = task?.status === 'generating' || task?.status === 'building';
+  const statusLabel = task ? (taskRunning ? statusLabels[task.status] : canPreview ? statusLabels.ready : statusLabels[task.status]) : null;
+  const statusColor = statusLabel === statusLabels.ready ? 'green' : statusLabel === statusLabels.failed ? 'red' : 'default';
   const canDownload = canEdit && sourceAvailable && !generating;
   const canDeploy = canEdit && (canPreview || sourceAvailable) && !generating;
   const contextLength = selected ? selectionContext(selected).length : 0;
@@ -256,7 +276,7 @@ function Chat({ id }: { id: string }) {
     <div className="chat-toolbar">
       <h1 className="chat-app-name">{app?.appName || '网站生成器'}</h1>
       {app?.codeGenType && <Tag color="blue">{formatCodeGenType(app.codeGenType)}</Tag>}
-      {task && <Tag color={task.status === 'ready' ? 'green' : task.status === 'failed' ? 'red' : 'default'}>{statusLabels[task.status]}</Tag>}
+      {task && statusLabel && <Tag color={statusColor}>{statusLabel}</Tag>}
       <Space wrap>
         <Button icon={<InfoCircleOutlined aria-hidden="true" />} disabled={!app} onClick={() => setDetailOpen(true)}>应用详情</Button>
         <Button href={canEdit ? '/app/edit/' + id : undefined} icon={<EditOutlined aria-hidden="true" />} disabled={!canEdit}>编辑应用</Button>
@@ -264,7 +284,7 @@ function Chat({ id }: { id: string }) {
         <Button type="primary" icon={<CloudUploadOutlined aria-hidden="true" />} loading={publishing} disabled={!canDeploy} onClick={() => { void deploy(); }}>部署</Button>
       </Space>
     </div>
-    {problem && <Alert style={{ marginBottom: 12 }} type="error" title={problem} closable={{ 'aria-label': '关闭错误提示' }} onClose={() => { setError(''); clearError(); setDismissedTaskError(taskErrorKey); }} />}
+    {alert && <Alert style={{ marginBottom: 12 }} type={alert.type} title={alert.title} closable={{ 'aria-label': '关闭错误提示' }} onClose={alert.dismiss} />}
     {historyError && <Alert style={{ marginBottom: 12 }} type="warning" title={'对话历史暂不可读取：' + historyError} />}
     <div className="chat-columns">
       <section className="chat-panel" aria-label="应用对话">
@@ -311,7 +331,7 @@ function Chat({ id }: { id: string }) {
           {app?.deployUrl && <a href={app.deployUrl} target="_blank" rel="noopener noreferrer">访问作品</a>}
         </Space></div>
         {generating || rebuilding ? <div className="preview-loading" role="status"><Spin size="large" /><p>{generating ? '正在生成网站...' : '正在重建预览...'}</p></div> :
-          canPreview ? <iframe ref={iframe} className="preview-frame" title="应用预览" src={previewSrc} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={() => editorMessage({ type: 'TOGGLE_EDIT_MODE', editMode: editing })} /> :
+          canPreview ? <iframe ref={iframe} className="preview-frame" title="应用预览" src={previewSrc} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={() => { previewLoaded.current = true; editorMessage({ type: 'TOGGLE_EDIT_MODE', editMode: editing }); }} /> :
           <div className="preview-placeholder"><div className="preview-placeholder-icon">🌐</div><p>网站文件生成完成后将在这里展示</p></div>}
       </section>
     </div>

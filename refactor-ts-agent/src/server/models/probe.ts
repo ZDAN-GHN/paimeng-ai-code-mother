@@ -1,13 +1,12 @@
 import 'server-only';
 import { z } from 'zod';
 import { BusinessError } from '../http';
-import type { ProviderApiFormat } from '@/shared/model-config';
+import { providerModelListLimit, type ProviderApiFormat } from '@/shared/model-config';
 
 /** 上游 /models 归一化后的下拉条目。 */
 export type ProviderModel = { id: string; label: string };
 
 const probeTimeoutMs = 10000;
-const maxModelCount = 200;
 const errorSnippetLimit = 200;
 
 /** 探测目标：只取拼请求需要的字段，不接触密钥。 */
@@ -51,7 +50,7 @@ function normalizeModels(payload: unknown): ProviderModel[] {
     const displayName = entry.display_name ?? entry.name;
     const label = displayName && displayName !== entry.id ? `${displayName}（${entry.id}）` : entry.id;
     models.push({ id: entry.id, label });
-    if (models.length >= maxModelCount) break;
+    if (models.length >= providerModelListLimit) break;
   }
   return models;
 }
@@ -66,7 +65,9 @@ export async function fetchProviderModels(target: ProviderProbeTarget, apiKey: s
   try {
     response = await fetch(modelsEndpoint(target.baseUrl), {
       method: 'GET',
-      headers: probeHeaders(target.apiFormat, apiKey),
+      // 显式禁用缓存：管理员点一次就要看到上游此刻的真实列表，中间层也不该替我们缓存。
+      headers: { ...probeHeaders(target.apiFormat, apiKey), 'cache-control': 'no-cache' },
+      cache: 'no-store',
       redirect: 'manual',
       signal: AbortSignal.timeout(timeoutMs),
     });

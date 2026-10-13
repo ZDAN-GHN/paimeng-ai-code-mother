@@ -22,6 +22,7 @@ npm run test:e2e:isolated # 隔离的完整 E2E（生产构建）
 | 规则 | 强制手段 |
 | --- | --- |
 | 不要用 `{' '}` 做间距。antd 的 `Form.Item` 会因此拿到多个子节点，开关/输入框变成死控件：界面会动但不进表单、保存不落库、重开显示默认值（2026-10-12 六个开关全废）。用 `Space` 或 CSS gap。 | `npm run check:ui`；`npm run test:e2e:dev`；`tests/e2e/model-manage.spec.ts` 的开关断言 |
+| 有 `name` 的 `Form.Item` 直接子节点必须是控件本身，不能外包一层 `Space`/`Space.Compact`/`div` 等包装元素：antd 只把 `value`/`onChange` 注入直接子节点，包装元素会静默丢掉它们，字段永远收不到值（2026-10-13 别名「上游模型名」下拉选中后保存不落库，且没有任何告警）。按钮、提示等放到 `Form.Item` 外面。 | `npm run check:ui` 的 Form.Item 绑定规则；`tests/e2e/model-manage.spec.ts` 的「从下拉里选中的上游模型名会写进数据库」 |
 | 不要用 antd v6 已废弃的写法：`Space direction=` → `orientation`，`Input addonAfter/addonBefore` → `Space.Compact`。这类告警只在 dev 构建出现，生产构建 E2E 抓不到。 | `npm run check:ui`；`npm run test:e2e:dev` |
 | E2E 里不要写死 `http://localhost:3000` / `http://127.0.0.1:3001`，也不要用 `ADMIN_PARITY_BASE` 这类自造变量。隔离运行会把地址换掉（`E2E_APP_PORT`/`E2E_PREVIEW_PORT`），写死会让整批用例 ECONNREFUSED（2026-10-14 一次 10 个用例集体失败）。统一从 `tests/e2e/support/app-origin.ts` 取。 | `npm run check:e2e`；`npm run test:e2e:isolated` |
 | 不要在 E2E 里用 `getByRole('option')` / `getByRole('alert')`：会命中外层隐藏元素（antd 下拉、Next 路由公告），表现为「element is not stable」直到超时。用 `.ant-select-dropdown:not(.ant-select-dropdown-hidden)` + `getByText`，或 `.ant-alert-error[role="alert"]`。 | `npm run check:e2e` |
