@@ -34,7 +34,7 @@ async function copySafeTree(source: string, destination: string, depth = 0, budg
   }
 }
 
-function command(program: string, args: string[], signal?: AbortSignal, timeout = 180000) {
+function command(program: string, args: string[], signal?: AbortSignal, timeout = getConfig().buildTimeoutMs) {
   return new Promise<void>((resolve, reject) => {
     signal?.throwIfAborted();
     const child = spawn(program, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: process.env.NODE_ENV }, shell: false });

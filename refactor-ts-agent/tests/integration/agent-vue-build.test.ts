@@ -88,4 +88,5 @@ it('真实 SDK 中错误依赖被工具拒绝并修正后自动 Docker 构建，
   const stored = await loadMessages(appId);
   expect(stored[1].parts).toContainEqual(expect.objectContaining({ type: 'tool-writeFiles', state: 'output-error' }));
   expect(stored[1].parts).toContainEqual(expect.objectContaining({ type: 'tool-writeFiles', state: 'output-available' }));
-}, 180000);
+// 容器内真实 npm install 走网络，整机负载下可能超过 3 分钟，超时放宽到 5 分钟避免误报。
+}, 300000);

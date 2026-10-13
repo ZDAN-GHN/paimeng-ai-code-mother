@@ -29,7 +29,8 @@ export default defineConfig({ plugins: [vue()], base: './' });`);
   process.env.TS_BUILD_SECRET='dummy-platform-private-test';
   try{await buildApp(vue);expect(await readFile(join(workspace(vue),'dist/index.html'),'utf8')).toContain('assets/');}
   finally{if(original===undefined)delete process.env.TS_BUILD_SECRET;else process.env.TS_BUILD_SECRET=original;}
- },180000);
+  // 真实容器内要跑一次 npm install（走网络），机器负载高时实测接近 170 秒，留出更宽的余量。
+ },300000);
 });
 
 describe('稳定发布地址与实际产物判定', () => {
