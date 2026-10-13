@@ -315,16 +315,18 @@ describe('模型配置存储', () => {
     expect(final).toMatchObject({ revision: '7', refreshEpoch: '6' });
   });
 
-  it('HTTP 地址只在部署允许名单内放行', async () => {
+  it('HTTP 地址在本机/局域网或部署允许名单内放行', async () => {
     await seedFromEnv();
+    // 公网 HTTP 与内网域名都不在默认放行范围内。
     await expect(upsertProvider(provider({ id: 'env-default', baseUrl: 'http://api.example.test/v1' }), { expectedRevision: '1' })).rejects.toMatchObject({ status: 400, code: 40000 });
-    await expect(upsertProvider(provider({ id: 'env-default', baseUrl: 'http://127.0.0.1:8080/v1' }), { expectedRevision: '1' })).rejects.toMatchObject({ status: 400, code: 40000 });
-    process.env.MODEL_INTERNAL_BASE_URL_ORIGINS = 'http://127.0.0.1:8080';
-    await expect(upsertProvider(provider({ id: 'env-default', baseUrl: 'http://127.0.0.1:8080/v1' }), { expectedRevision: '1' })).resolves.toMatchObject({ revision: '2' });
-    await expect(upsertProvider(provider({ id: 'env-default', baseUrl: 'http://127.0.0.1:9090/v1' }), { expectedRevision: '2' })).rejects.toMatchObject({ status: 400, code: 40000 });
-    await expect(upsertProvider(provider({ id: 'env-default', baseUrl: 'http://internal.example:8080/v1' }), { expectedRevision: '2' })).rejects.toMatchObject({ status: 400, code: 40000 });
-    process.env.MODEL_INTERNAL_BASE_URL_ORIGINS = 'http://127.0.0.1:8080,http://internal.example:8080';
-    await expect(upsertProvider(provider({ id: 'env-default', baseUrl: 'http://internal.example:8080/v1' }), { expectedRevision: '2' })).resolves.toMatchObject({ revision: '3' });
+    await expect(upsertProvider(provider({ id: 'env-default', baseUrl: 'http://internal.example:8080/v1' }), { expectedRevision: '1' })).rejects.toMatchObject({ status: 400, code: 40000 });
+    // 本机与局域网字面量不需要允许名单（自建模型网关的常见形态）。
+    await expect(upsertProvider(provider({ id: 'env-default', baseUrl: 'http://127.0.0.1:8787/v1' }), { expectedRevision: '1' })).resolves.toMatchObject({ revision: '2' });
+    await expect(upsertProvider(provider({ id: 'env-default', baseUrl: 'http://192.168.1.20:8080/v1' }), { expectedRevision: '2' })).resolves.toMatchObject({ revision: '3' });
+    // 其它主机名仍要写进名单，且只放行列出的来源。
+    process.env.MODEL_INTERNAL_BASE_URL_ORIGINS = 'http://internal.example:8080';
+    await expect(upsertProvider(provider({ id: 'env-default', baseUrl: 'http://internal.example:8080/v1' }), { expectedRevision: '3' })).resolves.toMatchObject({ revision: '4' });
+    await expect(upsertProvider(provider({ id: 'env-default', baseUrl: 'http://internal.example:9090/v1' }), { expectedRevision: '4' })).rejects.toMatchObject({ status: 400, code: 40000 });
   });
 
   it('部署允许名单条目非法时配置加载失败', () => {

@@ -488,10 +488,10 @@ describe('模型管理 API', () => {
     expect(anonymous.status).toBe(401);
     expect((await request('model/admin/provider/models', { provider: providerInput() }, memberCookie)).status).toBe(403);
 
-    // 非 HTTPS 地址必须命中部署允许的来源，否则先被地址校验拒绝。
+    // 非 HTTPS 且不是本机/局域网地址时必须命中部署允许的来源，否则先被地址校验拒绝。
     const blockedAddress = await request(
       'model/admin/provider/models',
-      { provider: providerInput({ baseUrl: 'http://127.0.0.1:1' }) },
+      { provider: providerInput({ baseUrl: 'http://api.example.com/v1' }) },
       adminCookie,
     );
     expect(blockedAddress.status).toBe(400);

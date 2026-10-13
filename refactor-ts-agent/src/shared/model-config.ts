@@ -235,8 +235,28 @@ export function modelBaseUrlIssue(value: string, policy: { internalOrigins: read
   if (url.search) return '模型地址不能包含查询参数';
   if (url.hash) return '模型地址不能包含片段';
   if (url.protocol === 'https:') return null;
+  if (isLocalModelHost(url.hostname)) return null;
   const allowed = policy.internalOrigins.some(origin => originOf(origin) === url.origin);
-  return allowed ? null : '非 HTTPS 模型地址只允许部署显式允许的来源';
+  return allowed ? null : '非 HTTPS 模型地址只允许本机或局域网地址（localhost、127.0.0.0/8、10/8、172.16/12、192.168/16、::1），其它来源需在 MODEL_INTERNAL_BASE_URL_ORIGINS 显式允许';
+}
+
+/**
+ * 本机或局域网地址的字面量判断：HTTP 连到这些地址时不要求部署显式允许（本机模型网关、局域网推理服务）。
+ * 只认字面量，不做 DNS 解析——域名（哪怕解析到内网）仍要进 MODEL_INTERNAL_BASE_URL_ORIGINS；
+ * 169.254/16 也不算，避免把云元数据地址当成本机放行。
+ */
+export function isLocalModelHost(hostname: string): boolean {
+  const name = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (name === 'localhost' || name.endsWith('.localhost')) return true;
+  if (name === '::1' || name.startsWith('fe80:') || /^f[cd][0-9a-f]{2}:/.test(name)) return true;
+  const octets = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(name);
+  if (!octets) return false;
+  const first = Number(octets[1]);
+  const second = Number(octets[2]);
+  if (first === 127 || first === 10) return true;
+  if (first === 192 && second === 168) return true;
+  if (first === 172 && second >= 16 && second <= 31) return true;
+  return false;
 }
 
 /** 校验完整候选配置：必需别名、引用完整性、密钥引用与地址规则。 */

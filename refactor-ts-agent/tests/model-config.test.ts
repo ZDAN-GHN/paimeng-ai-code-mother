@@ -208,11 +208,30 @@ describe('模型地址校验', () => {
     expect(modelBaseUrlIssue('https://api.openai.com/v1', policy)).toBeNull();
   });
 
-  it('HTTP 只放行部署显式允许的来源，回环地址也不例外', () => {
-    expect(modelBaseUrlIssue('http://127.0.0.1:8080/v1', policy)).not.toBeNull();
-    expect(modelBaseUrlIssue('http://localhost:1234/v1', policy)).not.toBeNull();
+  it('HTTP 直接放行本机与局域网地址，不需要部署允许名单', () => {
+    for (const value of [
+      'http://127.0.0.1:8080/v1',
+      'http://127.9.9.9:1/v1',
+      'http://localhost:1234/v1',
+      'http://LOCALHOST:1234/v1',
+      'http://[::1]:1234/v1',
+      'http://10.0.0.7:8080/v1',
+      'http://172.16.5.5:8080/v1',
+      'http://172.31.255.254/v1',
+      'http://192.168.1.20:1234/v1',
+    ]) {
+      expect(modelBaseUrlIssue(value, policy), value).toBeNull();
+    }
+  });
+
+  it('HTTP 只放行本机/局域网或部署显式允许的来源', () => {
     expect(modelBaseUrlIssue('http://model-gateway.internal:8080/v1', policy)).toBeNull();
-    expect(modelBaseUrlIssue('http://model-gateway.internal:9090/v1', policy)).not.toBeNull();
+    expect(modelBaseUrlIssue('http://model-gateway.internal:9090/v1', policy)).toContain('局域网');
+    expect(modelBaseUrlIssue('http://api.example.com/v1', policy)).not.toBeNull();
+    expect(modelBaseUrlIssue('http://8.8.8.8/v1', policy)).not.toBeNull();
+    expect(modelBaseUrlIssue('http://172.32.0.1/v1', policy)).not.toBeNull();
+    expect(modelBaseUrlIssue('http://192.169.1.1/v1', policy)).not.toBeNull();
+    expect(modelBaseUrlIssue('http://169.254.169.254/latest', policy)).not.toBeNull();
     expect(modelBaseUrlIssue('http://127.0.0.1:8080/v1', { internalOrigins: ['http://127.0.0.1:8080'] })).toBeNull();
   });
 

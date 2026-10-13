@@ -17,7 +17,7 @@
 环境变量：
 
 - 密钥来源二选一：`apiKeySource='env'` 时 DB 只存引用名（`apiKeyEnv`），允许引用的名单默认为 `AI_API_KEY`，其余通过 `MODEL_API_KEY_ENV_ALLOWLIST`（逗号分隔）显式加入；`apiKeySource='inline'` 时明文不入库，服务端用 AES-256-GCM 加密后只存 `apiKeyCiphertext`（`v1:<iv>:<tag>:<ciphertext>`），主密钥来自 `MODEL_SECRET_KEY`（64 位十六进制、32 字节 base64 或任意口令，scrypt 派生），未设置时自动生成 `runtime/model-secret.key`（0600）。管理接口只返回 `apiKeySource` 与是否已配置，不回显明文或密文。
-- 地址只允许无内嵌凭据、无查询、无片段的 HTTP(S)。`http:` 仅在 origin 出现在 `MODEL_INTERNAL_BASE_URL_ORIGINS`（逗号分隔，回环地址也需显式列出）时放行；`https:` 不受该名单限制。
+- 地址只允许无内嵌凭据、无查询、无片段的 HTTP(S)。`http:` 对**本机与局域网字面量**（`localhost`/`*.localhost`、`127.0.0.0/8`、`10/8`、`172.16/12`、`192.168/16`、`::1`、IPv6 链路本地 `fe80::/10` 与 ULA `fc00::/7`）直接放行——自建网关常见形态 `http://127.0.0.1:8787/v1` 不需要额外配置；判定只看字面量、不做 DNS 解析，也**不含** `169.254/16`（避免把云元数据地址当本机）。其余 `http:` origin 需写进 `MODEL_INTERNAL_BASE_URL_ORIGINS`（逗号分隔）；`https:` 不受该名单限制。
 - 管理端可以在已部署的密钥引用之间热切换，无需重启。**轮换某个环境变量的值**（例如替换 `AI_API_KEY` 的密钥）需要更新进程环境并重启进程；DB 配置变更本身不要求重启。
 
 ## 现状与目标

@@ -92,6 +92,7 @@
 2. **探测错误片段会泄漏密钥**：测试先失败于「上游返回 500：boom sk-probe-secret」，改为用当前密钥对片段做替换后再截断。
 3. **别名弹窗没有落点显示探测失败**：`probeText` 原本只渲染在提供商弹窗，别名「获取模型」失败只有 toast，E2E 因此在对话框内找不到文案；现已在「上游模型名」下方显示，并让别名弹窗打开时清空上次的探测结果。
 4. **antd v6 的两处废弃属性（只在 dev 模式告警，生产构建看不到）**：`<Space direction="vertical">` 已废弃 → `orientation="vertical"`（`src/components/model-manager.tsx` 共 4 处：499/719/739/927）；`Input` 的 `addonAfter` 已废弃（`node_modules/antd/es/input/Input.js:49`）→ 用 `Space.Compact` 包住 `AutoComplete` 与「获取模型」按钮。复核方式：隔离副本 + 真实 `next dev --port 3020`（测试库）+ Playwright 捕获 `console` 的 warning/error，修复后只剩预期的 401（未登录时的会话检查）与 502（故意指向不可达上游的探测）。
+5. **本机/局域网 HTTP 地址不再要求部署显式允许（2026-10-13 追加，用户实测自建网关 `http://127.0.0.1:8787/v1` 被地址校验拦下）**：`modelBaseUrlIssue` 现在对本机与局域网字面量（`localhost`/`*.localhost`、`127.0.0.0/8`、`10/8`、`172.16/12`、`192.168/16`、`::1`、`fe80::/10`、`fc00::/7`）直接放行，判定只看字面量、不解析域名、不含 `169.254/16`；其它 `http:` origin 仍须写进 `MODEL_INTERNAL_BASE_URL_ORIGINS`。
 
 ### 全量测试的两项负载性超时（与本计划改动无关）
 
