@@ -785,7 +785,9 @@ function ModelConfigManager() {
                   <Space orientation="vertical" size={8} style={{ width: '100%' }}>
                     {fields.map((field) => (
                       <Space key={field.key} size={8} align="start">
+                        {/* Form 级 preserve={false} 只为丢弃密钥；列表内层若不显式 preserve，值会在子树重挂载时被抹成 undefined */}
                         <Form.Item
+                          preserve
                           name={[field.name, 'name']}
                           rules={[
                             { required: true, message: '请输入请求头名称' },
@@ -807,6 +809,7 @@ function ModelConfigManager() {
                           <Input aria-label="请求头名称" placeholder="User-Agent" />
                         </Form.Item>
                         <Form.Item
+                          preserve
                           name={[field.name, 'value']}
                           rules={[
                             { required: true, message: '请输入请求头值' },
