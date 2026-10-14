@@ -4,6 +4,9 @@ import type { CodeGenType } from '@/shared/contracts';
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import type { TemplateIdentity } from '@/shared/templates';
 const usage={inputTokens:{total:1,noCache:1,cacheRead:0,cacheWrite:0},outputTokens:{total:1,text:1,reasoning:0}};
+const fixtureSummaryText='（可控测试摘要）历史目标、约束与已完成内容已压缩；文件内容必须以工具读取为准。';
+// 摘要走 generateText（doGenerate）。留一小段可观察的窗口，浏览器用例才能看到「正在整理历史上下文」。
+const fixtureSummaryDelayMs=800;
 export function fixtureFiles(type:CodeGenType,prompt:string){
 const title=prompt.replace(/[<>&"']/g,'').slice(0,80);
  if(type==='react_project')return [
@@ -24,7 +27,10 @@ const title=prompt.replace(/[<>&"']/g,'').slice(0,80);
  if(type==='multi_file')files.push({path:'style.css',content:'body{font-family:system-ui;background:#fff6f1}main{max-width:800px;margin:80px auto;padding:32px}'},{path:'script.js',content:"document.querySelector('#action').addEventListener('click',()=>{document.querySelector('p').textContent='交互成功'})"});return files;
 }
 export function fixtureModel(type:CodeGenType,prompt:string,template?:TemplateIdentity|null){
- let call=0;return new MockLanguageModelV4({provider:'local-test-fixture',modelId:'fixture-tool-loop',doStream:async()=>{
+ let call=0;return new MockLanguageModelV4({provider:'local-test-fixture',modelId:'fixture-tool-loop',doGenerate:async()=>{
+  await new Promise(resolve=>setTimeout(resolve,fixtureSummaryDelayMs));
+  return {content:[{type:'text',text:fixtureSummaryText}],finishReason:{unified:'stop',raw:undefined},usage,warnings:[]};
+ },doStream:async()=>{
  const chunks:LanguageModelV4StreamPart[]=[{type:'stream-start',warnings:[]}];
  const step=call++;
  const sourcePath=type==='react_project'?'src/App.tsx':'src/App.vue';

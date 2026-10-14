@@ -20,7 +20,7 @@ const observed = vi.hoisted(() => ({ instructions: '' }));
 vi.mock('@/server/model', async () => {
   const { fixtureModel, fixtureFiles } = await import('@/server/fixture-model');
   const { MockLanguageModelV4, simulateReadableStream } = await import('ai/test');
-  return { modelFor: async () => {
+  const buildModel = async () => {
     const model = fixtureModel('vue_project', '工具重试后自动构建');
     const stream = model.doStream.bind(model);
     let first = true;
@@ -37,7 +37,15 @@ vi.mock('@/server/model', async () => {
       ] }) }) }).doStream(options);
     };
     return model;
-  } };
+  };
+  return {
+    modelFor: buildModel,
+    taskModelsFor: async () => {
+      const model = await buildModel();
+      const source = { model, alias: 'codegen.default', providerId: null, modelName: null };
+      return { model, generation: source, summary: source, summaryUnavailableReason: null };
+    },
+  };
 });
 
 loadEnvFile('.env');

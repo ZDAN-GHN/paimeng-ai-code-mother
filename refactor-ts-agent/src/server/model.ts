@@ -1,11 +1,13 @@
 import 'server-only';
 import { generateText, Output } from 'ai';
+import type { LanguageModel } from 'ai';
 import { z } from 'zod';
 import { getConfig } from './config';
 import { BusinessError } from './http';
 import { codeGenTypes, type CodeGenType } from '@/shared/contracts';
 import { modelRegistry } from './models/registry';
 import type { TemplateIdentity } from '@/shared/templates';
+import { aliasNotConfiguredMessage, resolveSummaryModel, summaryAliasName, type SummaryModelSource } from './memory-model';
 
 /** 路由是部署可配置项：失败要告诉用户改哪个别名，并且不能把密钥或整段上游报文原样抛给前端。 */
 function routingFailureDetail(error: unknown) {
@@ -13,9 +15,57 @@ function routingFailureDetail(error: unknown) {
  return raw.replace(/\s+/g, ' ').replace(/(sk-|Bearer\s+)[A-Za-z0-9._-]{6,}/gi, '$1***').slice(0, 300) || '未知错误';
 }
 
+export type TaskModels = {
+ model: LanguageModel;
+ generation: SummaryModelSource;
+ /** 可选的摘要模型：构建失败时为 null，此时跳过历史整理但仍然照常生成。 */
+ summary: SummaryModelSource | null;
+ /** summary 为 null 时记录可选别名不可用的原因，供诊断与日志使用。 */
+ summaryUnavailableReason: string | null;
+};
+
+/**
+ * 一次生成任务实际要用的两个模型：生成模型与可选摘要模型。
+ * 二者（以及路线模型）从同一份注册表快照解析，任务开始时固定，任务进行中改配置只影响下一个任务。
+ * memory.summarize 是可选别名：完全未配置时复用生成模型；确实构建失败（例如内联密钥无法解密）时
+ * 只跳过摘要并保留原因，绝不能因此让生成不可用；生成模型自身的错误仍然照常上抛。
+ * 回退时模型标识沿用生成绑定；fixture 模式没有真实 providerId/modelName，两者都记为 null，
+ * 报告与文档不得声称此时有完整模型标识。
+ */
+export async function taskModelsFor(type: CodeGenType, prompt: string, template?: TemplateIdentity | null): Promise<TaskModels> {
+ if (getConfig().aiMode === 'fixture') {
+  const { fixtureModel } = await import('./fixture-model');
+  const model = fixtureModel(type, prompt, template);
+  const source: SummaryModelSource = { model, alias: 'codegen.default', providerId: null, modelName: null };
+  return { model, generation: source, summary: source, summaryUnavailableReason: null };
+ }
+ const { bindings, failures } = await modelRegistry().resolveBindingsWithFailures(['codegen.default', summaryAliasName]);
+ const generationBinding = bindings.get('codegen.default');
+ if (!generationBinding) throw new BusinessError(503, 50300, aliasNotConfiguredMessage('codegen.default'));
+ const generation: SummaryModelSource = {
+  model: generationBinding.model,
+  alias: generationBinding.alias,
+  providerId: generationBinding.providerId,
+  modelName: generationBinding.modelName,
+ };
+ const summaryFailure = failures.get(summaryAliasName);
+ if (summaryFailure) {
+  return { model: generation.model, generation, summary: null, summaryUnavailableReason: summaryFailure };
+ }
+ const summary = await resolveSummaryModel(async alias => {
+  const binding = bindings.get(alias);
+  if (!binding) throw new BusinessError(503, 50300, aliasNotConfiguredMessage(alias));
+  return binding;
+ }, generation);
+ return { model: generation.model, generation, summary, summaryUnavailableReason: null };
+}
+
+/** 只解析生成模型：关闭历史摘要时不应触碰可选别名，否则可选模型的问题会波及基础生成。 */
 export async function modelFor(type:CodeGenType,prompt:string,template?:TemplateIdentity|null){
- const config=getConfig();
- if(config.aiMode==='fixture'){const {fixtureModel}=await import('./fixture-model');return fixtureModel(type,prompt,template);}
+ if (getConfig().aiMode === 'fixture') {
+  const { fixtureModel } = await import('./fixture-model');
+  return fixtureModel(type, prompt, template);
+ }
  return (await modelRegistry().resolveBinding('codegen.default')).model;
 }
 

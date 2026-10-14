@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ToolLoopAgent, isStepCount, streamText, tool } from 'ai';
 import { z } from 'zod';
-import { modelFor } from '@/server/model';
+import { modelFor, taskModelsFor } from '@/server/model';
 import { createModelRegistry, modelRegistry, type ModelRegistryStore } from '@/server/models/registry';
 import type { ModelAlias, ModelConfigSnapshot, ModelProvider } from '@/shared/model-config';
 
@@ -158,5 +158,84 @@ describe('任务进行中的模型绑定冻结', () => {
     expect(last.body.model).toBe('model-b');
     expect(last.authorization).toBe('Bearer secret-b');
     expect(last.body.temperature).toBe(0.9);
+  });
+
+  it('生成模型与摘要模型取自同一份注册表快照：缺 memory.summarize 时回退并沿用生成绑定的真实标识', async () => {
+    process.env.AI_API_KEY = 'secret-a';
+    const { state, store } = mutableStore(snapshotOf(baseUrl, '1', '0', 'model-a', {}));
+    const registry = createModelRegistry({ store, clock: () => Date.now() });
+    vi.mocked(modelRegistry).mockReturnValue(registry);
+
+    const task = await taskModelsFor('html', '生成一个展示页');
+    expect(task.generation).toMatchObject({ alias: 'codegen.default', providerId: 'primary', modelName: 'model-a' });
+    // 未配置可选别名时回退到生成模型，且模型标识沿用生成绑定而不是留空。
+    expect(task.summary).toMatchObject({ alias: 'codegen.default', providerId: 'primary', modelName: 'model-a' });
+    expect(task.summary).not.toBeNull();
+    expect(task.summary?.model).toBe(task.generation.model);
+
+    // 任务进行中改配置提升 epoch：只有下一个任务看到新绑定。
+    state.snapshot = snapshotOf(baseUrl, '2', '1', 'model-b', {});
+    state.epoch = '1';
+    const next = await taskModelsFor('html', '再生成一页');
+    expect(next.generation.modelName).toBe('model-b');
+    expect(next.summary).not.toBeNull();
+    expect(next.summary?.modelName).toBe('model-b');
+  });
+
+  it('配置了 memory.summarize 时使用该别名的提供商与模型标识，并存于同一快照', async () => {
+    process.env.AI_API_KEY = 'secret-a';
+    const base = snapshotOf(baseUrl, '1', '0', 'model-a', {});
+    const { store } = mutableStore({ ...base, aliases: [...base.aliases, aliasFixture('memory.summarize', 'summary-model', {})] });
+    const registry = createModelRegistry({ store, clock: () => Date.now() });
+    vi.mocked(modelRegistry).mockReturnValue(registry);
+
+    const task = await taskModelsFor('html', '生成一个展示页');
+    expect(task.generation.modelName).toBe('model-a');
+    expect(task.summary).toMatchObject({ alias: 'memory.summarize', providerId: 'primary', modelName: 'summary-model' });
+    expect(task.summary).not.toBeNull();
+    expect(task.summary?.model).not.toBe(task.generation.model);
+  });
+
+  it('可选摘要模型构建失败时跳过整理但不阻断生成', async () => {
+    process.env.AI_API_KEY = 'secret-a';
+    const base = snapshotOf(baseUrl, '1', '0', 'model-a', {});
+    const brokenProvider: ModelProvider = {
+      id: 'summary-only', displayName: '摘要专用', apiFormat: 'openai-chat', baseUrl,
+      apiKeySource: 'inline', apiKeyCiphertext: 'not-a-ciphertext', options: {}, enabled: true, createTime: '', updateTime: '',
+    };
+    const { store } = mutableStore({
+      ...base,
+      providers: [...base.providers, brokenProvider],
+      aliases: [...base.aliases, { ...aliasFixture('memory.summarize', 'summary-model', {}), providerId: 'summary-only' }],
+    });
+    const registry = createModelRegistry({ store, clock: () => Date.now() });
+    vi.mocked(modelRegistry).mockReturnValue(registry);
+
+    const task = await taskModelsFor('html', '生成一个展示页');
+    expect(task.generation.modelName).toBe('model-a');
+    expect(task.model).toBe(task.generation.model);
+    expect(task.summary).toBeNull();
+    expect(task.summaryUnavailableReason).toContain('密钥密文格式无法识别');
+  });
+
+  it('关闭摘要时 modelFor 只解析生成别名，不被损坏的可选别名拖垮', async () => {
+    process.env.AI_API_KEY = 'secret-a';
+    const base = snapshotOf(baseUrl, '1', '0', 'model-a', {});
+    const brokenProvider: ModelProvider = {
+      id: 'summary-only', displayName: '摘要专用', apiFormat: 'openai-chat', baseUrl,
+      apiKeySource: 'inline', apiKeyCiphertext: 'not-a-ciphertext', options: {}, enabled: true, createTime: '', updateTime: '',
+    };
+    const { store } = mutableStore({
+      ...base,
+      providers: [...base.providers, brokenProvider],
+      aliases: [...base.aliases, { ...aliasFixture('memory.summarize', 'summary-model', {}), providerId: 'summary-only' }],
+    });
+    const registry = createModelRegistry({ store, clock: () => Date.now() });
+    vi.mocked(modelRegistry).mockReturnValue(registry);
+
+    // 关闭摘要时生成路径不解析可选别名：损坏的 memory.summarize 不影响基础生成。
+    const generationBinding = await registry.resolveBinding('codegen.default');
+    const model = await modelFor('html', '生成一个展示页');
+    expect(model).toBe(generationBinding.model);
   });
 });

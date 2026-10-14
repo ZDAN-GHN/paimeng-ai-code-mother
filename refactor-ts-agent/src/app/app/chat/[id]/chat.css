@@ -86,6 +86,11 @@
   font-size: 12px;
   overflow: auto;
 }
+.chat-page .memory-hint {
+  margin: 0 16px 8px;
+  color: #98877b;
+  font-size: 13px;
+}
 .chat-page .generating-hint {
   margin: 0 16px 8px;
   color: #98877b;

@@ -361,6 +361,24 @@ describe('buildAliasModels', () => {
     expect(() => buildAliasModels([{ ...providerFixture, baseUrl }], [aliasFixture()])).toThrow(/密钥环境变量 AI_API_KEY 未配置/);
   });
 
+  it('非必需别名构建失败只记录原因，必需别名仍然失败关闭', () => {
+    process.env.AI_API_KEY = 'local-secret';
+    const optionalAlias: ModelAlias = { ...aliasFixture({ alias: 'memory.summarize' }), providerId: 'summary-only' };
+    const brokenProvider: ModelProvider = {
+      id: 'summary-only', displayName: '摘要专用', apiFormat: 'openai-chat', baseUrl,
+      apiKeySource: 'inline', apiKeyCiphertext: 'not-a-ciphertext', options: {}, enabled: true, createTime: '', updateTime: '',
+    };
+    const models = buildAliasModels([{ ...providerFixture, baseUrl }, brokenProvider], [aliasFixture(), optionalAlias]);
+
+    expect(bindingOf(models, 'codegen.default').modelName).toBe(modelName);
+    expect(models.bindings['memory.summarize']).toBeUndefined();
+    expect(models.failures['memory.summarize']).toContain('密钥密文格式无法识别');
+    expect(Object.isFrozen(models.failures)).toBe(true);
+    // 必需别名自身的构建失败仍然是整体失败（fail-closed）。
+    expect(() => buildAliasModels([{ ...providerFixture, baseUrl, apiKeySource: 'inline', apiKeyCiphertext: 'not-a-ciphertext' }], [aliasFixture()]))
+      .toThrow(/密钥密文格式无法识别/);
+  });
+
   it('别名配置的思考强度按格式注入 reasoning 参数', async () => {
     process.env.AI_API_KEY = 'local-secret';
     forceJson = true;

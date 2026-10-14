@@ -1,11 +1,15 @@
 import 'server-only';
-import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lt, lte, notLike, sql } from 'drizzle-orm';
 import type { UIMessage } from 'ai';
 import { db, now, type Transaction } from './db';
 import { apps, generations, histories, leases, messages, users } from './schema';
 import { BusinessError } from './http';
+import { getConfig } from './config';
 import { nextSnowflakeId } from './snowflake';
 import { enforceChatRateLimit } from './rate-limit';
+import { groupTurns, type LoadedTurn, type StoredMessage } from './memory-context';
+import { readSummaryInTx } from './memory-store';
+import { compareTurns, isLegacyMessageId, legacyMessagePrefix, type SummarySnapshot, type TurnOrder } from './memory-types';
 import type { GenerationStatus, User } from '@/shared/contracts';
 
 const activeStatuses = ['generating', 'building'];
@@ -26,11 +30,65 @@ async function recoverLease(tx: Transaction, lease: typeof leases.$inferSelect) 
   await tx.delete(leases).where(and(eq(leases.appId, lease.appId), eq(leases.generationId, lease.generationId)));
 }
 
+function legacyMessage(row: typeof histories.$inferSelect): UIMessage {
+  return { id: `${legacyMessagePrefix}${row.id}`, role: row.messageType === 'user' ? 'user' : 'assistant', parts: [{ type: 'text', text: row.message }] } as UIMessage;
+}
+
+/**
+ * 旧 chat_history 的兼容边界。平台每次原生生成也会往 ts_chat_history 写一条镜像行，
+ * 所以「已迁移」不能靠 messages 表空/非空判断，只能按来源与时间去重：只迁移比本应用第一条原生消息更早、
+ * 且还没有对应 legacy-<id> 行的历史行（判定「第一条原生消息」时排除 legacy- 行本身）。legacy-<id> 是确定性消息 id，本身就是持久迁移标记，
+ * 重复调用不会重复迁移，镜像行（createTime 不早于原生消息）也永远不会被再迁一遍。
+ * ts_message.sequence 是全局自增唯一列，无法插到已有行之前，所以迁移行只能追加在末尾；
+ * 读取时按 legacy- 前缀把补迁行整体排到原生消息之前（见 orderRows），摘要游标也按这两个区块分别推进。
+ */
+async function pendingLegacyRows(tx: Transaction, appId: string, existingIds: ReadonlySet<string>) {
+  const [firstNative] = await tx
+    .select({ createTime: messages.createTime })
+    .from(messages)
+    .where(and(eq(messages.appId, BigInt(appId)), notLike(messages.id, `${legacyMessagePrefix}%`)))
+    .orderBy(asc(messages.sequence))
+    .limit(1);
+  const rows = await tx.select().from(histories).where(and(
+    eq(histories.appId, BigInt(appId)),
+    eq(histories.isDelete, 0),
+    firstNative ? lt(histories.createTime, firstNative.createTime) : undefined,
+  )).orderBy(asc(histories.createTime), asc(histories.id));
+  return rows.filter(row => !existingIds.has(`${legacyMessagePrefix}${row.id}`));
+}
+
+function selectMessageRows(tx: Transaction, appId: string) {
+  return tx.select().from(messages).where(eq(messages.appId, BigInt(appId))).orderBy(asc(messages.sequence));
+}
+
+function rowOrder(row: typeof messages.$inferSelect): TurnOrder {
+  return { block: isLegacyMessageId(row.id) ? 'legacy' : 'native', endSequence: String(row.sequence) };
+}
+
+/**
+ * 会话历史的规范顺序：补迁的旧历史整体排在原生消息之前。
+ * orderBy(sequence) 会把补迁行排在末尾（它们的全局 sequence 更大），所以这里必须再按区块重排一次。
+ */
+function orderRows(rows: readonly (typeof messages.$inferSelect)[]): (typeof messages.$inferSelect)[] {
+  return [...rows].sort((left, right) => compareTurns(rowOrder(left), rowOrder(right)));
+}
+
+/**
+ * 读取当前应用的原始消息行（保留 sequence），把尚未迁移的旧历史补进来，再按区块规范顺序返回（补迁旧历史在前）。
+ * 生成路径必须在应用写锁的事务里、并且在本轮输入落库之前调用，快照才不会被其它生成任务改写。
+ */
+async function historyRows(tx: Transaction, appId: string): Promise<StoredMessage[]> {
+  let rows = await selectMessageRows(tx, appId);
+  const legacy = await pendingLegacyRows(tx, appId, new Set(rows.map(row => row.id)));
+  if (legacy.length) {
+    for (const row of legacy) await storeMessage(tx, appId, legacyMessage(row));
+    rows = await selectMessageRows(tx, appId);
+  }
+  return orderRows(rows).map(row => ({ id: row.id, sequence: String(row.sequence), body: row.body as UIMessage }));
+}
+
 async function messagesFrom(tx: Transaction, appId: string) {
-  const rows = await tx.select().from(messages).where(eq(messages.appId, BigInt(appId))).orderBy(asc(messages.sequence));
-  if (rows.length) return rows.map(row => row.body as UIMessage);
-  const old = await tx.select().from(histories).where(and(eq(histories.appId, BigInt(appId)), eq(histories.isDelete, 0))).orderBy(asc(histories.createTime), asc(histories.id));
-  return old.map(row => ({ id: `legacy-${row.id}`, role: row.messageType === 'user' ? 'user' : 'assistant', parts: [{ type: 'text', text: row.message }] } as UIMessage));
+  return (await historyRows(tx, appId)).map(row => row.body);
 }
 
 export async function loadMessages(appId: string) {
@@ -45,22 +103,35 @@ async function storeMessage(tx: Transaction, appId: string, message: UIMessage) 
 
 // The app row lock spans each filesystem operation. An expired worker cannot
 // write alongside a replacement generation, deployment, download, or deletion.
-export async function withAppWriter<T>(appId: string, work: (tx: Transaction, app: typeof apps.$inferSelect) => Promise<T>, generationId?: string) {
+export async function withAppWriter<T>(appId: string, work: (tx: Transaction, app: typeof apps.$inferSelect) => Promise<T>, generationId?: string, options: { lockTask?: boolean } = {}) {
   if (!generationId) {
     const [busy] = await db().select().from(leases).where(eq(leases.appId, BigInt(appId))).limit(1);
     if (busy && busy.expiresAt > now()) throw new BusinessError(409, 40900, '应用正在生成，请先取消或等待完成');
   }
   return db().transaction(async tx => {
     const app = await lockedApp(tx, appId);
-    const [lease] = await tx.select().from(leases).where(eq(leases.appId, app.id)).limit(1);
     if (generationId) {
-      const [task] = await tx.select().from(generations).where(eq(generations.id, generationId)).limit(1);
+      // 默认只是一致性读：写路径里包含整次容器构建（agent.ts 的 buildApp 跑在 write() 事务内），
+      // 长时间锁住租约行会让每 5 秒一次的心跳 UPDATE 一直等锁，直到 innodb_lock_wait_timeout
+      // （默认 50s）先把仍在跑的构建判死。只有「必须确认任务此刻仍在生成中」的摘要提交才用
+      // lockTask 加行锁，与取消提交（setGeneration 的普通 UPDATE）建立数据库互斥，见 memory-store.ts。
+      const leaseRows = options.lockTask
+        ? await tx.select().from(leases).where(eq(leases.appId, app.id)).limit(1).for('update')
+        : await tx.select().from(leases).where(eq(leases.appId, app.id)).limit(1);
+      const taskRows = options.lockTask
+        ? await tx.select().from(generations).where(eq(generations.id, generationId)).limit(1).for('update')
+        : await tx.select().from(generations).where(eq(generations.id, generationId)).limit(1);
+      const [lease] = leaseRows;
+      const [task] = taskRows;
       if (!lease || lease.generationId !== generationId || lease.expiresAt <= now() || !task || !activeStatuses.includes(task.status)) {
         throw new BusinessError(409, 40900, '生成任务已失去应用写权限');
       }
-    } else if (lease) {
-      if (lease.expiresAt > now()) throw new BusinessError(409, 40900, '应用正在生成，请先取消或等待完成');
-      await recoverLease(tx, lease);
+    } else {
+      const [lease] = await tx.select().from(leases).where(eq(leases.appId, app.id)).limit(1);
+      if (lease) {
+        if (lease.expiresAt > now()) throw new BusinessError(409, 40900, '应用正在生成，请先取消或等待完成');
+        await recoverLease(tx, lease);
+      }
     }
     return work(tx, app);
   });
@@ -70,7 +141,13 @@ export async function saveMessage(appId: string, message: UIMessage, generationI
   await withAppWriter(appId, tx => storeMessage(tx, appId, message), generationId);
 }
 
-export async function beginGeneration(appId: string, id: string, user: User, message: UIMessage, clientAddress = 'unknown') {
+export type BeginGenerationContext = { history: UIMessage[]; turns: LoadedTurn[]; summary: SummarySnapshot | null };
+
+/**
+ * 在同一个应用写锁事务里固定本轮的历史回合边界、终态快照和摘要版本。
+ * 这样本轮模型看到的历史与后续摘要提交的基线不会中途漂移。
+ */
+export async function beginGenerationContext(appId: string, id: string, user: User, message: UIMessage, clientAddress = 'unknown'): Promise<BeginGenerationContext> {
   const [busy] = await db().select().from(leases).where(eq(leases.appId, BigInt(appId))).limit(1);
   if (busy && busy.expiresAt > now()) throw new BusinessError(409, 40900, '应用已有正在运行的生成任务');
   const historyId = await nextSnowflakeId();
@@ -88,18 +165,27 @@ export async function beginGeneration(appId: string, id: string, user: User, mes
     await enforceChatRateLimit(tx, actor.id.toString(), clientAddress);
     // History is loaded only after acquiring the writer lock, never from a client
     // or from a snapshot taken while the preceding generation was completing.
-    const history = await messagesFrom(tx, appId);
+    const stored = await historyRows(tx, appId);
+    const generationRows = await tx.select({ id: generations.id, status: generations.status }).from(generations).where(eq(generations.appId, app.id));
+    const statuses = new Map(generationRows.map(row => [row.id, row.status as GenerationStatus]));
+    const turns = groupTurns(stored, statuses, id);
+    // 摘要功能关闭时连摘要表都不读：这样未应用 009 迁移的部署也能跑原来的旧窗口行为。
+    const summary = getConfig().memory.enabled ? await readSummaryInTx(tx, appId) : null;
     await tx.insert(generations).values({ id, appId: app.id, userId: actor.id, status: 'generating', createTime: now(), updateTime: now() });
     await tx.insert(leases).values({ appId: app.id, generationId: id, expiresAt: expiry() });
-    for (const old of history.filter(m => m.id.startsWith('legacy-'))) await storeMessage(tx, appId, old);
     await storeMessage(tx, appId, message);
     await tx.insert(histories).values({ id: historyId, appId: app.id, userId: actor.id, messageType: 'user', message: message.parts.filter(p => p.type === 'text').map(p => p.text).join('\n'), createTime: now(), updateTime: now() });
-    return history;
+    return { history: stored.map(row => row.body), turns, summary };
   }).catch(error => {
     const code = (error as { cause?: { code?: string }; code?: string }).cause?.code ?? (error as { code?: string }).code;
     if (code === 'ER_DUP_ENTRY') throw new BusinessError(409, 40900, '该请求或消息已经处理，请读取生成状态');
     throw error;
   });
+}
+
+/** 返回旧签名的历史快照，兼容既有调用者（backend-invariants 等）。 */
+export async function beginGeneration(appId: string, id: string, user: User, message: UIMessage, clientAddress = 'unknown') {
+  return (await beginGenerationContext(appId, id, user, message, clientAddress)).history;
 }
 
 export async function setGeneration(id: string, status: GenerationStatus, error: string | null = null) {

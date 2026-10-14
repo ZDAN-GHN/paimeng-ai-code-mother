@@ -2,8 +2,10 @@ import 'server-only';
 import { z } from 'zod';
 import { resolve } from 'node:path';
 import { modelConfigListIssues } from '@/shared/model-config';
+import type { MemoryBudgets } from './memory-types';
 const blankAsUnset = (value: unknown) => (typeof value === 'string' && value.trim() === '' ? undefined : value);
 const csv = (value: string) => value.split(',').map(part => part.trim()).filter(Boolean);
+const booleanFlag = (value: unknown) => { const text = blankAsUnset(value); return typeof text === 'string' ? text.trim().toLowerCase() : text; };
 const environment = z.object({
   DATABASE_URL:z.string().default('mysql://paimeng_ts:unused@127.0.0.1:3306/paimeng_ai_code_mother_ts'),
   APP_ORIGIN:z.url().default('http://localhost:3000'),
@@ -20,6 +22,14 @@ const environment = z.object({
   GENERATION_TIMEOUT_MS:z.preprocess(blankAsUnset, z.coerce.number().int().min(0, 'GENERATION_TIMEOUT_MS 不能为负数').max(86400000, 'GENERATION_TIMEOUT_MS 不能超过 86400000').default(0)),
   MODEL_REPLY_TIMEOUT_MS:z.preprocess(blankAsUnset, z.coerce.number().int().min(1000, 'MODEL_REPLY_TIMEOUT_MS 必须不小于 1000').max(86400000, 'MODEL_REPLY_TIMEOUT_MS 不能超过 86400000').default(900000)),
   MODEL_RETRY_LIMIT:z.preprocess(blankAsUnset, z.coerce.number().int().min(0, 'MODEL_RETRY_LIMIT 不能为负数').max(5, 'MODEL_RETRY_LIMIT 不能超过 5').default(2)),
+  MEMORY_ENABLED:z.preprocess(booleanFlag, z.enum(['true','false','1','0']).default('true').transform(value => value === 'true' || value === '1')),
+  MEMORY_CONTEXT_BUDGET_TOKENS:z.preprocess(blankAsUnset, z.coerce.number().int().min(2000, 'MEMORY_CONTEXT_BUDGET_TOKENS 必须不小于 2000').max(2000000, 'MEMORY_CONTEXT_BUDGET_TOKENS 不能超过 2000000').default(24000)),
+  MEMORY_RECENT_BUDGET_TOKENS:z.preprocess(blankAsUnset, z.coerce.number().int().min(500, 'MEMORY_RECENT_BUDGET_TOKENS 必须不小于 500').max(1000000, 'MEMORY_RECENT_BUDGET_TOKENS 不能超过 1000000').default(12000)),
+  MEMORY_SUMMARY_INPUT_TOKENS:z.preprocess(blankAsUnset, z.coerce.number().int().min(2000, 'MEMORY_SUMMARY_INPUT_TOKENS 必须不小于 2000').max(2000000, 'MEMORY_SUMMARY_INPUT_TOKENS 不能超过 2000000').default(24000)),
+  MEMORY_SUMMARY_OUTPUT_TOKENS:z.preprocess(blankAsUnset, z.coerce.number().int().min(128, 'MEMORY_SUMMARY_OUTPUT_TOKENS 必须不小于 128').max(32000, 'MEMORY_SUMMARY_OUTPUT_TOKENS 不能超过 32000').default(2048)),
+  MEMORY_CALL_TIMEOUT_MS:z.preprocess(blankAsUnset, z.coerce.number().int().min(1000, 'MEMORY_CALL_TIMEOUT_MS 必须不小于 1000').max(600000, 'MEMORY_CALL_TIMEOUT_MS 不能超过 600000').default(60000)),
+  MEMORY_MIN_NEW_TURNS:z.preprocess(blankAsUnset, z.coerce.number().int().min(1, 'MEMORY_MIN_NEW_TURNS 必须是不小于 1 的整数').max(100, 'MEMORY_MIN_NEW_TURNS 不能超过 100').default(4)),
+  MEMORY_RETRY_INTERVAL_MS:z.preprocess(blankAsUnset, z.coerce.number().int().min(1000, 'MEMORY_RETRY_INTERVAL_MS 必须不小于 1000').max(86400000, 'MEMORY_RETRY_INTERVAL_MS 不能超过 86400000').default(120000)),
   CHAT_RATE_LIMIT_TYPE:z.preprocess(value => { const text = blankAsUnset(value); return typeof text === 'string' ? text.trim().toUpperCase() : text; }, z.enum(['API','USER','IP']).default('USER')),
   CHAT_RATE_LIMIT_RATE:z.preprocess(blankAsUnset, z.coerce.number().int().min(1, 'CHAT_RATE_LIMIT_RATE 必须是不小于 1 的整数').max(1000, 'CHAT_RATE_LIMIT_RATE 不能超过 1000').default(1)),
   CHAT_RATE_LIMIT_INTERVAL:z.preprocess(blankAsUnset, z.coerce.number().int().min(1, 'CHAT_RATE_LIMIT_INTERVAL 必须是不小于 1 的整数').max(86400, 'CHAT_RATE_LIMIT_INTERVAL 不能超过 86400 秒').default(60)),
@@ -38,5 +48,9 @@ export function getConfig() {
   const modelInternalBaseUrlOrigins=csv(env.MODEL_INTERNAL_BASE_URL_ORIGINS);
   const modelConfigIssues=modelConfigListIssues(modelApiKeyEnvAllowlist,modelInternalBaseUrlOrigins);
   if(modelConfigIssues.length) throw new Error(modelConfigIssues.join('；'));
-  return {databaseUrl:env.DATABASE_URL,appOrigin:new URL(env.APP_ORIGIN).origin,previewOrigin:new URL(env.PREVIEW_ORIGIN).origin,aiBaseUrl:env.AI_BASE_URL,aiApiKey:env.AI_API_KEY,aiModel:env.AI_MODEL,aiMode:env.AI_MODE,modelApiKeyEnvAllowlist,modelInternalBaseUrlOrigins,modelSecretKey:env.MODEL_SECRET_KEY,buildImage:env.BUILD_IMAGE,buildTimeoutMs:env.BUILD_TIMEOUT_MS,generationTimeoutMs:env.GENERATION_TIMEOUT_MS,modelReplyTimeoutMs:env.MODEL_REPLY_TIMEOUT_MS,modelRetryLimit:env.MODEL_RETRY_LIMIT,runtimeRoot:resolve(process.cwd(),'runtime'),chatRateLimit:{type:env.CHAT_RATE_LIMIT_TYPE,rate:env.CHAT_RATE_LIMIT_RATE,intervalSeconds:env.CHAT_RATE_LIMIT_INTERVAL,message:env.CHAT_RATE_LIMIT_MESSAGE||(env.CHAT_RATE_LIMIT_RATE>1?`每 ${env.CHAT_RATE_LIMIT_INTERVAL} 秒最多生成 ${env.CHAT_RATE_LIMIT_RATE} 次，请稍后重试`:`每 ${env.CHAT_RATE_LIMIT_INTERVAL} 秒只能生成一次，请稍后重试`)}};
+  const memory:MemoryBudgets&{callTimeoutMs:number}={enabled:env.MEMORY_ENABLED,contextTokens:env.MEMORY_CONTEXT_BUDGET_TOKENS,recentTokens:env.MEMORY_RECENT_BUDGET_TOKENS,summaryInputTokens:env.MEMORY_SUMMARY_INPUT_TOKENS,summaryOutputTokens:env.MEMORY_SUMMARY_OUTPUT_TOKENS,minNewTurns:env.MEMORY_MIN_NEW_TURNS,retryIntervalMs:env.MEMORY_RETRY_INTERVAL_MS,callTimeoutMs:env.MEMORY_CALL_TIMEOUT_MS};
+  if(memory.summaryOutputTokens>=memory.summaryInputTokens) throw new Error('MEMORY_SUMMARY_OUTPUT_TOKENS 必须小于 MEMORY_SUMMARY_INPUT_TOKENS');
+  if(memory.summaryOutputTokens>=memory.contextTokens) throw new Error('MEMORY_SUMMARY_OUTPUT_TOKENS 必须小于 MEMORY_CONTEXT_BUDGET_TOKENS');
+  if(memory.recentTokens+memory.summaryOutputTokens>=memory.contextTokens) throw new Error('MEMORY_RECENT_BUDGET_TOKENS 与 MEMORY_SUMMARY_OUTPUT_TOKENS 之和必须小于 MEMORY_CONTEXT_BUDGET_TOKENS');
+  return {databaseUrl:env.DATABASE_URL,appOrigin:new URL(env.APP_ORIGIN).origin,previewOrigin:new URL(env.PREVIEW_ORIGIN).origin,aiBaseUrl:env.AI_BASE_URL,aiApiKey:env.AI_API_KEY,aiModel:env.AI_MODEL,aiMode:env.AI_MODE,modelApiKeyEnvAllowlist,modelInternalBaseUrlOrigins,modelSecretKey:env.MODEL_SECRET_KEY,buildImage:env.BUILD_IMAGE,buildTimeoutMs:env.BUILD_TIMEOUT_MS,generationTimeoutMs:env.GENERATION_TIMEOUT_MS,modelReplyTimeoutMs:env.MODEL_REPLY_TIMEOUT_MS,modelRetryLimit:env.MODEL_RETRY_LIMIT,memory,runtimeRoot:resolve(process.cwd(),'runtime'),chatRateLimit:{type:env.CHAT_RATE_LIMIT_TYPE,rate:env.CHAT_RATE_LIMIT_RATE,intervalSeconds:env.CHAT_RATE_LIMIT_INTERVAL,message:env.CHAT_RATE_LIMIT_MESSAGE||(env.CHAT_RATE_LIMIT_RATE>1?`每 ${env.CHAT_RATE_LIMIT_INTERVAL} 秒最多生成 ${env.CHAT_RATE_LIMIT_RATE} 次，请稍后重试`:`每 ${env.CHAT_RATE_LIMIT_INTERVAL} 秒只能生成一次，请稍后重试`)}};
 }

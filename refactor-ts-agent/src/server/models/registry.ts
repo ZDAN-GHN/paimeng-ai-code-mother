@@ -46,8 +46,20 @@ export type ModelRegistryStatus = {
   lastError: string | null;
 };
 
+export type ModelRegistryBindings = {
+  bindings: Map<string, AliasModel>;
+  /** 别名构建失败的原因（非必需别名）；可用于在降级的同时保留诊断信息。 */
+  failures: Map<string, string>;
+};
+
 export type ModelRegistry = {
   resolveBinding(alias: string): Promise<AliasModel>;
+  resolveBindings(aliases: readonly string[]): Promise<Map<string, AliasModel>>;
+  /**
+   * 与 resolveBindings 使用同一份快照，并额外返回非必需别名的构建失败原因，
+   * 让调用方能够区分「生成模型缺失（必须报错）」与「可选模型不可用（可降级）」。
+   */
+  resolveBindingsWithFailures(aliases: readonly string[]): Promise<ModelRegistryBindings>;
   resolveModel(alias: string): Promise<LanguageModel>;
   status(): ModelRegistryStatus;
 };
@@ -257,7 +269,8 @@ export function createModelRegistry(options: ModelRegistryOptions = {}): ModelRe
     return installed;
   }
 
-  async function loadedFor(alias: string): Promise<{ snapshot: LoadedSnapshot; binding: AliasModel }> {
+  /** 取一份当前可用快照并做 epoch/回退判定；同名别名一律来自同一次调用返回的快照。 */
+  async function loadedSnapshot(): Promise<LoadedSnapshot> {
     let observed: bigint | null;
     try {
       observed = await observeEpoch();
@@ -286,15 +299,41 @@ export function createModelRegistry(options: ModelRegistryOptions = {}): ModelRe
     }
     // 已判定配置无效时不能放行旧快照；只有 install 成功（合法且不回退）才会清除 invalidFault。
     if (invalidFault) throw unavailable(invalidFault);
+    return snapshot;
+  }
+
+  async function loadedFor(alias: string): Promise<{ snapshot: LoadedSnapshot; binding: AliasModel }> {
+    const snapshot = await loadedSnapshot();
     const binding = snapshot.models.bindings[alias];
     if (!binding) throw unavailable(`模型别名 ${alias} 未配置或未启用`);
     return { snapshot, binding };
+  }
+
+  async function bindingsFor(aliases: readonly string[]): Promise<ModelRegistryBindings> {
+    const snapshot = await loadedSnapshot();
+    const bindings = new Map<string, AliasModel>();
+    const failures = new Map<string, string>();
+    for (const alias of aliases) {
+      const binding = snapshot.models.bindings[alias];
+      if (binding) {
+        bindings.set(alias, binding);
+        continue;
+      }
+      const failure = snapshot.models.failures[alias];
+      if (failure) failures.set(alias, failure);
+    }
+    return { bindings, failures };
   }
 
   return {
     async resolveBinding(alias) {
       return (await loadedFor(alias)).binding;
     },
+    /** 一次任务需要的多个别名固定在同一份快照上解析；缺失的别名不出现在结果里，由调用方决定回退策略。 */
+    async resolveBindings(aliases) {
+      return (await bindingsFor(aliases)).bindings;
+    },
+    resolveBindingsWithFailures: bindingsFor,
     async resolveModel(alias) {
       const { snapshot } = await loadedFor(alias);
       return snapshot.models.provider.languageModel(alias);

@@ -30,12 +30,12 @@ try {
 const redis = new URL(process.env.REDIS_URL ?? '');
 assert.equal(redis.protocol, 'redis:');
 assert.equal(redis.hostname, '127.0.0.1');
-assert.equal(redis.port, '6381');
+assert.equal(redis.port, '6379');
 assert.equal(redis.pathname, '/0');
 if (redis.username || redis.password) throw new Error('The dedicated local Redis URL must not contain credentials');
 function exchange(commands: string[][], expected: string) {
   return new Promise<void>((resolve, reject) => {
-    const socket = createConnection({ host: '127.0.0.1', port: 6381 });
+    const socket = createConnection({ host: '127.0.0.1', port: 6379 });
     let reply = '';
     const payload = commands.map(command => `*${command.length}\r\n` + command.map(value => `$${Buffer.byteLength(value)}\r\n${value}\r\n`).join('')).join('');
     socket.setTimeout(5000, () => { socket.destroy(new Error('Local Redis response timed out')); });
@@ -60,5 +60,5 @@ try {
     execFileSync('docker', ['compose', '--env-file', '.env', '-f', 'compose.yaml', 'up', '-d', '--wait', '--no-recreate', 'redis'], { stdio: 'inherit' });
   }
   await exchange([['GET', key]], `$${value.length}\r\n${value}\r\n`);
-  console.log('VERIFIED Redis on 127.0.0.1:6381 without a password and with real read/write' + (process.argv.includes('--restart-redis') ? ' retained across container restart' : ''));
+  console.log('VERIFIED Redis on 127.0.0.1:6379 without a password and with real read/write' + (process.argv.includes('--restart-redis') ? ' retained across container restart' : ''));
 } finally { await exchange([['DEL', key]], ':1\r\n'); }

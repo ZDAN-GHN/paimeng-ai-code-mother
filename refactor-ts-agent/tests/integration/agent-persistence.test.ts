@@ -43,7 +43,7 @@ vi.mock('@/server/workspace', () => ({
 vi.mock('@/server/model', async () => {
   const { fixtureModel } = await import('@/server/fixture-model');
   const { MockLanguageModelV4, simulateReadableStream } = await import('ai/test');
-  return { routeCodeGenType: async () => 'html' as const, modelFor: async (...args: Parameters<typeof fixtureModel>) => {
+  const buildModel = async (...args: Parameters<typeof fixtureModel>) => {
     const model = fixtureModel(...args); const stream = model.doStream.bind(model);
     let first = true;
     model.doStream = async options => {
@@ -73,7 +73,16 @@ vi.mock('@/server/model', async () => {
       return { ...result, stream: simulateReadableStream<LanguageModelV4StreamPart>({ chunks: parts }) };
     };
     return model;
-  } };
+  };
+  return {
+    routeCodeGenType: async () => 'html' as const,
+    modelFor: buildModel,
+    taskModelsFor: async (...args: Parameters<typeof fixtureModel>) => {
+      const model = await buildModel(...args);
+      const source = { model, alias: 'codegen.default', providerId: null, modelName: null };
+      return { model, generation: source, summary: source, summaryUnavailableReason: null };
+    },
+  };
 });
 loadEnvFile('.env');
 process.env.DATABASE_URL = testDatabaseUrl(process.env.DATABASE_URL ?? '');
@@ -91,6 +100,8 @@ async function cleaned(id: string, status: string) {
 }
 describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用受控实现）', () => {
   beforeAll(async () => {
+    // 本套用例验证关闭滚动摘要时的旧行为（最近 20 条窗口）。
+    process.env.MEMORY_ENABLED = 'false';
     const id = await nextSnowflakeId();
     await db().insert(users).values({ id, userAccount: 'ts_agent_lifecycle_' + randomUUID(), userPassword: 'unused', createTime: now(), updateTime: now() });
     const [row] = await db().select().from(users).where(eq(users.id, id));
@@ -110,7 +121,7 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
     // Keep the per-user 60 second generation window independent between tests.
     await db().delete(rateLimits).where(eq(rateLimits.limitKey, 'user:' + actor.id));
   });
-  afterAll(async () => { await db().delete(users).where(eq(users.id, BigInt(actor.id))); await getPool().end(); });
+  afterAll(async () => { delete process.env.MEMORY_ENABLED; await db().delete(users).where(eq(users.id, BigInt(actor.id))); await getPool().end(); });
 
   it('工具参数错误被模型重试修复后仍构建并完成，不向客户端发送整次失败', async () => {
     control.toolFailure = true;

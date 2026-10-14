@@ -10,7 +10,7 @@
 2. 执行 `npm ci`。
 3. 执行 `npm run assets:import`。此命令只读取旧平台的派蒙图片，写入新应用的 `public/`。
 4. 执行 `npm run infra:up`。固定命名的 MySQL 和 Redis 容器启动并等待健康检查。该命令读取 `.env`，不生成或改写凭据。
-5. 执行 `npm run db:migrate`。迁移完成后显示“独立 TS 数据库迁移完成”。重复执行会核对已有迁移的校验和。迁移包含 `006_model_registry.sql`（模型配置表与状态行）、`007_provider_api_format.sql`（提供商 API 格式、可空密钥引用与密文字段）与 `008_provider_headers.sql`（提供商自定义请求头 JSON 列）；随后执行一次 `npm run db:init-models`，把现有 `.env` 的模型配置写入数据库（仅当表仍为空且版本为零；幂等，已有配置不会被覆盖）。
+5. 执行 `npm run db:migrate`。迁移完成后显示“独立 TS 数据库迁移完成”。重复执行会核对已有迁移的校验和。迁移包含 `006_model_registry.sql`（模型配置表与状态行）、`007_provider_api_format.sql`（提供商 API 格式、可空密钥引用与密文字段）、`008_provider_headers.sql`（提供商自定义请求头 JSON 列）与 `009_conversation_summary.sql`（每个应用的滚动摘要一行）；随后执行一次 `npm run db:init-models`，把现有 `.env` 的模型配置写入数据库（仅当表仍为空且版本为零；幂等，已有配置不会被覆盖）。
 6. 执行 `docker pull node:24-alpine`。Vue 生成工程使用该镜像进行隔离构建。
 7. 执行 `npx playwright install chromium`。发布封面截图和浏览器测试都需要 Chromium。若系统缺少浏览器依赖，按 Playwright 的报错安装系统依赖。
 8. 执行 `npm run dev:all` 同时启动管理端与预览进程，输出按 `[app]`、`[preview]` 前缀合并，按 Ctrl-C 一起停止；也可以在一个终端执行 `npm run preview`，在另一个终端执行 `npm run dev`。两个进程的端口分别取自 `APP_ORIGIN` 与 `PREVIEW_ORIGIN`，端口已被占用时 `dev:all` 会直接报错退出。
@@ -28,15 +28,15 @@
 
 ## 使用固定的本地数据库容器
 
-MySQL 容器固定为 `paimeng-ts-refactor-mysql-1`，宿主连接地址为 `127.0.0.1:3306`。本地管理账号为 `root`，密码为 `root`。应用继续使用专用账号 `paimeng_ts`，本地密码同样为 `root`，仅访问专用开发库与测试库。开发库为 `paimeng_ai_code_mother_ts`，集成测试库为 `paimeng_ai_code_mother_ts_test`，两个库位于同一个 MySQL 容器。MySQL 数据继续保存在 `runtime/mysql/`。
+MySQL 容器固定为 `zslm-mysql`，宿主连接地址为 `127.0.0.1:3306`。本地管理账号为 `root`，密码为 `root`。应用继续使用专用账号 `paimeng_ts`，本地密码同样为 `root`，仅访问专用开发库与测试库。开发库为 `paimeng_ai_code_mother_ts`，集成测试库为 `paimeng_ai_code_mother_ts_test`，两个库位于同一个 MySQL 容器。MySQL 数据继续保存在 `runtime/mysql/`。
 
 已有 MySQL 数据目录初始化后，修改 `.env` 不会自动修改数据库内的账号密码。密码变更需要在此专用容器内同步账号后再重启应用，本次已完成同步并保留已有数据。
 
-Redis 容器固定为 `paimeng-ts-refactor-redis-1`，宿主连接地址为 `127.0.0.1:6381`，使用逻辑库 0。按本地开发要求不设置密码，连接字符串为 `redis://127.0.0.1:6381/0`。Redis 镜像固定到已验证的官方镜像摘要。
+Redis 容器固定为 `zslm-redis`，宿主连接地址为 `127.0.0.1:6379`，使用逻辑库 0。按本地开发要求不设置密码，连接字符串为 `redis://127.0.0.1:6379/0`。Redis 镜像固定到已验证的官方镜像摘要。
 
 本地弱密码和无密码 Redis 只用于这两个回环端口的开发服务。容器内的 Redis 关闭 protected mode，以接受 Docker 转发连接；宿主端口仍只绑定 `127.0.0.1`。这些默认值不用于公网或生产环境。
 
-Redis 启用 AOF 持久化，数据存入固定命名卷 `paimeng-ts-refactor-redis-data`。两个容器仅发布到宿主回环地址，并设置 `unless-stopped` 重启策略。Docker 守护进程启动时会恢复未被手动停止的容器。MySQL 已使用默认宿主端口 3306。Redis 的默认端口 6379 当前由旧项目的 `paimeng-redis` 占用，因此新 Redis 暂时保留 6381；停止旧容器需要单独确认，数据卷会保留。
+Redis 启用 AOF 持久化，数据存入固定命名卷 `paimeng-ts-refactor-redis-data`。两个容器仅发布到宿主回环地址，并设置 `unless-stopped` 重启策略。Docker 守护进程启动时会恢复未被手动停止的容器。MySQL 与 Redis 都使用默认宿主端口（3306 与 6379）。原先占用 6379 的旧项目容器 `paimeng-redis` 已不存在（2026-10-14 复核：`docker inspect` 报 no such object，`ss -ltnp` 显示 6379 无监听），因此 Redis 从临时的 6381 切回默认端口，数据卷保留。
 
 重复执行 `npm run infra:up` 会复用固定容器与数据。执行 `npm run infra:status` 查看状态，执行 `npm run infra:stop` 停止两个容器但保留数据。重新开发时再次执行 `npm run infra:up`。删除 `runtime/mysql/` 或执行删除卷的 Docker 命令会丢失数据库数据，日常启动和停止不需要这些操作。
 
@@ -75,6 +75,8 @@ Redis 已作为本地开发服务提供连接。当前平台会话、消息和�
 提供商弹窗的「测试连接」与别名弹窗的「获取模型」都会请求上游 `GET {baseUrl}/models`（`openai-chat` / `openai-responses` 用 `Authorization: Bearer`，`anthropic-messages` 用 `x-api-key` + `anthropic-version`），每次点击都会重新请求上游（带 `cache-control: no-cache`，不使用缓存）、10 秒超时、不跟随重定向、错误信息不回显密钥与自定义请求头的值；「获取模型」的结果只填充当前对话框的候选列表（最多 1000 条，命中上限时界面会提示可能被截断），不落库。密钥来源为“直接输入”且表单留空时，探测沿用数据库里已保存的密文。「获取模型」失败的原因会显示在别名的「上游模型名」下方。
 
 生成的时长预算都在 `.env`：`GENERATION_TIMEOUT_MS`（毫秒，默认 `0`，表示不限制整次生成任务；旧版写死 10 分钟）；`MODEL_REPLY_TIMEOUT_MS`（毫秒，默认 `900000`）限制单次模型回复的时长，超时中止并记为「单次回复超时」；每个模型请求的失败重试次数由 `MODEL_RETRY_LIMIT`（默认 `2`，0-5）控制。上游输出到达 token 上限（`finishReason = length`）不再判为失败：文件已经落盘就继续构建，模型可以在下一轮对话里根据构建结果补齐。
+
+长对话默认启用「滚动摘要 + 最近完整回合」。超预算时，较早的完整回合会被压缩成一段固定分节（当前目标 / 用户要求与约束 / 已完成内容 / 决策与理由 / 待办 / 失败与取消尝试 / 重要文件等）的摘要，作为历史消息（明确标注为低信任参考）发给模型，最近若干回合仍带完整原文。原始聊天记录和界面上的完整历史都不删减，只是不再全部塞进模型上下文。表结构由 `migrations/009_conversation_summary.sql` 创建，`npm run db:migrate` 执行。开关与预算都在 `.env`：`MEMORY_ENABLED`（默认 `true`，设为 `false` 回到旧的「最近 20 条消息」行为）、`MEMORY_CONTEXT_BUDGET_TOKENS`（默认 `24000`）、`MEMORY_RECENT_BUDGET_TOKENS`（默认 `12000`）、`MEMORY_SUMMARY_INPUT_TOKENS`（默认 `24000`）、`MEMORY_SUMMARY_OUTPUT_TOKENS`（默认 `2048`）、`MEMORY_CALL_TIMEOUT_MS`（默认 `60000`）、`MEMORY_MIN_NEW_TURNS`（默认 `4`）、`MEMORY_RETRY_INTERVAL_MS`（默认 `120000`）；token 数为粗估（约等于字符数除以 2，中英混排下偏差较大），只用于判断是否整理，不保证精确。摘要模型是可选别名 `memory.summarize`（在「模型管理 → 别名」里配置）；未配置时复用本次生成所用的模型，配置错误不会被误判为「未配置」。摘要调用失败、超时或返回空内容时，保留上一版摘要与覆盖位置，降级为「旧摘要 + 装得下的最近完整回合」，并按 `MEMORY_RETRY_INTERVAL_MS` 冷却后重试；整理失败不会中断本轮生成，也不会推进覆盖位置。整理期间界面会显示「正在整理历史上下文，请稍候…」，结束、失败或取消后自动消失。摘要是**有损**压缩：它可能丢掉细节，且本项目的摘要质量只在受控测试模型下验证过，未用真实模型评测过输出质量。
 
 密钥有两种来源。引用环境变量时只存引用名（`apiKeyEnv`），默认允许 `AI_API_KEY`，其余通过 `MODEL_API_KEY_ENV_ALLOWLIST`（逗号分隔）加入；直接输入时明文不落库，服务端用 AES-256-GCM 加密后只存密文（`apiKeyCiphertext`，格式 `v1:<iv>:<tag>:<ciphertext>`），主密钥取自 `MODEL_SECRET_KEY`（64 位十六进制、32 字节 base64 或任意口令，scrypt 派生），未设置时自动生成 `runtime/model-secret.key`（权限 600）。管理接口只返回 `apiKeySource` 与当前实例是否已配置，绝不返回明文或密文；编辑态密钥留空表示保持已保存的值。该密钥文件丢失后已保存的密钥无法解密，需要在管理端重新输入。
 

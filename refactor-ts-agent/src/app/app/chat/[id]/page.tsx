@@ -18,6 +18,11 @@ const statusLabels = { generating: '生成中', building: '构建中', ready: '�
 const historyPageSize = 10;
 const inputLimit = 1000;
 
+/** 服务端用 transient data 事件告知摘要进度；data 是未知形状，只在明确为 consolidating 时显示提示。 */
+function isConsolidating(data: unknown): boolean {
+  return typeof data === 'object' && data !== null && (data as { status?: unknown }).status === 'consolidating';
+}
+
 function selectionContext(selected: Selected) {
   const lines = ['\n\n选中元素信息：'];
   if (selected.pagePath) lines.push('- 页面路径: ' + selected.pagePath);
@@ -55,6 +60,7 @@ function Chat({ id }: { id: string }) {
   const [visibleHistory, setVisibleHistory] = useState(historyPageSize);
   const [detailOpen, setDetailOpen] = useState(false);
   const [deployModal, setDeployModal] = useState<{ open: boolean; url: string }>({ open: false, url: '' });
+  const [memoryBusy, setMemoryBusy] = useState(false);
   const iframe = useRef<HTMLIFrameElement>(null);
   const messageList = useRef<HTMLDivElement>(null);
   const mounted = useRef(false);
@@ -87,8 +93,11 @@ function Chat({ id }: { id: string }) {
     id, transport,
     onFinish: () => { void refresh(); },
     onError: e => { if (mounted.current) setError(e.message); },
+    onData: part => { if (part.type === 'data-memory') setMemoryBusy(isConsolidating(part.data)); },
   });
   const generating = status === 'submitted' || status === 'streaming' || task?.status === 'generating' || task?.status === 'building';
+  // 生成结束、失败或取消后清掉「正在整理历史上下文」的临时提示。
+  useEffect(() => { if (!generating) setMemoryBusy(false); }, [generating]);
 
   useEffect(() => {
     mounted.current = true;
@@ -306,6 +315,7 @@ function Chat({ id }: { id: string }) {
               </div>
           )}
         </div>
+        {memoryBusy && <p className="memory-hint" role="status">正在整理历史上下文，请稍候…</p>}
         {generating && <p className="generating-hint" role="status">正在生成或构建，请稍候…</p>}
         <div className="chat-input">
           {selected && <Alert className="selected-element-alert" type="info" closable onClose={() => setSelected(null)}

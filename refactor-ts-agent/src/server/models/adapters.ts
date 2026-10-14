@@ -5,7 +5,15 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { LanguageModelV4, LanguageModelV4Middleware } from '@ai-sdk/provider';
 import { customProvider, defaultSettingsMiddleware, wrapLanguageModel, type LanguageModel, type LanguageModelMiddleware } from 'ai';
 import { getConfig } from '../config';
-import { isAllowedModelApiKeyEnv, type ModelAlias, type ModelAliasSettings, type ModelProvider, type ProviderKeySource, type ReasoningLevel } from '@/shared/model-config';
+import {
+  isAllowedModelApiKeyEnv,
+  requiredModelAliases,
+  type ModelAlias,
+  type ModelAliasSettings,
+  type ModelProvider,
+  type ProviderKeySource,
+  type ReasoningLevel,
+} from '@/shared/model-config';
 import { ModelConfigInvalidError } from './errors';
 import { responsesReasoningFetch } from './responses-reasoning';
 import { decryptModelSecret } from './secrets';
@@ -29,6 +37,11 @@ export type AliasModelProvider = {
 export type AliasModels = {
   /** 冻结的别名绑定表；原型为空，缺失别名返回 undefined，而不是 Object.prototype 上的成员。 */
   readonly bindings: Readonly<Record<string, AliasModel>>;
+  /**
+   * 非必需别名构建失败的记录：别名 → 错误信息。
+   * 可选能力（如 memory.summarize）的提供商密钥缺失时，应跳过该能力而不是让整份快照失败。
+   */
+  readonly failures: Readonly<Record<string, string>>;
   readonly provider: AliasModelProvider;
 };
 
@@ -140,27 +153,43 @@ function buildLanguageModel(provider: ModelProvider, alias: ModelAlias): Languag
   return Object.freeze(wrapped);
 }
 
-/** 把一份快照里的提供商与别名编译为别名到冻结模型的映射，以及按别名解析的 provider。 */
-export function buildAliasModels(providers: readonly ModelProvider[], aliases: readonly ModelAlias[]): AliasModels {
+/**
+ * 把一份快照里的提供商与别名编译为别名到冻结模型的映射，以及按别名解析的 provider。
+ *
+ * `requiredAliases` 里的别名构建失败会直接抛出（缺少生成模型必须显式报错）；
+ * 其它别名（可选能力）构建失败只记入 `failures`，由调用方决定是否降级。
+ */
+export function buildAliasModels(
+  providers: readonly ModelProvider[],
+  aliases: readonly ModelAlias[],
+  requiredAliases: readonly string[] = requiredModelAliases,
+): AliasModels {
   const providersById = new Map(providers.map(provider => [provider.id, provider]));
   const bindings: Record<string, AliasModel> = Object.create(null);
+  const failures: Record<string, string> = Object.create(null);
   const languageModels: Record<string, LanguageModel> = Object.create(null);
   for (const alias of aliases) {
-    const provider = providersById.get(alias.providerId);
-    if (!provider) throw new ModelConfigInvalidError(`别名 ${alias.alias} 指向不存在的提供商 ${alias.providerId}`);
-    if (!provider.enabled || !alias.enabled) continue;
-    const model = buildLanguageModel(provider, alias);
-    bindings[alias.alias] = Object.freeze({
-      alias: alias.alias,
-      providerId: provider.id,
-      modelName: alias.modelName,
-      apiKeySource: provider.apiKeySource,
-      model,
-    });
-    languageModels[alias.alias] = model;
+    try {
+      const provider = providersById.get(alias.providerId);
+      if (!provider) throw new ModelConfigInvalidError(`别名 ${alias.alias} 指向不存在的提供商 ${alias.providerId}`);
+      if (!provider.enabled || !alias.enabled) continue;
+      const model = buildLanguageModel(provider, alias);
+      bindings[alias.alias] = Object.freeze({
+        alias: alias.alias,
+        providerId: provider.id,
+        modelName: alias.modelName,
+        apiKeySource: provider.apiKeySource,
+        model,
+      });
+      languageModels[alias.alias] = model;
+    } catch (error) {
+      if (requiredAliases.includes(alias.alias)) throw error;
+      failures[alias.alias] = error instanceof Error ? error.message : String(error);
+    }
   }
   return {
     bindings: Object.freeze(bindings),
+    failures: Object.freeze(failures),
     provider: Object.freeze(customProvider({ languageModels: Object.freeze(languageModels) })),
   };
 }
