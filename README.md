@@ -1,6 +1,6 @@
 # 派蒙 AI 应用工坊
 
-一个基于AI的代码生成平台，提供可视化的代码开发和管理功能。项目目前是单体项目，后续将重构为分布式架构，重构的代码将放在[paimeng-ai-code-mother-microservice](paimeng-ai-code-mother-microservice)包中。
+一个基于AI的代码生成平台，提供可视化的代码开发和管理功能。旧的单体 Java 后端与 Vue 前端已整体归档到 [archive/](archive/)；曾尝试的分布式重构骨架在 [archive/paimeng-ai-code-backend/paimeng-ai-code-mother-microservice](archive/paimeng-ai-code-backend/paimeng-ai-code-mother-microservice)，新的重构版本在 [paimeng-ai-code-agent/](paimeng-ai-code-agent)。
 
 ## 项目运行效果
 
