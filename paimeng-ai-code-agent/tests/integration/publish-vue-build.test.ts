@@ -22,6 +22,7 @@ vi.mock('@/server/artifacts', () => ({
   deployApp: vi.fn(async () => 'ABCDEF'),
   captureCover: vi.fn(async (key: string) => `http://127.0.0.1:3001/covers/${key}.png`),
   downloadApp: vi.fn(),
+  loadBuildState: async () => null,
 }));
 
 loadEnvFile('.env');

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { guardRequest, body, success, failure, BusinessError } from '@/server/http';
+import { guardRequest, body, success, failure, BusinessError, withHeartbeat } from '@/server/http';
 import { login, logout, register, requireUser, requireAdmin } from '@/server/auth';
 import * as business from '@/server/business';
 import { generationFor, loadMessages } from '@/server/generation-store';
@@ -34,8 +34,8 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/my/list/page/vo')return success(await business.listApps(value,'my',user));
    if(path==='app/update')return success(await business.updateApp(value,user));
    if(path==='app/delete')return success(await business.deleteApp(value,user));
-   if(path==='app/deploy')return success(await business.publish(value,user));
-   if(path==='app/build')return success(await business.rebuildPreview(value,user));
+   if(path==='app/deploy')return withHeartbeat(async()=>success(await business.publish(value,user)));
+   if(path==='app/build')return withHeartbeat(async()=>success(await business.rebuildPreview(value,user)));
    if(path==='app/chat/gen/code')return await chatResponse(req,value,user);
    if(path==='app/generation/cancel')return success(await cancelGeneration(z.object({appId:idSchema}).parse(value).appId,user));
    await requireAdmin(req);

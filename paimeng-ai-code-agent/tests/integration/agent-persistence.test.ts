@@ -34,6 +34,7 @@ vi.mock('@/server/artifacts', () => ({
   buildApp: async (_app: unknown, signal: AbortSignal) => { control.builds++; if (control.build) await control.build(signal); },
   workspace: () => '/nonexistent-ts-backend-test-workspace', previewUrl: () => 'http://127.0.0.1:3001/preview/test/',
   deployedUrl: () => 'http://127.0.0.1:3001/deploy/test/', deployApp: vi.fn(), captureCover: vi.fn(), downloadApp: vi.fn(), hasPreview: async () => true,
+  loadBuildState: async () => null,
 }));
 vi.mock('@/server/workspace', () => ({
   workspace: () => '/nonexistent-ts-backend-test-workspace',

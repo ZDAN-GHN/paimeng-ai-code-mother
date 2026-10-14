@@ -57,6 +57,7 @@ function Chat({ id }: { id: string }) {
   const [publishing, setPublishing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
+  const [busySeconds, setBusySeconds] = useState(0);
   const [visibleHistory, setVisibleHistory] = useState(historyPageSize);
   const [detailOpen, setDetailOpen] = useState(false);
   const [deployModal, setDeployModal] = useState<{ open: boolean; url: string }>({ open: false, url: '' });
@@ -97,6 +98,12 @@ function Chat({ id }: { id: string }) {
   });
   const generating = status === 'submitted' || status === 'streaming' || task?.status === 'generating' || task?.status === 'building';
   useEffect(() => { if (!generating) setMemoryBusy(false); }, [generating]);
+  const buildPending = publishing || rebuilding;
+  useEffect(() => {
+    if (!buildPending) { setBusySeconds(0); return; }
+    const timer = setInterval(() => setBusySeconds(value => value + 1), 1000);
+    return () => clearInterval(timer);
+  }, [buildPending]);
 
   useEffect(() => {
     mounted.current = true;
@@ -247,12 +254,15 @@ function Chat({ id }: { id: string }) {
   }
 
   const taskErrorKey = task?.error ? `${task.id}:${task.error}` : '';
+  // 失败之后又成功构建（builtAt）或部署（deployedTime）过，这条失败已不代表当前状态。
+  const failureTime = task?.updateTime ?? '';
+  const failureResolved = !!failureTime && [app?.builtAt, app?.deployedTime].some(time => !!time && time > failureTime);
   const building = task?.status === 'building';
   const visibleMessages = messages.slice(-visibleHistory);
   const sourceAvailable = app?.sourceAvailable ?? !!app?.previewUrl;
   const canPreview = !!app?.previewUrl;
   const requestError = error || chatError?.message || null;
-  const taskError = taskErrorKey !== dismissedTaskError ? task?.error ?? null : null;
+  const taskError = !failureResolved && taskErrorKey !== dismissedTaskError ? task?.error ?? null : null;
   const alert = requestError
     ? { type: 'error' as const, title: requestError, dismiss: () => { setError(''); clearError(); } }
     : taskError
@@ -280,10 +290,11 @@ function Chat({ id }: { id: string }) {
         <Button icon={<InfoCircleOutlined aria-hidden="true" />} disabled={!app} onClick={() => setDetailOpen(true)}>应用详情</Button>
         <Button href={canEdit ? '/app/edit/' + id : undefined} icon={<EditOutlined aria-hidden="true" />} disabled={!canEdit}>编辑应用</Button>
         <Button href={canDownload ? '/api/app/download/' + encodeURIComponent(id) : undefined} icon={<DownloadOutlined aria-hidden="true" />} disabled={!canDownload}>下载代码</Button>
-        <Button type="primary" icon={<CloudUploadOutlined aria-hidden="true" />} loading={publishing} disabled={!canDeploy} onClick={() => { void deploy(); }}>部署</Button>
+        <Button type="primary" icon={<CloudUploadOutlined aria-hidden="true" />} loading={publishing} disabled={!canDeploy} onClick={() => { void deploy(); }}>{publishing ? '部署中…' : '部署'}</Button>
       </Space>
     </div>
     {alert && <Alert style={{ marginBottom: 12 }} type={alert.type} title={alert.title} closable={{ 'aria-label': '关闭错误提示' }} onClose={alert.dismiss} />}
+    {buildPending && <Alert style={{ marginBottom: 12 }} type="info" title={publishing ? `正在部署：容器内安装依赖并打包，已用时 ${busySeconds} 秒（通常 1-5 分钟），完成后会弹出部署链接` : `正在构建预览：容器内安装依赖并打包，已用时 ${busySeconds} 秒（通常 1-5 分钟）`} />}
     {historyError && <Alert style={{ marginBottom: 12 }} type="warning" title={'对话历史暂不可读取：' + historyError} />}
     <div className="chat-columns">
       <section className="chat-panel" aria-label="应用对话">

@@ -9,6 +9,23 @@ export function failure(error:unknown){
  console.error('Request failed',error);
  return Response.json({code:50000,data:null,message:'服务处理失败，请稍后重试'},{status:500,headers});
 }
+const heartbeatIntervalMs=1000;
+// 部署/构建几十秒内没有响应字节时，Firefox 会在链路状态变化后关掉这条「无流量」连接；慢路径每 1s 写一个前导空白字节（JSON.parse 允许），客户端解析逻辑不变。
+export async function withHeartbeat(work:()=>Promise<Response>){
+ const encoder=new TextEncoder();
+ const settled=work().then(response=>({response}),error=>({error}));
+ const first=await Promise.race([settled,new Promise<null>(resolve=>{setTimeout(()=>resolve(null),heartbeatIntervalMs);})]);
+ if(first!==null)return 'response' in first?first.response:failure(first.error);
+ return new Response(new ReadableStream<Uint8Array>({
+  async start(controller){
+   const beat=setInterval(()=>{try{controller.enqueue(encoder.encode('\n'));}catch{}},heartbeatIntervalMs);
+   try{
+    const outcome=await settled;
+    controller.enqueue(encoder.encode(await ('response' in outcome?outcome.response:failure(outcome.error)).text()));
+   }finally{clearInterval(beat);controller.close();}
+  },
+ }),{headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Accel-Buffering':'no','X-Content-Type-Options':'nosniff'}});
+}
 const maxBodyBytes=100000;
 export function guardRequest(req:Request){
  const config=getConfig();

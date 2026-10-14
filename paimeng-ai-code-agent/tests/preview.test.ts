@@ -47,6 +47,8 @@ describe('真实预览 HTTP 边界', () => {
     expect(response.body).toContain('event.source!==parent||event.origin!==parentOrigin');
     expect(response.headers['set-cookie']).toBeUndefined();
     expect(response.headers['content-security-policy']).toContain('frame-ancestors http://localhost:3000');
+    expect(response.headers['content-security-policy']).toContain("style-src 'self' 'unsafe-inline' https://fonts.googleapis.com");
+    expect(response.headers['content-security-policy']).toContain("font-src 'self' data: https://fonts.gstatic.com");
     expect((await rawGet('/api/user/get/login')).status).toBe(404);
     expect((await rawGet(`/deploy/${key}/`, undefined, 'POST')).status).toBe(405);
     expect((await rawGet(`/deploy/${key}/`, { host: 'localhost:3000' })).status).toBe(403);

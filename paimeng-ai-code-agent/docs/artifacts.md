@@ -29,13 +29,13 @@ Vue、Vite 和 Vue 插件必需。React 工程使用另一套允许依赖（`rea
 
 ## 两阶段容器构建
 
-依赖安装阶段只能看到服务端重建的 `package.json`。该文件只包含批准的依赖，不包含生成的生命周期脚本、npm 配置或可执行源码。模板工程使用模板原版 `package.json` 与 `package-lock.json` 执行 `npm ci --ignore-scripts`，其余工程执行 `npm install --ignore-scripts`。
+依赖安装阶段只能看到服务端重建的 `package.json`。该文件只包含批准的依赖，不包含生成的生命周期脚本、npm 配置或可执行源码。模板工程使用模板原版 `package.json` 与 `package-lock.json` 执行 `npm ci --ignore-scripts`，其余工程执行 `npm install --ignore-scripts`。安装阶段使用的 registry 由 `BUILD_NPM_REGISTRY` 决定（默认官方源，国内网络可改成镜像；锁文件带 `integrity`，镜像无法改变装出来的产物内容）。
 
 安装完成后，服务端复制已校验的源码，忽略源工程的 `package.json` 和 `package-lock.json`。第二个容器使用 `--network=none`，模板工程先执行模板定义的检查命令（Vue 为 `vue-tsc --noEmit`，React 为 `tsc --noEmit`），再统一直接执行 Vite CLI。生成的 Vite 配置在这个断网容器中运行。生成工程的 `npm run build` 脚本不执行。
 
-两个阶段都使用非 root 用户、只读根文件系统、全部移除的 Linux capabilities、`no-new-privileges`、128 个进程上限、768 MiB 内存上限、一个 CPU，以及 256 MiB 的临时文件系统。每阶段最长 180 秒。容器只挂载独立临时构建目录，不挂载平台源码、数据库文件、Docker socket 或 `.env`。平台数据库和模型环境变量不传入容器。
+两个阶段都使用非 root 用户、只读根文件系统、全部移除的 Linux capabilities、`no-new-privileges`、128 个进程上限、768 MiB 内存上限、一个 CPU，以及 256 MiB 的临时文件系统。每阶段最长 `BUILD_TIMEOUT_MS`（默认 180 秒）。容器只挂载独立临时构建目录，不挂载平台源码、数据库文件、Docker socket 或 `.env`。平台数据库和模型环境变量不传入容器。
 
-构建因任务失效、租约丢失或构建超时而停止时会终止命令并清理容器和临时目录；客户端断开不会中止构建。Docker 守护进程由平台宿主访问，生成代码无法访问其 socket。该边界仍依赖宿主 Docker 和内核安全，不代表无漏洞的通用多租户沙箱。
+构建因任务失效、租约丢失或构建超时而停止时会终止命令并清理容器和临时目录；客户端断开不会中止构建。超时与命令失败会带可读原因返回给客户端（超时 `504/50400`，命令非零退出 `500/50001`），完整容器输出只写服务端日志。Docker 守护进程由平台宿主访问，生成代码无法访问其 socket。该边界仍依赖宿主 Docker 和内核安全，不代表无漏洞的通用多租户沙箱。
 
 HTML 和多文件类型不执行容器构建。它们必须提供包含 HTML 标签的 `index.html`，浏览器脚本只在隔离预览来源执行。
 

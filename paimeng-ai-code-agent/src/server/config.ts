@@ -18,6 +18,7 @@ const environment = z.object({
   MODEL_INTERNAL_BASE_URL_ORIGINS:z.string().default(''),
   MODEL_SECRET_KEY:z.string().max(512, 'MODEL_SECRET_KEY 最长 512 个字符').default(''),
   BUILD_IMAGE:z.enum(['node:24-alpine','node:24-bookworm-slim']).default('node:24-alpine'),
+  BUILD_NPM_REGISTRY:z.preprocess(blankAsUnset,z.url().default('https://registry.npmjs.org')),
   BUILD_TIMEOUT_MS:z.preprocess(blankAsUnset, z.coerce.number().int().min(10000, 'BUILD_TIMEOUT_MS 必须不小于 10000').max(1800000, 'BUILD_TIMEOUT_MS 不能超过 1800000').default(180000)),
   GENERATION_TIMEOUT_MS:z.preprocess(blankAsUnset, z.coerce.number().int().min(0, 'GENERATION_TIMEOUT_MS 不能为负数').max(86400000, 'GENERATION_TIMEOUT_MS 不能超过 86400000').default(0)),
   MODEL_REPLY_TIMEOUT_MS:z.preprocess(blankAsUnset, z.coerce.number().int().min(1000, 'MODEL_REPLY_TIMEOUT_MS 必须不小于 1000').max(86400000, 'MODEL_REPLY_TIMEOUT_MS 不能超过 86400000').default(900000)),
@@ -43,6 +44,7 @@ export function getConfig() {
   if(!/^paimeng_ai_code_mother_ts(?:_test)?$/.test(db.pathname.slice(1))) throw new Error('DATABASE_URL 必须指向独立的 paimeng_ai_code_mother_ts 或 paimeng_ai_code_mother_ts_test 数据库');
   if(new URL(env.APP_ORIGIN).origin===new URL(env.PREVIEW_ORIGIN).origin) throw new Error('预览与管理端必须使用不同来源');
   if(new URL(env.APP_ORIGIN).hostname===new URL(env.PREVIEW_ORIGIN).hostname) throw new Error('预览与管理端必须使用不同主机名，以隔离 Cookie');
+  if(!/^https?:\/\//.test(env.BUILD_NPM_REGISTRY)) throw new Error('BUILD_NPM_REGISTRY 必须是 HTTP(S) 地址');
   if(env.AI_MODE==='fixture'&&process.env.NODE_ENV==='production'&&process.env.ALLOW_TEST_FIXTURE!=='1') throw new Error('生产环境禁止 fixture 模型');
   const modelApiKeyEnvAllowlist=csv(env.MODEL_API_KEY_ENV_ALLOWLIST);
   const modelInternalBaseUrlOrigins=csv(env.MODEL_INTERNAL_BASE_URL_ORIGINS);
@@ -52,5 +54,5 @@ export function getConfig() {
   if(memory.summaryOutputTokens>=memory.summaryInputTokens) throw new Error('MEMORY_SUMMARY_OUTPUT_TOKENS 必须小于 MEMORY_SUMMARY_INPUT_TOKENS');
   if(memory.summaryOutputTokens>=memory.contextTokens) throw new Error('MEMORY_SUMMARY_OUTPUT_TOKENS 必须小于 MEMORY_CONTEXT_BUDGET_TOKENS');
   if(memory.recentTokens+memory.summaryOutputTokens>=memory.contextTokens) throw new Error('MEMORY_RECENT_BUDGET_TOKENS 与 MEMORY_SUMMARY_OUTPUT_TOKENS 之和必须小于 MEMORY_CONTEXT_BUDGET_TOKENS');
-  return {databaseUrl:env.DATABASE_URL,appOrigin:new URL(env.APP_ORIGIN).origin,previewOrigin:new URL(env.PREVIEW_ORIGIN).origin,aiBaseUrl:env.AI_BASE_URL,aiApiKey:env.AI_API_KEY,aiModel:env.AI_MODEL,aiMode:env.AI_MODE,modelApiKeyEnvAllowlist,modelInternalBaseUrlOrigins,modelSecretKey:env.MODEL_SECRET_KEY,buildImage:env.BUILD_IMAGE,buildTimeoutMs:env.BUILD_TIMEOUT_MS,generationTimeoutMs:env.GENERATION_TIMEOUT_MS,modelReplyTimeoutMs:env.MODEL_REPLY_TIMEOUT_MS,modelRetryLimit:env.MODEL_RETRY_LIMIT,memory,runtimeRoot:resolve(process.cwd(),'runtime'),chatRateLimit:{type:env.CHAT_RATE_LIMIT_TYPE,rate:env.CHAT_RATE_LIMIT_RATE,intervalSeconds:env.CHAT_RATE_LIMIT_INTERVAL,message:env.CHAT_RATE_LIMIT_MESSAGE||(env.CHAT_RATE_LIMIT_RATE>1?`每 ${env.CHAT_RATE_LIMIT_INTERVAL} 秒最多生成 ${env.CHAT_RATE_LIMIT_RATE} 次，请稍后重试`:`每 ${env.CHAT_RATE_LIMIT_INTERVAL} 秒只能生成一次，请稍后重试`)}};
+  return {databaseUrl:env.DATABASE_URL,appOrigin:new URL(env.APP_ORIGIN).origin,previewOrigin:new URL(env.PREVIEW_ORIGIN).origin,aiBaseUrl:env.AI_BASE_URL,aiApiKey:env.AI_API_KEY,aiModel:env.AI_MODEL,aiMode:env.AI_MODE,modelApiKeyEnvAllowlist,modelInternalBaseUrlOrigins,modelSecretKey:env.MODEL_SECRET_KEY,buildImage:env.BUILD_IMAGE,buildNpmRegistry:env.BUILD_NPM_REGISTRY,buildTimeoutMs:env.BUILD_TIMEOUT_MS,generationTimeoutMs:env.GENERATION_TIMEOUT_MS,modelReplyTimeoutMs:env.MODEL_REPLY_TIMEOUT_MS,modelRetryLimit:env.MODEL_RETRY_LIMIT,memory,runtimeRoot:resolve(process.cwd(),'runtime'),chatRateLimit:{type:env.CHAT_RATE_LIMIT_TYPE,rate:env.CHAT_RATE_LIMIT_RATE,intervalSeconds:env.CHAT_RATE_LIMIT_INTERVAL,message:env.CHAT_RATE_LIMIT_MESSAGE||(env.CHAT_RATE_LIMIT_RATE>1?`每 ${env.CHAT_RATE_LIMIT_INTERVAL} 秒最多生成 ${env.CHAT_RATE_LIMIT_RATE} 次，请稍后重试`:`每 ${env.CHAT_RATE_LIMIT_INTERVAL} 秒只能生成一次，请稍后重试`)}};
 }

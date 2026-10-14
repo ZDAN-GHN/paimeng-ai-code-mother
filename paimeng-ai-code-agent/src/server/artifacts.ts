@@ -2,10 +2,12 @@ import 'server-only';
 import { spawn } from 'node:child_process';
 import { copyFile, readdir, lstat, writeFile, rename, rm, realpath, readFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import archiver from 'archiver';
 import { PassThrough, Readable } from 'node:stream';
 import { getConfig } from './config';
+import { now } from './db';
+import { BusinessError } from './http';
 import { validateProjectManifest } from './build-contract';
 import { readTemplateFile, templateTypecheck, validateTemplateManifest } from './templates';
 import { appTemplate } from './template-workspace';
@@ -34,6 +36,11 @@ async function copySafeTree(source: string, destination: string, depth = 0, budg
   }
 }
 
+function buildFailureDetail(output: string) {
+  const text = output.replace(/\s+/g, ' ').trim();
+  return text.length > 400 ? '…' + text.slice(-400) : text;
+}
+
 function command(program: string, args: string[], signal?: AbortSignal, timeout = getConfig().buildTimeoutMs) {
   return new Promise<void>((resolve, reject) => {
     signal?.throwIfAborted();
@@ -51,8 +58,8 @@ function command(program: string, args: string[], signal?: AbortSignal, timeout 
     child.on('close', code => {
       cleanup();
       if (signal?.aborted) reject(signal.reason);
-      else if (expired) reject(new Error('构建超时'));
-      else if (code !== 0) reject(new Error(`构建失败 ${output.slice(-4000)}`));
+      else if (expired) reject(new BusinessError(504, 50400, `构建超时：容器内安装依赖与打包未能在 ${Math.round(timeout / 1000)} 秒内完成，请稍后重试；机器负载高时可调大 BUILD_TIMEOUT_MS`));
+      else if (code !== 0) { console.error('Build command failed', output.slice(-4000)); reject(new BusinessError(500, 50001, `构建失败：${buildFailureDetail(output) || `容器命令退出码 ${code}`}`)); }
       else resolve();
     });
   });
@@ -67,11 +74,61 @@ async function containerRun(stage: string, executable: string[], network: boolea
     'run', '--name', name, '--rm', '--user', `${uid}:${gid}`, '--read-only',
     '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=128', '--memory=768m', '--cpus=1',
     '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m', '--mount', `type=bind,src=${stage},dst=/work`, '--workdir', '/work',
-    '--env', 'HOME=/tmp', '--env', 'npm_config_cache=/tmp/npm', '--env', 'npm_config_registry=https://registry.npmjs.org',
+    '--env', 'HOME=/tmp', '--env', 'npm_config_cache=/tmp/npm', '--env', 'npm_config_registry=' + config.buildNpmRegistry,
     ...(!network ? ['--network=none'] : []), config.buildImage, ...executable,
   ];
   try { await command('docker', args, signal); }
   finally { await command('docker', ['rm', '-f', name], undefined, 10000).catch(() => {}); }
+}
+
+export type BuildState = { version: number; sourceHash: string; builtAt: string };
+
+const BUILD_STATE_VERSION = 1;
+// 清单以 .paimeng- 开头：文件工具、源码清单、产物拷贝、下载与预览都会跳过这类名字。
+const BUILD_STATE_FILE = '.paimeng-build.json';
+
+export function buildStatePath(app: WorkspaceApp) {
+  return join(workspace(app), BUILD_STATE_FILE);
+}
+
+/** 当前源码与模板版本的指纹：用来判断已有产物是否还对应当前代码。 */
+export async function sourceDigest(app: WorkspaceApp) {
+  const template = await appTemplate(app);
+  const hash = createHash('sha256');
+  hash.update(template ? `template:${template.id}@${template.version}\n` : 'template:none\n');
+  for (const path of await listProjectFiles(app)) {
+    const content = await readProjectFile(app, path);
+    hash.update(`file:${path}:${Buffer.byteLength(content)}\n`);
+    hash.update(content);
+  }
+  return hash.digest('hex');
+}
+
+export async function loadBuildState(app: WorkspaceApp): Promise<BuildState | null> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(buildStatePath(app), 'utf8'));
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const { version, sourceHash, builtAt } = parsed as Partial<BuildState>;
+    return version === BUILD_STATE_VERSION && typeof sourceHash === 'string' && typeof builtAt === 'string'
+      ? { version, sourceHash, builtAt }
+      : null;
+  } catch { return null; }
+}
+
+/** 记录「dist 里的产物对应这份源码」；构建期间源码变过就不会写，下次会自动重建。 */
+export async function saveBuildState(app: WorkspaceApp, sourceHash: string) {
+  const temporary = join(await ensureWorkspace(app), '.paimeng-state-' + randomUUID());
+  const state: BuildState = { version: BUILD_STATE_VERSION, sourceHash, builtAt: now() };
+  await writeFile(temporary, JSON.stringify(state), 'utf8');
+  await rename(temporary, buildStatePath(app));
+}
+
+/** 源码与模板都没变、产物也还在时，不必再进容器构建一次。 */
+export async function buildIsCurrent(app: WorkspaceApp, digest?: string) {
+  if (!isProjectCodeGenType(app.codeGenType)) return false;
+  const state = await loadBuildState(app);
+  if (!state || state.sourceHash !== (digest ?? await sourceDigest(app))) return false;
+  return hasPreview(app);
 }
 
 export async function buildApp(app: WorkspaceApp, signal?: AbortSignal) {
@@ -89,6 +146,9 @@ export async function buildApp(app: WorkspaceApp, signal?: AbortSignal) {
   const lockedManifest = template ? await readTemplateFile(template, 'package.json') : null;
   const lock = template ? await readTemplateFile(template, 'package-lock.json') : null;
   if (lock && await readProjectFile(app, 'package-lock.json') !== lock) throw new Error('模板依赖锁已改变，请恢复对应模板版本的 package-lock.json');
+  // 生成阶段已经构建过一次、之后源码没动过：直接复用那份产物，不再进容器。
+  const digest = await sourceDigest(app);
+  if (await buildIsCurrent(app, digest)) return;
   const runtime = await ensureRuntime();
   const builds = await ensureSafeDirectory(join(runtime, 'builds'));
   const stage = await ensureSafeDirectory(join(builds, randomUUID()));
@@ -123,6 +183,8 @@ export async function buildApp(app: WorkspaceApp, signal?: AbortSignal) {
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     try { await rename(stagedDist, existing); }
     catch (error) { if (backedUp) await rename(backup, existing); throw error; }
+    // 清单只在源码整个构建期间都没变时才写：写不下去也只是下次重新构建，不影响本次产物。
+    if (await sourceDigest(app) === digest) await saveBuildState(app, digest).catch(() => {});
   } finally {
     await rm(stagedDist, { recursive: true, force: true });
     await rm(backup, { recursive: true, force: true });

@@ -8,7 +8,7 @@ import { nextSnowflakeId } from './snowflake';
 import { withAppWriter } from './generation-store';
 import { publicUser } from './auth';
 import { BusinessError } from './http';
-import { previewUrl, deployedUrl, deployApp, captureCover, downloadApp, hasPreview, buildApp } from './artifacts';
+import { previewUrl, deployedUrl, deployApp, captureCover, downloadApp, hasPreview, buildApp, loadBuildState } from './artifacts';
 import { listProjectFiles, workspace } from './workspace';
 import { routeCodeGenType } from './model';
 import { appTemplate, initializeTemplate } from './template-workspace';
@@ -26,6 +26,7 @@ async function appView(row:typeof apps.$inferSelect,connection:Pick<ReturnType<t
  const [creator]=await connection.select().from(users).where(and(eq(users.id,row.userId),eq(users.isDelete,0))).limit(1);
  const app:AppInfo={...row,id:String(row.id),userId:String(row.userId),codeGenType:z.enum(codeGenTypes).parse(row.codeGenType),user:creator?publicUser(creator):undefined};
  app.previewUrl=await hasPreview(app)?previewUrl(app):null;
+ app.builtAt=(await loadBuildState(app))?.builtAt??null;
  try{app.sourceAvailable=(await listProjectFiles(app)).length>0;}catch{app.sourceAvailable=false;}
  const template=await appTemplate(app);app.template=template?{id:template.id,version:template.version}:null;
  app.deployUrl=app.deployKey?deployedUrl(app.deployKey):null;
