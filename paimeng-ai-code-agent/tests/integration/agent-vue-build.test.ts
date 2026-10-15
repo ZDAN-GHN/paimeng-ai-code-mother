@@ -40,6 +40,10 @@ vi.mock('@/server/model', async () => {
   };
   return {
     modelFor: buildModel,
+    modelBindingFor: async () => {
+      const model = await buildModel();
+      return { model, generation: { model, alias: 'codegen.default', providerId: null, modelName: null } };
+    },
     taskModelsFor: async () => {
       const model = await buildModel();
       const source = { model, alias: 'codegen.default', providerId: null, modelName: null };

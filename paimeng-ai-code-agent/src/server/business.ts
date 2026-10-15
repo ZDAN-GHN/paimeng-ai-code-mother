@@ -1,8 +1,8 @@
 import 'server-only';
 import { rm } from 'node:fs/promises';
-import { and, asc, desc, eq, like, lt, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, like, lt, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
-import { apps, users, histories, generations, leases, sessions, messages } from './schema';
+import { apps, users, histories, generations, generationSteps, leases, sessions, messages } from './schema';
 import { db, now } from './db';
 import { nextSnowflakeId } from './snowflake';
 import { withAppWriter } from './generation-store';
@@ -67,7 +67,7 @@ export async function updateApp(raw:unknown,user:User,admin=false){
 }
 export async function deleteApp(raw:unknown,user:User){
  const {id}=z.object({id:idSchema}).parse(raw);await getApp(id,user,true,true);
- await withAppWriter(id,async(tx,row)=>{if(String(row.userId)!==user.id&&user.userRole!=='admin')throw new BusinessError(403,40300,'无权限删除该应用');await tx.update(apps).set({isDelete:1,updateTime:now()}).where(eq(apps.id,row.id));await tx.update(histories).set({isDelete:1}).where(eq(histories.appId,row.id));await tx.delete(messages).where(eq(messages.appId,row.id));});return true;
+ await withAppWriter(id,async(tx,row)=>{if(String(row.userId)!==user.id&&user.userRole!=='admin')throw new BusinessError(403,40300,'无权限删除该应用');await tx.update(apps).set({isDelete:1,updateTime:now()}).where(eq(apps.id,row.id));await tx.update(histories).set({isDelete:1}).where(eq(histories.appId,row.id));await tx.delete(messages).where(eq(messages.appId,row.id));await tx.delete(generationSteps).where(inArray(generationSteps.generationId, tx.select({ id: generations.id }).from(generations).where(eq(generations.appId, row.id))));});return true;
 }
 export async function assertIdle(id:string){const [lease]=await db().select().from(leases).where(eq(leases.appId,BigInt(id))).limit(1);if(lease&&lease.expiresAt>now())throw new BusinessError(409,40900,'应用正在生成，请先取消或等待完成');}
 export async function download(id:string,user:User){await getApp(id,user,true);return withAppWriter(id,async(tx,row)=>{if(String(row.userId)!==user.id)throw new BusinessError(403,40300,'无权限下载该应用');return downloadApp(await appView(row,tx));});}

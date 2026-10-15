@@ -2,6 +2,7 @@ import 'server-only';
 import { cursorAfter, type HistoryTurn, type SummarySnapshot } from './memory-types';
 import { buildSummaryPrompt, serializeTurn, summaryRequestTokens } from './memory-serialize';
 import { summarizeHistory, type SummaryModelSource } from './memory-model';
+import { recordSummaryStep } from './generation-accounting';
 import { commitSummary, recordSummaryAttempt } from './memory-store';
 import { BusinessError } from './http';
 
@@ -18,6 +19,8 @@ export type ConsolidateResult =
 export async function consolidateHistory(input: {
   appId: string;
   generationId: string;
+  /** 本次生成内第几次摘要调用（记账用） */
+  stepNumber: number;
   summary: SummarySnapshot | null;
   turns: readonly HistoryTurn[];
   model: SummaryModelSource;
@@ -33,7 +36,9 @@ export async function consolidateHistory(input: {
   if (summaryRequestTokens(previousText, input.turns.map(serializeTurn)) > input.inputTokens) {
     return { kind: 'skipped', reason: 'over-input-budget' };
   }
+  const startedAt = Date.now();
   const result = await summarizeHistory({ model: input.model.model, system, prompt, outputTokens: input.outputTokens, timeoutMs: input.timeoutMs, signal: input.signal });
+  await recordSummaryStep({ generationId: input.generationId, round: 1, stepNumber: input.stepNumber, durationMs: Date.now() - startedAt, model: input.model, result });
   if (!result.ok) {
     if (result.reason !== 'cancelled') await recordAttempt(input.appId, input.generationId);
     return { kind: 'failed', reason: result.reason };

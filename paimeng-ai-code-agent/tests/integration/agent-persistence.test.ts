@@ -91,6 +91,10 @@ vi.mock('@/server/model', async () => {
   return {
     routeCodeGenType: async () => 'html' as const,
     modelFor: buildModel,
+    modelBindingFor: async (...args: Parameters<typeof fixtureModel>) => {
+      const model = await buildModel(...args);
+      return { model, generation: { model, alias: 'codegen.default', providerId: null, modelName: null } };
+    },
     taskModelsFor: async (...args: Parameters<typeof fixtureModel>) => {
       const model = await buildModel(...args);
       const source = { model, alias: 'codegen.default', providerId: null, modelName: null };
@@ -160,7 +164,7 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
     await cleaned(id, 'failed');
     expect(control.builds).toBe(0);
     expect(body).toContain('"type":"error"');
-    expect(await generationFor(appId)).toMatchObject({ error: '测试模型连接断开' });
+    expect(await generationFor(appId)).toMatchObject({ error: '测试模型连接断开', stopReason: 'model-error' });
   });
 
   it('上游输出到 token 上限（length）不再判为失败，文件照常落盘并继续构建', async () => {
@@ -170,6 +174,7 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
     await cleaned(id, 'ready');
     expect(control.writes).toBe(1);
     expect(control.builds).toBe(1);
+    expect(await generationFor(appId)).toMatchObject({ stopReason: 'completed' });
   });
 
   it('没有客户端消费也完成工具消息，最终持久化完成前下一任务仍被拒绝；下一轮模型获得完整权威历史', async () => {
@@ -243,6 +248,7 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
     expect(req.signal.aborted).toBe(false);
     await cleaned(id, 'cancelled');
     expect(control.writes).toBe(0);
+    expect(await generationFor(appId)).toMatchObject({ stopReason: 'cancelled' });
   });
 
   it('构建失败能定位到源码时，诊断回到模型，修复后仍以同一条回复 ready 完成', async () => {
@@ -279,7 +285,7 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
     // 模型在修复轮只给了一段回复，没写文件：三次模型调用（首轮两步 + 修复轮一步），只构建了一次。
     expect(control.builds).toBe(1);
     expect(control.prompts).toHaveLength(3);
-    expect(await generationFor(appId)).toMatchObject({ error: '生成结果缺少有效 HTML 页面；本轮模型未修改任何文件，已停止继续修复' });
+    expect(await generationFor(appId)).toMatchObject({ error: '生成结果缺少有效 HTML 页面；本轮模型未修改任何文件，已停止继续修复', stopReason: 'verification-failed' });
   });
 
   it('不可修复的构建失败（安装阶段）不会多花一轮模型', async () => {
@@ -289,7 +295,7 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
     await cleaned(id, 'failed');
     expect(control.builds).toBe(1);
     expect(control.prompts).toHaveLength(2);
-    expect(await generationFor(appId)).toMatchObject({ error: '构建失败：npm 退出码 1' });
+    expect(await generationFor(appId)).toMatchObject({ error: '构建失败：npm 退出码 1', stopReason: 'verification-failed' });
   });
 
   it('修复轮耗尽后以原始构建错误结束，不把「没修好」当成失败原因', async () => {
@@ -303,7 +309,7 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
     expect(control.builds).toBe(2);
     expect(control.prompts).toHaveLength(4);
     expect(JSON.stringify(control.prompts[2])).toContain('共 1 次');
-    expect(await generationFor(appId)).toMatchObject({ error: '生成结果缺少有效 HTML 页面' });
+    expect(await generationFor(appId)).toMatchObject({ error: '生成结果缺少有效 HTML 页面', stopReason: 'verification-failed' });
   });
 
   it('提交前已中止的请求不创建任务或历史', async () => {
@@ -328,7 +334,7 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
     const id = randomUUID(); const response = await chatResponse(request(), payload(id), actor);
     await entered.promise; expect(fireTimeout).toBeTypeOf('function'); fireTimeout!();
     await response.text(); await cleaned(id, 'failed');
-    expect(await generationFor(appId)).toMatchObject({ error: '生成超时' });
+    expect(await generationFor(appId)).toMatchObject({ error: '生成超时', stopReason: 'timeout' });
   });
 
   it('模型上下文最多携带二十条消息，权威历史与工具上下文完整保存', async () => {

@@ -11,6 +11,7 @@ import { groupTurns, type LoadedTurn, type StoredMessage } from './memory-contex
 import { readSummaryInTx } from './memory-store';
 import { compareTurns, isLegacyMessageId, legacyMessagePrefix, type SummarySnapshot, type TurnOrder } from './memory-types';
 import type { GenerationStatus, User } from '@/shared/contracts';
+import { stopReasonFrom, type GenerationStopReason } from './generation-accounting';
 
 const activeStatuses = ['generating', 'building'];
 const expiry = () => new Date(Date.now() + 30000).toISOString().slice(0, 23).replace('T', ' ');
@@ -24,7 +25,7 @@ async function lockedApp(tx: Transaction, appId: string) {
 async function recoverLease(tx: Transaction, lease: typeof leases.$inferSelect) {
   const [task] = await tx.select().from(generations).where(eq(generations.id, lease.generationId)).for('update');
   if (task && activeStatuses.includes(task.status)) {
-    await tx.update(generations).set({ status: 'failed', error: '生成进程中断，请重新提交', updateTime: now() }).where(eq(generations.id, task.id));
+    await tx.update(generations).set({ status: 'failed', error: '生成进程中断，请重新提交', stopReason: 'interrupted', updateTime: now() }).where(eq(generations.id, task.id));
   }
   await tx.delete(leases).where(and(eq(leases.appId, lease.appId), eq(leases.generationId, lease.generationId)));
 }
@@ -169,8 +170,8 @@ export async function beginGeneration(appId: string, id: string, user: User, mes
   return (await beginGenerationContext(appId, id, user, message, clientAddress)).history;
 }
 
-export async function setGeneration(id: string, status: GenerationStatus, error: string | null = null) {
-  const [result] = await db().update(generations).set({ status, error, updateTime: now() }).where(and(eq(generations.id, id), sql`${generations.status} in ('generating', 'building')`));
+export async function setGeneration(id: string, status: GenerationStatus, error: string | null = null, stopReason: GenerationStopReason | null = null) {
+  const [result] = await db().update(generations).set({ status, error, stopReason, updateTime: now() }).where(and(eq(generations.id, id), sql`${generations.status} in ('generating', 'building')`));
   return result.affectedRows > 0;
 }
 
@@ -232,7 +233,7 @@ export async function recordAssistant(appId: string, user: User, message: UIMess
   await withAppWriter(appId, tx => storeAssistant(tx, appId, BigInt(user.id), message, historyId));
 }
 
-export async function finishGeneration(id: string, status: 'ready' | 'failed' | 'cancelled', error: string | null, responseMessage?: UIMessage) {
+export async function finishGeneration(id: string, status: 'ready' | 'failed' | 'cancelled', error: string | null, responseMessage?: UIMessage, stopReason?: GenerationStopReason) {
   const [task] = await db().select().from(generations).where(eq(generations.id, id));
   if (!task) return;
   const historyId = responseMessage?.parts.length ? await nextSnowflakeId() : null;
@@ -244,9 +245,12 @@ export async function finishGeneration(id: string, status: 'ready' | 'failed' | 
     if (!activeStatuses.includes(current.status)) {
       status = current.status as 'ready' | 'failed' | 'cancelled';
       error = current.error ?? (status === 'cancelled' ? '生成已取消' : null);
+      // 并发取消/租约回收已经写过停止原因时以它为准；否则保留调用方给出的原因。
+      stopReason = stopReasonFrom(current.stopReason) ?? stopReason;
     }
+    const effectiveStopReason = stopReason ?? (status === 'ready' ? 'completed' : status === 'cancelled' ? 'cancelled' : null);
     if (responseMessage?.parts.length && historyId !== null) await storeAssistant(tx, String(task.appId), task.userId, responseMessage, historyId);
-    await tx.update(generations).set({ status, error, updateTime: now() }).where(eq(generations.id, id));
+    await tx.update(generations).set({ status, error, stopReason: effectiveStopReason, updateTime: now() }).where(eq(generations.id, id));
     await tx.delete(leases).where(and(eq(leases.appId, task.appId), eq(leases.generationId, id)));
   });
 }

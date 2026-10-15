@@ -60,13 +60,20 @@ export async function taskModelsFor(type: CodeGenType, prompt: string, template?
  return { model: generation.model, generation, summary, summaryUnavailableReason: null };
 }
 
-/** 只解析生成模型：关闭历史摘要时不应触碰可选别名，否则可选模型的问题会波及基础生成。 */
-export async function modelFor(type:CodeGenType,prompt:string,template?:TemplateIdentity|null){
+/** 只解析生成模型（关闭历史摘要时不触碰可选别名），并返回实际绑定标识用于记账。 */
+export async function modelBindingFor(type:CodeGenType,prompt:string,template?:TemplateIdentity|null):Promise<{model:LanguageModel;generation:SummaryModelSource}>{
  if (getConfig().aiMode === 'fixture') {
   const { fixtureModel } = await import('./fixture-model');
-  return fixtureModel(type, prompt, template);
+  const model = fixtureModel(type, prompt, template);
+  return { model, generation: { model, alias: 'codegen.default', providerId: null, modelName: null } };
  }
- return (await modelRegistry().resolveBinding('codegen.default')).model;
+ const binding = await modelRegistry().resolveBinding('codegen.default');
+ return { model: binding.model, generation: { model: binding.model, alias: binding.alias, providerId: binding.providerId, modelName: binding.modelName } };
+}
+
+/** 只解析生成模型：关闭历史摘要时不应触碰可选别名，否则可选模型的问题会波及基础生成。 */
+export async function modelFor(type:CodeGenType,prompt:string,template?:TemplateIdentity|null){
+ return (await modelBindingFor(type, prompt, template)).model;
 }
 
 export async function routeCodeGenType(prompt: string): Promise<CodeGenType> {

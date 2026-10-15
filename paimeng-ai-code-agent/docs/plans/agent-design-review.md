@@ -69,6 +69,8 @@ P1 表示建议近期优先，P2 表示在基础测量和可靠性完善后推�
 
 现状：`ts_generation` 保存任务状态、错误和时间；UIMessage 保存工具过程；最新摘要行保存部分 usage。缺少按任务关联的生成模型用量、步骤/工具耗时、实际模型绑定、重试和明确停止原因。见 [schema.ts](../../src/server/schema.ts)、[agent.ts](../../src/server/agent.ts)。
 
+实现状态与详细设计见 §9。
+
 建议：先建立统一的任务/步骤记录，让 D1 可以消费。至少关联 `generationId`、实际模型标识、步骤序号、工具名、耗时、输入/输出 token、结束原因。摘要、生成与可观测的重试分开计量；无法获取的上游调用用量标记未知，不能记成零。费用使用可追溯的价格来源估算，不把聚合商官价当成实际账单。
 
 验收：抽取一次成功、工具纠错、超时、取消和构建失败任务，可以回答它在哪里花时间、调用了什么、为何停止、哪些费用可确定。无需先部署独立观测服务，也不默认保存完整敏感提示词或工具正文。
@@ -357,3 +359,41 @@ UX 结果：构建期间仍是“代码已生成，正在完成构建，构建�
 局限：种子是注入出来的（`EVAL_SEED_MODE=spare|required`），没有 `BUILD_REPAIR_ROUNDS=0` 的对照（不必：注入之后直接构建已证明种子会让构建失败）；单模型、单提示、n 很小，不能当成功率；`required` 模式（把已有渲染接到可空变量上，删掉会丢用户可见信息）这次没能进入修复轮。
 
 本次交付为评估、设计记录与评估工具。除 §8.0、§8.10、§8.11 标为“实测”的数据外，没有运行压测或故障注入。
+
+## 9. D2 详细设计：生成任务统一记账
+
+实现状态：2026-10-16 已落地（`migrations/010_generation_accounting.sql`、`src/server/generation-accounting.ts`），未提交；评估工具的执行记录仍保留在 §8.11。
+
+### 9.1 目标与边界
+
+要回答的问题：一次生成在哪里花时间、调用了什么、用了多少 token、为什么停下。不做的事：不新增后台/看板/HTTP 接口（数据留在 MySQL，用 SQL 或脚本读）；不做费用估算（按 D2 原文，价格来源可追溯之前不把聚合商官价当账单）；不保存提示词、工具正文、模型输出或构建日志正文（§8.10 第 4 条：诊断不落库）；不改 API 响应（`stopReason` 随现有 `app/generation` 查询返回，前端暂不使用）。
+
+### 9.2 数据模型
+
+`ts_generation_step`：每个模型步骤、每次摘要调用、每次构建尝试各一行（`kind` = `model` / `summary` / `build`）。
+
+- `round` 是这个步骤所属的模型轮次，首轮为 1，每次构建失败后的修复轮 +1；构建尝试行记触发它的轮次。
+- 用量的 NULL/0 区分：`inputTokens` 等为 NULL 表示上游没有返回用量，0 表示已知的零。汇总时跳过 NULL，只要有一步未知就把合计标记为未知（`usageUnknown`），避免把未知记成免费。
+- 实际绑定与实际路由分开记：`modelAlias`/`providerId`/`modelName` 是注册表里的绑定（§8.11 的教训：报告必须记模型实际标识）；`upstreamProvider`/`upstreamModelId` 是 SDK 归一化后真正响应的模型，两者不一致正是路由/降级要查的线索。
+- 耗时三段分开：`modelMs` 等模型响应，`toolMs` 执行工具，`durationMs` 整个步骤（含排队与流式输出）；构建与摘要的 `durationMs` 是墙钟。
+- `toolCalls` 只存 `{name, ok, ms}`；参数错误的 `tool-input-error` 与执行失败都记 `ok=false`，正文不落库。
+- `finishReason` 记模型自己的停止原因（`stop`/`length`/`tool-calls`…），与任务级 `stopReason` 分开。
+- 外键 `generationId → ts_generation(id) ON DELETE CASCADE`：测试或未来的数据保留策略硬删任务时步骤随之回收；表不设 `createTime` 之外的区间索引，读法是按任务整段取。
+
+`ts_generation.stopReason`：任务级停止原因，取值 `completed` / `no-changes` / `step-limit` / `verification-failed` / `timeout` / `cancelled` / `lease-lost` / `model-error` / `initialization-failed` / `interrupted`。取消与超时从 abort 信号区分（带原因的 abort 不是用户取消）；`interrupted` 由租约回收写；`beginGeneration` 的启动恢复写 `initialization-failed`。停止原因只在终态写一次，`finishGeneration` 遇到并发取消/回收时保留已有值。
+
+### 9.3 写入与读取
+
+写入全是尽力而为：记账失败只告警，不影响生成与状态转移。写入点在 `agent.ts` 的四个位置——`onStepEnd`（模型步骤，复用给刷新回复计时器的钩子，不额外注册），`verify()`（每次构建，成功/失败/取消都记，失败带 `build-feedback` 的分类与阶段），`consolidateHistory`（每次摘要调用，含失败），以及 `finishGeneration`（任务级）。
+
+读取用 `generationAccount(generationId)`：返回任务状态、停止原因、模型标识、按 `kind` 的合计（模型/摘要/构建、墙钟总时长）和逐步明细。它只有服务端调用方，暂不对前端开放。
+
+### 9.4 与 D1 / D6 的衔接
+
+D1 的评估报告可以直接用 `totals`（构建通过率、步数、耗时、token 与未知用量标记），不必再自己包一层计时；D6 的预算（步数、绝对时长、token）应当用这里的真实分布来定——比如“一轮修复平均多花多少 token/秒”现在是可观测量，而不是估计值。
+
+### 9.5 测试
+
+- `tests/generation-accounting.test.ts`：停止原因分类的纯函数用例。
+- `tests/integration/generation-accounting.test.ts`：真实 `buildApp`（html 校验，不需要 Docker）跑五种任务——成功、工具参数错误后重试、上游不返回用量、模型不写文件、客户端取消——从 `ts_generation_step` 读回断言步骤、工具成败、token 与停止原因。
+- 既有用例补了 `stopReason` 断言（超时/取消/不可修复/无进展/修复耗尽/模型流失败/长度截断）。

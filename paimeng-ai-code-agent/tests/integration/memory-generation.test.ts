@@ -74,6 +74,11 @@ vi.mock('@/server/model', async () => {
       control.modelForCalls += 1;
       return buildGenerationModel(...args);
     },
+    modelBindingFor: async (...args: Parameters<typeof fixtureModel>) => {
+      control.modelForCalls += 1;
+      const model = buildGenerationModel(...args);
+      return { model, generation: { model, alias: 'codegen.default', providerId: null, modelName: null } };
+    },
     // taskModelsFor 返回同一份注册表快照上的两个模型；测试里用受控 fixture 代替。
     taskModelsFor: async (...args: Parameters<typeof fixtureModel>) => {
       control.taskModelsForCalls += 1;
@@ -300,11 +305,11 @@ describe('滚动摘要接入生成流程（受控摘要模型）', () => {
     await db().insert(leases).values({ appId: BigInt(appId), generationId, expiresAt: new Date(Date.now() + 30000).toISOString().slice(0, 23).replace('T', ' ') });
     const model: SummaryModelSource = { model: new MockLanguageModelV4({ modelId: 'fixture-summary', doGenerate: async () => ({ content: [{ type: 'text', text: '摘要一' }], finishReason: { unified: 'stop', raw: undefined }, usage: { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } }, warnings: [] }) }), alias: 'memory.summarize', providerId: null, modelName: 'fixture' };
     const turns = [turn({ start: 1, end: 2, userText: '需要保留登录', assistantText: '已实现' })];
-    const input = { appId, generationId, summary: null, turns, model, inputTokens: 24000, outputTokens: 2048, timeoutMs: 5000, signal: new AbortController().signal };
+    const input = { appId, generationId, stepNumber: 0, summary: null, turns, model, inputTokens: 24000, outputTokens: 2048, timeoutMs: 5000, signal: new AbortController().signal };
     const first = await consolidateHistory(input);
     expect(first.kind).toBe('committed');
     expect((first as { summary: { version: string } }).summary.version).toBe('1');
-    const second = await consolidateHistory(input);
+    const second = await consolidateHistory({ ...input, stepNumber: 1 });
     expect(second.kind).toBe('failed');
     expect((second as { reason: string }).reason).toBe('version-conflict');
     const [row] = await summaryRows();

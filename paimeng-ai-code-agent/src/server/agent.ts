@@ -2,10 +2,11 @@ import 'server-only';
 import { z } from 'zod';
 import { ToolLoopAgent, tool, convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, validateUIMessages, type ModelMessage, type UIMessage, type UIMessageStreamWriter } from 'ai';
 import { idSchema, type User } from '@/shared/contracts';
-import { modelFor, taskModelsFor } from './model';
+import { modelBindingFor, taskModelsFor } from './model';
 import { getApp } from './business';
 import { buildApp, sourceDigest } from './artifacts';
 import { classifyBuildFailure, formatBuildFeedback, noProgressMessage } from './build-feedback';
+import { recordBuildStep, recordModelStep, stopReasonOf, type GenerationStopReason } from './generation-accounting';
 import { readProjectFileAsText, writeProjectFile, listProjectFiles, modifyProjectFile, deleteProjectFile } from './workspace';
 import { beginGenerationContext, type BeginGenerationContext, heartbeat, saveMessage, setGeneration, restoreGeneration, finishGeneration, generationFor, withAppWriter } from './generation-store';
 import { validatePrompt } from './prompt-safety';
@@ -54,7 +55,7 @@ export async function cancelGeneration(appId: string, user: User) {
   await getApp(appId, user, true);
   const task = await generationFor(appId);
   if (task?.status === 'generating') {
-    await setGeneration(task.id, 'cancelled', '生成已取消');
+    await setGeneration(task.id, 'cancelled', '生成已取消', 'cancelled');
     controllers.get(task.id)?.abort();
   }
   return true;
@@ -72,7 +73,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
   const { generationTimeoutMs, modelReplyTimeoutMs, modelRetryLimit, memory: memoryBudgets, webAccess } = getConfig();
   const taskModels = memoryBudgets.enabled
     ? await taskModelsFor(app.codeGenType, prompt, app.template)
-    : { model: await modelFor(app.codeGenType, prompt, app.template), summary: null, summaryUnavailableReason: null };
+    : { ...(await modelBindingFor(app.codeGenType, prompt, app.template)), summary: null, summaryUnavailableReason: null };
   if (taskModels.summaryUnavailableReason) {
     console.warn(`历史摘要不可用，本轮跳过整理：${taskModels.summaryUnavailableReason}`);
   }
@@ -137,7 +138,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
     check();
   } catch (error) {
     req.signal.removeEventListener('abort', abortRequest);
-    if (acquired) await finishGeneration(input.requestId, controller.signal.aborted ? 'cancelled' : 'failed', '生成初始化失败');
+    if (acquired) await finishGeneration(input.requestId, controller.signal.aborted ? 'cancelled' : 'failed', '生成初始化失败', undefined, controller.signal.aborted ? 'cancelled' : 'initialization-failed');
     throw error;
   }
   controllers.set(input.requestId, controller);
@@ -167,6 +168,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
     let remaining = turnsAfter(context.turns, cursorOf(summary));
     let hinted = false;
     let rounds = 0;
+    let summaryCalls = 0;
     try {
       while (source && rounds < maxConsolidationRounds && contextCost(summary, remaining) > memoryBudgets.contextTokens) {
         const plan = planSummaryWindow({ turns: remaining.map(toHistoryTurn), summary, incomingText: prompt, budgets: memoryBudgets, contextOverheadTokens: overhead, nowMs: Date.now() });
@@ -175,6 +177,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
         const result = await consolidateHistory({
           appId: app.id,
           generationId: input.requestId,
+          stepNumber: summaryCalls++,
           summary,
           turns: plan.summarize,
           model: source,
@@ -207,13 +210,42 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
       const settle = (outcome: Parameters<typeof writer.setOutcome>[0]) => { try { writer.setOutcome(outcome); } catch {} };
       let status: 'ready' | 'failed' | 'cancelled' = 'failed';
       let error: string | null = null;
+      let stopReason: GenerationStopReason = 'model-error';
+      // 构建尝试的记账序号
+      let buildSteps = 0;
       const hintBuild = (data: { status: 'repairing'; attempt: number; maxAttempts: number }) => {
         try { writer.write({ type: 'data-build', data, transient: true }); } catch {}
       };
+      // 服务端拥有验证权：每次构建尝试单独记账，失败时带上分类与阶段。
+      const verify = async (round: number) => {
+        const startedAt = Date.now();
+        const stepNumber = buildSteps++;
+        try {
+          await write(() => buildApp(app, building.signal));
+          await recordBuildStep({ generationId: input.requestId, round, stepNumber, durationMs: Date.now() - startedAt, outcome: { status: 'ok' } });
+        } catch (problem) {
+          const detail = problem instanceof Error ? problem.message.slice(0, 1000) : '构建失败';
+          if (phase.aborted) {
+            const reason = phase.reason instanceof Error ? phase.reason.message : String(phase.reason);
+            await recordBuildStep({ generationId: input.requestId, round, stepNumber, durationMs: Date.now() - startedAt, outcome: { status: 'cancelled', detail: reason.slice(0, 1000) } });
+          } else {
+            await recordBuildStep({ generationId: input.requestId, round, stepNumber, durationMs: Date.now() - startedAt, outcome: { status: 'failed', verdict: classifyBuildFailure(problem), detail } });
+          }
+          throw problem;
+        }
+      };
       // 每一轮模型循环复用同一个 Agent、工具与租约；修复轮只是把诊断拼在上一轮消息之后。
-      const runRound = async (messages: ModelMessage[], originalMessages: UIMessage[]) => {
+      const runRound = async (messages: ModelMessage[], originalMessages: UIMessage[], round: number) => {
         await ensureWritable();
-        const result = await agent.stream({ messages, abortSignal: controller.signal, onStepStart: armReplyTimer, onStepEnd: clearReplyTimer });
+        const result = await agent.stream({
+          messages,
+          abortSignal: controller.signal,
+          onStepStart: armReplyTimer,
+          onStepEnd: async step => {
+            clearReplyTimer();
+            await recordModelStep(step, { generationId: input.requestId, round, model: taskModels.generation });
+          },
+        });
         let message: UIMessage | undefined;
         const uiStream = createUIMessageStream({
           originalMessages,
@@ -236,9 +268,13 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
         } finally { reader.releaseLock(); }
         check();
         if (streamError) throw streamError;
+        const steps = await result.steps;
         const finish = await result.finishReason;
-        if (finish !== 'stop' && finish !== 'length') throw new Error(`Agent 未正常结束 ${finish}`);
-        remainingSteps = Math.max(0, remainingSteps - (await result.steps).length);
+        remainingSteps = Math.max(0, remainingSteps - steps.length);
+        if (finish !== 'stop' && finish !== 'length') {
+          stopReason = remainingSteps === 0 ? 'step-limit' : 'model-error';
+          throw new Error(`Agent 未正常结束 ${finish}`);
+        }
         if (!message) throw new Error('模型响应未完成');
         return { responseMessages: await result.responseMessages, message };
       };
@@ -248,8 +284,11 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
         const validated = await validateUIMessages({ messages: assembled, tools: allTools });
         let messages = await convertToModelMessages(validated, { tools: allTools, ignoreIncompleteToolCalls: true });
         let uiMessages = validated;
-        let round = await runRound(messages, uiMessages);
-        if (!changed) throw new Error('Agent 未保存任何文件');
+        let round = await runRound(messages, uiMessages, 1);
+        if (!changed) {
+          stopReason = 'no-changes';
+          throw new Error('Agent 未保存任何文件');
+        }
         let snapshot = await sourceDigest(app);
         const maxRepairs = getConfig().buildRepairRounds;
         // 服务端拥有验证权：构建失败且失败能定位到生成源码时，把诊断交回模型，最多修复 maxRepairs 轮。
@@ -259,15 +298,19 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
             phase = building.signal;
             clearTimeout(timeout);
             timeout = armGenerationTimeout(building);
-            await write(() => buildApp(app, building.signal));
+            await verify(repairs + 1);
             check();
             status = 'ready';
+            stopReason = 'completed';
             settle({ status: 'completed' });
             break;
           } catch (problem) {
             if (phase.aborted) throw problem;
             const verdict = classifyBuildFailure(problem);
-            if (!verdict.repairable || repairs >= maxRepairs || remainingSteps <= 0) throw problem;
+            if (!verdict.repairable || repairs >= maxRepairs || remainingSteps <= 0) {
+              stopReason = 'verification-failed';
+              throw problem;
+            }
             repairs += 1;
             hintBuild({ status: 'repairing', attempt: repairs, maxAttempts: maxRepairs });
             if (!await restoreGeneration(input.requestId)) throw problem;
@@ -278,23 +321,28 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
             const feedback: ModelMessage = { role: 'user', content: formatBuildFeedback(problem, repairs, maxRepairs) };
             messages = [...messages, ...round.responseMessages, feedback];
             uiMessages = [...uiMessages, round.message];
-            round = await runRound(messages, uiMessages);
+            round = await runRound(messages, uiMessages, repairs + 1);
             const current = await sourceDigest(app);
             // 源码没变时再构建结果必然相同；保留原始构建错误，只补充「本轮模型没改文件」。
-            if (current === snapshot) throw new Error(noProgressMessage(problem));
+            if (current === snapshot) {
+              stopReason = 'verification-failed';
+              throw new Error(noProgressMessage(problem));
+            }
             snapshot = current;
           }
         }
       } catch (problem) {
         const cancelled = phase.aborted && phase.reason instanceof DOMException && phase.reason.name === 'AbortError';
-        const reason = phase.aborted && !cancelled ? phase.reason : problem;
+        const abortedReason = phase.aborted && !cancelled ? phase.reason : undefined;
+        const reason = abortedReason ?? problem;
         status = cancelled ? 'cancelled' : 'failed';
         error = cancelled ? '生成已取消' : reason instanceof Error ? reason.message.slice(0, 1000) : '生成失败';
+        stopReason = stopReasonOf({ current: stopReason, cancelled, abortedReason });
         settle(cancelled ? { status: 'aborted' } : { status: 'failed', error: reason });
         throw problem;
       } finally {
         try {
-          await finishGeneration(input.requestId, status, error, responseMessage);
+          await finishGeneration(input.requestId, status, error, responseMessage, stopReason);
         } finally {
           clearInterval(pulse);
           clearTimeout(timeout);
