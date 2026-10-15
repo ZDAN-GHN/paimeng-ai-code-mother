@@ -21,6 +21,7 @@
     "test:integration": "vitest run tests/integration",
     "test:e2e": "playwright test",
     "test:e2e:dev": "E2E_APP_MODE=dev E2E_APP_PORT=3020 E2E_PREVIEW_PORT=3021 tsx scripts/test-e2e.ts tests/e2e/dev-warnings.spec.ts",
+    "eval:repair": "vitest run --config vitest.eval.config.ts",
     "db:migrate": "tsx --env-file=.env scripts/migrate.ts",
     "db:test:setup": "tsx --env-file=.env scripts/test-database.ts",
     "db:import": "tsx --conditions=react-server --env-file=.env scripts/import-legacy.ts",
