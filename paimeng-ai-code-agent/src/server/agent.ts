@@ -1,12 +1,13 @@
 import 'server-only';
 import { z } from 'zod';
-import { ToolLoopAgent, tool, isStepCount, convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, validateUIMessages, type UIMessage, type UIMessageStreamWriter } from 'ai';
+import { ToolLoopAgent, tool, convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, validateUIMessages, type ModelMessage, type UIMessage, type UIMessageStreamWriter } from 'ai';
 import { idSchema, type User } from '@/shared/contracts';
 import { modelFor, taskModelsFor } from './model';
 import { getApp } from './business';
-import { buildApp } from './artifacts';
+import { buildApp, sourceDigest } from './artifacts';
+import { classifyBuildFailure, formatBuildFeedback, noProgressMessage } from './build-feedback';
 import { readProjectFileAsText, writeProjectFile, listProjectFiles, modifyProjectFile, deleteProjectFile } from './workspace';
-import { beginGenerationContext, type BeginGenerationContext, heartbeat, saveMessage, setGeneration, finishGeneration, generationFor, withAppWriter } from './generation-store';
+import { beginGenerationContext, type BeginGenerationContext, heartbeat, saveMessage, setGeneration, restoreGeneration, finishGeneration, generationFor, withAppWriter } from './generation-store';
 import { validatePrompt } from './prompt-safety';
 import { clientIp } from './rate-limit';
 import { generationInstructions, staticPathHint } from './generation-instructions';
@@ -122,7 +123,10 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
   const entry = app.template ? templateEntry(app.template) : null;
   const webInstruction = webEnabled ? ` ${webAccessInstructions({ images: imagesEnabled, strictLicense: webAccess.strictLicense })}` : '';
   const instructions = generationInstructions({ app, template: app.template, entry, webInstruction });
-  const agent = new ToolLoopAgent({ model, tools, stopWhen: isStepCount(30), maxRetries: modelRetryLimit, instructions });
+  // 步数预算在首轮与修复轮之间共享：stopWhen 只在 settings 上，所以用闭包变量控制每轮剩余步数。
+  const maxSteps = 30;
+  let remainingSteps = maxSteps;
+  const agent = new ToolLoopAgent({ model, tools, stopWhen: ({ steps }) => steps.length >= remainingSteps, maxRetries: modelRetryLimit, instructions });
   const overhead = contextOverheadTokens(instructions, toolSchemas, toolDescriptions);
   let context: BeginGenerationContext;
   let acquired = false;
@@ -203,17 +207,19 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
       const settle = (outcome: Parameters<typeof writer.setOutcome>[0]) => { try { writer.setOutcome(outcome); } catch {} };
       let status: 'ready' | 'failed' | 'cancelled' = 'failed';
       let error: string | null = null;
-      try {
-        check();
-        const assembled = await buildModelMessages(writer);
-        const validated = await validateUIMessages({ messages: assembled, tools: allTools });
+      const hintBuild = (data: { status: 'repairing'; attempt: number; maxAttempts: number }) => {
+        try { writer.write({ type: 'data-build', data, transient: true }); } catch {}
+      };
+      // 每一轮模型循环复用同一个 Agent、工具与租约；修复轮只是把诊断拼在上一轮消息之后。
+      const runRound = async (messages: ModelMessage[], originalMessages: UIMessage[]) => {
         await ensureWritable();
-        const result = await agent.stream({ messages: await convertToModelMessages(validated, { tools: allTools, ignoreIncompleteToolCalls: true }), abortSignal: controller.signal, onStepStart: armReplyTimer, onStepEnd: clearReplyTimer });
+        const result = await agent.stream({ messages, abortSignal: controller.signal, onStepStart: armReplyTimer, onStepEnd: clearReplyTimer });
+        let message: UIMessage | undefined;
         const uiStream = createUIMessageStream({
-          originalMessages: validated,
+          originalMessages,
           generateId: () => `${input.requestId}-assistant`,
           onStepEnd: async ({ responseMessage }) => { await saveMessage(app.id, responseMessage, input.requestId); },
-          onEnd: event => { responseMessage = event.responseMessage; },
+          onEnd: event => { responseMessage = event.responseMessage; message = event.responseMessage; },
           onError: failure => { streamError = failure; return '模型响应失败'; },
           execute: ({ writer: modelWriter }) => {
             modelWriter.merge(result.toUIMessageStream({ sendReasoning: true, onError: failure => failure instanceof Error ? failure.message.slice(0, 1000) : '工具或模型响应失败' }));
@@ -232,15 +238,53 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
         if (streamError) throw streamError;
         const finish = await result.finishReason;
         if (finish !== 'stop' && finish !== 'length') throw new Error(`Agent 未正常结束 ${finish}`);
-        if (!changed) throw new Error('Agent 未保存任何文件');
-        if (!await setGeneration(input.requestId, 'building')) throw new Error('生成任务已停止');
-        phase = building.signal;
-        clearTimeout(timeout);
-        timeout = armGenerationTimeout(building);
-        await write(() => buildApp(app, building.signal));
+        remainingSteps = Math.max(0, remainingSteps - (await result.steps).length);
+        if (!message) throw new Error('模型响应未完成');
+        return { responseMessages: await result.responseMessages, message };
+      };
+      try {
         check();
-        status = 'ready';
-        settle({ status: 'completed' });
+        const assembled = await buildModelMessages(writer);
+        const validated = await validateUIMessages({ messages: assembled, tools: allTools });
+        let messages = await convertToModelMessages(validated, { tools: allTools, ignoreIncompleteToolCalls: true });
+        let uiMessages = validated;
+        let round = await runRound(messages, uiMessages);
+        if (!changed) throw new Error('Agent 未保存任何文件');
+        let snapshot = await sourceDigest(app);
+        const maxRepairs = getConfig().buildRepairRounds;
+        // 服务端拥有验证权：构建失败且失败能定位到生成源码时，把诊断交回模型，最多修复 maxRepairs 轮。
+        for (let repairs = 0; ;) {
+          try {
+            if (!await setGeneration(input.requestId, 'building')) throw new Error('生成任务已停止');
+            phase = building.signal;
+            clearTimeout(timeout);
+            timeout = armGenerationTimeout(building);
+            await write(() => buildApp(app, building.signal));
+            check();
+            status = 'ready';
+            settle({ status: 'completed' });
+            break;
+          } catch (problem) {
+            if (phase.aborted) throw problem;
+            const verdict = classifyBuildFailure(problem);
+            if (!verdict.repairable || repairs >= maxRepairs || remainingSteps <= 0) throw problem;
+            repairs += 1;
+            hintBuild({ status: 'repairing', attempt: repairs, maxAttempts: maxRepairs });
+            if (!await restoreGeneration(input.requestId)) throw problem;
+            phase = controller.signal;
+            clearTimeout(timeout);
+            timeout = armGenerationTimeout(controller);
+            check();
+            const feedback: ModelMessage = { role: 'user', content: formatBuildFeedback(problem, repairs, maxRepairs) };
+            messages = [...messages, ...round.responseMessages, feedback];
+            uiMessages = [...uiMessages, round.message];
+            round = await runRound(messages, uiMessages);
+            const current = await sourceDigest(app);
+            // 源码没变时再构建结果必然相同；保留原始构建错误，只补充「本轮模型没改文件」。
+            if (current === snapshot) throw new Error(noProgressMessage(problem));
+            snapshot = current;
+          }
+        }
       } catch (problem) {
         const cancelled = phase.aborted && phase.reason instanceof DOMException && phase.reason.name === 'AbortError';
         const reason = phase.aborted && !cancelled ? phase.reason : problem;

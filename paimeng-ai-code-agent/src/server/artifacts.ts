@@ -9,6 +9,7 @@ import { getConfig } from './config';
 import { now } from './db';
 import { BusinessError } from './http';
 import { validateProjectManifest } from './build-contract';
+import { markBuildFailure, sourceFailure, type BuildStage } from './build-feedback';
 import { readTemplateFile, templateTypecheck, validateTemplateManifest } from './templates';
 import { findStaticScaffoldFiles } from './project-shape';
 import { appTemplate } from './template-workspace';
@@ -42,7 +43,7 @@ function buildFailureDetail(output: string) {
   return text.length > 400 ? '…' + text.slice(-400) : text;
 }
 
-function command(program: string, args: string[], signal?: AbortSignal, timeout = getConfig().buildTimeoutMs) {
+function command(program: string, args: string[], signal?: AbortSignal, timeout = getConfig().buildTimeoutMs, stage: BuildStage = 'platform') {
   return new Promise<void>((resolve, reject) => {
     signal?.throwIfAborted();
     const child = spawn(program, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: process.env.NODE_ENV }, shell: false });
@@ -55,18 +56,18 @@ function command(program: string, args: string[], signal?: AbortSignal, timeout 
     child.stdout.on('data', append);
     child.stderr.on('data', append);
     function cleanup() { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
-    child.on('error', error => { cleanup(); reject(error); });
+    child.on('error', error => { cleanup(); reject(markBuildFailure(error, { stage, detail: output })); });
     child.on('close', code => {
       cleanup();
       if (signal?.aborted) reject(signal.reason);
-      else if (expired) reject(new BusinessError(504, 50400, `构建超时：容器内安装依赖与打包未能在 ${Math.round(timeout / 1000)} 秒内完成，请稍后重试；机器负载高时可调大 BUILD_TIMEOUT_MS`));
-      else if (code !== 0) { console.error('Build command failed', output.slice(-4000)); reject(new BusinessError(500, 50001, `构建失败：${buildFailureDetail(output) || `容器命令退出码 ${code}`}`)); }
+      else if (expired) reject(markBuildFailure(new BusinessError(504, 50400, `构建超时：容器内安装依赖与打包未能在 ${Math.round(timeout / 1000)} 秒内完成，请稍后重试；机器负载高时可调大 BUILD_TIMEOUT_MS`), { stage, detail: output }));
+      else if (code !== 0) { console.error('Build command failed', output.slice(-4000)); reject(markBuildFailure(new BusinessError(500, 50001, `构建失败：${buildFailureDetail(output) || `容器命令退出码 ${code}`}`), { stage, detail: output })); }
       else resolve();
     });
   });
 }
 
-async function containerRun(stage: string, executable: string[], network: boolean, signal?: AbortSignal) {
+async function containerRun(directory: string, step: Extract<BuildStage, 'install' | 'typecheck' | 'build'>, executable: string[], network: boolean, signal?: AbortSignal) {
   const config = getConfig();
   const name = 'paimeng-ts-build-' + randomUUID();
   const uid = process.getuid?.() || 1000;
@@ -74,11 +75,11 @@ async function containerRun(stage: string, executable: string[], network: boolea
   const args = [
     'run', '--name', name, '--rm', '--user', `${uid}:${gid}`, '--read-only',
     '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=128', '--memory=768m', '--cpus=1',
-    '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m', '--mount', `type=bind,src=${stage},dst=/work`, '--workdir', '/work',
+    '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m', '--mount', `type=bind,src=${directory},dst=/work`, '--workdir', '/work',
     '--env', 'HOME=/tmp', '--env', 'npm_config_cache=/tmp/npm', '--env', 'npm_config_registry=' + config.buildNpmRegistry,
     ...(!network ? ['--network=none'] : []), config.buildImage, ...executable,
   ];
-  try { await command('docker', args, signal); }
+  try { await command('docker', args, signal, config.buildTimeoutMs, step); }
   finally { await command('docker', ['rm', '-f', name], undefined, 10000).catch(() => {}); }
 }
 
@@ -138,17 +139,21 @@ export async function buildApp(app: WorkspaceApp, signal?: AbortSignal) {
   const files = await listProjectFiles(app);
   if (!isProjectCodeGenType(app.codeGenType)) {
     const forbidden = findStaticScaffoldFiles(app.codeGenType, files);
-    if (forbidden.length) throw new Error(`生成结果与应用类型不符：${app.codeGenType} 应用不能包含 ${forbidden.slice(0, 3).map(file => file.path).join('、')}。原生静态页面不经过构建，请删除这些文件改回 index.html，或新建应用时选择 Vue/React 模板。`);
+    if (forbidden.length) throw sourceFailure(`生成结果与应用类型不符：${app.codeGenType} 应用不能包含 ${forbidden.slice(0, 3).map(file => file.path).join('、')}。原生静态页面不经过构建，请删除这些文件改回 index.html，或新建应用时选择 Vue/React 模板。`);
+    if (!files.includes('index.html')) throw sourceFailure('生成结果缺少 index.html');
     const index = await readProjectFile(app, 'index.html');
-    if (!/<html[\s>]/i.test(index)) throw new Error('生成结果缺少有效 HTML 页面');
+    if (!/<html[\s>]/i.test(index)) throw sourceFailure('生成结果缺少有效 HTML 页面');
     return;
   }
   const template = await appTemplate(app);
-  const manifest = await readProjectFile(app, 'package.json');
-  const dependencies = template ? validateTemplateManifest(template, manifest) : validateProjectManifest(app.codeGenType, manifest);
+  let dependencies: ReturnType<typeof validateProjectManifest>;
+  try {
+    const manifest = await readProjectFile(app, 'package.json');
+    dependencies = template ? validateTemplateManifest(template, manifest) : validateProjectManifest(app.codeGenType, manifest);
+  } catch (error) { throw sourceFailure(error); }
   const lockedManifest = template ? await readTemplateFile(template, 'package.json') : null;
   const lock = template ? await readTemplateFile(template, 'package-lock.json') : null;
-  if (lock && await readProjectFile(app, 'package-lock.json') !== lock) throw new Error('模板依赖锁已改变，请恢复对应模板版本的 package-lock.json');
+  if (lock && await readProjectFile(app, 'package-lock.json') !== lock) throw markBuildFailure(new Error('模板依赖锁已改变，请恢复对应模板版本的 package-lock.json'), { stage: 'template' });
   // 生成阶段已经构建过一次、之后源码没动过：直接复用那份产物，不再进容器。
   const digest = await sourceDigest(app);
   if (await buildIsCurrent(app, digest)) return;
@@ -163,19 +168,19 @@ export async function buildApp(app: WorkspaceApp, signal?: AbortSignal) {
     await writeFile(join(stage, 'package.json'), lockedManifest ?? JSON.stringify({ name: 'isolated-generated-app', version: '1.0.0', private: true, type: 'module', dependencies }));
     if (lock) await writeFile(join(stage, 'package-lock.json'), lock);
     // Install has network access, but never sees generated executable code or npm configuration.
-    await containerRun(stage, ['npm', lock ? 'ci' : 'install', '--ignore-scripts', '--no-audit', '--no-fund'], true, signal);
+    await containerRun(stage, 'install', ['npm', lock ? 'ci' : 'install', '--ignore-scripts', '--no-audit', '--no-fund'], true, signal);
     for (const file of files) {
       if (file === 'package.json' || file === 'package-lock.json') continue;
       let parent = stage;
       for (const part of file.split('/').slice(0, -1)) parent = await ensureSafeDirectory(join(parent, part));
       await copyFile(join(root, file), join(stage, file));
     }
-    if (template) await containerRun(stage, [...templateTypecheck(template)], false, signal);
-    await containerRun(stage, ['node', 'node_modules/vite/bin/vite.js', 'build', '--base=./'], false, signal);
+    if (template) await containerRun(stage, 'typecheck', [...templateTypecheck(template)], false, signal);
+    await containerRun(stage, 'build', ['node', 'node_modules/vite/bin/vite.js', 'build', '--base=./'], false, signal);
     signal?.throwIfAborted();
     const dist = join(stage, 'dist');
     const index = await lstat(join(dist, 'index.html'));
-    if (!index.isFile() || index.isSymbolicLink()) throw new Error('构建没有输出 index.html');
+    if (!index.isFile() || index.isSymbolicLink()) throw sourceFailure('构建没有输出 index.html');
     await copySafeTree(dist, stagedDist);
     signal?.throwIfAborted();
     try {

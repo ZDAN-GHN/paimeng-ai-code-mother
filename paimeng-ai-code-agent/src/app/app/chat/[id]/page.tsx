@@ -23,6 +23,15 @@ function isConsolidating(data: unknown): boolean {
   return typeof data === 'object' && data !== null && (data as { status?: unknown }).status === 'consolidating';
 }
 
+/** 服务端在构建失败后进入修复轮；data 是未知形状，只在阶段与次数都合法时显示提示。 */
+function repairingOf(data: unknown): { attempt: number; maxAttempts: number } | null {
+  if (typeof data !== 'object' || data === null) return null;
+  const part = data as { status?: unknown; attempt?: unknown; maxAttempts?: unknown };
+  return part.status === 'repairing' && typeof part.attempt === 'number' && typeof part.maxAttempts === 'number'
+    ? { attempt: part.attempt, maxAttempts: part.maxAttempts }
+    : null;
+}
+
 function selectionContext(selected: Selected) {
   const lines = ['\n\n选中元素信息：'];
   if (selected.pagePath) lines.push('- 页面路径: ' + selected.pagePath);
@@ -58,6 +67,7 @@ function Chat({ id }: { id: string }) {
   const [cancelling, setCancelling] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
   const [busySeconds, setBusySeconds] = useState(0);
+  const [repairing, setRepairing] = useState<{ attempt: number; maxAttempts: number } | null>(null);
   const [visibleHistory, setVisibleHistory] = useState(historyPageSize);
   const [detailOpen, setDetailOpen] = useState(false);
   const [deployModal, setDeployModal] = useState<{ open: boolean; url: string }>({ open: false, url: '' });
@@ -94,10 +104,13 @@ function Chat({ id }: { id: string }) {
     id, transport,
     onFinish: () => { void refresh(); },
     onError: e => { if (mounted.current) setError(e.message); },
-    onData: part => { if (part.type === 'data-memory') setMemoryBusy(isConsolidating(part.data)); },
+    onData: part => {
+      if (part.type === 'data-memory') setMemoryBusy(isConsolidating(part.data));
+      if (part.type === 'data-build') setRepairing(repairingOf(part.data));
+    },
   });
   const generating = status === 'submitted' || status === 'streaming' || task?.status === 'generating' || task?.status === 'building';
-  useEffect(() => { if (!generating) setMemoryBusy(false); }, [generating]);
+  useEffect(() => { if (!generating) { setMemoryBusy(false); setRepairing(null); } }, [generating]);
   const buildPending = publishing || rebuilding;
   useEffect(() => {
     if (!buildPending) { setBusySeconds(0); return; }
@@ -317,7 +330,7 @@ function Chat({ id }: { id: string }) {
           )}
         </div>
         {memoryBusy && <p className="memory-hint" role="status">正在整理历史上下文，请稍候…</p>}
-        {generating && <p className="generating-hint" role="status">正在生成或构建，请稍候…</p>}
+        {generating && <p className="generating-hint" role="status">{repairing ? '构建未通过，正在进行第 ' + repairing.attempt + '/' + repairing.maxAttempts + ' 次修复…' : '正在生成或构建，请稍候…'}</p>}
         <div className="chat-input">
           {selected && <Alert className="selected-element-alert" type="info" closable onClose={() => setSelected(null)}
             title={'已选中 ' + selected.tagName.toLowerCase() + (selected.id ? ' #' + selected.id : '') + (selected.className ? ' .' + selected.className.split(/\s+/).filter(Boolean).join('.') : '')}

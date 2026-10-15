@@ -10,6 +10,7 @@ import { nextSnowflakeId } from '@/server/snowflake';
 import { users, apps, histories, messages, leases, generations, rateLimits } from '@/server/schema';
 import { publicUser } from '@/server/auth';
 import { generationFor, loadMessages } from '@/server/generation-store';
+import { markBuildFailure } from '@/server/build-feedback';
 import { chatResponse, cancelGeneration } from '@/server/agent';
 import type { User } from '@/shared/contracts';
 
@@ -17,6 +18,7 @@ const control = vi.hoisted(() => ({
   finish: null as null | { entered: () => void; release: Promise<void> },
   build: null as null | ((signal: AbortSignal) => Promise<void>),
   writes: 0,
+  repairWrite: false,
   toolFailure: false,
   fatalFailure: false,
   lengthFinish: false,
@@ -32,6 +34,8 @@ vi.mock('@/server/generation-store', async importOriginal => {
 });
 vi.mock('@/server/artifacts', () => ({
   buildApp: async (_app: unknown, signal: AbortSignal) => { control.builds++; if (control.build) await control.build(signal); },
+  // 源码指纹按写入次数变化：模型没改文件时指纹不变，正是修复轮的无进展终止条件。
+  sourceDigest: async () => 'digest-' + control.writes,
   workspace: () => '/nonexistent-ts-backend-test-workspace', previewUrl: () => 'http://127.0.0.1:3001/preview/test/',
   deployedUrl: () => 'http://127.0.0.1:3001/deploy/test/', deployApp: vi.fn(), captureCover: vi.fn(), downloadApp: vi.fn(), hasPreview: async () => true,
   loadBuildState: async () => null,
@@ -42,21 +46,30 @@ vi.mock('@/server/workspace', () => ({
   writeProjectFile: async () => { control.writes++; }, modifyProjectFile: async () => {}, deleteProjectFile: async () => {},
 }));
 vi.mock('@/server/model', async () => {
-  const { fixtureModel } = await import('@/server/fixture-model');
+  const { fixtureModel, fixtureFiles } = await import('@/server/fixture-model');
   const { MockLanguageModelV4, simulateReadableStream } = await import('ai/test');
+  const usage = { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } };
   const buildModel = async (...args: Parameters<typeof fixtureModel>) => {
     const model = fixtureModel(...args); const stream = model.doStream.bind(model);
     let first = true;
+    let calls = 0;
     model.doStream = async options => {
       control.prompts.push(options.prompt);
+      const index = calls++;
       if (first && (control.toolFailure || control.fatalFailure)) {
         first = false;
-        const usage = { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } };
         const chunks: LanguageModelV4StreamPart[] = control.fatalFailure
           ? [{ type: 'stream-start', warnings: [] }, { type: 'error', error: new Error('测试模型连接断开') }]
           : [{ type: 'stream-start', warnings: [] }, { type: 'tool-call', toolCallId: 'invalid-write', toolName: 'writeFiles', input: '{"files":' }, { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage }];
         const failure = new MockLanguageModelV4({ doStream: async () => ({ stream: simulateReadableStream<LanguageModelV4StreamPart>({ chunks }) }) });
         return failure.doStream(options);
+      }
+      // fixtureModel 只在首轮会写文件；修复轮需要模型再看一眼诊断后重新写入，才能验证「改过源码后重新构建」。
+      if (control.repairWrite && index >= 2) {
+        const chunks: LanguageModelV4StreamPart[] = index % 2 === 0
+          ? [{ type: 'stream-start', warnings: [] }, { type: 'tool-call', toolCallId: randomUUID(), toolName: 'writeFiles', input: JSON.stringify({ files: fixtureFiles('html', '服务器可信需求') }) }, { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage }]
+          : [{ type: 'stream-start', warnings: [] }, { type: 'text-start', id: 'repair-reply' }, { type: 'text-delta', id: 'repair-reply', delta: '已按诊断修正源码。' }, { type: 'text-end', id: 'repair-reply' }, { type: 'finish', finishReason: { unified: 'stop', raw: undefined }, usage }];
+        return { stream: simulateReadableStream<LanguageModelV4StreamPart>({ chunks, initialDelayInMs: 10, chunkDelayInMs: 5 }) };
       }
       const result = await stream(options);
       if (!control.lengthFinish) return result;
@@ -109,7 +122,7 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
     actor = publicUser(row);
   });
   beforeEach(async () => {
-    control.finish = null; control.build = null; control.writes = 0; control.prompts = []; control.toolFailure = false; control.fatalFailure = false; control.lengthFinish = false; control.builds = 0;
+    control.finish = null; control.build = null; control.writes = 0; control.repairWrite = false; control.prompts = []; control.toolFailure = false; control.fatalFailure = false; control.lengthFinish = false; control.builds = 0;
     const id = await nextSnowflakeId();
     await db().insert(apps).values({ id, initPrompt: '服务器可信需求', codeGenType: 'html', userId: BigInt(actor.id), createTime: now(), updateTime: now() });
     appId = id.toString();
@@ -117,6 +130,7 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
   afterEach(async () => {
     vi.restoreAllMocks();
     delete process.env.GENERATION_TIMEOUT_MS;
+    delete process.env.BUILD_REPAIR_ROUNDS;
     for (const table of [leases, generations, messages, histories]) await db().delete(table).where(eq(table.appId, BigInt(appId)));
     await db().delete(apps).where(eq(apps.id, BigInt(appId)));
     // Keep the per-user 60 second generation window independent between tests.
@@ -229,6 +243,67 @@ describe('真实 SDK 流与数据库完成顺序（文件和构建边界采用�
     expect(req.signal.aborted).toBe(false);
     await cleaned(id, 'cancelled');
     expect(control.writes).toBe(0);
+  });
+
+  it('构建失败能定位到源码时，诊断回到模型，修复后仍以同一条回复 ready 完成', async () => {
+    control.repairWrite = true;
+    control.build = async () => {
+      if (control.builds === 1) throw markBuildFailure(new Error('生成结果缺少有效 HTML 页面'), { stage: 'source' });
+    };
+    const id = randomUUID();
+    const body = await (await chatResponse(request(), payload(id), actor)).text();
+    await cleaned(id, 'ready');
+    // 首轮 2 步 + 修复轮 2 步；构建跑了两次。
+    expect(control.builds).toBe(2);
+    expect(control.prompts).toHaveLength(4);
+    const repairPrompt = JSON.stringify(control.prompts[2]);
+    expect(repairPrompt).toContain('验证未通过（第 1 次修复，共 2 次）');
+    expect(repairPrompt).toContain('阶段：源码校验');
+    expect(repairPrompt).toContain('生成结果缺少有效 HTML 页面');
+    expect(repairPrompt).toContain('不要重新生成整个工程');
+    expect(body).toContain('data-build');
+    expect(body).toContain('repairing');
+    // 修复轮与原轮是同一条 assistant 消息，不产生第二个气泡。
+    const stored = await loadMessages(appId);
+    expect(stored).toHaveLength(2);
+    expect(stored[1].id).toBe(`${id}-assistant`);
+    expect(stored[1].parts).toContainEqual(expect.objectContaining({ type: 'tool-writeFiles', state: 'output-available' }));
+    expect(stored[1].parts.filter(part => part.type === 'text')).toHaveLength(2);
+  });
+
+  it('修复轮没有改动源码时立即停止，不再多跑一次注定相同的构建', async () => {
+    control.build = async () => { throw markBuildFailure(new Error('生成结果缺少有效 HTML 页面'), { stage: 'source' }); };
+    const id = randomUUID();
+    await (await chatResponse(request(), payload(id), actor)).text();
+    await cleaned(id, 'failed');
+    // 模型在修复轮只给了一段回复，没写文件：三次模型调用（首轮两步 + 修复轮一步），只构建了一次。
+    expect(control.builds).toBe(1);
+    expect(control.prompts).toHaveLength(3);
+    expect(await generationFor(appId)).toMatchObject({ error: '生成结果缺少有效 HTML 页面；本轮模型未修改任何文件，已停止继续修复' });
+  });
+
+  it('不可修复的构建失败（安装阶段）不会多花一轮模型', async () => {
+    control.build = async () => { throw markBuildFailure(new Error('构建失败：npm 退出码 1'), { stage: 'install', detail: 'npm error code ECONNRESET' }); };
+    const id = randomUUID();
+    await (await chatResponse(request(), payload(id), actor)).text();
+    await cleaned(id, 'failed');
+    expect(control.builds).toBe(1);
+    expect(control.prompts).toHaveLength(2);
+    expect(await generationFor(appId)).toMatchObject({ error: '构建失败：npm 退出码 1' });
+  });
+
+  it('修复轮耗尽后以原始构建错误结束，不把「没修好」当成失败原因', async () => {
+    process.env.BUILD_REPAIR_ROUNDS = '1';
+    control.repairWrite = true;
+    control.build = async () => { throw markBuildFailure(new Error('生成结果缺少有效 HTML 页面'), { stage: 'source' }); };
+    const id = randomUUID();
+    await (await chatResponse(request(), payload(id), actor)).text();
+    await cleaned(id, 'failed');
+    // 首轮构建 + 一次修复轮各构建一次。
+    expect(control.builds).toBe(2);
+    expect(control.prompts).toHaveLength(4);
+    expect(JSON.stringify(control.prompts[2])).toContain('共 1 次');
+    expect(await generationFor(appId)).toMatchObject({ error: '生成结果缺少有效 HTML 页面' });
   });
 
   it('提交前已中止的请求不创建任务或历史', async () => {

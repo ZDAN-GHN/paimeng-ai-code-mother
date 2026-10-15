@@ -33,6 +33,7 @@ const control = vi.hoisted(() => ({
 
 vi.mock('@/server/artifacts', () => ({
   buildApp: async () => {},
+  sourceDigest: async () => 'digest',
   workspace: () => '/nonexistent-ts-backend-test-workspace', previewUrl: () => 'http://127.0.0.1:3001/preview/test/',
   deployedUrl: () => 'http://127.0.0.1:3001/deploy/test/', deployApp: vi.fn(), captureCover: vi.fn(), downloadApp: vi.fn(), hasPreview: async () => true,
   loadBuildState: async () => null,

@@ -174,6 +174,12 @@ export async function setGeneration(id: string, status: GenerationStatus, error:
   return result.affectedRows > 0;
 }
 
+/** 构建失败后回到可取消的生成阶段（修复轮）：只允许 building → generating，不会覆盖取消等终态。 */
+export async function restoreGeneration(id: string) {
+  const [result] = await db().update(generations).set({ status: 'generating', error: null, updateTime: now() }).where(and(eq(generations.id, id), eq(generations.status, 'building')));
+  return result.affectedRows > 0;
+}
+
 export async function heartbeat(id: string) {
   const [result] = await db().update(leases).set({ expiresAt: expiry() }).where(and(eq(leases.generationId, id), gte(leases.expiresAt, now())));
   if (!result.affectedRows) throw new BusinessError(409, 40900, '生成任务租约已失效');
