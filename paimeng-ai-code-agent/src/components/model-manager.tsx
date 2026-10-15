@@ -360,7 +360,7 @@ function ModelConfigManager() {
         <Alert
           type="error"
           showIcon
-          message="模型配置加载失败"
+          title="模型配置加载失败"
           description={error ?? '未知错误'}
           action={
             <Button size="small" onClick={() => void reload()}>
@@ -492,7 +492,7 @@ function ModelConfigManager() {
         <Alert
           type="error"
           showIcon
-          message="模型配置刷新失败"
+          title="模型配置刷新失败"
           description={error}
           style={{ marginBottom: 16 }}
         />
@@ -502,7 +502,7 @@ function ModelConfigManager() {
         <Alert
           type="error"
           showIcon
-          message="操作失败：模型配置已被其他操作修改"
+          title="操作失败：模型配置已被其他操作修改"
           description={
             <Space orientation="vertical" size={4}>
               <span>{conflict}</span>
@@ -525,7 +525,7 @@ function ModelConfigManager() {
           <Alert
             type="info"
             showIcon
-            message="模型配置尚未初始化"
+            title="模型配置尚未初始化"
             description={
               <div>
                 <p>当前数据库中没有可用的模型提供商与别名。请在服务器上执行一次初始化命令，从环境变量导入默认提供商与必需别名：</p>
@@ -991,7 +991,7 @@ function ConflictAlert({ message, onReload }: { message: string; onReload: () =>
     <Alert
       type="error"
       showIcon
-      message="保存失败：模型配置已被其他操作修改"
+      title="保存失败：模型配置已被其他操作修改"
       description={
         <Space orientation="vertical" size={4}>
           <span>{message}</span>

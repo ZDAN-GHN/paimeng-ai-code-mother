@@ -10,8 +10,9 @@ import { now } from './db';
 import { BusinessError } from './http';
 import { validateProjectManifest } from './build-contract';
 import { readTemplateFile, templateTypecheck, validateTemplateManifest } from './templates';
+import { findStaticScaffoldFiles } from './project-shape';
 import { appTemplate } from './template-workspace';
-import { workspace, ensureRuntime, ensureWorkspace, ensureSafeDirectory, listProjectFiles, readProjectFile, validateDeployKey, type WorkspaceApp } from './workspace';
+import { workspace, ensureRuntime, ensureWorkspace, ensureSafeDirectory, listProjectFiles, readProjectFile, readProjectFileBytes, validateDeployKey, type WorkspaceApp } from './workspace';
 import { isProjectCodeGenType } from '@/shared/contracts';
 export { workspace } from './workspace';
 
@@ -91,14 +92,14 @@ export function buildStatePath(app: WorkspaceApp) {
   return join(workspace(app), BUILD_STATE_FILE);
 }
 
-/** 当前源码与模板版本的指纹：用来判断已有产物是否还对应当前代码。 */
+/** 当前源码与模板版本的指纹：按原始字节计算，图片等二进制资源也要参与。 */
 export async function sourceDigest(app: WorkspaceApp) {
   const template = await appTemplate(app);
   const hash = createHash('sha256');
   hash.update(template ? `template:${template.id}@${template.version}\n` : 'template:none\n');
   for (const path of await listProjectFiles(app)) {
-    const content = await readProjectFile(app, path);
-    hash.update(`file:${path}:${Buffer.byteLength(content)}\n`);
+    const content = await readProjectFileBytes(app, path);
+    hash.update(`file:${path}:${content.byteLength}\n`);
     hash.update(content);
   }
   return hash.digest('hex');
@@ -136,6 +137,8 @@ export async function buildApp(app: WorkspaceApp, signal?: AbortSignal) {
   const root = await ensureWorkspace(app);
   const files = await listProjectFiles(app);
   if (!isProjectCodeGenType(app.codeGenType)) {
+    const forbidden = findStaticScaffoldFiles(app.codeGenType, files);
+    if (forbidden.length) throw new Error(`生成结果与应用类型不符：${app.codeGenType} 应用不能包含 ${forbidden.slice(0, 3).map(file => file.path).join('、')}。原生静态页面不经过构建，请删除这些文件改回 index.html，或新建应用时选择 Vue/React 模板。`);
     const index = await readProjectFile(app, 'index.html');
     if (!/<html[\s>]/i.test(index)) throw new Error('生成结果缺少有效 HTML 页面');
     return;
@@ -200,13 +203,31 @@ export function deployedUrl(key: string) {
   return `${getConfig().previewOrigin}/deploy/${validateDeployKey(key)}/`;
 }
 
+const staticTemplateIndexes = new Map<string, Promise<string>>();
+
 export async function hasPreview(app: WorkspaceApp) {
   const directory = join(workspace(app), ...(isProjectCodeGenType(app.codeGenType) ? ['dist'] : []));
   const index = join(directory, 'index.html');
   try {
     if (await realpath(directory) !== directory || await realpath(index) !== index) return false;
     const info = await lstat(index);
-    return info.isFile() && info.size > 0 && info.size <= 20 * 1024 * 1024 && /<html[\s>]/i.test(await readFile(index, 'utf8'));
+    if (!info.isFile() || info.size <= 0 || info.size > 20 * 1024 * 1024) return false;
+    const content = await readFile(index);
+    if (!/<html[\s>]/i.test(content.toString('utf8'))) return false;
+    if (!isProjectCodeGenType(app.codeGenType)) {
+      const template = await appTemplate(app);
+      if (template) {
+        const key = `${template.id}@${template.version}`;
+        let skeleton = staticTemplateIndexes.get(key);
+        if (!skeleton) {
+          skeleton = readTemplateFile(template, 'index.html');
+          staticTemplateIndexes.set(key, skeleton);
+        }
+        // 骨架未改动视为还没生成内容，避免新建应用立即显示可预览。
+        if (content.equals(Buffer.from(await skeleton))) return false;
+      }
+    }
+    return true;
   } catch { return false; }
 }
 
@@ -250,7 +271,7 @@ export async function downloadApp(app: WorkspaceApp) {
   const archive = archiver('zip', { zlib: { level: 6 } });
   archive.on('error', error => output.destroy(error));
   archive.pipe(output);
-  for (const file of files) archive.append(await readProjectFile(app, file), { name: file });
+  for (const file of files) archive.append(await readProjectFileBytes(app, file), { name: file });
   void archive.finalize();
   return new Response(Readable.toWeb(output) as ReadableStream<Uint8Array>, { headers: { 'Content-Type': 'application/zip', 'Content-Disposition': `attachment; filename="${app.id}.zip"`, 'Cache-Control': 'no-store' } });
 }

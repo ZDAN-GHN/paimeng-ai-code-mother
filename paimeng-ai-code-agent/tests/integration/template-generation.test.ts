@@ -42,7 +42,7 @@ afterAll(async () => {
   await getPool().end();
 });
 
-it('显式模板覆盖自动路由，新工程默认使用对应技术栈模板，HTML 保留原流程且拒绝冲突', async () => {
+it('显式模板覆盖自动路由，新工程默认使用对应技术栈模板，HTML 默认使用静态模板且拒绝冲突', async () => {
   for (const item of cases) {
     const explicit = await createApp({ initPrompt: '简单网页', templateId: item.templateId }, actor);
     created.push({ id: explicit, codeGenType: item.codeGenType });
@@ -54,7 +54,13 @@ it('显式模板覆盖自动路由，新工程默认使用对应技术栈模板�
   }
   const id = await createApp({ initPrompt: '简单网页', codeGenType: 'html' }, actor);
   created.push({ id, codeGenType: 'html' });
-  expect((await getApp(id, actor)).template).toBeNull();
+  expect(await getApp(id, actor)).toMatchObject({ template: { id: 'html', version: '1.0.0' }, previewUrl: null });
+  const multi = await createApp({ initPrompt: '多文件静态网站', codeGenType: 'multi_file' }, actor);
+  created.push({ id: multi, codeGenType: 'multi_file' });
+  expect((await getApp(multi, actor)).template).toEqual({ id: 'multi-file', version: '1.0.0' });
+  const routed = await createApp({ initPrompt: '简单网页' }, actor);
+  created.push({ id: routed, codeGenType: 'html' });
+  expect((await getApp(routed, actor)).template).toEqual({ id: 'html', version: '1.0.0' });
   await expect(createApp({ initPrompt: '简单网页', templateId: 'missing' }, actor)).rejects.toThrow();
   for (const item of cases) await expect(createApp({ initPrompt: '简单网页', templateId: item.templateId, codeGenType: 'html' }, actor)).rejects.toThrow('模板与应用类型不匹配');
 });
@@ -88,3 +94,23 @@ for (const item of cases) it(`真实 SDK 在 ${item.templateId} 模板上修改�
     expect.objectContaining({ type: 'tool-writeFiles', state: 'output-available' }),
   ]));
 }, 180000);
+
+for (const type of ['html', 'multi_file'] as const) it(`fixture 模型在 ${type} 默认静态模板上生成并直接预览`, async () => {
+  const title = '静态模板需求标题';
+  const id = await createApp({ initPrompt: title, codeGenType: type }, actor);
+  const app = { id, codeGenType: type };
+  created.push(app);
+  await db().delete(rateLimits).where(eq(rateLimits.limitKey, 'user:' + actor.id));
+  const requestId = randomUUID();
+  const response = await chatResponse(new Request('http://localhost:3000/api/app/chat/gen/code'), {
+    appId: id, requestId, message: { id: randomUUID(), role: 'user', parts: [{ type: 'text', text: title }] },
+  }, actor);
+  expect(await response.text()).not.toContain('"type":"error"');
+  expect(await generationFor(id)).toMatchObject({ id: requestId, status: 'ready', error: null });
+  expect((await getApp(id, actor)).previewUrl).toContain(`/preview/${type}_${id}/`);
+  expect(await readProjectFile(app, 'index.html')).toContain(title);
+  const files = await listProjectFiles(app);
+  expect(files.some(path => /(?:^|\/)package\.json$|(?:^|\/)vite\.config\.|\.(?:vue|tsx)$/i.test(path))).toBe(false);
+  const parts = (await loadMessages(id))[1].parts;
+  expect(parts).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'tool-readFile', state: 'output-available', input: { path: 'index.html' } })]));
+});

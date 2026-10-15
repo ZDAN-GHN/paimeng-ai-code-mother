@@ -26,9 +26,9 @@ JSON 成功响应为 `{code:0,data,message:"ok"}`。失败返回业务错误码�
 
 ## 应用 API 与权限
 
-- POST `/api/app/add` 接收 `{initPrompt,codeGenType?,templateId?}`，返回应用 ID。`templateId` 只接受已注册模板，未知模板返回 400 `不支持的工程模板`；显式模板与 `codeGenType` 冲突时返回 400 `模板与应用类型不匹配`。Vue 应用未指定模板时默认 `vue-ts`，React 应用默认 `react-ts`，初始化只在此时发生一次。
-- 首页只传初始需求；未指定类型时同步调用模型路由，简单展示、多文件静态页面、复杂交互分别选择 HTML、多文件、前端工程。工程类型里需求明确要求 React 或 Vue 时按需求选，未指明技术栈时默认 Vue，因此路由可以返回 `react_project` 并自动使用 React 模板。用户也可以在首页技术栈下拉里显式指定模板，此时以用户选择为准。显式类型仍供 API 和测试使用。初始需求上限为 1000 字。
-- GET `/api/app/get/vo?id=` 返回公开应用信息，其中 `template` 给出工程模板 id 与版本，旧工程为 null。
+- POST `/api/app/add` 接收 `{initPrompt,codeGenType?,templateId?}`，返回应用 ID。`templateId` 只接受已注册模板，未知模板返回 400 `不支持的工程模板`；显式模板与 `codeGenType` 冲突时返回 400 `模板与应用类型不匹配`。所有新建应用按类型自动套用模板：HTML 为 `html`，多文件为 `multi-file`，Vue 为 `vue-ts`，React 为 `react-ts`，初始化只在此时发生一次。
+- 首页技术栈下拉默认「自动选择」，也可显式选择原生 HTML、原生多文件、Vue + TypeScript、React + TypeScript 四种模板之一。自动选择时创建按钮可用，仅提交 `{initPrompt}` 走 AI 路由；显式选择时提交 `{initPrompt,templateId}`。API 未指定 `templateId`/`codeGenType` 时仍同步调用 `routeCodeGenType` 模型路由，并按类型自动套对应模板；简单展示、多文件静态页面、复杂交互分别选择 HTML、多文件、前端工程。工程类型里需求明确要求 React 或 Vue 时按需求选，未指明技术栈时默认 Vue，因此路由可以返回 `react_project` 并自动使用 React 模板。用户也可以在首页技术栈下拉里显式指定模板，此时以用户选择为准。显式类型仍供 API 和测试使用。初始需求上限为 1000 字。
+- GET `/api/app/get/vo?id=` 返回公开应用信息，其中 `template` 给出模板 id 与版本，未使用模板的旧应用为 null。
 - POST `/api/app/my/list/page/vo` 返回当前用户的应用分页。POST `/api/app/good/list/page/vo` 返回优先级至少 99 的精选应用。
 - POST `/api/app/update` 接收 `{id,appName}`，只允许创建者修改名称。
 - POST `/api/app/delete` 接收 `{id}`，允许创建者或管理员逻辑删除应用。

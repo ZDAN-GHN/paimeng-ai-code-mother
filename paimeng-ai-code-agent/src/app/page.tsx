@@ -6,7 +6,7 @@ import { api } from '@/client/api';
 import { useAuth } from '@/components/providers';
 import { HomeAppCard } from '@/components/app-card';
 import type { AppInfo, Page } from '@/shared/contracts';
-import { projectTemplates } from '@/shared/templates';
+import { codeGenTemplates } from '@/shared/templates';
 const quickTemplates=[
  {label:'个人博客网站',prompt:'创建一个现代化的个人博客网站，包含文章列表、详情页、分类标签、搜索功能、评论系统和个人简介页面。采用简洁的设计风格，支持响应式布局，文章支持Markdown格式，首页展示最新文章和热门推荐。'},
  {label:'企业官网',prompt:'设计一个专业的企业官网，包含公司介绍、产品服务展示、新闻资讯、联系我们等页面。采用商务风格的设计，包含轮播图、产品展示卡片、团队介绍、客户案例展示，支持多语言切换和在线客服功能。'},
@@ -34,7 +34,7 @@ export default function Home(){
  }
  return <div id="homePage"><div className="container">
   <div className="hero-section"><h1 className="hero-title">AI 应用生成平台</h1><p className="hero-description">一句话轻松创建网站应用</p></div>
-  <div className="template-picker"><label htmlFor="project-template">技术栈</label><Select id="project-template" aria-label="技术栈" value={templateId} onChange={setTemplateId} disabled={creating} options={[{value:'auto',label:'自动选择'},...projectTemplates.map(template=>({value:template.id,label:template.name}))]}/><span>{templateId==='auto'?'根据需求选择静态网页或前端工程':projectTemplates.find(template=>template.id===templateId)?.description}</span></div>
+  <div className="template-picker"><label htmlFor="project-template">技术栈</label><Select id="project-template" aria-label="技术栈" value={templateId} onChange={setTemplateId} disabled={creating} options={[{value:'auto',label:'自动选择'},...codeGenTemplates.map(template=>({value:template.id,label:template.name}))]}/><span>{templateId==='auto'?'根据需求自动选择技术栈（AI 路由）':codeGenTemplates.find(template=>template.id===templateId)?.description}</span></div>
   <div className="input-section"><Input.TextArea className="prompt-input" aria-label="应用描述" placeholder="帮我创建个人博客网站" value={prompt} onChange={e=>setPrompt(e.target.value)} rows={4} maxLength={1000}/><div className="input-actions"><Button className="create-button" type="primary" size="large" aria-label="创建应用" loading={creating} onClick={()=>{void create();}}>↑</Button></div></div>
   <div className="quick-actions">{quickTemplates.map(item=><Button key={item.label} onClick={()=>setPrompt(item.prompt)}>{item.label}</Button>)}</div>
   <section className="section"><h2 className="section-title">我的作品</h2><div className="app-grid">{my.records.map(app=><HomeAppCard key={app.id} app={app}/>)}</div><div className="pagination-wrapper"><Pagination current={my.pageNumber} pageSize={my.pageSize} total={my.totalRow} showSizeChanger={false} showTotal={total=>`共 ${total} 个应用`} onChange={page=>{void loadMy(page);}}/></div></section>

@@ -49,6 +49,8 @@ test('浏览器完成注册、登录、生成、编辑、预览、发布和下�
   await expect(page.getByRole('heading', { name: 'AI 应用生成平台' })).toBeVisible();
   await expect(page.locator('.site-header')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
   await expect(page.locator('.site-layout')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  await page.getByLabel('技术栈', { exact: true }).click();
+  await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').getByText('原生 HTML', { exact: true }).click();
   await page.getByLabel('应用描述').fill('浏览器测试首页');
   await page.getByRole('button', { name: '创建应用', exact: true }).click();
   await expect(page).toHaveURL(/\/app\/chat\/\d+/);
@@ -164,8 +166,10 @@ test('普通用户不能打开管理员页面，管理员可查询和编辑', as
   await expect(page.getByRole('heading', { name: '对话管理', exact: true })).toBeVisible();
   await page.getByLabel('应用 ID', { exact: true }).fill(appId);
   await page.getByRole('button', { name: /^搜\s*索$/ }).click();
-  await expect(page.getByRole('button', { name: /tool-writeFiles/ })).toHaveCount(1);
-  await page.getByRole('button', { name: /tool-writeFiles/ }).click();
+  // 模板 fixture 先 listFiles/readFile 再 writeFiles；管理页只预览前 60 字，预览不能证明完整工具调用。
+  await expect(page.getByRole('button', { name: /tool-listFiles/ })).toHaveCount(1);
+  await page.getByRole('button', { name: /tool-listFiles/ }).click();
+  await expect(page.getByRole('dialog').getByText(/tool-writeFiles/)).toBeVisible();
   await expect(page.getByRole('dialog').getByText(/文件已生成/)).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'OK', exact: true }).click();
   const clearedSearch = page.waitForResponse(response => response.url().endsWith('/api/chatHistory/admin/list/page/vo') && response.request().method() === 'POST');

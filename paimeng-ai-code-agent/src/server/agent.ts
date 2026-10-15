@@ -5,11 +5,11 @@ import { idSchema, type User } from '@/shared/contracts';
 import { modelFor, taskModelsFor } from './model';
 import { getApp } from './business';
 import { buildApp } from './artifacts';
-import { readProjectFile, writeProjectFile, listProjectFiles, modifyProjectFile, deleteProjectFile } from './workspace';
+import { readProjectFileAsText, writeProjectFile, listProjectFiles, modifyProjectFile, deleteProjectFile } from './workspace';
 import { beginGenerationContext, type BeginGenerationContext, heartbeat, saveMessage, setGeneration, finishGeneration, generationFor, withAppWriter } from './generation-store';
 import { validatePrompt } from './prompt-safety';
 import { clientIp } from './rate-limit';
-import { BUILD_DEPENDENCIES, REACT_DEPENDENCIES } from './build-contract';
+import { generationInstructions, staticPathHint } from './generation-instructions';
 import { templateEntry } from './templates';
 import { getConfig } from './config';
 import { planSummaryWindow } from './memory-window';
@@ -17,6 +17,7 @@ import { contextMessages, recentWithinBudget, toHistoryTurn, turnsAfter, turnsTo
 import { consolidateHistory } from './memory-consolidate';
 import { buildHistoryMessage, estimateTokens, estimateTokensForChars } from './memory-serialize';
 import { cursorOf, type SummarySnapshot } from './memory-types';
+import { createWebAccessSession, createWebAccessTools, enabledWebToolNames, pickEnabledWebTools, webAccessInstructions, webAccessToolDescriptions, webAccessToolSchemas } from './web-access/tools';
 
 const controllers = new Map<string, AbortController>();
 const inputSchema = z.object({
@@ -25,17 +26,17 @@ const inputSchema = z.object({
   message: z.object({ id: z.string().min(1).max(64), role: z.literal('user'), parts: z.array(z.object({ type: z.literal('text'), text: z.string().min(1).max(1000) }).strict()).min(1).max(8) }).strict(),
 }).strict();
 
-const toolSchemas = {
+const fileToolSchemas = {
   readFile: z.object({ path: z.string() }),
   listFiles: z.object({}),
   writeFiles: z.object({ files: z.array(z.object({ path: z.string(), content: z.string().max(256000) })).min(1).max(60) }),
   modifyFile: z.object({ path: z.string(), oldText: z.string().min(1), newText: z.string() }),
   deleteFile: z.object({ path: z.string() }),
 };
-const toolDescriptions = {
+const fileToolDescriptions = {
   readFile: '读取当前应用的文本文件',
   listFiles: '列出当前应用源文件',
-  writeFiles: '写入当前应用文件，必须提供完整内容。HTML 模式写 index.html。Vue 或 React 工程使用对应框架与 Vite，并保留模板入口。',
+  writeFiles: '写入当前应用文件，必须提供完整内容。',
   modifyFile: '通过唯一精确匹配修改文件',
   deleteFile: '删除当前应用单个文件，不允许删除目录',
 };
@@ -43,8 +44,8 @@ const generationOutputMarginTokens = 1024;
 const maxConsolidationRounds = 3;
 const historySummaryWrapperTokens = estimateTokens(buildHistoryMessage({ text: '', coveredThroughSequence: '0', legacyCoveredThroughSequence: '0', version: '0', modelAlias: null, providerId: null, modelName: null, lastAttemptTime: null, updateTime: null }));
 
-function contextOverheadTokens(instructions: string): number {
-  const schemaChars = (Object.keys(toolSchemas) as (keyof typeof toolSchemas)[]).reduce((total, name) => total + name.length + toolDescriptions[name].length + JSON.stringify(z.toJSONSchema(toolSchemas[name])).length, 0);
+function contextOverheadTokens(instructions: string, schemas: Record<string, z.ZodType>, descriptions: Record<string, string>): number {
+  const schemaChars = Object.keys(schemas).reduce((total, name) => total + name.length + (descriptions[name]?.length ?? 0) + JSON.stringify(z.toJSONSchema(schemas[name])).length, 0);
   return estimateTokens(instructions) + estimateTokensForChars(schemaChars) + historySummaryWrapperTokens + generationOutputMarginTokens;
 }
 
@@ -67,7 +68,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
   const controller = new AbortController();
   const building = new AbortController();
   const abortRequest = () => controller.abort();
-  const { generationTimeoutMs, modelReplyTimeoutMs, modelRetryLimit, memory: memoryBudgets } = getConfig();
+  const { generationTimeoutMs, modelReplyTimeoutMs, modelRetryLimit, memory: memoryBudgets, webAccess } = getConfig();
   const taskModels = memoryBudgets.enabled
     ? await taskModelsFor(app.codeGenType, prompt, app.template)
     : { model: await modelFor(app.codeGenType, prompt, app.template), summary: null, summaryUnavailableReason: null };
@@ -93,22 +94,36 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
   let phase = controller.signal;
   const check = () => phase.throwIfAborted();
   const write = <T>(work: () => Promise<T>) => withAppWriter(app.id, async () => { check(); const value = await work(); check(); return value; }, input.requestId);
-  const tools = {
-    readFile: tool({ description: toolDescriptions.readFile, inputSchema: toolSchemas.readFile, execute: async ({ path }) => { check(); return readProjectFile(app, path); } }),
+  const ensureWritable = async () => {
+    check();
+    const current = await heartbeat(input.requestId).catch(() => null);
+    if (!current || !['generating', 'building'].includes(current)) throw new Error('生成任务已失效');
+    check();
+  };
+  const webEnabled = webAccess.enabled;
+  const imagesEnabled = webEnabled && webAccess.images;
+  const webSettings = { enabled: webEnabled, images: imagesEnabled };
+  const webTools = createWebAccessTools({ app, session: createWebAccessSession(), signal: controller.signal, check, ensureWritable, write });
+  const webNames = enabledWebToolNames(webSettings);
+  const webToolSchemas = Object.fromEntries(webNames.map(name => [name, webAccessToolSchemas[name]]));
+  const webToolDescriptions = Object.fromEntries(webNames.map(name => [name, webAccessToolDescriptions[name]]));
+  const toolSchemas = { ...fileToolSchemas, ...webToolSchemas };
+  const toolDescriptions = { ...fileToolDescriptions, ...webToolDescriptions, writeFiles: fileToolDescriptions.writeFiles + staticPathHint(app.codeGenType) };
+  const fileTools = {
+    readFile: tool({ description: toolDescriptions.readFile, inputSchema: toolSchemas.readFile, execute: async ({ path }) => { check(); return readProjectFileAsText(app, path); } }),
     listFiles: tool({ description: toolDescriptions.listFiles, inputSchema: toolSchemas.listFiles, execute: async () => { check(); return listProjectFiles(app); } }),
     writeFiles: tool({ description: toolDescriptions.writeFiles, inputSchema: toolSchemas.writeFiles, execute: async ({ files }) => write(async () => { for (const file of files) { check(); await writeProjectFile(app, file.path, file.content); changed = true; } return { written: files.map(f => f.path) }; }) }),
     modifyFile: tool({ description: toolDescriptions.modifyFile, inputSchema: toolSchemas.modifyFile, execute: async ({ path, oldText, newText }) => write(async () => { await modifyProjectFile(app, path, oldText, newText); changed = true; return { modified: path }; }) }),
     deleteFile: tool({ description: toolDescriptions.deleteFile, inputSchema: toolSchemas.deleteFile, execute: async ({ path }) => write(async () => { await deleteProjectFile(app, path); changed = true; return { deleted: path }; }) }),
   };
+  // 模型只看到已启用的工具；校验与会话转换使用超集，保证关闭开关后历史里的工具结果仍可读取。
+  const tools = { ...fileTools, ...pickEnabledWebTools(webTools, webSettings) };
+  const allTools = { ...fileTools, ...webTools };
   const entry = app.template ? templateEntry(app.template) : null;
-  const projectInstructions = app.template
-    ? `当前工程已从 ${app.template.id}@${app.template.version} 模板初始化。先使用 listFiles，再 readFile 阅读 AGENTS.md、package.json、入口 ${entry} 及与需求相关的源码，然后在现有工程上实现用户需求。保留 TypeScript 入口 ${entry} 和 vite.config.ts，不要另起一套 JS 工程。模板依赖和锁文件固定，可用库见 package.json，不要增删依赖。平台在隔离容器中检查类型并构建静态产物。`
-    : app.codeGenType === 'react_project'
-      ? `React 工程必须使用 React、React DOM、Vite 和 React 插件，base './'，必须包含 package.json、index.html、vite.config.js 和 src/main.jsx。package.json 必须包含这些插件与 React 类型包，依赖只允许以下精确版本，禁止 ^、~、latest ${JSON.stringify(REACT_DEPENDENCIES)}。`
-      : `HTML 与多文件应用必须有 index.html。Vue 工程必须使用 Vue、Vite，base './'，必须包含 package.json、index.html、vite.config.js 和 src/main.js。package.json 必须包含 Vue、Vite 和 Vue 插件，依赖只允许以下精确版本，禁止 ^、~、latest ${JSON.stringify(BUILD_DEPENDENCIES)}。`;
-  const instructions = `你是应用生成 Agent。当前应用类型 ${app.codeGenType}。所有读写必须使用工具，禁止仅输出代码而不写入文件。只能修改当前应用。禁止写密钥或 .env。${projectInstructions} 禁止安装脚本和任意 shell。工具返回错误时根据错误修正并重试。文件保存完成后服务端会自动构建前端工程并提供 dist/index.html 预览，无需调用 shell。完成后简短说明改动。初始化需求 ${app.initPrompt}`;
+  const webInstruction = webEnabled ? ` ${webAccessInstructions({ images: imagesEnabled, strictLicense: webAccess.strictLicense })}` : '';
+  const instructions = generationInstructions({ app, template: app.template, entry, webInstruction });
   const agent = new ToolLoopAgent({ model, tools, stopWhen: isStepCount(30), maxRetries: modelRetryLimit, instructions });
-  const overhead = contextOverheadTokens(instructions);
+  const overhead = contextOverheadTokens(instructions, toolSchemas, toolDescriptions);
   let context: BeginGenerationContext;
   let acquired = false;
   try {
@@ -182,12 +197,6 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
     return contextMessages({ summary, turns: remaining, incoming });
   };
 
-  const ensureWritable = async () => {
-    check();
-    const current = await heartbeat(input.requestId).catch(() => null);
-    if (!current || !['generating', 'building'].includes(current)) throw new Error('生成任务已失效');
-    check();
-  };
   const stream = createUIMessageStream({
     onError: () => controller.signal.aborted ? '生成已停止，请查看任务状态' : '生成或构建失败，请查看任务状态',
     execute: async ({ writer }) => {
@@ -197,9 +206,9 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
       try {
         check();
         const assembled = await buildModelMessages(writer);
-        const validated = await validateUIMessages({ messages: assembled, tools });
+        const validated = await validateUIMessages({ messages: assembled, tools: allTools });
         await ensureWritable();
-        const result = await agent.stream({ messages: await convertToModelMessages(validated, { tools, ignoreIncompleteToolCalls: true }), abortSignal: controller.signal, onStepStart: armReplyTimer, onStepEnd: clearReplyTimer });
+        const result = await agent.stream({ messages: await convertToModelMessages(validated, { tools: allTools, ignoreIncompleteToolCalls: true }), abortSignal: controller.signal, onStepStart: armReplyTimer, onStepEnd: clearReplyTimer });
         const uiStream = createUIMessageStream({
           originalMessages: validated,
           generateId: () => `${input.requestId}-assistant`,

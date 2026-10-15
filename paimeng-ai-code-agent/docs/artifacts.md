@@ -2,13 +2,19 @@
 
 ## 文件工作目录
 
-文件工具由 `src/server/workspace.ts` 提供。应用目录固定为 `runtime/code_output/{codeGenType}_{appId}/`，类型限于 `html`、`multi_file` 和 `vue_project`。应用 ID 由服务端绑定，模型不能选择其他应用目录。
+文件工具由 `src/server/workspace.ts` 提供。应用目录固定为 `runtime/code_output/{codeGenType}_{appId}/`，类型限于 `html`、`multi_file`、`vue_project` 和 `react_project`。应用 ID 由服务端绑定，模型不能选择其他应用目录。
 
 源文件限制为单文件 256 KiB、总计 16 MiB、最多 256 个文件。写入前计算替换后的总大小及数量，超限时保留原文件。写入通过专用临时文件与重命名完成。
 
 路径拒绝绝对路径、目录遍历、反斜杠、空字节、超过 20 层的目录，以及 `.env*`、`.paimeng-*`、`node_modules`、`dist`、`.git`、`.next`、`.nuxt`、`.cache`、`.npmrc`、`.yarnrc`、`.yarnrc.yml` 和 `.ssh`。工具拒绝符号链接及特殊文件。运行目录属于新应用，不共享旧项目的可写目录。
 
 应用生成、源码工具、构建、下载、发布与删除使用数据库中的应用写入锁及任务租约。旧任务失去租约后不能继续写入。文件安全假设运行目录不被另一个具有宿主文件权限的进程恶意修改。它不是用于抵御已获得宿主账号权限的攻击者的隔离机制。
+
+## 静态模板与预览
+
+HTML 与多文件类型没有构建步骤，源码目录直接静态托管。新建应用分别初始化 `html@1.0.0` 与 `multi-file@1.0.0`，包含可改写骨架和 `AGENTS.md`。骨架的 `index.html` 未改动时不显示预览，避免将初始化骨架当作已生成内容。
+
+静态类型禁止 package.json、依赖锁、构建工具配置、TypeScript 及 Vue/React 等框架源文件。`src/server/project-shape.ts` 定义路径规则，`writeProjectFile` 在工具层拒绝写入，`buildApp` 再扫描全部源码，拒绝遗留或绕过工具写入的工程脚手架并给出修复提示。普通 HTML/CSS/JS/MJS/JSON 与素材仍可使用；工具可删除遗留文件，模板的入口、说明及依赖锁保护仍然生效。
 
 ## Vue 构建依赖
 

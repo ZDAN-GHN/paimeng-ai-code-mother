@@ -33,13 +33,14 @@ export function fixtureModel(type:CodeGenType,prompt:string,template?:TemplateId
  },doStream:async()=>{
  const chunks:LanguageModelV4StreamPart[]=[{type:'stream-start',warnings:[]}];
  const step=call++;
- const sourcePath=type==='react_project'?'src/App.tsx':'src/App.vue';
+ const project=type==='react_project'||type==='vue_project';
+ const sourcePath=project?(type==='react_project'?'src/App.tsx':'src/App.vue'):'index.html';
  if(template&&step<3)chunks.push({type:'tool-call',toolCallId:randomUUID(),toolName:step===0?'listFiles':'readFile',input:JSON.stringify(step===0?{}:{path:step===1?'AGENTS.md':sourcePath})},{type:'finish',finishReason:{unified:'tool-calls',raw:undefined},usage});
  else if(step===(template?3:0)){
   const files=fixtureFiles(type,prompt);
   const source=files.find(file=>file.path===sourcePath);
   const typed=source&&(type==='react_project'?source.content.replace('useState(0)','useState<number>(0)'):source.content.replace('<script setup>','<script setup lang="ts">'));
-  const edits=template&&source?[{...source,content:typed??source.content}]:files;
+  const edits=template&&project&&source?[{...source,content:typed??source.content}]:files;
   chunks.push({type:'tool-call',toolCallId:randomUUID(),toolName:'writeFiles',input:JSON.stringify({files:edits})},{type:'finish',finishReason:{unified:'tool-calls',raw:undefined},usage});
  }
  else chunks.push({type:'text-start',id:'reply'},{type:'text-delta',id:'reply',delta:'文件已生成，正在验证与构建。此回复来自可控测试模型。'},{type:'text-end',id:'reply'},{type:'finish',finishReason:{unified:'stop',raw:undefined},usage});

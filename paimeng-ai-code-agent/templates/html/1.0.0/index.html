@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>我的静态网站</title>
+  <meta name="description" content="从简洁的静态骨架开始，构建自己的响应式网站。">
+  <style>
+:root {
+  color-scheme: light;
+  --color-bg: #f6f7fb;
+  --color-surface: #ffffff;
+  --color-text: #20283b;
+  --color-muted: #58647a;
+  --color-accent: #4058c9;
+  --color-border: #dce1ed;
+  --space-1: .5rem;
+  --space-2: 1rem;
+  --space-3: 1.5rem;
+  --space-4: 2.5rem;
+  --radius: 1rem;
+  --content-width: 72rem;
+  --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+*, *::before, *::after { box-sizing: border-box; }
+body, h1, h2, h3, p { margin: 0; }
+body {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  line-height: 1.6;
+}
+img { display: block; max-width: 100%; height: auto; }
+button, input, textarea, select { font: inherit; }
+a { color: var(--color-accent); text-underline-offset: .2em; }
+:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 4px; }
+.container {
+  width: min(100% - var(--space-3) * 2, var(--content-width));
+  margin-inline: auto;
+}
+.site-header { background: var(--color-surface); border-bottom: 1px solid var(--color-border); }
+.header-content {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-block: var(--space-3);
+}
+.brand { font-weight: 700; text-decoration: none; color: var(--color-text); }
+nav { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+main { flex: 1; padding-block: var(--space-4); }
+.grid { display: grid; gap: var(--space-3); }
+.card {
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.card h2 { margin-bottom: var(--space-1); font-size: 1.25rem; }
+.card p { color: var(--color-muted); }
+.site-footer { padding-block: var(--space-3); color: var(--color-muted); }
+@media (min-width: 40rem) {
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 64rem) {
+  .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-content">
+      <a class="brand" href="./index.html">我的网站</a>
+      <nav aria-label="主导航"><a href="#app">首页</a><a href="#credits">来源与署名</a></nav>
+    </div>
+  </header>
+  <main class="container" id="app">
+  </main>
+  <footer class="site-footer" id="credits">
+    <div class="container">
+      <p>© 我的网站 · 来源与署名待填写</p>
+    </div>
+  </footer>
+</body>
+</html>

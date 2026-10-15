@@ -30,3 +30,4 @@ npm run test:e2e:isolated # 隔离的完整 E2E（生产构建）
 | 容器构建命令的预算不要写死代码里。整机负载高时容器内 `npm ci`/`vite build` 会超过预算，真实 Docker 构建用例报「构建超时」（2026-10-12/13 三次踩到）。 | `BUILD_TIMEOUT_MS`（默认 180000；`vitest.config.ts` 给测试 300000）；`tests/artifacts.test.ts`、`tests/templates.test.ts`、`tests/integration/agent-vue-build.test.ts` |
 | 端口被占用时不要用 `pkill -f`/`pgrep -f` 清理：模式串会匹配到你自己的命令行并把当前 shell 杀掉（exit 143）。用 `ss -ltnp` 取 PID，或 `[n]ext` 这类括号技巧。 | `scripts/test-e2e.ts` 的端口报错文案（会告诉你怎么换端口） |
 | 只改 `paimeng-ai-code-agent/`，旧代码与开发库只读：旧 Java（`archive/paimeng-ai-code-backend/`，含其下的 `paimeng-ai-code-mother-microservice/` 微服务骨架）与旧 Vue（`archive/paimeng-ai-code-mother-frontend/`）都只归档不动。 | 人工复核 + `git status`；`npm run verify:boundary` 对整树取 sha256（改动后哈希会变，不要为了让哈希通过而改它） |
+| html/multi_file 直接静态托管，不要生成 package.json、构建配置或 Vue/React/TypeScript 工程源码；需要框架时用对应模板新建应用。 | `src/server/project-shape.ts` 工具层拒绝 + `buildApp` 全文件校验；`tests/static-templates.test.ts` |

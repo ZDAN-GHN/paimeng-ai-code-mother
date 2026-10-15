@@ -2,6 +2,7 @@ import 'server-only';
 import { z } from 'zod';
 import { resolve } from 'node:path';
 import { modelConfigListIssues } from '@/shared/model-config';
+import { parseExtraNetworks } from './web-access/network';
 import type { MemoryBudgets } from './memory-types';
 const blankAsUnset = (value: unknown) => (typeof value === 'string' && value.trim() === '' ? undefined : value);
 const csv = (value: string) => value.split(',').map(part => part.trim()).filter(Boolean);
@@ -35,6 +36,13 @@ const environment = z.object({
   CHAT_RATE_LIMIT_RATE:z.preprocess(blankAsUnset, z.coerce.number().int().min(1, 'CHAT_RATE_LIMIT_RATE 必须是不小于 1 的整数').max(1000, 'CHAT_RATE_LIMIT_RATE 不能超过 1000').default(1)),
   CHAT_RATE_LIMIT_INTERVAL:z.preprocess(blankAsUnset, z.coerce.number().int().min(1, 'CHAT_RATE_LIMIT_INTERVAL 必须是不小于 1 的整数').max(86400, 'CHAT_RATE_LIMIT_INTERVAL 不能超过 86400 秒').default(60)),
   CHAT_RATE_LIMIT_MESSAGE:z.string().default(''),
+  WEB_ACCESS_ENABLED:z.preprocess(booleanFlag, z.enum(['true','false','1','0']).default('false').transform(value => value === 'true' || value === '1')),
+  WEB_ACCESS_TAVILY_API_KEY:z.string().max(200).default(''),
+  WEB_ACCESS_IMAGES:z.preprocess(booleanFlag, z.enum(['true','false','1','0']).default('true').transform(value => value === 'true' || value === '1')),
+  WEB_ACCESS_STRICT_LICENSE:z.preprocess(booleanFlag, z.enum(['true','false','1','0']).default('false').transform(value => value === 'true' || value === '1')),
+  WEB_ACCESS_JINA_FALLBACK:z.preprocess(booleanFlag, z.enum(['true','false','1','0']).default('false').transform(value => value === 'true' || value === '1')),
+  WEB_ACCESS_ALLOW_NETWORKS:z.string().default(''),
+  WEB_ACCESS_PROXY:z.preprocess(blankAsUnset, z.string().max(200).default('')),
 });
 export function getConfig() {
   const env=environment.parse(process.env);
@@ -51,8 +59,10 @@ export function getConfig() {
   const modelConfigIssues=modelConfigListIssues(modelApiKeyEnvAllowlist,modelInternalBaseUrlOrigins);
   if(modelConfigIssues.length) throw new Error(modelConfigIssues.join('；'));
   const memory:MemoryBudgets&{callTimeoutMs:number}={enabled:env.MEMORY_ENABLED,contextTokens:env.MEMORY_CONTEXT_BUDGET_TOKENS,recentTokens:env.MEMORY_RECENT_BUDGET_TOKENS,summaryInputTokens:env.MEMORY_SUMMARY_INPUT_TOKENS,summaryOutputTokens:env.MEMORY_SUMMARY_OUTPUT_TOKENS,minNewTurns:env.MEMORY_MIN_NEW_TURNS,retryIntervalMs:env.MEMORY_RETRY_INTERVAL_MS,callTimeoutMs:env.MEMORY_CALL_TIMEOUT_MS};
+  if(env.WEB_ACCESS_PROXY){let proxy:URL;try{proxy=new URL(env.WEB_ACCESS_PROXY);}catch{throw new Error('WEB_ACCESS_PROXY 必须是有效的代理地址');}if(!['http:','https:'].includes(proxy.protocol))throw new Error('WEB_ACCESS_PROXY 只支持 http(s) 代理');}
+  const webAccessAllowNetworks=parseExtraNetworks(csv(env.WEB_ACCESS_ALLOW_NETWORKS));
   if(memory.summaryOutputTokens>=memory.summaryInputTokens) throw new Error('MEMORY_SUMMARY_OUTPUT_TOKENS 必须小于 MEMORY_SUMMARY_INPUT_TOKENS');
   if(memory.summaryOutputTokens>=memory.contextTokens) throw new Error('MEMORY_SUMMARY_OUTPUT_TOKENS 必须小于 MEMORY_CONTEXT_BUDGET_TOKENS');
   if(memory.recentTokens+memory.summaryOutputTokens>=memory.contextTokens) throw new Error('MEMORY_RECENT_BUDGET_TOKENS 与 MEMORY_SUMMARY_OUTPUT_TOKENS 之和必须小于 MEMORY_CONTEXT_BUDGET_TOKENS');
-  return {databaseUrl:env.DATABASE_URL,appOrigin:new URL(env.APP_ORIGIN).origin,previewOrigin:new URL(env.PREVIEW_ORIGIN).origin,aiBaseUrl:env.AI_BASE_URL,aiApiKey:env.AI_API_KEY,aiModel:env.AI_MODEL,aiMode:env.AI_MODE,modelApiKeyEnvAllowlist,modelInternalBaseUrlOrigins,modelSecretKey:env.MODEL_SECRET_KEY,buildImage:env.BUILD_IMAGE,buildNpmRegistry:env.BUILD_NPM_REGISTRY,buildTimeoutMs:env.BUILD_TIMEOUT_MS,generationTimeoutMs:env.GENERATION_TIMEOUT_MS,modelReplyTimeoutMs:env.MODEL_REPLY_TIMEOUT_MS,modelRetryLimit:env.MODEL_RETRY_LIMIT,memory,runtimeRoot:resolve(process.cwd(),'runtime'),chatRateLimit:{type:env.CHAT_RATE_LIMIT_TYPE,rate:env.CHAT_RATE_LIMIT_RATE,intervalSeconds:env.CHAT_RATE_LIMIT_INTERVAL,message:env.CHAT_RATE_LIMIT_MESSAGE||(env.CHAT_RATE_LIMIT_RATE>1?`每 ${env.CHAT_RATE_LIMIT_INTERVAL} 秒最多生成 ${env.CHAT_RATE_LIMIT_RATE} 次，请稍后重试`:`每 ${env.CHAT_RATE_LIMIT_INTERVAL} 秒只能生成一次，请稍后重试`)}};
+  return {databaseUrl:env.DATABASE_URL,appOrigin:new URL(env.APP_ORIGIN).origin,previewOrigin:new URL(env.PREVIEW_ORIGIN).origin,aiBaseUrl:env.AI_BASE_URL,aiApiKey:env.AI_API_KEY,aiModel:env.AI_MODEL,aiMode:env.AI_MODE,modelApiKeyEnvAllowlist,modelInternalBaseUrlOrigins,modelSecretKey:env.MODEL_SECRET_KEY,buildImage:env.BUILD_IMAGE,buildNpmRegistry:env.BUILD_NPM_REGISTRY,buildTimeoutMs:env.BUILD_TIMEOUT_MS,generationTimeoutMs:env.GENERATION_TIMEOUT_MS,modelReplyTimeoutMs:env.MODEL_REPLY_TIMEOUT_MS,modelRetryLimit:env.MODEL_RETRY_LIMIT,memory,runtimeRoot:resolve(process.cwd(),'runtime'),chatRateLimit:{type:env.CHAT_RATE_LIMIT_TYPE,rate:env.CHAT_RATE_LIMIT_RATE,intervalSeconds:env.CHAT_RATE_LIMIT_INTERVAL,message:env.CHAT_RATE_LIMIT_MESSAGE||(env.CHAT_RATE_LIMIT_RATE>1?`每 ${env.CHAT_RATE_LIMIT_INTERVAL} 秒最多生成 ${env.CHAT_RATE_LIMIT_RATE} 次，请稍后重试`:`每 ${env.CHAT_RATE_LIMIT_INTERVAL} 秒只能生成一次，请稍后重试`)},webAccess:{enabled:env.WEB_ACCESS_ENABLED,tavilyApiKey:env.WEB_ACCESS_TAVILY_API_KEY,images:env.WEB_ACCESS_IMAGES,strictLicense:env.WEB_ACCESS_STRICT_LICENSE,jinaFallback:env.WEB_ACCESS_JINA_FALLBACK,allowNetworks:webAccessAllowNetworks,proxy:env.WEB_ACCESS_PROXY}};
 }

@@ -22,7 +22,7 @@ async function mockChat(page:Page){
   await page.route('**/api/app/generation?*',route=>route.fulfill({json:{code:0,data:{id:'task-1',status:'cancelled'}}}));
 }
 
-test('模板按钮填入完整需求，创建应用只提交 initPrompt 交给后端自动选类型',async({page})=>{
+test('默认自动选择保留 AI 路由，技术栈下拉展示自动选择与四种模板',async({page})=>{
   await mockHome(page,{user:creator});
   await mockChat(page);
   let payload:Record<string,unknown>|undefined;
@@ -38,10 +38,34 @@ test('模板按钮填入完整需求，创建应用只提交 initPrompt 交给�
   await expect(page.getByLabel('生成类型')).toHaveCount(0);
   await page.getByRole('button',{name:'个人博客网站'}).click();
   await expect(page.getByLabel('应用描述')).toHaveValue(blogTemplate);
+  await expect(page.getByRole('button',{name:'创建应用'})).toBeEnabled();
+  await expect(page.locator('.template-picker .ant-select')).toContainText('自动选择');
+  await expect(page.getByText('根据需求自动选择技术栈（AI 路由）',{exact:true})).toBeVisible();
+  await page.getByLabel('技术栈',{exact:true}).click();
+  const dropdown=page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)');
+  await expect(dropdown.locator('.ant-select-item-option')).toHaveCount(5);
+  for(const name of ['自动选择','原生 HTML','原生多文件','Vue + TypeScript','React + TypeScript']) await expect(dropdown.getByText(name,{exact:true})).toBeVisible();
+  await dropdown.getByText('自动选择',{exact:true}).click();
   await page.getByRole('button',{name:'创建应用'}).click();
   await expect(page).toHaveURL(/\/app\/chat\/999$/);
   expect(payload).toEqual({initPrompt:blogTemplate});
+  expect(payload).not.toHaveProperty('templateId');
   expect(payload).not.toHaveProperty('codeGenType');
+});
+
+test('显式选择原生 HTML 时提交 templateId',async({page})=>{
+  await mockHome(page,{user:creator});
+  await mockChat(page);
+  let payload:Record<string,unknown>|undefined;
+  await page.route('**/api/app/add',async route=>{payload=route.request().postDataJSON();await route.fulfill({json:{code:0,data:'999'}});});
+  await page.goto('/');
+  await page.getByLabel('应用描述').fill(blogTemplate);
+  await page.getByLabel('技术栈',{exact:true}).click();
+  await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').getByText('原生 HTML',{exact:true}).click();
+  await expect(page.getByText('单文件静态页，样式与交互集中在 index.html')).toBeVisible();
+  await page.getByRole('button',{name:'创建应用'}).click();
+  await expect(page).toHaveURL(/\/app\/chat\/999$/);
+  expect(payload).toEqual({initPrompt:blogTemplate,templateId:'html'});
 });
 
 test('首页展示两个分页的 N 个应用与 N 个案例总数文案',async({page})=>{
