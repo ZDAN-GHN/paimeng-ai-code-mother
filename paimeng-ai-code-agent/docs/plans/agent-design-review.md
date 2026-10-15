@@ -171,7 +171,21 @@ P1 表示建议近期优先，P2 表示在基础测量和可靠性完善后推�
 
 对应测试：`tests/build-feedback.test.ts`（分类与诊断纯函数）、`tests/integration/build-repair-loop.test.ts`（真实 `buildApp` 的 html 校验闭环：修复成功回到 `ready`、同一条 assistant 消息；无进展时保留原始错误且只有一次构建）、`tests/integration/agent-persistence.test.ts` 新增 4 例（诊断回传、无进展、不可修复、轮次耗尽）。
 
-本次跑过的验证：`tsc --noEmit`、`vitest` 全量 449 例、`check:ui`、`check:e2e`、`test:e2e:dev`、`test:e2e:isolated`。仍未验证：真实模型看到真实类型或打包诊断后的修复成功率、修复轮重复 `npm ci` 的墙钟开销、以及更多轮次是否值得。
+本次跑过的验证：`tsc --noEmit`、`vitest` 全量 449 例、`check:ui`、`check:e2e`、`test:e2e:dev`、`test:e2e:isolated`。仍未验证：真实模型看到真实类型或打包诊断后的修复成功率，以及更多轮次是否值得；容器重复安装的墙钟开销已实测（验证见 §8.10）。
+
+### 8.0.1 闸门能被绕过（2026-10-15 实测）
+
+修复轮给模型创造了一个新动机：“让构建通过”不等于“修好源码”——而当前闸门是可以被绕过的。在 `node:24-alpine` 里复刻 `containerRun` 的参数、registry 用 `.env` 里的 npmmirror，对真实 `vue_project` 工程实测：
+
+| 注入方式 | `vue-tsc --noEmit` | 说明 |
+| --- | --- | --- |
+| `src/main.ts` 里写 `const n: number = 'text'` | `error TS2322`，失败 | 基准：真实类型错误确实被拦住 |
+| 同一错误 + 文件首行 `// @ts-nocheck` | **无输出，通过** | 每文件抑制注释可静默绕过类型检查 |
+| 同一错误 + `tsconfig.json` 改 `strict: false` | 仍然 `TS2322`，失败 | 放宽 strict 拦住不了普通类型错误 |
+| `tsconfig.json` 改 `include: []` | `error TS18003`，失败 | 清空 include 会被 TypeScript 自己拦住 |
+| 仅 `vite build` | exit 0 | 打包不做类型检查，类型闸门只有 `vue-tsc` |
+
+影响：模型只要给出错的文件加一行 `@ts-nocheck`，就会得到一次“构建通过”。因此 §8.9 的验收里增加一项：修复轮不得以削弱验证的方式通过——对比修复前后的 `tsconfig.json` / `vite.config.ts` 指纹，并统计 `@ts-nocheck` / `@ts-ignore` / `@ts-expect-error` 的新增数量；评估阶段先记录不拦截，看到真实比率后再决定是否直接判失败。
 
 ### 8.1 目标与边界
 
@@ -276,7 +290,7 @@ UX 结果：构建期间仍是“代码已生成，正在完成构建，构建�
 | 修复轮次 | 无 | 新增 `BUILD_REPAIR_ROUNDS`，取值 0–3，默认 2（0 表示关闭）。两次基本覆盖类型错误与导入路径这两类常见失败，再多会显著拉长用户可感知的墙钟时间 |
 | 无进展终止 | 无 | 每次失败后记录源码指纹（`sourceDigest`），修复轮结束后指纹未变则立即停止 |
 
-“无进展终止”的判定依据是构建的输入同一性：源码与锁文件构成容器构建的全部输入，输入逐字节相同、镜像不变，输出必然相同。指纹未变时再构建一次只是把同一个错误重打一遍，代价却是一次真实容器执行（依赖安装最坏接近 170 秒，并受 `BUILD_TIMEOUT_MS` 约束），所以直接停在判定点上。
+“无进展终止”的判定依据是构建的输入同一性：源码与锁文件构成容器构建的全部输入，输入逐字节相同、镜像不变，输出必然相同。指纹未变时再构建一次只是把同一个错误重打一遍，代价却是一次真实容器执行（本机实测约 15 秒，见 §8.10；`BUILD_TIMEOUT_MS` 是上限而不是预计值），所以直接停在判定点上。
 
 它同时挡住“模型声称已修复但没有写文件”的空转与重复同一错误的循环。这类无进展不应该“再多给一轮”：同样的输入不会产生新信息，预算应该花在有信息量的循环上；用户重发一次更便宜，因为他可以补充新信息。
 
@@ -288,9 +302,9 @@ UX 结果：构建期间仍是“代码已生成，正在完成构建，构建�
 | --- | --- |
 | `src/server/build-feedback.ts`（新） | `classifyBuildFailure` 与 `formatBuildFeedback` 纯函数 |
 | `src/server/artifacts.ts` | `containerRun` 增加 `step` 参数并透传；`command` 把 step 挂到 `BusinessError` |
-| `src/server/http.ts` | `BusinessError` 增加可选阶段字段，序列化不变 |
+| `src/server/http.ts` | 设计里曾计划加可选阶段字段，实现时改为在 `build-feedback.ts` 里用 `WeakMap` 打标，该文件未改 |
 | `src/server/generation-store.ts` | 新增 `restoreGeneration(id)`（`building → generating` 的 CAS） |
-| `src/server/agent.ts` | 抽出 `verifyAndBuild()`，改成有上限的修复循环；闭包 `remainingSteps`；`data-build` 事件 |
+| `src/server/agent.ts` | 抽出 `runRound()`，改成有上限的修复循环；闭包 `remainingSteps`；`data-build` 事件 |
 | `src/server/config.ts` | `BUILD_REPAIR_ROUNDS`（与 `BUILD_TIMEOUT_MS` 并列） |
 | `src/app/app/chat/[id]/page.tsx` | `onData` 处理 `data-build`；tsx 改动会触发 `check:ui` 与 `test:e2e:dev` 门禁 |
 
@@ -307,12 +321,13 @@ UX 结果：构建期间仍是“代码已生成，正在完成构建，构建�
 5. **预算不放大**：把小步数上限跑满，断言两轮总步数不超上限。
 6. **纯函数单测**：`classifyBuildFailure` 的每一类；`formatBuildFeedback` 的长度上限、换行保留、`/work/` 归一化。
 7. **真实容器**：在 `tests/integration/agent-vue-build.test.ts` 附近注入真实编译错误，验证真实构建失败后能被修复到 `ready`，并记录第一次失败的 stage（受 `BUILD_TIMEOUT_MS` 与 vitest 300s 约束，属较慢用例）。
+8. **验证完整性（见 §8.0.1）**：修复轮不得以 `@ts-nocheck`、放宽 `tsconfig.json` 或重写 `vite.config.ts` 的方式通过。最小形式是先记录、后拦截：快照 `tsconfig.json` / `vite.config.ts` 指纹与抑制注释数量，在报告里单列一栏。
 
-验收口径：能回答“这次失败是否可修复、模型修了几次、最终是否真的构建通过、修复额外花掉了多少步与时间”。“构建通过”与“需求满足”仍然分开看，后者是 D5。
+验收口径：能回答“这次失败是否可修复、模型修了几次、最终是否真的构建通过、修复额外花掉了多少步与时间”。“构建通过”与“需求满足”仍然分开看，后者是 D5；修复是否以削弱验证为代价单独看，不算作修复成功。
 
 ### 8.10 未决与暂缓
 
-1. **容器依赖安装会重复**：每次 `buildApp` 都新建 stage 目录并执行 `npm ci/install`（走网络，实测最坏接近 170 秒），修复轮会让它再跑一遍。是否复用依赖层或命名卷是独立优化，与 D3/R3 一起权衡；本轮先接受。
+1. **容器依赖安装会重复：已实测，结论是现在不值得优化。** 每次 `buildApp` 都新建 stage 目录并执行 `npm ci`，修复轮会再跑一遍。2026-10-15 在本机用 `.env` 的 registry（npmmirror）对真实 `vue_project` 工程实测：`npm ci` 8.6–11.0 秒（冷缓存，同一 stage 第二次仍然 11.0 秒，因为 npm 缓存落在容器的 tmpfs 里）、`vue-tsc --noEmit` 3.1 秒、`vite build` 1.5 秒，三段合计约 15 秒；`docker run` 启动开销约 0.2 秒/次，三次容器约 1 秒。即一轮修复的容器开销约 16 秒，真正的成本是模型的额外一轮而不是构建。`170 秒` 是官方源 + 机器负载下的旧数字，不是当前配置的常态；换 registry 或机器后该结论要重测。
 2. **全局截止时间**：当前时限是“每阶段重置”，加入修复轮后单任务的绝对上界更难一眼看出。是否引入任务级总预算（步数＋时间＋token）属于 D6，建议在 D2 记账落地后用真实数据设定，而不是先拍一个数字。
 3. **把验证做成模型可调用的工具**（如 `verify`）：能让模型在建中自查，但调用时机与次数不可控，且与“服务端拥有验证权”冲突。若采纳，应作为额外一次机会，而不是替代修复循环。
 4. **诊断落库**：先不落库；需要审计时用保留前缀方案，不进 UIMessage 序列，避免污染后续回合与摘要。
