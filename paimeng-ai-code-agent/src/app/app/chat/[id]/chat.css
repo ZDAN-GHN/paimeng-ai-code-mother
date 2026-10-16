@@ -333,3 +333,53 @@
 .chat-page .generation-usage-tools span { margin-right: 8px; white-space: nowrap; }
 .chat-page .generation-usage-tool-failed { color: #cf1322; }
 .chat-page .generation-usage-detail { display: block; margin-top: 2px; color: #cf1322; overflow-wrap: anywhere; }
+
+/* 生成/构建时间线：紧凑横排，只列实际发生过的阶段 */
+.chat-page .build-progress {
+  margin: 0 16px 8px;
+  padding: 8px 12px;
+  border: 1px solid #eee4dd;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+}
+.chat-page .build-progress-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.chat-page .build-progress-item { display: inline-flex; align-items: center; gap: 4px; color: #6f6259; }
+.chat-page .build-progress-icon { display: inline-flex; color: #52c41a; }
+.chat-page .build-progress-running .build-progress-icon { color: #1890ff; }
+.chat-page .build-progress-failed .build-progress-icon,
+.chat-page .build-progress-failed .build-progress-label { color: #cf1322; }
+.chat-page .build-progress-cancelled .build-progress-icon { color: #999; }
+.chat-page .build-progress-meta,
+.chat-page .build-progress-ms { color: #a08c80; }
+.chat-page .build-progress-error { margin: 6px 0 0; color: #cf1322; overflow-wrap: anywhere; }
+
+/* 排队消息：输入框上方的 chips 与暂停提示 */
+.chat-page .composer-queue { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.chat-page .composer-queue-hint { color: #928278; font-size: 12px; }
+.chat-page .composer-queue-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chat-page .composer-queue-chip { max-width: 100%; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-page .composer-queue-paused { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: #d46b08; font-size: 12px; }
+
+/* 阶段性预览：有预览就保留 iframe，生成中盖一个徽标 */
+.chat-page .preview-live { position: relative; flex: 1; display: flex; min-height: 0; }
+.chat-page .preview-live-badge {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(24, 144, 255, 0.92);
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+}

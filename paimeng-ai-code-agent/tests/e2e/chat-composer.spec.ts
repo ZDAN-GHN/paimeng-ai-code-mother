@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
-import { appOrigin } from './support/app-origin';
+import { appOrigin, previewOrigin } from './support/app-origin';
 
 const origin = appOrigin();
 const prompt = '发送操作回归测试';
@@ -178,4 +178,108 @@ test('生成中追加消息不打断用户向上翻历史，出现回到底部�
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
+});
+
+test('生成中按 Enter 进队列，生成结束后自动发出队首', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const bodies: Array<Record<string, unknown>> = [];
+  let release = () => {};
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+    const write = (part: unknown) => response.write(`data: ${JSON.stringify(part)}\n\n`);
+    write({ type: 'start', messageId: 'queue-assistant' });
+    write({ type: 'text-start', id: 'queue-text' });
+    write({ type: 'text-delta', id: 'queue-text', delta: '第一轮回复。' });
+    write({ type: 'data-progress', data: { stage: 'files', paths: ['index.html'], at: 1 }, transient: true });
+    void gate.then(() => {
+      write({ type: 'data-progress', data: { stage: 'ready', at: 2 }, transient: true });
+      write({ type: 'text-end', id: 'queue-text' });
+      response.write('data: [DONE]\n\n');
+      response.end();
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+  const port = (server.address() as AddressInfo).port;
+  await page.route('**/api/app/chat/gen/code', route => { bodies.push(route.request().postDataJSON()); return route.continue({ url: `http://127.0.0.1:${port}/stream` }); });
+  try {
+    await page.getByLabel('对话消息').fill('第一条需求');
+    await page.getByRole('button', { name: /^发\s*送$/ }).click();
+    await expect(page.getByText('第一轮回复。', { exact: true })).toBeVisible();
+    await page.getByLabel('对话消息').fill('排队的需求');
+    await page.getByLabel('对话消息').press('Enter');
+    await expect(page.locator('.composer-queue-chip')).toHaveCount(1);
+    await expect(page.locator('.composer-queue-chip')).toContainText('排队的需求');
+    await expect(page.locator('.composer-queue-hint')).toHaveText('1 条消息排队中');
+    expect(bodies).toHaveLength(1);
+    release();
+    await expect(page.locator('.composer-queue-chip')).toHaveCount(0);
+    await expect.poll(() => bodies.length).toBe(2);
+    expect(bodies[1]).toMatchObject({ appId: page.url().split('/').at(-1), message: { role: 'user', parts: [{ type: 'text', text: '排队的需求' }] } });
+  } finally {
+    release();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+test('生成中 Ctrl + Enter 中途插话，文本立即进入消息列表并提示已插话', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.unroute('**/api/app/generation?*');
+  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'steer-task', status: 'generating' } } }));
+  let steers = 0;
+  await page.route('**/api/app/chat/steer', async route => {
+    steers += 1;
+    expect(route.request().method()).toBe('POST');
+    expect(route.request().postDataJSON()).toMatchObject({ appId: page.url().split('/').at(-1), text: '补充一个需求' });
+    await route.fulfill({ json: { code: 0, data: { accepted: true } } });
+  });
+  await page.reload();
+  await expect(page.getByLabel('对话消息')).toBeEnabled();
+  await page.getByLabel('对话消息').fill('补充一个需求');
+  await page.getByLabel('对话消息').press('Control+Enter');
+  await expect(page.locator('.message-user')).toContainText('补充一个需求');
+  await expect(page.locator('.generating-hint')).toHaveText('已插话，模型会在当前步骤结束后处理');
+  await expect(page.getByLabel('对话消息')).toHaveValue('');
+  expect(steers).toBe(1);
+});
+
+test('进度事件画出时间线，preview 事件给 iframe 加上版本参数', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.route('**/api/app/get/vo?*', async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({ json: { ...body, data: { ...body.data, previewUrl: previewOrigin() + '/progress-preview', sourceAvailable: true } } });
+  });
+  await page.route('**/api/app/chat/gen/code', async route => {
+    const stream = createUIMessageStream({ execute: ({ writer }) => {
+      writer.write({ type: 'start', messageId: 'progress-assistant' });
+      writer.write({ type: 'data-progress', data: { stage: 'files', paths: ['index.html', 'style.css'], at: 10 }, transient: true });
+      writer.write({ type: 'data-progress', data: { stage: 'source', status: 'ok', ms: 120, at: 20 }, transient: true });
+      writer.write({ type: 'data-progress', data: { stage: 'install', status: 'ok', ms: 21000, at: 30 }, transient: true });
+      writer.write({ type: 'data-progress', data: { stage: 'typecheck', status: 'ok', ms: 4000, at: 40 }, transient: true });
+      writer.write({ type: 'data-progress', data: { stage: 'build', status: 'ok', ms: 9000, at: 50 }, transient: true });
+      writer.write({ type: 'data-progress', data: { stage: 'preview', version: 1, at: 60 }, transient: true });
+      writer.write({ type: 'data-progress', data: { stage: 'ready', at: 70 }, transient: true });
+      writer.write({ type: 'text-start', id: 'progress-text' });
+      writer.write({ type: 'text-delta', id: 'progress-text', delta: '已完成构建。' });
+      writer.write({ type: 'text-end', id: 'progress-text' });
+      writer.setOutcome({ status: 'completed' });
+    } });
+    const response = createUIMessageStreamResponse({ stream });
+    await route.fulfill({ status: response.status, headers: Object.fromEntries(response.headers), body: await response.text() });
+  });
+  await page.reload();
+  await expect(page.getByLabel('对话消息')).toBeEnabled();
+  await page.getByLabel('对话消息').fill('做一个带进度的页面');
+  await page.getByRole('button', { name: /^发\s*送$/ }).click();
+  const timeline = page.locator('.build-progress');
+  await expect(timeline).toBeVisible();
+  await expect(timeline).toContainText('写入文件');
+  await expect(timeline).toContainText('2 个文件');
+  await expect(timeline).toContainText('源码校验');
+  await expect(timeline).toContainText('安装依赖');
+  await expect(timeline).toContainText('类型检查');
+  await expect(timeline).toContainText('打包');
+  await expect(timeline).toContainText('预览就绪');
+  await expect(page.locator('.preview-frame')).toHaveAttribute('src', /pv=1/);
 });

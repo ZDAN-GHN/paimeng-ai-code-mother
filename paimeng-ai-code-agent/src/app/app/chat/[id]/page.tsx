@@ -10,6 +10,8 @@ import { useAuth } from '@/components/providers';
 import { type AppInfo, type Generation, type GenerationAccount, isProjectCodeGenType } from '@/shared/contracts';
 import { MarkdownMessage } from '@/components/chat/markdown-message';
 import { GenerationUsage } from '@/components/chat/generation-usage';
+import { BuildProgress } from '@/components/chat/build-progress';
+import { composerAction, dequeue, enqueue, initialProgress, parseProgressEvent, progressReducer, removeQueued, type ProgressState } from '@/components/chat/generation-feedback';
 import { ToolCall, toolCallOf } from '@/components/chat/tool-call';
 import { AppDetailModal, formatCodeGenType } from '@/components/chat/app-detail-modal';
 import { DeploySuccessModal } from '@/components/chat/deploy-success-modal';
@@ -86,6 +88,13 @@ function Chat({ id }: { id: string }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const [deployModal, setDeployModal] = useState<{ open: boolean; url: string }>({ open: false, url: '' });
   const [memoryBusy, setMemoryBusy] = useState(false);
+  const [progress, setProgress] = useState<ProgressState>(initialProgress);
+  const [queue, setQueue] = useState<string[]>([]);
+  const [queuePaused, setQueuePaused] = useState(false);
+  const [drainArmed, setDrainArmed] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [steered, setSteered] = useState(false);
+  const [previewVersion, setPreviewVersion] = useState<number | null>(null);
   const iframe = useRef<HTMLIFrameElement>(null);
   const messageList = useRef<HTMLDivElement>(null);
   const messageContent = useRef<HTMLDivElement>(null);
@@ -97,6 +106,9 @@ function Chat({ id }: { id: string }) {
   const rebuildTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialPromptHandled = useRef(false);
   const loadingOlder = useRef(false);
+  const terminalSeen = useRef(false);
+  const previewRefreshAt = useRef(0);
+  const previewPending = useRef<number | null>(null);
   const canEdit = !!user && user.id === app?.userId;
   const isAdmin = user?.userRole === 'admin';
   const loaded = appLoaded && historySettled;
@@ -116,13 +128,44 @@ function Chat({ id }: { id: string }) {
       body: { appId: id, message: messages[messages.length - 1], requestId: crypto.randomUUID() },
     }),
   }), [id]);
+  /** 消费服务端的瞬时 `data-progress`：推进时间线、按 >=1s 节流刷新 iframe、终态接管队列。 */
+  function applyProgress(data: unknown) {
+    const event = parseProgressEvent(data);
+    if (!event) return;
+    setProgress(current => progressReducer(current, event));
+    if (event.stage === 'preview') {
+      previewPending.current = event.version;
+      if (Date.now() - previewRefreshAt.current >= 1000) {
+        previewRefreshAt.current = Date.now();
+        previewPending.current = null;
+        setPreviewVersion(event.version);
+      }
+      return;
+    }
+    if (event.stage === 'ready' || event.stage === 'failed' || event.stage === 'cancelled') {
+      terminalSeen.current = true;
+      const pending = previewPending.current;
+      previewPending.current = null;
+      if (pending !== null) { previewRefreshAt.current = Date.now(); setPreviewVersion(pending); }
+      if (event.stage === 'cancelled') setQueuePaused(true);
+      else { setTask(current => current ? { ...current, status: event.stage } : current); setDrainArmed(true); }
+    }
+  }
   const { messages, setMessages, sendMessage, stop, clearError, status, error: chatError } = useChat<UIMessage>({
     id, transport,
-    onFinish: () => { void refresh(); },
+    onFinish: options => {
+      // 兜底：没收到终态进度事件时按 ready 处理，清掉可能滞后的「生成中」，让队列继续发。
+      if (!terminalSeen.current && !options.isAbort) {
+        setTask(current => current && (current.status === 'generating' || current.status === 'building') ? { ...current, status: 'ready' } : current);
+        setDrainArmed(true);
+      }
+      void refresh();
+    },
     onError: e => { if (mounted.current) setError(e.message); },
     onData: part => {
       if (part.type === 'data-memory') setMemoryBusy(isConsolidating(part.data));
       if (part.type === 'data-build') setRepairing(repairingOf(part.data));
+      if (part.type === 'data-progress') applyProgress(part.data);
     },
   });
   const generating = status === 'submitted' || status === 'streaming' || task?.status === 'generating' || task?.status === 'building';
@@ -140,7 +183,7 @@ function Chat({ id }: { id: string }) {
     if (!task?.id || taskStatus === 'generating' || taskStatus === 'building') return;
     void refreshUsage();
   }, [task?.id, taskStatus, refreshUsage]);
-  useEffect(() => { if (!generating) { setMemoryBusy(false); setRepairing(null); } }, [generating]);
+  useEffect(() => { if (!generating) { setMemoryBusy(false); setRepairing(null); setSteered(false); } }, [generating]);
   const buildPending = publishing || rebuilding;
   useEffect(() => {
     if (!buildPending) { setBusySeconds(0); return; }
@@ -264,16 +307,62 @@ function Chat({ id }: { id: string }) {
     if (text.length > inputLimit) { setError('消息与选中元素信息合计不能超过 1000 字，请精简后重试'); return; }
     initialPromptHandled.current = true;
     submitting.current = true;
+    setSending(true);
     stick.current = true;
+    terminalSeen.current = false;
+    previewPending.current = null;
+    previewRefreshAt.current = 0;
     setStickToBottom(true);
+    setProgress(initialProgress());
+    setPreviewVersion(null);
+    setSteered(false);
+    setDrainArmed(false);
     setError(''); clearError(); setDismissedTaskError(''); setInput(''); setSelected(null); setEditing(false);
     try {
       await sendMessage({ text });
       await refresh();
     } catch (e) {
       if (mounted.current) { setInput(original); setError((e as Error).message); }
-    } finally { submitting.current = false; }
+    } finally { submitting.current = false; setSending(false); }
   }, [input, generating, canEdit, loaded, selected, clearError, sendMessage, refresh]);
+
+  /** 生成中按 Enter：本地排队，等终态事件（或 onFinish 兜底）后自动发队首。 */
+  const queueMessage = useCallback(() => {
+    const text = input.trim();
+    if (!text || !canEdit || !loaded) return;
+    setQueue(current => enqueue(current, text));
+    setInput('');
+  }, [input, canEdit, loaded]);
+
+  /** 生成中按 Ctrl/⌘ + Enter：注入模型上下文，这条消息立即出现在对话里。 */
+  const steer = useCallback(async () => {
+    const text = input.trim();
+    if (!text || !canEdit || !loaded) return;
+    try {
+      await api('app/chat/steer', { appId: id, text });
+      if (!mounted.current) return;
+      setInput('');
+      setSteered(true);
+      setMessages(previous => {
+        const message: UIMessage = { id: 'steer-' + crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text }] };
+        const lastAssistant = previous.findLastIndex(item => item.role === 'assistant');
+        return lastAssistant < 0 ? [...previous, message] : [...previous.slice(0, lastAssistant), message, ...previous.slice(lastAssistant)];
+      });
+    } catch (e) {
+      if (mounted.current) message.error((e as Error).message);
+    }
+  }, [input, canEdit, loaded, id, setMessages, message]);
+
+  // 终态后把队首发出去；暂停（取消）时不发，等用户点「继续发送」。sendMessage 要等整条流结束
+  // 才 settle，所以用 sending 状态等上一次发送彻底结束，否则队首会被 submitting 拦掉。
+  useEffect(() => {
+    if (!drainArmed || generating || queuePaused || sending || !canEdit || !loaded) return;
+    const { head, rest } = dequeue(queue);
+    if (head === null) return;
+    setDrainArmed(false);
+    setQueue(rest);
+    void submit(head);
+  }, [drainArmed, generating, queuePaused, sending, queue, canEdit, loaded, submit]);
 
   useEffect(() => {
     if (!appLoaded || !historyLoaded || authLoading || !app || initialPromptHandled.current) return;
@@ -299,6 +388,7 @@ function Chat({ id }: { id: string }) {
 
   async function cancel() {
     setCancelling(true);
+    if (queue.length) setQueuePaused(true);
     try {
       await api('app/generation/cancel', { appId: id });
       await stop(); await refresh();
@@ -349,7 +439,7 @@ function Chat({ id }: { id: string }) {
   const contextLength = selected ? selectionContext(selected).length : 0;
   const textareaMax = Math.max(0, inputLimit - contextLength);
   const previewSrc = canPreview && app?.previewUrl
-    ? app.previewUrl + (app.previewUrl.includes('?') ? '&' : '?') + 'generation=' + encodeURIComponent(task?.id || '')
+    ? app.previewUrl + (app.previewUrl.includes('?') ? '&' : '?') + 'generation=' + encodeURIComponent(task?.id || '') + (previewVersion === null ? '' : '&pv=' + previewVersion)
     : undefined;
 
   return <main className="chat-page">
@@ -389,8 +479,19 @@ function Chat({ id }: { id: string }) {
         </div>
         {!stickToBottom && <button type="button" className="jump-to-bottom" onClick={() => scrollToBottom(true)}>回到最新 ↓</button>}
         {memoryBusy && <p className="memory-hint" role="status">正在整理历史上下文，请稍候…</p>}
-        {generating && <p className="generating-hint" role="status">{repairing ? '构建未通过，正在进行第 ' + repairing.attempt + '/' + repairing.maxAttempts + ' 次修复…' : '正在生成或构建，请稍候…'}</p>}
+        <BuildProgress state={progress} error={taskError} />
+        {generating && <p className="generating-hint" role="status">{repairing ? '构建未通过，正在进行第 ' + repairing.attempt + '/' + repairing.maxAttempts + ' 次修复…' : steered ? '已插话，模型会在当前步骤结束后处理' : '正在生成或构建，请稍候…'}</p>}
         <div className="chat-input">
+          {queue.length > 0 && <div className="composer-queue">
+            <span className="composer-queue-hint" role="status">{queue.length} 条消息排队中</span>
+            <div className="composer-queue-chips">
+              {queue.map((text, index) => <Tag key={index} className="composer-queue-chip" closable onClose={() => setQueue(current => removeQueued(current, index))}>{text}</Tag>)}
+            </div>
+          </div>}
+          {queuePaused && queue.length > 0 && <div className="composer-queue-paused">
+            <span>已停止，队列已暂停</span>
+            <Button size="small" type="link" onClick={() => { setQueuePaused(false); setDrainArmed(true); }}>继续发送</Button>
+          </div>}
           {selected && <Alert className="selected-element-alert" type="info" closable onClose={() => setSelected(null)}
             title={'已选中 ' + selected.tagName.toLowerCase() + (selected.id ? ' #' + selected.id : '') + (selected.className ? ' .' + selected.className.split(/\s+/).filter(Boolean).join('.') : '')}
             description={<div className="element-details">
@@ -400,8 +501,16 @@ function Chat({ id }: { id: string }) {
             </div>} />}
           <Input.TextArea aria-label="对话消息" placeholder={canEdit ? '请描述你想生成的网站，越详细效果越好哦' : '无法在别人的作品下对话哦~'} value={input}
             onChange={e => setInput(e.target.value)} disabled={!canEdit || !loaded} autoSize={{ minRows: 3, maxRows: 6 }} maxLength={textareaMax}
-            onKeyDown={e => { if (e.nativeEvent.isComposing) return; if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); } }} />
-          <div className="prompt-actions"><span className="composer-hint">Enter 发送，Shift + Enter 换行</span>
+            onKeyDown={e => {
+              if (e.nativeEvent.isComposing) return;
+              const action = composerAction({ key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, generating });
+              if (action === 'none' || action === 'newline') return;
+              e.preventDefault();
+              if (action === 'send') void submit();
+              else if (action === 'queue') queueMessage();
+              else void steer();
+            }} />
+          <div className="prompt-actions"><span className="composer-hint">Enter 排队发送 · Ctrl + Enter 中途插话 · Shift + Enter 换行</span>
             {generating ? <Button danger icon={<StopOutlined aria-hidden="true" />} loading={cancelling} disabled={building} title={building ? '代码已生成，正在完成构建，构建无法取消' : undefined} onClick={() => { void cancel(); }}>{building ? '构建中' : '停止生成'}</Button> :
               <Button type="primary" icon={<SendOutlined aria-hidden="true" />} disabled={!canEdit || !loaded || !input.trim()} onClick={() => { void submit(); }}>发送</Button>}
           </div>
@@ -413,8 +522,11 @@ function Chat({ id }: { id: string }) {
           {canPreview && <Button size="small" type="link" icon={<ExportOutlined aria-hidden="true" />} onClick={() => { if (app?.previewUrl) window.open(app.previewUrl, '_blank', 'noopener'); }}>新窗口打开</Button>}
           {app?.deployUrl && <a href={app.deployUrl} target="_blank" rel="noopener noreferrer">访问作品</a>}
         </Space></div>
-        {generating || rebuilding ? <div className="preview-loading" role="status"><Spin size="large" /><p>{generating ? '正在生成网站...' : '正在重建预览...'}</p></div> :
-          canPreview ? <iframe ref={iframe} className="preview-frame" title="应用预览" src={previewSrc} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={() => { previewLoaded.current = true; editorMessage({ type: 'TOGGLE_EDIT_MODE', editMode: editing }); }} /> :
+        {canPreview ? <div className="preview-live">
+          {generating && <div className="preview-live-badge" role="status">生成中，内容会持续更新</div>}
+          <iframe ref={iframe} className="preview-frame" title="应用预览" src={previewSrc} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={() => { previewLoaded.current = true; editorMessage({ type: 'TOGGLE_EDIT_MODE', editMode: editing }); }} />
+        </div> :
+          generating || rebuilding ? <div className="preview-loading" role="status"><Spin size="large" /><p>{generating ? '正在生成网站...' : '正在重建预览...'}</p></div> :
           <div className="preview-placeholder"><div className="preview-placeholder-icon">🌐</div><p>网站文件生成完成后将在这里展示</p></div>}
       </section>
     </div>
