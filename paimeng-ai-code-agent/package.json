@@ -58,6 +58,7 @@
     "rehype-highlight": "7.0.2",
     "remark-gfm": "4.0.1",
     "server-only": "0.0.1",
+    "sharp": "^0.35.5",
     "undici": "7.30.0",
     "zod": "4.6.5"
   },
