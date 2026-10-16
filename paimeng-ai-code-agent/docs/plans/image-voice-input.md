@@ -48,6 +48,9 @@ v1 明确不做：图片用途选择（素材/参考）、裁剪标注、附件�
 共享资源：U1 与 U4 都改 `route.ts`，所以 U4 排在 U1 之后；其余单元文件不重叠。子代理只跑 tsc 与自己文件的
 vitest，不跑 E2E（E2E 由主代理串行跑，避免抢测试库与端口）。
 
+- **客户端消息里的图片放在 metadata，发送时才合并进 parts**（U3 定案）：`parts` 保持 SDK 合法的联合类型，避免 `useChat` 内部与流式归约遇到未知 part；`DefaultChatTransport.prepareSendMessagesRequest` 在发送时把 metadata 里的附件合并进最后一条消息的 `parts`，形状严格等于契约的 `{ type:'attachment', attachmentId, mediaType, filename }`。展示只有一条路径（本地从 metadata、历史从 parts，同一组件、同一 zod 校验）。排队消息自动发送走同一条合并路径。
+- **队列函数改为泛型**（`enqueue/dequeue/removeQueued` 约束 `{ text: string }`）：字符串元素行为逐字不变，排队消息可带附件。
+
 ## 已知取舍
 
 - **不做用途选择**：早期方案的「素材/参考」单选要求用户先理解一个额外概念。v1 把上传图片一律复制到
