@@ -20,6 +20,17 @@ export type ChatHistory = {id:string;appId:string;userId:string;message:string;m
 /** 任务级停止原因（D2 记账，设计见 docs/plans/agent-design-review.md §9）。 */
 export const generationStopReasons = ['completed','no-changes','step-limit','verification-failed','timeout','cancelled','lease-lost','model-error','initialization-failed','interrupted'] as const;
 export type GenerationStopReason = typeof generationStopReasons[number];
+/**
+ * 生成过程中的瞬时进度事件（`data-progress`，服务端写、客户端读；不落库、不进 UI 消息 parts）。
+ * `files` 是写入/修改/删除完成后的文件，`preview` 表示部分预览已可看（版本单调递增），
+ * 构建阶段事件来自 buildApp 的 stage 回调，`ready`/`failed`/`cancelled` 是任务终态。
+ */
+export type BuildProgressStage = 'files'|'preview'|'source'|'install'|'typecheck'|'build'|'ready'|'failed'|'cancelled';
+export type BuildProgressEvent =
+ | {stage:'files';paths:string[];at:number}
+ | {stage:'preview';version:number;at:number}
+ | {stage:'source'|'install'|'typecheck'|'build';status:'started'|'ok'|'failed';ms:number;at:number}
+ | {stage:'ready'|'failed'|'cancelled';at:number};
 /** 注册表里的模型绑定标识（与上游实际响应的 provider/model 分开记）。 */
 export type ModelIdentity = {alias:string|null;providerId:string|null;modelName:string|null};
 export type AccountStepKind = 'model'|'build'|'summary';
