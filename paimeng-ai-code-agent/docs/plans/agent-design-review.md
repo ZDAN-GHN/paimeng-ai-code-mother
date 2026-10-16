@@ -443,3 +443,52 @@ D1 的评估报告可以直接用 `totals`（构建通过率、步数、耗时�
 - `tests/e2e/chat-composer.spec.ts`：脚本化 UI 消息流断言渲染结果（三条工具调用、代码块、替换对比、缩略图 `src` 指向素材接口、页面上不出现协议字段、可展开收起、贴底状态不被内容长高破坏）；另有一条真实慢速流用例：生成中向上翻历史，后续追加不动滚动位置，点「回到最新」回到底部。
 - `tests/e2e/platform.spec.ts`：真实 fixture 生成后断言工具调用可读标题、气泡里没有协议字段；对话管理弹窗断言可读历史文本。
 - 真实模型证据（本机探针 `runtime/probe/probe-ui.mjs`，截图留在 `runtime/evidence/`，都不提交）：一次联网找图的生成里，`检索图片`/`导入图片`/`写入文件`/`修改文件` 按执行顺序逐步出现，缩略图可点开，浏览器无报错。
+
+## 11. 构建进度可视化、阶段性预览与中途插话（2026-10-16 落地）
+
+用户要求两件事：(a)「构建进度与工具增量反馈」——希望网页阶段性有部分呈现、构建过程可视化；(b)「中途插话 steering + 后续任务排队 follow-up」——Enter 排队发送、Ctrl+Enter 中途插话，且插话必须等当前步骤跑完（可能是模型输出，也可能是工具调用），不能退化成「中断后重发」。
+
+契约类型先落在 `@/shared/contracts` 的 `BuildProgressEvent`（提交 `5e646cd`），再由两个并行子任务分别实现服务端与客户端（`f9b61a9`、`7d8f438`）。
+
+### 11.1 进度事件（服务端 → 客户端）
+
+`data-progress` 是**瞬时**事件（`transient: true`）：不落库、不进 UI 消息 parts，刷新页面即消失；发送失败一律吞掉，不影响生成。事件种类：
+
+| 事件 | 触发点 | 含义 |
+| --- | --- | --- |
+| `files {paths}` | `agent.ts` 的 `onStepEnd` | 这一步成功写入/修改/删除的文件（参数错误与 `tool-error` 的调用不算，进度不虚报） |
+| `preview {version}` | 同上，仅静态应用 | workspace 就是预览目录，写完即可看；≥1s 节流，版本单调递增 |
+| `source/install/typecheck/build {status,ms}` | `buildApp` 的 `onStage` 回调 | 构建各阶段的 started/ok/failed 与墙钟；回调只是通知，抛错不会让构建失败 |
+| `ready/failed/cancelled` | 任务终态 | 客户端据此接管队列与徽标 |
+
+`buildApp(app, signal, onStage?)` 的第三个参数是可选的：`rebuildPreview`/`publish` 不传，行为与之前完全一致。项目模板里 `source` 只覆盖清单校验（模板锁文件被改这类失败发生在阶段之外，靠终态 `failed` 表达）。
+
+### 11.2 客户端消费
+
+- 纯逻辑在 `src/components/chat/generation-feedback.ts`：`composerAction`（键位决策）、`enqueue`/`dequeue`/`removeQueued`、`parseProgressEvent`（zod 判别联合）、`progressReducer`（事件序列 → 阶段列表；终态之后的事件视为新一次生成并重置）。
+- 时间线 `src/components/chat/build-progress.tsx`：只渲染实际发生过的阶段，完成显示耗时，失败标红并带任务错误文案；因为事件是瞬时的，刷新后自然消失。
+- **阶段性预览**：只要有 `app.previewUrl` 就保留 iframe（生成中、重建中都不再被整块 spinner 替换），生成中盖一个「生成中，内容会持续更新」徽标；`preview` 事件按 ≥1s 节流给 src 追加 `pv=<version>` 强制刷新，避免每写一个文件整页重载。没有预览时才显示原来的占位/spinner。
+
+### 11.3 中途插话与排队
+
+- `POST app/chat/steer {appId, text}`：权限**仅创建者**（`getApp(appId, user, true)`，与 `app/chat/gen/code`、`app/generation/cancel` 一致——插话会写进别人的对话历史并影响别人的生成，属于写操作，不给管理员开口子）。
+- 注入点是 `ToolLoopAgent` settings 的 `prepareStep`：把该任务的队列 drain 出来，返回 `{ messages: [...messages, ...文本] }`。已核实 SDK 实现（`ai/dist/index.js`）：`messagesForNextStep = [...stepMessages, ...stepResponseMessages]`，即 prepareStep 返回的 messages 会带到后续步骤，所以每次只追加新 drain 的文本，不会重复注入。`prepareStep` 在每次模型调用前执行，天然满足「等当前步骤跑完（含工具执行）再注入」，不打断当前步骤。
+- 注入过的消息随 `runRound` 返回，修复轮重建 messages 时带上（`[...messages, ...round.steered, ...round.responseMessages, feedback]`），否则修复轮丢上下文；集成测试里用「临时删掉 `...round.steered` 应当失败」做过变异校验。
+- 文本同时落库成一条普通 user 消息（`saveUserMessage`：`ts_message` + `chat_history`），刷新后仍在对话里；模型侧只把它当新的 user 消息。
+- 队列只属于本进程里正在跑的那次生成：任务已结束、或进程重启后没有队列时返回 409「当前没有正在生成的步骤，插话不适用」，而不是静默存一条永远不会注入的消息。
+- 客户端键位：Enter 生成中排队 / 空闲发送；Ctrl（⌘）+ Enter 生成中插话 / 空闲等同发送；Shift + Enter 换行；保留 `isComposing` 组合键保护。排队消息显示为 chips（可单条删除），收到终态事件（或 `onFinish` 兜底）后自动发队首；`cancelled` 时暂停队列并给「继续发送」按钮。
+
+### 11.4 验证
+
+- 单元：`tests/generation-feedback.test.ts`（13 例：键位、队列、进度归约）、`tests/tool-call-view.test.ts`、`tests/tool-transcript.test.ts`；`npm test` 491 例全过。
+- 集成（真实 MySQL + mock 模型）：`tests/integration/chat-steering.test.ts`（插话后**下一次模型调用确实收到这条 user 文本**、落库、无活跃生成 409、HTTP 权限）、`tests/integration/build-progress.test.ts`（SSE 里 files/preview/source/ready 齐全）、`tests/integration/http.test.ts`（steer 的 400/403/409）。
+- E2E：`tests/e2e/chat-composer.spec.ts` 三条新用例（排队后自动发队首、Ctrl+Enter 插话、进度事件画时间线并给 iframe 加 `pv=`）；`test:e2e:isolated` 72 通过/2 跳过，`test:e2e:dev` 无告警。
+- 真实模型探针（`runtime/probe/probe-progress.mjs`，截图在 `runtime/evidence/`，都不提交）：一次真实生成里 iframe 在生成中就显示了半成品页面并带徽标；时间线依次出现「生成 → 写入文件 → 预览就绪 → 源码校验」；排队消息在该次生成结束后自动发出并被模型正确执行（把标题字号调大）；插话文本落库且位置正好在该次生成的 user 与 assistant 行之间（说明注入发生在该轮之内）；浏览器无报错。
+
+### 11.5 已知取舍
+
+- 进度事件不落库：刷新页面后时间线消失（只保留 D2 的逐步记账）。
+- 时间线在任务结束后仍留在页面上，直到下一次生成或刷新；没有做「N 秒后淡出」。
+- `files` 事件按模型步骤聚合，一步里写多个文件合并成一条；不显示单文件级进度。
+- 队列是客户端本地的：刷新页面后排队消息丢失（已发出的插话不丢）。
+- 静态应用（html/multi_file）才有 `preview` 事件；Vue/React 项目要等构建产物，预览在构建完成后才更新。
