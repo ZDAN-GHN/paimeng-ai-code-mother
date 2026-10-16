@@ -13,6 +13,9 @@ const mime: Record<string, string> = {
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8',
 };
 
+/** 静态资源的 Content-Type；未知扩展名返回 null（调用方决定 404 还是拒绝）。 */
+export function contentType(path: string) { return mime[extname(path)] ?? null; }
+
 function editorBridge(parentOrigin: string) {
   return `<script data-paimeng-editor>(function(){
   var parentOrigin=${JSON.stringify(parentOrigin)};
@@ -138,7 +141,7 @@ export async function createPreviewServer() {
       const directoryReal = await realpath(directory);
       if (directoryReal !== directory) throw new Error('目录不允许软链接');
       let file = join(directory, asset);
-      if (!mime[extname(file)]) {
+      if (!contentType(file)) {
         if (extname(file)) { res.writeHead(404); res.end(); return; }
         file = join(directory, 'index.html');
       }
@@ -154,7 +157,7 @@ export async function createPreviewServer() {
         contents = Buffer.from(/<\/body>/i.test(html) ? html.replace(/<\/body>/i, script + '</body>') : html + script);
       }
       res.writeHead(200, {
-        'Content-Type': mime[extname(file)], 'Content-Length': contents.length, 'Cache-Control': 'no-store',
+        'Content-Type': contentType(file) ?? 'application/octet-stream', 'Content-Length': contents.length, 'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
         'Content-Security-Policy': `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self'; worker-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'self'; frame-ancestors ${config.appOrigin}; sandbox allow-scripts allow-same-origin`,
       });

@@ -9,7 +9,8 @@ import { withAppWriter } from './generation-store';
 import { publicUser } from './auth';
 import { BusinessError } from './http';
 import { previewUrl, deployedUrl, deployApp, captureCover, downloadApp, hasPreview, buildApp, loadBuildState } from './artifacts';
-import { listProjectFiles, workspace } from './workspace';
+import { contentType } from './preview';
+import { listProjectFiles, readProjectFileBytes, workspace } from './workspace';
 import { routeCodeGenType } from './model';
 import { appTemplate, initializeTemplate } from './template-workspace';
 import { defaultTemplateFor, resolveTemplate } from './templates';
@@ -70,6 +71,13 @@ export async function deleteApp(raw:unknown,user:User){
  await withAppWriter(id,async(tx,row)=>{if(String(row.userId)!==user.id&&user.userRole!=='admin')throw new BusinessError(403,40300,'无权限删除该应用');await tx.update(apps).set({isDelete:1,updateTime:now()}).where(eq(apps.id,row.id));await tx.update(histories).set({isDelete:1}).where(eq(histories.appId,row.id));await tx.delete(messages).where(eq(messages.appId,row.id));await tx.delete(generationSteps).where(inArray(generationSteps.generationId, tx.select({ id: generations.id }).from(generations).where(eq(generations.appId, row.id))));});return true;
 }
 export async function assertIdle(id:string){const [lease]=await db().select().from(leases).where(eq(leases.appId,BigInt(id))).limit(1);if(lease&&lease.expiresAt>now())throw new BusinessError(409,40900,'应用正在生成，请先取消或等待完成');}
+/** 生成对话里要显示的图片素材：只放行图片类型，路径仍走 workspace 的安全解析。 */
+export async function readAppAsset(id:string,path:string,user:User){
+ const app=await getApp(id,user,true,true);
+ const type=contentType(path);
+ if(!type?.startsWith('image/'))throw new BusinessError(400,40000,'只支持读取图片素材');
+ return { bytes:await readProjectFileBytes(app,path), mime:type };
+}
 export async function download(id:string,user:User){await getApp(id,user,true);return withAppWriter(id,async(tx,row)=>{if(String(row.userId)!==user.id)throw new BusinessError(403,40300,'无权限下载该应用');return downloadApp(await appView(row,tx));});}
 const rebuildCooldown=60000;
 const rebuilds=new Map<string,{at:number;error:string|null}>();

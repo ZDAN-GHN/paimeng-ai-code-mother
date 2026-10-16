@@ -10,6 +10,7 @@ import { useAuth } from '@/components/providers';
 import { type AppInfo, type Generation, type GenerationAccount, isProjectCodeGenType } from '@/shared/contracts';
 import { MarkdownMessage } from '@/components/chat/markdown-message';
 import { GenerationUsage } from '@/components/chat/generation-usage';
+import { ToolCall, toolCallOf } from '@/components/chat/tool-call';
 import { AppDetailModal, formatCodeGenType } from '@/components/chat/app-detail-modal';
 import { DeploySuccessModal } from '@/components/chat/deploy-success-modal';
 import './chat.css';
@@ -31,6 +32,16 @@ function repairingOf(data: unknown): { attempt: number; maxAttempts: number } | 
   return part.status === 'repairing' && typeof part.attempt === 'number' && typeof part.maxAttempts === 'number'
     ? { attempt: part.attempt, maxAttempts: part.maxAttempts }
     : null;
+}
+
+/** 助手回复的内容块：文字、思考过程、工具调用。工具调用只渲染可读信息，不显示原始 JSON。 */
+function AssistantParts({ parts, assetUrl }: { parts: UIMessage['parts']; assetUrl: (path: string) => string }) {
+  return <>{parts.map((part, index) => {
+    if (part.type === 'text') return <MarkdownMessage key={index} content={part.text} />;
+    if (part.type === 'reasoning') return <details className="reasoning" key={index}><summary>思考过程</summary><div className="message-text">{part.text}</div></details>;
+    const call = toolCallOf(part);
+    return call ? <ToolCall key={index} call={call} assetUrl={assetUrl} /> : null;
+  })}</>;
 }
 
 function selectionContext(selected: Selected) {
@@ -71,11 +82,14 @@ function Chat({ id }: { id: string }) {
   const [busySeconds, setBusySeconds] = useState(0);
   const [repairing, setRepairing] = useState<{ attempt: number; maxAttempts: number } | null>(null);
   const [visibleHistory, setVisibleHistory] = useState(historyPageSize);
+  const [stickToBottom, setStickToBottom] = useState(true);
   const [detailOpen, setDetailOpen] = useState(false);
   const [deployModal, setDeployModal] = useState<{ open: boolean; url: string }>({ open: false, url: '' });
   const [memoryBusy, setMemoryBusy] = useState(false);
   const iframe = useRef<HTMLIFrameElement>(null);
   const messageList = useRef<HTMLDivElement>(null);
+  const messageContent = useRef<HTMLDivElement>(null);
+  const stick = useRef(true);
   const mounted = useRef(false);
   const submitting = useRef(false);
   const rebuildCount = useRef(0);
@@ -114,6 +128,7 @@ function Chat({ id }: { id: string }) {
   const generating = status === 'submitted' || status === 'streaming' || task?.status === 'generating' || task?.status === 'building';
   const taskStatus = task?.status;
   // 每次生成结束时取一次用量：一条助手回复对应一次生成，按消息 id 挂到气泡上；生成中不轮询明细。
+  const assetUrl = useCallback((path: string) => '/api/app/asset?appId=' + encodeURIComponent(id) + '&path=' + encodeURIComponent(path), [id]);
   const refreshUsage = useCallback(async () => {
     try {
       const accounts = await api<GenerationAccount[]>('app/generation/accounts?appId=' + encodeURIComponent(id));
@@ -173,12 +188,38 @@ function Chat({ id }: { id: string }) {
     const timer = setInterval(() => { void refresh(); }, 1500);
     return () => clearInterval(timer);
   }, [generating, refresh]);
+  // 流式追加只在用户本来就贴着底部时才跟随；用户向上看历史时不动他的滚动位置。
+  const scrollToBottom = useCallback((smooth = false) => {
+    const list = messageList.current;
+    if (!list) return;
+    list.scrollTo({ top: list.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+    stick.current = true;
+    setStickToBottom(true);
+  }, []);
+  const onMessagesScroll = useCallback(() => {
+    const list = messageList.current;
+    if (!list) return;
+    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+    stick.current = atBottom;
+    setStickToBottom(atBottom);
+  }, []);
   useEffect(() => {
     const list = messageList.current;
     if (!list) return;
     if (loadingOlder.current) { loadingOlder.current = false; return; }
-    list.scrollTop = list.scrollHeight;
+    if (stick.current) list.scrollTop = list.scrollHeight;
   }, [messages, visibleHistory]);
+  // 内容长高时（流式文字、图片缩略图加载、用量块出现）保持贴底；用户向上翻历史后不再强制滚动。
+  useEffect(() => {
+    const content = messageContent.current;
+    if (!content || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      const list = messageList.current;
+      if (list && stick.current) list.scrollTop = list.scrollHeight;
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
 
   const previewOrigin = app?.previewUrl ? new URL(app.previewUrl).origin : null;
   // iframe 加载完成前它的文档还是 about:blank（源继承自本页），此时向预览源发消息会被浏览器拒绝并报错。
@@ -223,6 +264,8 @@ function Chat({ id }: { id: string }) {
     if (text.length > inputLimit) { setError('消息与选中元素信息合计不能超过 1000 字，请精简后重试'); return; }
     initialPromptHandled.current = true;
     submitting.current = true;
+    stick.current = true;
+    setStickToBottom(true);
     setError(''); clearError(); setDismissedTaskError(''); setInput(''); setSelected(null); setEditing(false);
     try {
       await sendMessage({ text });
@@ -326,27 +369,25 @@ function Chat({ id }: { id: string }) {
     {historyError && <Alert style={{ marginBottom: 12 }} type="warning" title={'对话历史暂不可读取：' + historyError} />}
     <div className="chat-columns">
       <section className="chat-panel" aria-label="应用对话">
-        <div className="messages" ref={messageList}>
-          {messages.length > visibleHistory && <Button type="link" onClick={() => { loadingOlder.current = true; setVisibleHistory(count => count + historyPageSize); }}>加载更多历史消息</Button>}
-          {!messages.length && <div className="message-item initial-prompt"><div className="message-role">初始需求</div><div className="message-text">{app?.initPrompt || '加载应用…'}</div></div>}
-          {visibleMessages.map(item => {
-            const usage = usageByMessage.get(item.id);
-            return item.role === 'user'
-              ? <div className="message-item message-user" key={item.id}>
-                  <div className="message-bubble">{item.parts.map((part, index) => part.type === 'text' ? <div className="message-text" key={index}>{part.text}</div> : null)}</div>
-                  <Avatar className="message-avatar" src={user?.userAvatar ?? undefined} icon={<UserOutlined />} />
-                </div>
-              : <div className="message-item message-ai" key={item.id}>
-                  <Avatar className="message-avatar" src="/paimeng.png" alt="AI 助手" />
-                  <div className="message-bubble">{item.parts.map((part, index) =>
-                    part.type === 'text' ? <MarkdownMessage key={index} content={part.text} /> :
-                    part.type === 'reasoning' ? <details className="reasoning" key={index}><summary>思考过程</summary><div className="message-text">{part.text}</div></details> :
-                    part.type.startsWith('tool-') ? <details className="tool-result" key={index}><summary>{part.type.replace('tool-', '')} 工具状态</summary><pre>{JSON.stringify(part, null, 2)}</pre></details> : null)}
-                    {usage && <GenerationUsage usage={usage} />}
+        <div className="messages" ref={messageList} onScroll={onMessagesScroll}>
+          <div className="messages-inner" ref={messageContent}>
+            {messages.length > visibleHistory && <Button type="link" onClick={() => { loadingOlder.current = true; setVisibleHistory(count => count + historyPageSize); }}>加载更多历史消息</Button>}
+            {!messages.length && <div className="message-item initial-prompt"><div className="message-role">初始需求</div><div className="message-text">{app?.initPrompt || '加载应用…'}</div></div>}
+            {visibleMessages.map(item => {
+              const usage = usageByMessage.get(item.id);
+              return item.role === 'user'
+                ? <div className="message-item message-user" key={item.id}>
+                    <div className="message-bubble">{item.parts.map((part, index) => part.type === 'text' ? <div className="message-text" key={index}>{part.text}</div> : null)}</div>
+                    <Avatar className="message-avatar" src={user?.userAvatar ?? undefined} icon={<UserOutlined />} />
                   </div>
-                </div>;
-          })}
+                : <div className="message-item message-ai" key={item.id}>
+                    <Avatar className="message-avatar" src="/paimeng.png" alt="AI 助手" />
+                    <div className="message-bubble"><AssistantParts parts={item.parts} assetUrl={assetUrl} />{usage && <GenerationUsage usage={usage} />}</div>
+                  </div>;
+            })}
+          </div>
         </div>
+        {!stickToBottom && <button type="button" className="jump-to-bottom" onClick={() => scrollToBottom(true)}>回到最新 ↓</button>}
         {memoryBusy && <p className="memory-hint" role="status">正在整理历史上下文，请稍候…</p>}
         {generating && <p className="generating-hint" role="status">{repairing ? '构建未通过，正在进行第 ' + repairing.attempt + '/' + repairing.maxAttempts + ' 次修复…' : '正在生成或构建，请稍候…'}</p>}
         <div className="chat-input">

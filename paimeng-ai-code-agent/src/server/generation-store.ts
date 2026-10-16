@@ -12,6 +12,7 @@ import { readSummaryInTx } from './memory-store';
 import { compareTurns, isLegacyMessageId, legacyMessagePrefix, type SummarySnapshot, type TurnOrder } from './memory-types';
 import type { GenerationStatus, User } from '@/shared/contracts';
 import { stopReasonFrom, type GenerationStopReason } from './generation-accounting';
+import { toolTranscript } from './tool-transcript';
 
 const activeStatuses = ['generating', 'building'];
 const expiry = () => new Date(Date.now() + 30000).toISOString().slice(0, 23).replace('T', ' ');
@@ -224,7 +225,8 @@ export async function generationFor(appId: string) {
 
 async function storeAssistant(tx: Transaction, appId: string, userId: bigint, message: UIMessage, historyId: bigint) {
   await storeMessage(tx, appId, message);
-  const text = message.parts.map(p => p.type === 'text' ? p.text : p.type.startsWith('tool-') ? JSON.stringify(p) : '').filter(Boolean).join('\n');
+  // 历史文本是给人读的（列表、管理员查询、摘要输入）：工具调用转成可读文本，不存原始 JSON。
+  const text = message.parts.map(p => p.type === 'text' ? p.text : toolTranscript(p)).filter(part => part !== null && part !== '').join('\n');
   if (text) await tx.insert(histories).values({ id: historyId, appId: BigInt(appId), userId, messageType: 'ai', message: text, createTime: now(), updateTime: now() });
 }
 

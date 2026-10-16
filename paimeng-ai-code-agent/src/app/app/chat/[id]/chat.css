@@ -77,14 +77,84 @@
 .chat-page .message-role { font-size: 12px; color: #8e7e73; margin-bottom: 6px; }
 .chat-page .message-text { white-space: pre-wrap; line-height: 1.7; }
 .chat-page .initial-prompt .message-text { color: #867870; }
-.chat-page .reasoning,
-.chat-page .tool-result {
+.chat-page .reasoning {
   margin: 8px 0;
   padding: 8px;
   border-radius: 6px;
   background: #f2f6f4;
   font-size: 12px;
   overflow: auto;
+}
+/* 工具调用：标题行 + 明细，明细里的代码块可滚动，长内容不撑爆气泡。 */
+.chat-page .tool-call {
+  margin: 6px 0;
+  border: 1px solid #e6ece9;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  overflow: hidden;
+}
+.chat-page .tool-call-error { border-color: #ffccc7; }
+.chat-page .tool-call-header {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  background: #f7faf9;
+  color: #1a1a1a;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-page .tool-call-header:hover { background: #eef4f1; }
+.chat-page .tool-call-caret,
+.chat-page .tool-call-icon { color: #7d8c86; flex-shrink: 0; }
+.chat-page .tool-call-title { font-weight: 600; overflow-wrap: anywhere; }
+.chat-page .tool-call-meta { color: #867870; overflow-wrap: anywhere; }
+.chat-page .tool-call-tag { margin-left: auto; }
+.chat-page .tool-call-body { padding: 6px 8px 8px; }
+.chat-page .tool-call-error-text { margin: 0 0 6px; color: #cf1322; overflow-wrap: anywhere; }
+.chat-page .tool-call-file { margin-bottom: 8px; }
+.chat-page .tool-call-file:last-child { margin-bottom: 0; }
+.chat-page .tool-call-file-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; }
+.chat-page .tool-call-path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.chat-page .tool-call-code {
+  max-height: 260px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 4px;
+  background: #f7faf9;
+  color: #1a1a1a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}
+.chat-page .tool-call-diff { overflow: auto; border-radius: 4px; background: #f7faf9; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.chat-page .tool-call-diff-line { padding: 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-page .tool-call-diff-removed { background: #fff1f0; color: #a8071a; }
+.chat-page .tool-call-diff-added { background: #f6ffed; color: #237804; }
+.chat-page .tool-call-list { margin: 0; padding-left: 18px; }
+.chat-page .tool-call-list li { margin-bottom: 4px; }
+.chat-page .tool-call-snippet { display: block; color: #867870; }
+.chat-page .tool-call-link { color: #cb573e; }
+.chat-page .tool-call-images { display: flex; flex-wrap: wrap; gap: 12px; }
+.chat-page .tool-call-image { display: flex; flex-direction: column; gap: 4px; max-width: 220px; margin: 0; }
+.chat-page .tool-call-image figcaption { display: flex; flex-direction: column; gap: 2px; }
+.chat-page .jump-to-bottom {
+  align-self: center;
+  margin: 0 0 6px;
+  padding: 4px 12px;
+  border: 1px solid #f0e4dd;
+  border-radius: 999px;
+  background: #fff;
+  color: #cb573e;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 .chat-page .memory-hint {
   margin: 0 16px 8px;

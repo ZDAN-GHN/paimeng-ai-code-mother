@@ -409,3 +409,37 @@ D1 的评估报告可以直接用 `totals`（构建通过率、步数、耗时�
 - `tests/integration/generation-accounting.test.ts`：真实 `buildApp`（html 校验，不需要 Docker）跑五种任务——成功、工具参数错误后重试、上游不返回用量、模型不写文件、客户端取消——从 `ts_generation_step` 读回断言步骤、工具成败、token 与停止原因。
 - 既有用例补了 `stopReason` 断言（超时/取消/不可修复/无进展/修复耗尽/模型流失败/长度截断）。
 - `tests/integration/http.test.ts`：`app/generation/accounts` 返回的 `messageId` 与持久化的助手消息 id 一致，合计里有模型步骤与一次通过的构建；`tests/e2e/platform.spec.ts` 断言用量块出现在助手气泡里、展开后能看到逐步行。
+
+## 10. 对话里的工具调用与素材展示（2026-10-16 落地）
+
+用户反馈（附截图）：「给前端的工具调用不是流式的」「希望像 pi 这类 agent 工具的文件操作渲染效果」「不要暴露工具调用细节（id）」「导入的图片素材要在消息里渲染、可点开放大」「生成过程追加的消息不要影响用户的滚动」。旧版 Java 实现里已有对应做法（`generateToolExecutedResult`：`[工具调用] 写入文件 index.html` + 代码块、替换前后对比），这次是把它复刻到 TS 前端并把历史文本一并纠正。
+
+### 10.1 渲染层（前端）
+
+`src/components/chat/tool-call.tsx` 是纯转换 + 展示：
+
+- `toolCallOf(part)` 把 UI 消息里的工具 part 转成判别联合 `ToolCallView`（`files-written` / `file-modified` / `file-read` / `files-listed` / `file-deleted` / `images-imported` / `images-searched` / `web-searched` / `page-read` / `unknown`），输入输出用 zod 校验，解析失败（流式中的半截参数）退化成「进行中」的通用标题，不抛错。流式期间 `tool-input-delta` 已把 part 变成 `input-streaming` 且带部分参数，所以文件内容和搜索动作是逐步出现的，不是最后一次性蹦出来。
+- 渲染只出现可读信息：中文动作 + 目标（`写入文件 index.html`）、行数/体积等摘要、明细（代码块、`-`/`+` 替换对比、素材缩略图、搜索结果链接）。`toolCallId`、`state`、原始 JSON 一个都不渲染。
+- 写入/修改/导入图片默认展开，读取/列出/联网检索默认收起，用户可点标题行切换。
+- 导入的图片用 antd `Image` 渲染缩略图，`src` 指向新增的素材接口，点击即放大预览；许可与来源页一并显示（授权状态未知时明确写出来，对应 §web-access 的「通用网络档」约定）。
+
+### 10.2 素材接口
+
+`GET app/asset?appId=&path=`（`business.readAppAsset`）：只放行图片扩展名，路径仍走 `workspace` 的安全解析（禁止软链接、越界、`node_modules`），权限与 `app/get` 一致（创建者或管理员，其他人 403），返回字节流 + `nosniff` + 私有缓存。预览服务器只服务 `runtime/code_output`，素材目录（`assets/`）不在预览路径里，所以图片要在对话里看到必须走这个接口。
+
+### 10.3 历史文本（服务端）
+
+`storeAssistant` 以前把工具 part 直接 `JSON.stringify` 进 `ts_history.message`，导致对话管理页和摘要输入里都是转义 JSON 与工具调用 id。现在统一走 `src/server/tool-transcript.ts`（`toolTranscript(part)`），按旧版 Java 的约定生成可读文本：`[工具调用] 写入文件 index.html`、`（N 行）`、代码块、`替换前/替换后`、`结果 …`。超长内容截断（读取/写入 2000 字、替换 1000 字、网页 500 字），内容含三反引号时用四反引号围栏。落库的助手消息（`ts_message.body`）仍是原始 UI 消息，只改历史文本这一处，模型上下文与前端渲染都不受影响。
+
+### 10.4 滚动
+
+消息列表只在用户本来就贴底时才跟随新内容：滚动事件维护 `stick`（距底 < 80px 视为贴底），内容变化时贴底才 `scrollTop = scrollHeight`；`ResizeObserver` 盯住内容容器，覆盖流式文字、图片缩略图加载、用量块出现这些「内容自己长高」的情况；用户向上翻历史后出现「回到最新」按钮，点击回到底部。自己发消息视为贴底（用户刚在输入框里操作）。
+
+### 10.5 测试与证据
+
+- `tests/tool-transcript.test.ts`：可读历史文本（写入/多文件/修改对比/读取/列出/联网/未完成/失败/未知工具/围栏与截断）。
+- `tests/tool-call-view.test.ts`：展示模型的纯函数用例（状态映射、半截参数降级、素材与许可字段、失败与未知工具）。
+- `tests/integration/http.test.ts`：`app/asset` 的图片字节、非图片 400、非本人 403、缺参数 400；`chatHistory/app` 里的助手文本是可读工具记录且不含 `toolCallId`。
+- `tests/e2e/chat-composer.spec.ts`：脚本化 UI 消息流断言渲染结果（三条工具调用、代码块、替换对比、缩略图 `src` 指向素材接口、页面上不出现协议字段、可展开收起、贴底状态不被内容长高破坏）；另有一条真实慢速流用例：生成中向上翻历史，后续追加不动滚动位置，点「回到最新」回到底部。
+- `tests/e2e/platform.spec.ts`：真实 fixture 生成后断言工具调用可读标题、气泡里没有协议字段；对话管理弹窗断言可读历史文本。
+- 真实模型证据（本机探针 `runtime/probe/probe-ui.mjs`，截图留在 `runtime/evidence/`，都不提交）：一次联网找图的生成里，`检索图片`/`导入图片`/`写入文件`/`修改文件` 按执行顺序逐步出现，缩略图可点开，浏览器无报错。

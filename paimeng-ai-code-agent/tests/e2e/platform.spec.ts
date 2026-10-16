@@ -57,6 +57,14 @@ test('浏览器完成注册、登录、生成、编辑、预览、发布和下�
   const appId = page.url().split('/').at(-1)!;
   await expect(page.getByText(/文件已生成/)).toBeVisible();
   await expect(page.getByText('可预览', { exact: true })).toBeVisible();
+  // 工具调用是可读操作记录：有中文动作与文件名，没有原始 JSON 与工具调用 id。
+  const toolCalls = page.locator('.message-ai .tool-call');
+  await expect(toolCalls.first()).toBeVisible();
+  await expect(toolCalls.filter({ hasText: '写入文件' }).first()).toBeVisible();
+  const bubbleText = await page.locator('.message-ai .message-bubble').last().innerText();
+  expect(bubbleText).not.toContain('toolCallId');
+  expect(bubbleText).not.toContain('output-available');
+  expect(bubbleText).not.toContain('"files"');
   // 用量挂在对应的助手回复上（一条回复一个用量），展开后能看到逐步明细。
   const usage = page.locator('.message-ai .generation-usage');
   await expect(usage).toBeVisible();
@@ -182,11 +190,13 @@ test('普通用户不能打开管理员页面，管理员可查询和编辑', as
   await expect(page.getByRole('heading', { name: '对话管理', exact: true })).toBeVisible();
   await page.getByLabel('应用 ID', { exact: true }).fill(appId);
   await page.getByRole('button', { name: /^搜\s*索$/ }).click();
-  // 模板 fixture 先 listFiles/readFile 再 writeFiles；管理页只预览前 60 字，预览不能证明完整工具调用。
-  await expect(page.getByRole('button', { name: /tool-listFiles/ })).toHaveCount(1);
-  await page.getByRole('button', { name: /tool-listFiles/ }).click();
-  await expect(page.getByRole('dialog').getByText(/tool-writeFiles/)).toBeVisible();
+  // 历史里存的是可读操作记录（旧版 Java 的 `[工具调用] …` 约定），不是原始 JSON。
+  // 管理页只预览前 60 字，预览不能证明完整内容，所以点开弹窗再断言。
+  await expect(page.getByRole('button', { name: /\[工具调用\] 列出文件/ })).toHaveCount(1);
+  await page.getByRole('button', { name: /\[工具调用\] 列出文件/ }).click();
+  await expect(page.getByRole('dialog').getByText(/\[工具调用\] 写入文件 index\.html/)).toBeVisible();
   await expect(page.getByRole('dialog').getByText(/文件已生成/)).toBeVisible();
+  await expect(page.getByRole('dialog')).not.toContainText('toolCallId');
   await page.getByRole('dialog').getByRole('button', { name: 'OK', exact: true }).click();
   const clearedSearch = page.waitForResponse(response => response.url().endsWith('/api/chatHistory/admin/list/page/vo') && response.request().method() === 'POST');
   await page.getByLabel('应用 ID', { exact: true }).fill('');
