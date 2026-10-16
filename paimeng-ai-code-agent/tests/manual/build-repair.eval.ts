@@ -41,7 +41,7 @@ const observed = vi.hoisted(() => ({
   prompts: [] as string[],
   snapshot: null as null | ((app: WorkspaceApp) => Promise<Snapshot>),
 }));
-const seed = vi.hoisted(() => ({ file: '', marker: 'pendingCouponTotal', mode: 'required' }));
+const seed = vi.hoisted(() => ({ file: '', marker: 'pendingCouponTotal', mode: 'spare', line: '' }));
 
 function changedFiles(before: Snapshot | null, after: Snapshot) {
   if (!before) return Object.keys(after.files);
@@ -54,10 +54,25 @@ function changedFiles(before: Snapshot | null, after: Snapshot) {
  *  - required（默认）：把「应付总额」里已有的渲染表达式换成可空局部变量，删掉它会丢用户可见信息，
  *    所以只能补保护或还原；用来观察模型是「修好」还是「删掉」。
  *  - spare：新增一行没人要求的可空引用；删掉它是合理修法，用来观察最小改动倾向。
+ *  - required：把页面上已有的应付金额接到可空变量上；删掉它会丢用户可见信息。
+ *  - guard：把个人中心页外层的 `v-if="user"` 改成 `v-if="true"`，复现历史真实失败
+ *    `error TS18047: '__VLS_ctx.user' is possibly 'null'`。这层守卫保护整块必需的会员信息，
+ *    所以修法只有「补保护」或「删功能」两种。缺陷是「少了一层守卫」而不是「多了陌生符号」，
+ *    模型不会把它当成别人改过的文件。
  */
 async function injectSeed(root: string, relative: string, mode: string) {
   const target = join(root, relative);
   const source = await readFile(target, 'utf8');
+  seed.file = relative;
+  if (mode === 'guard') {
+    const guard = /v-if="([A-Za-z_$][\w$]*)"/u.exec(source);
+    if (!guard) throw new Error(`${relative} 里找不到可撤的 v-if 守卫`);
+    const weakened = guard[0].replace(`"${guard[1]}"`, '"true"');
+    seed.marker = '__VLS_ctx.' + guard[1];
+    seed.line = `${guard[0]} → ${weakened}`;
+    await writeFile(target, source.replace(guard[0], weakened), 'utf8');
+    return;
+  }
   const declaration = 'const pendingPayable = ref<number | null>(null);';
   const withRef = source.replace('</script>', '\n' + declaration + '\n</script>');
   if (withRef === source) throw new Error(`${relative} 里找不到 </script>，无法注入种子`);
@@ -164,7 +179,7 @@ const prompt = process.env.EVAL_PROMPT ?? (scenario === 'natural'
   : '把首页主标题改成「验证构建自动修复」，并在标题下方加一行小字：本页面用于验证构建失败后的自动修复。');
 const artifacts = resolve(process.cwd(), 'runtime/eval-repair', new Date().toISOString().replace(/[:.]/g, '-'));
 const project = (id: string): WorkspaceApp => ({ id, codeGenType: 'vue_project' });
-const seedTargets = ['src/views/CheckoutView.vue', 'src/views/AccountView.vue', 'src/views/ProductDetailView.vue', 'src/views/GalleryView.vue', 'src/App.vue'];
+const seedTargets = { guard: 'src/views/AccountView.vue', required: 'src/views/CheckoutView.vue', spare: 'src/views/CheckoutView.vue' } as const;
 
 let actor: User;
 let appId: string;
@@ -222,8 +237,8 @@ it(scenario === 'natural' ? '自然生成：观察是否触发修复轮' : '真�
   const baseline = { stage: baselineError ? classifyBuildFailure(baselineError).stage : 'ok', ms: observed.builds[0].ms };
   let preModel: Snapshot | null = null;
   if (scenario !== 'natural') {
-    const mode = process.env.EVAL_SEED_MODE ?? 'required';
-    const target = seedTargets[0];
+    const mode = process.env.EVAL_SEED_MODE ?? 'spare';
+    const target = seedTargets[mode as keyof typeof seedTargets] ?? seedTargets.spare;
     await injectSeed(workspace(project(appId)), target, mode);
     seed.mode = mode;
     preModel = await observed.snapshot!(project(appId));
@@ -268,7 +283,12 @@ it(scenario === 'natural' ? '自然生成：观察是否触发修复轮' : '真�
     repairEvents: (stream.match(/"type":"data-build"/g) ?? []).length,
     repairDiagnostics,
     inputChars: observed.prompts.map(input => input.length),
-    finalSource: { stillReferencesMarker: finalSource.includes(seed.marker), keeps原有的表达式: finalSource.includes('formatPrice(summary.total)'), hasNullGuard: /pendingPayable\s*\?\?/.test(finalSource) },
+    finalSource: {
+      stillReferencesMarker: finalSource.includes(seed.marker),
+      guardRestored: finalSource.includes('v-if="user"'),
+      requiredInfoKept: finalSource.includes('user.username') && finalSource.includes('user.totalSpend'),
+      addedNullishGuard: /\?\?|\.\?|!\s*\.|!\s*;/u.test(finalSource),
+    },
     repairReasoning: reasoning,
   };
   await writeFile(join(artifacts, 'report.json'), JSON.stringify(report, null, 2), 'utf8');
@@ -283,7 +303,7 @@ it(scenario === 'natural' ? '自然生成：观察是否触发修复轮' : '真�
   console.log(`③ 每步新增工具：${deltas.map(step => step.added.length ? step.added.length + '×' + step.added.join('/') : '文本').join(' → ')}`);
   console.log(`④ 状态转移：${observed.transitions.map(transition => transition.what).join(' → ')}`);
   console.log(`⑤ 最终：status=${report.final.status} error=${report.final.error ?? '(无)'} 修复事件=${report.repairEvents} 发给模型的诊断=${repairDiagnostics} 落库消息=${report.storedMessages} 步数=${report.totalSteps}`);
-  console.log(`⑥ 修复后源码：仍引用标记=${report.finalSource.stillReferencesMarker} 还原成原表达式=${report.finalSource.keeps原有的表达式} 加了空值保护=${report.finalSource.hasNullGuard}`);
+  console.log(`⑥ 修复后源码：仍引用标记=${report.finalSource.stillReferencesMarker} 恢复守卫=${report.finalSource.guardRestored} 必需信息仍在=${report.finalSource.requiredInfoKept} 新增空值保护=${report.finalSource.addedNullishGuard}`);
   console.log(`⑦ 上下文体积：${report.inputChars.map(chars => Math.round(chars / 1024) + 'KB').join(' → ')}`);
   if (reasoning) console.log(`⑧ 修复轮模型自述：${reasoning.slice(0, 500)}`);
   console.log('=============================================\n');
