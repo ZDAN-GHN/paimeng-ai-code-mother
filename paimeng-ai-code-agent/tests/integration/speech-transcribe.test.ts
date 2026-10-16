@@ -23,7 +23,7 @@ const speechAlias: ModelAliasInput = {
   alias: 'speech.transcribe',
   providerId: defaultModelProviderId,
   modelName: 'whisper-1',
-  capabilities: { streaming: false, toolCalling: false, structuredOutput: false },
+  capabilities: { streaming: false, toolCalling: false, structuredOutput: false, imageInput: false },
   settings: {},
   enabled: true,
 };

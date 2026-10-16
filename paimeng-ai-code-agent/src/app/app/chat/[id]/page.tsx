@@ -3,7 +3,7 @@ import { use, useState, useEffect, useMemo, useRef, useCallback, type ComponentR
 import { useRouter } from 'next/navigation';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
-import { App, Button, Input, Alert, Tag, Space, Spin, Avatar } from 'antd';
+import { App, Button, Input, Alert, Tag, Space, Spin, Avatar, Tooltip } from 'antd';
 import { SendOutlined, DownloadOutlined, CloudUploadOutlined, EditOutlined, StopOutlined, InfoCircleOutlined, ExportOutlined, PictureOutlined, UserOutlined } from '@ant-design/icons';
 import { api } from '@/client/api';
 import { useAuth } from '@/components/providers';
@@ -582,7 +582,7 @@ function Chat({ id }: { id: string }) {
               {selected.textContent && <div className="element-item">内容: {selected.textContent.slice(0, 50)}{selected.textContent.length > 50 ? '…' : ''}</div>}
             </div>} />}
           <ImageAttachments appId={id} drafts={imageDrafts} onRemove={removeImage} onRetry={retryImage} />
-          <Input.TextArea aria-label="对话消息" ref={voiceInput} placeholder={canEdit ? '请描述你想生成的网站，越详细效果越好哦' : '无法在别人的作品下对话哦~'} value={input}
+          <Input.TextArea aria-label="对话消息" ref={voiceInput} placeholder={!canEdit ? '无法在别人的作品下对话哦~' : generating ? '生成中，可以继续说：Enter 排队发送 · Ctrl + Enter 中途插话 · Shift + Enter 换行' : '请描述你想生成的网站，越详细效果越好哦（Enter 直接发送 · Shift + Enter 换行）'} value={input}
             onChange={e => setInput(e.target.value)} disabled={!canEdit || !loaded} autoSize={{ minRows: 3, maxRows: 6 }} maxLength={textareaMax}
             onKeyDown={e => {
               if (e.nativeEvent.isComposing) return;
@@ -596,12 +596,16 @@ function Chat({ id }: { id: string }) {
             }} />
           <input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden
             onChange={event => { addImages(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = ''; }} />
-          <div className="prompt-actions"><span className="composer-hint">{imageBlockReason ?? 'Enter 排队发送 · Ctrl + Enter 中途插话 · Shift + Enter 换行'}</span>
-            <Space>
-              <Button icon={<PictureOutlined aria-hidden="true" />} disabled={!canAttachImages || imageDrafts.length >= imageLimits.maxImages} onClick={() => imageInput.current?.click()}>添加图片</Button>
+          <div className="prompt-actions">
+            <Space wrap>
+              <Button size="small" icon={<PictureOutlined aria-hidden="true" />} aria-label="添加图片" disabled={!canAttachImages || imageDrafts.length >= imageLimits.maxImages} onClick={() => imageInput.current?.click()}>添加图片</Button>
               <VoiceInput editable={canEdit && loaded} serverEnabled={voiceEnabled} onTranscript={appendVoiceText} />
               {generating ? <Button danger icon={<StopOutlined aria-hidden="true" />} loading={cancelling} disabled={building} title={building ? '代码已生成，正在完成构建，构建无法取消' : undefined} onClick={() => { void cancel(); }}>{building ? '构建中' : '停止生成'}</Button> :
-                <Button type="primary" icon={<SendOutlined aria-hidden="true" />} disabled={!canEdit || !loaded || !input.trim() || imageBlockReason !== null} onClick={() => { void submit(input, imageParts); }}>发送</Button>}
+                /* 附图状态挡住发送时，原因走悬浮提示：常显的长文案会把按钮行撑到面板外被裁掉。
+                   提示挂在 span 上，因为禁用的原生按钮不派发鼠标事件，直接挂在按钮上悬停不出提示。 */
+                <Tooltip title={imageBlockReason}>
+                  <span><Button type="primary" icon={<SendOutlined aria-hidden="true" />} disabled={!canEdit || !loaded || !input.trim() || imageBlockReason !== null} onClick={() => { void submit(input, imageParts); }}>发送</Button></span>
+                </Tooltip>}
             </Space>
           </div>
         </div>

@@ -167,16 +167,16 @@ export function ImageAttachments({ appId, drafts, onRemove, onRetry }: {
   onRetry: (key: string) => void;
 }) {
   if (!drafts.length) return null;
-  return <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+  return <div className="image-attachments" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
     {drafts.map(draft => {
       const name = draftName(draft);
       const src = draft.status === 'ready' ? attachmentViewUrl(appId, draft.attachment.id) : draft.previewUrl;
-      return <figure key={draft.key} style={{ margin: 0, width: 104 }}>
-        <div style={{ position: 'relative', lineHeight: 0 }}>
+      return <figure key={draft.key} className={'image-attachment-item' + (draft.status === 'failed' ? ' image-attachment-failed' : '')} style={{ margin: 0, width: 104 }}>
+        <div className="image-attachment-thumb" style={{ position: 'relative', lineHeight: 0 }}>
           <img src={src} alt={name} style={{ width: '100%', height: 72, objectFit: 'cover', borderRadius: 6, border: '1px solid #f0e4dd', opacity: draft.status === 'uploading' ? 0.55 : 1 }} />
           {draft.status === 'uploading' && <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spin size="small" indicator={<LoadingOutlined />} /></span>}
         </div>
-        <figcaption style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
+        <figcaption className="image-attachment-meta" style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: '#928278', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={name}>{name}</span>
             {draft.status === 'failed' && <Button size="small" type="text" icon={<ReloadOutlined aria-hidden="true" />} aria-label={`重试上传 ${name}`} onClick={() => onRetry(draft.key)} />}

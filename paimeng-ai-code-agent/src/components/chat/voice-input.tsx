@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Button } from 'antd';
+import { Button, Tooltip } from 'antd';
 import { AudioOutlined, DeleteOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons';
 import { z } from 'zod';
 
@@ -220,14 +220,18 @@ export function VoiceInput({ editable, serverEnabled, onTranscript }: {
 
   const recording = phase === 'recording';
   const busy = phase === 'starting' || phase === 'transcribing';
+  const mic = <Button
+    size="small"
+    aria-label={recording ? '结束录音' : '语音输入'}
+    icon={recording ? <StopOutlined aria-hidden="true" /> : <AudioOutlined aria-hidden="true" />}
+    disabled={reason !== null || busy || phase === 'failed'}
+    loading={busy}
+    onClick={() => { if (recording) stopRecording(); else void startRecording(); }}
+  >{recording ? '结束录音' : '语音输入'}</Button>;
+  // 不可用的原因文案很长（含别名与接口路径），放在悬浮提示里，不占按钮行的宽度；
+  // 提示挂在一层 span 上：禁用的原生按钮不派发鼠标事件，直接挂在按钮上悬停不出提示（实测）。
   return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-    <Button
-      icon={recording ? <StopOutlined aria-hidden="true" /> : <AudioOutlined aria-hidden="true" />}
-      disabled={reason !== null || busy || phase === 'failed'}
-      loading={busy}
-      onClick={() => { if (recording) stopRecording(); else void startRecording(); }}
-    >{recording ? '结束录音' : '语音输入'}</Button>
-    {reason !== null && <span className="composer-hint" role="status">{reason}</span>}
+    {reason === null ? mic : <Tooltip title={reason}><span>{mic}</span></Tooltip>}
     {phase === 'starting' && <span className="composer-hint" role="status">正在打开麦克风…</span>}
     {recording && <span className="composer-hint" role="status">正在录音，点击结束 · {formatRecordingTime(seconds)}/{formatRecordingTime(maxRecordingSeconds)}</span>}
     {recording && <Button size="small" type="text" onClick={() => stopRecording(true)}>取消录音</Button>}
