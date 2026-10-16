@@ -20,7 +20,7 @@ function mockModel(doGenerate: () => Promise<LanguageModelV4GenerateResult>) {
 }
 
 function binding(overrides: Partial<AliasModel> = {}): AliasModel {
-  return { alias: 'codegen.default', providerId: 'primary', modelName: 'codegen-model', apiKeySource: 'env', model: mockModel(async () => generateResult('ok')), ...overrides };
+  return { alias: 'codegen.default', providerId: 'primary', modelName: 'codegen-model', apiKeySource: 'env', capabilities: { streaming: true, toolCalling: true, structuredOutput: false, imageInput: false }, model: mockModel(async () => generateResult('ok')), ...overrides };
 }
 
 const fallback: SummaryModelSource = { model: mockModel(async () => generateResult('fallback')), alias: 'codegen.default', providerId: 'primary', modelName: 'codegen-model' };

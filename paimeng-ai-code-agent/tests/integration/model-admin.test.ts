@@ -98,7 +98,7 @@ function aliasInput(overrides: Partial<ModelAliasInput> = {}): ModelAliasInput {
     alias: 'codegen.default',
     providerId: 'env-default',
     modelName: 'gpt-test-model',
-    capabilities: { streaming: true, toolCalling: true, structuredOutput: false },
+    capabilities: { streaming: true, toolCalling: true, structuredOutput: false, imageInput: false },
     settings: {},
     enabled: true,
     ...overrides,
@@ -276,7 +276,7 @@ describe('模型管理 API', () => {
     expect((await json(created)).data).toMatchObject({ revision: '2', refreshEpoch: '0' });
 
     const aliasSaved = await request('model/admin/alias/upsert', {
-      alias: aliasInput({ alias: 'extra.model', providerId: 'secondary', modelName: 'gpt-extra', capabilities: { streaming: true, toolCalling: false, structuredOutput: false } }),
+      alias: aliasInput({ alias: 'extra.model', providerId: 'secondary', modelName: 'gpt-extra', capabilities: { streaming: true, toolCalling: false, structuredOutput: false, imageInput: false } }),
       expectedRevision: '2',
     }, adminCookie);
     expect(aliasSaved.status).toBe(200);
@@ -311,7 +311,7 @@ describe('模型管理 API', () => {
     expect(disabledProvider.status).toBe(400);
 
     const ghostProvider = await request('model/admin/alias/upsert', {
-      alias: aliasInput({ alias: 'route.classify', providerId: 'ghost', capabilities: { streaming: false, toolCalling: false, structuredOutput: true } }),
+      alias: aliasInput({ alias: 'route.classify', providerId: 'ghost', capabilities: { streaming: false, toolCalling: false, structuredOutput: true, imageInput: false } }),
       expectedRevision: '1',
     }, adminCookie);
     expect(ghostProvider.status).toBe(400);
@@ -386,7 +386,7 @@ describe('模型管理 API', () => {
     const created = await request('model/admin/provider/upsert', { provider: providerInput({ id: 'secondary', displayName: '备用' }), expectedRevision: '1' }, adminCookie);
     expect((await json(created)).data).toMatchObject({ revision: '2' });
     const aliasSaved = await request('model/admin/alias/upsert', {
-      alias: aliasInput({ alias: 'extra.model', providerId: 'secondary', capabilities: { streaming: true, toolCalling: false, structuredOutput: false } }),
+      alias: aliasInput({ alias: 'extra.model', providerId: 'secondary', capabilities: { streaming: true, toolCalling: false, structuredOutput: false, imageInput: false } }),
       expectedRevision: '2',
     }, adminCookie);
     expect((await json(aliasSaved)).data).toMatchObject({ revision: '3' });

@@ -89,7 +89,7 @@ const codegenAlias = (overrides: Partial<ModelAliasInput> = {}): ModelAliasInput
   alias: 'codegen.default',
   providerId: 'primary',
   modelName: 'gpt-test',
-  capabilities: { streaming: true, toolCalling: true, structuredOutput: false },
+  capabilities: { streaming: true, toolCalling: true, structuredOutput: false, imageInput: false },
   settings: {},
   enabled: true,
   ...overrides,
@@ -99,7 +99,7 @@ const routeAlias = (overrides: Partial<ModelAliasInput> = {}): ModelAliasInput =
   alias: 'route.classify',
   providerId: 'primary',
   modelName: 'gpt-test',
-  capabilities: { streaming: false, toolCalling: false, structuredOutput: true },
+  capabilities: { streaming: false, toolCalling: false, structuredOutput: true, imageInput: false },
   settings: {},
   enabled: true,
   ...overrides,
@@ -316,7 +316,7 @@ describe('完整候选配置校验', () => {
   it('缺少、禁用必需别名或能力不符会被拒绝', () => {
     expect(modelConfigIssues([provider()], [codegenAlias()], policy)).toContain('缺少必需别名 route.classify');
     expect(modelConfigIssues([provider()], [codegenAlias({ enabled: false }), routeAlias()], policy)).toContain('必需别名 codegen.default 不能禁用');
-    expect(modelConfigIssues([provider()], [codegenAlias({ capabilities: { streaming: true, toolCalling: false, structuredOutput: false } }), routeAlias()], policy)).toContain('必需别名 codegen.default 声明的能力不满足业务要求');
+    expect(modelConfigIssues([provider()], [codegenAlias({ capabilities: { streaming: true, toolCalling: false, structuredOutput: false, imageInput: false } }), routeAlias()], policy)).toContain('必需别名 codegen.default 声明的能力不满足业务要求');
   });
 
   it('别名必须指向存在的启用提供商', () => {

@@ -181,8 +181,9 @@ export async function writeProjectFile(app: WorkspaceApp, path: string, content:
 }
 
 /** 写入二进制资源（图片）。与文本写入共用路径校验、配额与原子替换，但另有自己的大小上限。 */
-export async function writeProjectFileBytes(app: WorkspaceApp, path: string, data: Buffer) {
-  if (data.byteLength > MAX_BINARY_FILE_BYTES) throw new Error('二进制文件超过限制');
+export async function writeProjectFileBytes(app: WorkspaceApp, path: string, data: Buffer, options: { maxBytes?: number } = {}) {
+  const limit = options.maxBytes ?? MAX_BINARY_FILE_BYTES;
+  if (data.byteLength > limit) throw new Error('二进制文件超过限制');
   const snapshot = await inspectProject(app);
   const existing = snapshot.files.find(entry => entry.path === path);
   if (snapshot.files.length + (existing ? 0 : 1) > MAX_PROJECT_FILES || snapshot.bytes - (existing?.size ?? 0) + data.byteLength > MAX_PROJECT_BYTES) throw new Error('工程超过文件数量或大小限制');

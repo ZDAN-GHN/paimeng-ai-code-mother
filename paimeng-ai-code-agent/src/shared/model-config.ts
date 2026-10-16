@@ -216,6 +216,8 @@ export const aliasCapabilitiesSchema = z.strictObject({
   streaming: z.boolean(),
   toolCalling: z.boolean(),
   structuredOutput: z.boolean(),
+  // 视觉能力：默认 false，库里已有别名行（无该字段）仍能解析。发送图片前必须显式开启。
+  imageInput: z.boolean().default(false),
 });
 export type ModelAliasCapabilities = z.infer<typeof aliasCapabilitiesSchema>;
 

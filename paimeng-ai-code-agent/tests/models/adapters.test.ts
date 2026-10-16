@@ -45,7 +45,7 @@ function aliasFixture(overrides: Partial<ModelAlias> = {}): ModelAlias {
     alias: 'codegen.default',
     providerId: 'local-provider',
     modelName,
-    capabilities: { streaming: true, toolCalling: true, structuredOutput: false },
+    capabilities: { streaming: true, toolCalling: true, structuredOutput: false, imageInput: false },
     settings: {},
     enabled: true,
     createTime: '',
@@ -244,7 +244,7 @@ describe('buildAliasModels', () => {
     respond = (_body, reply) => replyJson(reply, completion({ role: 'assistant', content: '{"codeGenType":"html"}' }));
     const models = buildAliasModels(
       [{ ...providerFixture, baseUrl, options: { supportsStructuredOutputs: true } }],
-      [aliasFixture({ alias: 'route.classify', capabilities: { streaming: false, toolCalling: false, structuredOutput: true } })],
+      [aliasFixture({ alias: 'route.classify', capabilities: { streaming: false, toolCalling: false, structuredOutput: true, imageInput: false } })],
     );
 
     const result = await generateText({
@@ -464,7 +464,7 @@ describe('buildAliasModels', () => {
     respond = (_body, reply) => replyJson(reply, completion({ role: 'assistant', content: '{"codeGenType":"html"}' }));
     const models = buildAliasModels(
       [{ ...providerFixture, baseUrl, headers: customHeaders, options: { supportsStructuredOutputs: true } }],
-      [aliasFixture({ alias: 'route.classify', capabilities: { streaming: false, toolCalling: false, structuredOutput: true } })],
+      [aliasFixture({ alias: 'route.classify', capabilities: { streaming: false, toolCalling: false, structuredOutput: true, imageInput: false } })],
     );
 
     await generateText({

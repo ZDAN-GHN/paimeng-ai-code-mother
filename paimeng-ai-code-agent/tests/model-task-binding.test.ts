@@ -53,8 +53,8 @@ function aliasFixture(alias: string, modelName: string, settings: ModelAlias['se
   return {
     alias, providerId: 'primary', modelName,
     capabilities: alias === 'codegen.default'
-      ? { streaming: true, toolCalling: true, structuredOutput: false }
-      : { streaming: false, toolCalling: false, structuredOutput: true },
+      ? { streaming: true, toolCalling: true, structuredOutput: false, imageInput: false }
+      : { streaming: false, toolCalling: false, structuredOutput: true, imageInput: false },
     settings, enabled: true, createTime: '', updateTime: '',
   };
 }

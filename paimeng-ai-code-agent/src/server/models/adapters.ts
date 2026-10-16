@@ -9,6 +9,7 @@ import {
   isAllowedModelApiKeyEnv,
   requiredModelAliases,
   type ModelAlias,
+  type ModelAliasCapabilities,
   type ModelAliasSettings,
   type ModelProvider,
   type ProviderKeySource,
@@ -25,6 +26,7 @@ export type AliasModel = {
   readonly providerId: string;
   readonly modelName: string;
   readonly apiKeySource: ProviderKeySource;
+  readonly capabilities: ModelAliasCapabilities;
   readonly model: LanguageModel;
 };
 
@@ -159,6 +161,7 @@ export function buildAliasModels(
         providerId: provider.id,
         modelName: alias.modelName,
         apiKeySource: provider.apiKeySource,
+        capabilities: alias.capabilities,
         model,
       });
       languageModels[alias.alias] = model;

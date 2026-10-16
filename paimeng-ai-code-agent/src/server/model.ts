@@ -18,6 +18,8 @@ function routingFailureDetail(error: unknown) {
 export type TaskModels = {
  model: LanguageModel;
  generation: SummaryModelSource;
+ /** 生成别名是否声明了图片输入能力；未声明时带附件的请求会被拒绝。 */
+ imageInput: boolean;
  /** 可选的摘要模型：构建失败时为 null，此时跳过历史整理但仍然照常生成。 */
  summary: SummaryModelSource | null;
  /** summary 为 null 时记录可选别名不可用的原因，供诊断与日志使用。 */
@@ -37,7 +39,8 @@ export async function taskModelsFor(type: CodeGenType, prompt: string, template?
   const { fixtureModel } = await import('./fixture-model');
   const model = fixtureModel(type, prompt, template);
   const source: SummaryModelSource = { model, alias: 'codegen.default', providerId: null, modelName: null };
-  return { model, generation: source, summary: source, summaryUnavailableReason: null };
+  // fixture 模型支持图片输入，让 E2E 的 fixture 模型也能走通图片链路。
+  return { model, generation: source, imageInput: true, summary: source, summaryUnavailableReason: null };
  }
  const { bindings, failures } = await modelRegistry().resolveBindingsWithFailures(['codegen.default', summaryAliasName]);
  const generationBinding = bindings.get('codegen.default');
@@ -50,25 +53,25 @@ export async function taskModelsFor(type: CodeGenType, prompt: string, template?
  };
  const summaryFailure = failures.get(summaryAliasName);
  if (summaryFailure) {
-  return { model: generation.model, generation, summary: null, summaryUnavailableReason: summaryFailure };
+  return { model: generation.model, generation, imageInput: generationBinding.capabilities.imageInput, summary: null, summaryUnavailableReason: summaryFailure };
  }
  const summary = await resolveSummaryModel(async alias => {
   const binding = bindings.get(alias);
   if (!binding) throw new BusinessError(503, 50300, aliasNotConfiguredMessage(alias));
   return binding;
  }, generation);
- return { model: generation.model, generation, summary, summaryUnavailableReason: null };
+ return { model: generation.model, generation, imageInput: generationBinding.capabilities.imageInput, summary, summaryUnavailableReason: null };
 }
 
-/** 只解析生成模型（关闭历史摘要时不触碰可选别名），并返回实际绑定标识用于记账。 */
-export async function modelBindingFor(type:CodeGenType,prompt:string,template?:TemplateIdentity|null):Promise<{model:LanguageModel;generation:SummaryModelSource}>{
+/** 只解析生成模型（关闭历史摘要时不触碰可选别名），并返回实际绑定标识与图片输入能力用于记账与校验。 */
+export async function modelBindingFor(type:CodeGenType,prompt:string,template?:TemplateIdentity|null):Promise<{model:LanguageModel;generation:SummaryModelSource;imageInput:boolean}>{
  if (getConfig().aiMode === 'fixture') {
   const { fixtureModel } = await import('./fixture-model');
   const model = fixtureModel(type, prompt, template);
-  return { model, generation: { model, alias: 'codegen.default', providerId: null, modelName: null } };
+  return { model, generation: { model, alias: 'codegen.default', providerId: null, modelName: null }, imageInput: true };
  }
  const binding = await modelRegistry().resolveBinding('codegen.default');
- return { model: binding.model, generation: { model: binding.model, alias: binding.alias, providerId: binding.providerId, modelName: binding.modelName } };
+ return { model: binding.model, generation: { model: binding.model, alias: binding.alias, providerId: binding.providerId, modelName: binding.modelName }, imageInput: binding.capabilities.imageInput };
 }
 
 /** 只解析生成模型：关闭历史摘要时不应触碰可选别名，否则可选模型的问题会波及基础生成。 */

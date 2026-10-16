@@ -35,8 +35,8 @@ function configuredRegistry(codegenModel = 'codegen-model', routeModel = 'test-m
   const alias = (name: string, modelName: string): ModelAlias => ({
     alias: name, providerId: 'primary', modelName,
     capabilities: name === 'codegen.default'
-      ? { streaming: true, toolCalling: true, structuredOutput: false }
-      : { streaming: false, toolCalling: false, structuredOutput: true },
+      ? { streaming: true, toolCalling: true, structuredOutput: false, imageInput: false }
+      : { streaming: false, toolCalling: false, structuredOutput: true, imageInput: false },
     settings: {}, enabled: true, createTime: '', updateTime: '',
   });
   const snapshot: ModelConfigSnapshot = {

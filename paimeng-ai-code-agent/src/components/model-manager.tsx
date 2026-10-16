@@ -938,6 +938,10 @@ function ModelConfigManager() {
                   <Switch aria-label="结构化输出" />
                 </Form.Item>
                 <span>结构化输出</span>
+                <Form.Item name={['capabilities', 'imageInput']} valuePropName="checked" noStyle>
+                  <Switch aria-label="图片输入" />
+                </Form.Item>
+                <span>图片输入</span>
               </Space>
             </Form.Item>
             <Space size={16} wrap>
@@ -1155,7 +1159,7 @@ function emptyAliasValues(): AliasFormValues {
     alias: '',
     providerId: '',
     modelName: '',
-    capabilities: { streaming: true, toolCalling: false, structuredOutput: false },
+    capabilities: { streaming: true, toolCalling: false, structuredOutput: false, imageInput: false },
     settings: {},
     enabled: true,
   };
@@ -1191,6 +1195,7 @@ function toAliasInput(values: AliasFormValues): ModelAliasInput {
       streaming: Boolean(values.capabilities.streaming),
       toolCalling: Boolean(values.capabilities.toolCalling),
       structuredOutput: Boolean(values.capabilities.structuredOutput),
+      imageInput: Boolean(values.capabilities.imageInput),
     },
     settings,
     enabled: Boolean(values.enabled),
@@ -1202,6 +1207,7 @@ function capabilityTags(capabilities: ModelAliasCapabilities) {
     ['streaming', '流式'],
     ['toolCalling', '工具调用'],
     ['structuredOutput', '结构化输出'],
+    ['imageInput', '图片输入'],
   ];
   const active = labels.filter(([key]) => capabilities[key]);
   if (active.length === 0) return <span className={styles.textGray}>无</span>;

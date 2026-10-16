@@ -75,7 +75,7 @@ const codegenAlias = (overrides: Partial<ModelAliasInput> = {}): ModelAliasInput
   alias: 'codegen.default',
   providerId: 'primary',
   modelName: 'gpt-test',
-  capabilities: { streaming: true, toolCalling: true, structuredOutput: false },
+  capabilities: { streaming: true, toolCalling: true, structuredOutput: false, imageInput: false },
   settings: {},
   enabled: true,
   ...overrides,
@@ -85,7 +85,7 @@ const routeAlias = (overrides: Partial<ModelAliasInput> = {}): ModelAliasInput =
   alias: 'route.classify',
   providerId: 'primary',
   modelName: 'gpt-test',
-  capabilities: { streaming: false, toolCalling: false, structuredOutput: true },
+  capabilities: { streaming: false, toolCalling: false, structuredOutput: true, imageInput: false },
   settings: {},
   enabled: true,
   ...overrides,
@@ -137,8 +137,8 @@ describe('模型配置存储', () => {
     expect(snapshot.providers).toHaveLength(1);
     expect(snapshot.providers[0]).toMatchObject({ id: 'env-default', baseUrl: 'https://api.example.test/v1', apiKeyEnv: 'AI_API_KEY', enabled: true });
     expect(snapshot.aliases.map(alias => alias.alias).sort()).toEqual(['codegen.default', 'route.classify']);
-    expect(snapshot.aliases.find(alias => alias.alias === 'codegen.default')?.capabilities).toEqual({ streaming: true, toolCalling: true, structuredOutput: false });
-    expect(snapshot.aliases.find(alias => alias.alias === 'route.classify')?.capabilities).toEqual({ streaming: false, toolCalling: false, structuredOutput: true });
+    expect(snapshot.aliases.find(alias => alias.alias === 'codegen.default')?.capabilities).toEqual({ streaming: true, toolCalling: true, structuredOutput: false, imageInput: false });
+    expect(snapshot.aliases.find(alias => alias.alias === 'route.classify')?.capabilities).toEqual({ streaming: false, toolCalling: false, structuredOutput: true, imageInput: false });
 
     const second = await seedFromEnv();
     expect(second).toEqual({ initialized: false, revision: '1', refreshEpoch: '0', providerId: null });

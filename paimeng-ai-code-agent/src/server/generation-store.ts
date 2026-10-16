@@ -12,6 +12,7 @@ import { readSummaryInTx } from './memory-store';
 import { compareTurns, isLegacyMessageId, legacyMessagePrefix, type SummarySnapshot, type TurnOrder } from './memory-types';
 import type { GenerationStatus, User } from '@/shared/contracts';
 import { stopReasonFrom, type GenerationStopReason } from './generation-accounting';
+import { attachmentPartSchema } from '@/shared/attachments';
 import { toolTranscript } from './tool-transcript';
 
 const activeStatuses = ['generating', 'building'];
@@ -144,6 +145,21 @@ export async function saveUserMessage(appId: string, user: User, text: string, g
 
 export type BeginGenerationContext = { history: UIMessage[]; turns: LoadedTurn[]; summary: SummarySnapshot | null };
 
+/**
+ * 用户历史文本（列表、摘要输入、管理员查询用）：文本片段直取，图片片段写成 `[图片：文件名]` 占位。
+ * 图片字节不进历史文本——它已经随 ts_message 的附件 part 保存，供前端回显。
+ */
+function userHistoryText(message: UIMessage): string {
+  return message.parts
+    .map(part => {
+      if (part.type === 'text') return part.text;
+      const attachment = attachmentPartSchema.safeParse(part);
+      return attachment.success ? `[图片：${attachment.data.filename}]` : '';
+    })
+    .filter(text => text !== '')
+    .join('\n');
+}
+
 export async function beginGenerationContext(appId: string, id: string, user: User, message: UIMessage, clientAddress = 'unknown'): Promise<BeginGenerationContext> {
   const [busy] = await db().select().from(leases).where(eq(leases.appId, BigInt(appId))).limit(1);
   if (busy && busy.expiresAt > now()) throw new BusinessError(409, 40900, '应用已有正在运行的生成任务');
@@ -168,7 +184,7 @@ export async function beginGenerationContext(appId: string, id: string, user: Us
     await tx.insert(generations).values({ id, appId: app.id, userId: actor.id, status: 'generating', createTime: now(), updateTime: now() });
     await tx.insert(leases).values({ appId: app.id, generationId: id, expiresAt: expiry() });
     await storeMessage(tx, appId, message);
-    await tx.insert(histories).values({ id: historyId, appId: app.id, userId: actor.id, messageType: 'user', message: message.parts.filter(p => p.type === 'text').map(p => p.text).join('\n'), createTime: now(), updateTime: now() });
+    await tx.insert(histories).values({ id: historyId, appId: app.id, userId: actor.id, messageType: 'user', message: userHistoryText(message), createTime: now(), updateTime: now() });
     return { history: stored.map(row => row.body), turns, summary };
   }).catch(error => {
     const code = (error as { cause?: { code?: string }; code?: string }).cause?.code ?? (error as { code?: string }).code;

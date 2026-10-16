@@ -1,14 +1,16 @@
 import 'server-only';
 import { z } from 'zod';
-import { ToolLoopAgent, tool, convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, isLoopFinished, validateUIMessages, wrapLanguageModel, type LanguageModel, type ModelMessage, type StepResult, type ToolSet, type UIMessage, type UIMessageStreamWriter } from 'ai';
+import { ToolLoopAgent, tool, convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, isLoopFinished, validateUIMessages, wrapLanguageModel, type FilePart, type LanguageModel, type ModelMessage, type StepResult, type ToolSet, type UIMessage, type UIMessageStreamWriter } from 'ai';
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
-import { idSchema, isProjectCodeGenType, type BuildProgressEvent, type User } from '@/shared/contracts';
+import { idSchema, isProjectCodeGenType, type BuildProgressEvent, type CodeGenType, type User } from '@/shared/contracts';
+import { attachmentPartSchema, imageLimits, type AttachmentPart, type ImageMediaType } from '@/shared/attachments';
 import { modelBindingFor, taskModelsFor } from './model';
 import { getApp } from './business';
 import { buildApp, sourceDigest, type BuildStageProgress } from './artifacts';
 import { classifyBuildFailure, formatBuildDiagnostic, formatBuildFeedback, noProgressMessage, type BuildStage } from './build-feedback';
 import { recordBuildStep, recordModelStep, stopReasonOf, type GenerationStopReason } from './generation-accounting';
-import { readProjectFileAsText, writeProjectFile, listProjectFiles, modifyProjectFile, deleteProjectFile } from './workspace';
+import { readProjectFileAsText, writeProjectFile, writeProjectFileBytes, listProjectFiles, modifyProjectFile, deleteProjectFile } from './workspace';
+import { readAttachmentBytes, readAttachmentOriginal } from './attachment-store';
 import { beginGenerationContext, type BeginGenerationContext, heartbeat, saveMessage, saveUserMessage, setGeneration, restoreGeneration, finishGeneration, generationFor, withAppWriter } from './generation-store';
 import { BusinessError } from './http';
 import { validatePrompt } from './prompt-safety';
@@ -26,10 +28,14 @@ import { createWebAccessSession, createWebAccessTools, enabledWebToolNames, pick
 const controllers = new Map<string, AbortController>();
 // 中途插话队列（steering）：按任务 id 存，生成开始时建空数组，结束时删除。
 const steerings = new Map<string, string[]>();
+const inputTextPartSchema = z.object({ type: z.literal('text'), text: z.string().min(1).max(1000) }).strict();
+// 消息片段：文本 + 用户上传图片的附件 part。附件 part 不是 SDK 的 UIMessage 片段，送模型前会整条摘掉并换成真实字节。
+const inputMessagePartSchema = z.discriminatedUnion('type', [inputTextPartSchema, attachmentPartSchema]);
 const inputSchema = z.object({
   appId: idSchema,
   requestId: z.uuid(),
-  message: z.object({ id: z.string().min(1).max(64), role: z.literal('user'), parts: z.array(z.object({ type: z.literal('text'), text: z.string().min(1).max(1000) }).strict()).min(1).max(8) }).strict(),
+  // metadata 是 SDK UIMessage 的合法字段（客户端把待发送图片暂存在这里，发送时合并进 parts）；服务端不解释它。
+  message: z.object({ id: z.string().min(1).max(64), role: z.literal('user'), metadata: z.unknown().optional(), parts: z.array(inputMessagePartSchema).min(1).max(12) }).strict(),
 }).strict();
 
 const baseToolSchemas = {
@@ -74,6 +80,37 @@ function writtenPathsOf<TOOLS extends ToolSet>(step: StepResult<TOOLS>): string[
   }
   return paths;
 }
+
+type AttachmentImage = { attachmentId: string; bytes: Buffer; mediaType: ImageMediaType; filename: string };
+
+const isAttachmentPart = (part: unknown): part is AttachmentPart => attachmentPartSchema.safeParse(part).success;
+
+/** 工作区里的上传副本命名：附件 id 前 8 位 + 清洗掉路径分隔符与控制字符的原文件名。 */
+function uploadFileName(attachmentId: string, filename: string): string {
+  const cleaned = filename.replace(/[\\/]/g, '_').replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 128);
+  return `${attachmentId.slice(0, 8)}-${cleaned || 'image'}`;
+}
+
+/** 上传副本目录：静态应用放 assets/uploads/，前端工程放 public/uploads/（Vite 只把 public/ 带进 dist）。 */
+const uploadDirectory = (type: CodeGenType): string => isProjectCodeGenType(type) ? 'public/uploads' : 'assets/uploads';
+
+/**
+ * 把图片字节附到最后一条 user 模型消息上。SDK 的 file part 接受裸 DataContent（Uint8Array/Buffer）。
+ * 历史轮次不重复发送字节：每轮消息都从 UI 历史重建，这里只给本轮消息附图。
+ */
+function attachModelImages(messages: ModelMessage[], images: readonly FilePart[]): ModelMessage[] {
+  if (!images.length) return messages;
+  const next = [...messages];
+  for (let index = next.length - 1; index >= 0; index -= 1) {
+    const message = next[index]!;
+    if (message.role !== 'user') continue;
+    const content = typeof message.content === 'string' ? [{ type: 'text' as const, text: message.content }, ...images] : [...message.content, ...images];
+    next[index] = { ...message, content };
+    break;
+  }
+  return next;
+}
+
 const historySummaryWrapperTokens = estimateTokens(buildHistoryMessage({ text: '', coveredThroughSequence: '0', legacyCoveredThroughSequence: '0', version: '0', modelAlias: null, providerId: null, modelName: null, lastAttemptTime: null, updateTime: null }));
 
 function contextOverheadTokens(instructions: string, schemas: Record<string, z.ZodType>, descriptions: Record<string, string>): number {
@@ -148,9 +185,10 @@ function retryableStreamErrors(model: LanguageModel): LanguageModel {
 export async function chatResponse(req: Request, raw: unknown, user: User) {
   const input = inputSchema.parse(raw);
   const app = await getApp(input.appId, user, true);
-  const prompt = input.message.parts.map(p => p.text).join('\n');
+  const prompt = input.message.parts.filter(part => part.type === 'text').map(part => part.text).join('\n');
   validatePrompt(prompt);
-  const incoming: UIMessage = { ...input.message, id: `${input.requestId}-user` };
+  // 附件 part 不在 SDK 的 UIMessage 联合类型里，但它要随 ts_message 保存供前端回显；这里在校验后的边界上显式放宽。
+  const incoming = { ...input.message, id: `${input.requestId}-user` } as UIMessage;
   const controller = new AbortController();
   const building = new AbortController();
   const abortRequest = () => controller.abort();
@@ -161,6 +199,17 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
   if (taskModels.summaryUnavailableReason) {
     console.warn(`历史摘要不可用，本轮跳过整理：${taskModels.summaryUnavailableReason}`);
   }
+  const attachmentParts = input.message.parts.filter(part => part.type === 'attachment');
+  // 能力校验发生在生成开始之前：没有声明图片输入的模型直接拒绝，不把 provider 的原始报错丢给用户。
+  if (attachmentParts.length > 0 && !taskModels.imageInput) {
+    throw new BusinessError(400, 40000, '当前生成模型不支持图片输入：请在模型管理里为别名开启「图片输入」，或换用支持视觉的模型');
+  }
+  // 解析附件字节（送模型的派生图）。越权或不存在会在生成开始前抛 403/404，不会留下生成记录。
+  const attachmentImages: AttachmentImage[] = await Promise.all(attachmentParts.map(async part => ({
+    attachmentId: part.attachmentId,
+    ...await readAttachmentBytes({ attachmentId: part.attachmentId, userId: user.id, appId: input.appId }),
+  })));
+  const modelImageParts: FilePart[] = attachmentImages.map(image => ({ type: 'file', data: image.bytes, mediaType: image.mediaType, filename: image.filename }));
   const model = retryableStreamErrors(taskModels.model);
   const summarySource = taskModels.summary;
   const armGenerationTimeout = (target: AbortController) => generationTimeoutMs > 0
@@ -264,7 +313,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
   const allTools = { ...baseTools, ...webTools };
   const entry = app.template ? templateEntry(app.template) : null;
   const webInstruction = webEnabled ? ` ${webAccessInstructions({ images: imagesEnabled, strictLicense: webAccess.strictLicense })}` : '';
-  const instructions = generationInstructions({ app, template: app.template, entry, webInstruction });
+  const instructions = generationInstructions({ app, template: app.template, entry, webInstruction, hasImages: attachmentImages.length > 0 });
   // stopWhen 只在 settings 上，且默认值是 20 步，所以显式声明「不因步数停止」。
   // 本轮 prepareStep 注入的插话消息：修复轮重建 messages 时要带上，否则下一轮丢上下文。
   let steeredMessages: ModelMessage[] = [];
@@ -462,9 +511,25 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
       };
       try {
         check();
+        // 上传原图副本写进工作区：静态资产或工程 public/ 下，供用户明确要求当素材时引用。
+        const uploads = uploadDirectory(app.codeGenType);
+        for (const image of attachmentImages) {
+          try {
+            const original = await readAttachmentOriginal({ attachmentId: image.attachmentId, userId: user.id, appId: input.appId });
+            const path = `${uploads}/${uploadFileName(image.attachmentId, original.filename)}`;
+            // 上传上限是 imageLimits.maxBytes（5 MiB），比模型写文件用的默认二进制上限大，所以显式对齐。
+            await write(() => writeProjectFileBytes(app, path, original.bytes, { maxBytes: imageLimits.maxBytes }));
+          } catch (problem) {
+            // 工作区副本是辅助能力（受工作区 2 MiB 二进制上限约束），失败不应让整次生成失败。
+            if (phase.aborted) throw problem;
+            console.warn(`上传图片写入工作区失败（生成 ${input.requestId}）：`, problem);
+          }
+        }
         const assembled = await buildModelMessages(writer);
-        const validated = await validateUIMessages({ messages: assembled, tools: allTools });
-        let messages = await convertToModelMessages(validated, { tools: allTools, ignoreIncompleteToolCalls: true });
+        // 附件 part 不在 SDK 的 UIMessage 联合类型里，校验前整条摘掉；字节随后按当前轮重新附到最后一条 user 消息上。
+        const stripped = assembled.map(message => message.parts.some(isAttachmentPart) ? { ...message, parts: message.parts.filter(part => !isAttachmentPart(part)) } : message);
+        const validated = await validateUIMessages({ messages: stripped, tools: allTools });
+        let messages = attachModelImages(await convertToModelMessages(validated, { tools: allTools, ignoreIncompleteToolCalls: true }), modelImageParts);
         let uiMessages = validated;
         let round = await runRound(messages, uiMessages, 1);
         if (!changed) {

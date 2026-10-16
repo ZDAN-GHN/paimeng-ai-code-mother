@@ -313,8 +313,8 @@ export async function initializeModelConfigFromEnv(): Promise<ModelInitializatio
       providerId: defaultModelProviderId,
       modelName: config.aiModel,
       capabilities: alias === 'codegen.default'
-        ? { streaming: true, toolCalling: true, structuredOutput: false }
-        : { streaming: false, toolCalling: false, structuredOutput: true },
+        ? { streaming: true, toolCalling: true, structuredOutput: false, imageInput: false }
+        : { streaming: false, toolCalling: false, structuredOutput: true, imageInput: false },
       settings: {},
       enabled: true,
     }));
