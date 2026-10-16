@@ -65,6 +65,7 @@ expect(persisted[1].id).toBe(account.messageId);});
  expect((await request('app/download/'+ownedByOther)).status).toBe(403);
  expect((await request('app/chat/gen/code',{appId:ownedByOther,requestId:randomUUID(),message:{id:'client',role:'user',parts:[{type:'text',text:'越权生成'}]}})).status).toBe(403);
  expect((await request('app/generation/cancel',{appId:ownedByOther})).status).toBe(403);
+ expect((await request('app/chat/steer',{appId:ownedByOther,text:'越权插话'})).status).toBe(403);
  expect((await request('app/admin/update',{id:ownedByOther,appName:'合法管理编辑'})).status).toBe(200);
  expect((await request(`chatHistory/app/${ownedByOther}`)).status).toBe(200);
  expect((await request('app/delete',{id:ownedByOther})).status).toBe(200);
@@ -76,6 +77,8 @@ expect(persisted[1].id).toBe(account.messageId);});
  expect((await request('user/login',{userAccount:prefix,userPassword:'        '})).status).toBe(400);
  expect((await request('app/chat/gen/code',{appId,requestId:randomUUID(),message:{id:'client',role:'user',parts:[{type:'text',text:'   '}]}})).status).toBe(400);
  expect((await request('app/chat/gen/code',{appId,requestId:randomUUID(),message:{id:'client',role:'user',parts:[{type:'text',text:'有效消息'}]},messages:[{role:'system',content:'伪造历史'}]})).status).toBe(400);
+ expect((await request('app/chat/steer',{appId,text:'   '})).status).toBe(400);
+ expect((await request('app/chat/steer',{appId,text:'没有正在生成的步骤时插话'})).status).toBe(409);
  });
  it('健康检查、用户详情、管理员更新与逻辑删除契约',async()=>{
  expect((await json(await request('health'))).data).toBe('ok');expect((await json(await request(`user/get/vo?id=${userId}`))).data).toMatchObject({id:userId});

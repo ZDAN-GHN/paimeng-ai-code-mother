@@ -133,24 +133,41 @@ export async function buildIsCurrent(app: WorkspaceApp, digest?: string) {
   return hasPreview(app);
 }
 
-export async function buildApp(app: WorkspaceApp, signal?: AbortSignal) {
+/** 构建各阶段的进度通知：只报告 started/ok/failed，不改变构建结果。 */
+export type BuildStageProgress = (stage: 'source' | 'install' | 'typecheck' | 'build', status: 'started' | 'ok' | 'failed', ms: number) => void;
+
+export async function buildApp(app: WorkspaceApp, signal?: AbortSignal, onStage?: BuildStageProgress) {
   signal?.throwIfAborted();
+  // 进度回调只是通知：回调抛错不能让构建失败。started 的 ms 恒为 0，ok/failed 的 ms 是这一阶段的墙钟。
+  const notify: BuildStageProgress = (stage, status, ms) => { try { onStage?.(stage, status, ms); } catch {} };
+  const stageRun = async <T>(step: 'source' | 'install' | 'typecheck' | 'build', work: () => Promise<T>): Promise<T> => {
+    const startedAt = Date.now();
+    notify(step, 'started', 0);
+    let value: T;
+    try { value = await work(); } catch (error) { notify(step, 'failed', Date.now() - startedAt); throw error; }
+    notify(step, 'ok', Date.now() - startedAt);
+    return value;
+  };
   const root = await ensureWorkspace(app);
   const files = await listProjectFiles(app);
   if (!isProjectCodeGenType(app.codeGenType)) {
-    const forbidden = findStaticScaffoldFiles(app.codeGenType, files);
-    if (forbidden.length) throw sourceFailure(`生成结果与应用类型不符：${app.codeGenType} 应用不能包含 ${forbidden.slice(0, 3).map(file => file.path).join('、')}。原生静态页面不经过构建，请删除这些文件改回 index.html，或新建应用时选择 Vue/React 模板。`);
-    if (!files.includes('index.html')) throw sourceFailure('生成结果缺少 index.html');
-    const index = await readProjectFile(app, 'index.html');
-    if (!/<html[\s>]/i.test(index)) throw sourceFailure('生成结果缺少有效 HTML 页面');
+    await stageRun('source', async () => {
+      const forbidden = findStaticScaffoldFiles(app.codeGenType, files);
+      if (forbidden.length) throw sourceFailure(`生成结果与应用类型不符：${app.codeGenType} 应用不能包含 ${forbidden.slice(0, 3).map(file => file.path).join('、')}。原生静态页面不经过构建，请删除这些文件改回 index.html，或新建应用时选择 Vue/React 模板。`);
+      if (!files.includes('index.html')) throw sourceFailure('生成结果缺少 index.html');
+      const index = await readProjectFile(app, 'index.html');
+      if (!/<html[\s>]/i.test(index)) throw sourceFailure('生成结果缺少有效 HTML 页面');
+    });
     return;
   }
   const template = await appTemplate(app);
-  let dependencies: ReturnType<typeof validateProjectManifest>;
-  try {
-    const manifest = await readProjectFile(app, 'package.json');
-    dependencies = template ? validateTemplateManifest(template, manifest) : validateProjectManifest(app.codeGenType, manifest);
-  } catch (error) { throw sourceFailure(error); }
+  const projectCodeGenType = app.codeGenType;
+  const dependencies = await stageRun('source', async () => {
+    try {
+      const manifest = await readProjectFile(app, 'package.json');
+      return template ? validateTemplateManifest(template, manifest) : validateProjectManifest(projectCodeGenType, manifest);
+    } catch (error) { throw sourceFailure(error); }
+  });
   const lockedManifest = template ? await readTemplateFile(template, 'package.json') : null;
   const lock = template ? await readTemplateFile(template, 'package-lock.json') : null;
   if (lock && await readProjectFile(app, 'package-lock.json') !== lock) throw markBuildFailure(new Error('模板依赖锁已改变，请恢复对应模板版本的 package-lock.json'), { stage: 'template' });
@@ -168,15 +185,15 @@ export async function buildApp(app: WorkspaceApp, signal?: AbortSignal) {
     await writeFile(join(stage, 'package.json'), lockedManifest ?? JSON.stringify({ name: 'isolated-generated-app', version: '1.0.0', private: true, type: 'module', dependencies }));
     if (lock) await writeFile(join(stage, 'package-lock.json'), lock);
     // Install has network access, but never sees generated executable code or npm configuration.
-    await containerRun(stage, 'install', ['npm', lock ? 'ci' : 'install', '--ignore-scripts', '--no-audit', '--no-fund'], true, signal);
+    await stageRun('install', () => containerRun(stage, 'install', ['npm', lock ? 'ci' : 'install', '--ignore-scripts', '--no-audit', '--no-fund'], true, signal));
     for (const file of files) {
       if (file === 'package.json' || file === 'package-lock.json') continue;
       let parent = stage;
       for (const part of file.split('/').slice(0, -1)) parent = await ensureSafeDirectory(join(parent, part));
       await copyFile(join(root, file), join(stage, file));
     }
-    if (template) await containerRun(stage, 'typecheck', [...templateTypecheck(template)], false, signal);
-    await containerRun(stage, 'build', ['node', 'node_modules/vite/bin/vite.js', 'build', '--base=./'], false, signal);
+    if (template) await stageRun('typecheck', () => containerRun(stage, 'typecheck', [...templateTypecheck(template)], false, signal));
+    await stageRun('build', () => containerRun(stage, 'build', ['node', 'node_modules/vite/bin/vite.js', 'build', '--base=./'], false, signal));
     signal?.throwIfAborted();
     const dist = join(stage, 'dist');
     const index = await lstat(join(dist, 'index.html'));

@@ -1,14 +1,15 @@
 import 'server-only';
 import { z } from 'zod';
-import { ToolLoopAgent, tool, convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, validateUIMessages, type ModelMessage, type UIMessage, type UIMessageStreamWriter } from 'ai';
-import { idSchema, type User } from '@/shared/contracts';
+import { ToolLoopAgent, tool, convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, validateUIMessages, type ModelMessage, type StepResult, type ToolSet, type UIMessage, type UIMessageStreamWriter } from 'ai';
+import { idSchema, isProjectCodeGenType, type BuildProgressEvent, type User } from '@/shared/contracts';
 import { modelBindingFor, taskModelsFor } from './model';
 import { getApp } from './business';
 import { buildApp, sourceDigest } from './artifacts';
 import { classifyBuildFailure, formatBuildFeedback, noProgressMessage } from './build-feedback';
 import { recordBuildStep, recordModelStep, stopReasonOf, type GenerationStopReason } from './generation-accounting';
 import { readProjectFileAsText, writeProjectFile, listProjectFiles, modifyProjectFile, deleteProjectFile } from './workspace';
-import { beginGenerationContext, type BeginGenerationContext, heartbeat, saveMessage, setGeneration, restoreGeneration, finishGeneration, generationFor, withAppWriter } from './generation-store';
+import { beginGenerationContext, type BeginGenerationContext, heartbeat, saveMessage, saveUserMessage, setGeneration, restoreGeneration, finishGeneration, generationFor, withAppWriter } from './generation-store';
+import { BusinessError } from './http';
 import { validatePrompt } from './prompt-safety';
 import { clientIp } from './rate-limit';
 import { generationInstructions, staticPathHint } from './generation-instructions';
@@ -22,6 +23,8 @@ import { cursorOf, type SummarySnapshot } from './memory-types';
 import { createWebAccessSession, createWebAccessTools, enabledWebToolNames, pickEnabledWebTools, webAccessInstructions, webAccessToolDescriptions, webAccessToolSchemas } from './web-access/tools';
 
 const controllers = new Map<string, AbortController>();
+// 中途插话队列（steering）：按任务 id 存，生成开始时建空数组，结束时删除。
+const steerings = new Map<string, string[]>();
 const inputSchema = z.object({
   appId: idSchema,
   requestId: z.uuid(),
@@ -44,6 +47,24 @@ const fileToolDescriptions = {
 };
 const generationOutputMarginTokens = 1024;
 const maxConsolidationRounds = 3;
+const previewThrottleMs = 1000;
+
+/** 模型步骤里成功执行的文件工具调用写到的路径（参数错误或 tool-error 的调用不算，进度不会虚报）。 */
+function writtenPathsOf<TOOLS extends ToolSet>(step: StepResult<TOOLS>): string[] {
+  const failed = new Set(step.content.filter(part => part.type === 'tool-error').map(part => part.toolCallId));
+  const paths: string[] = [];
+  for (const call of step.toolCalls) {
+    if (call.invalid === true || failed.has(call.toolCallId)) continue;
+    if (call.toolName === 'writeFiles') {
+      const parsed = fileToolSchemas.writeFiles.safeParse(call.input);
+      if (parsed.success) paths.push(...parsed.data.files.map(file => file.path));
+    } else if (call.toolName === 'modifyFile' || call.toolName === 'deleteFile') {
+      const parsed = (call.toolName === 'modifyFile' ? fileToolSchemas.modifyFile : fileToolSchemas.deleteFile).safeParse(call.input);
+      if (parsed.success) paths.push(parsed.data.path);
+    }
+  }
+  return paths;
+}
 const historySummaryWrapperTokens = estimateTokens(buildHistoryMessage({ text: '', coveredThroughSequence: '0', legacyCoveredThroughSequence: '0', version: '0', modelAlias: null, providerId: null, modelName: null, lastAttemptTime: null, updateTime: null }));
 
 function contextOverheadTokens(instructions: string, schemas: Record<string, z.ZodType>, descriptions: Record<string, string>): number {
@@ -58,6 +79,22 @@ export async function cancelGeneration(appId: string, user: User) {
     await setGeneration(task.id, 'cancelled', '生成已取消', 'cancelled');
     controllers.get(task.id)?.abort();
   }
+  return true;
+}
+
+/**
+ * 中途插话：把用户的追加约束放进本次生成的队列，在当前步骤跑完后、下一次模型调用前注入，
+ * 不打断正在执行的步骤。文本同时落库成一条普通 user 消息。
+ */
+export async function steerGeneration(appId: string, user: User, text: string) {
+  // 插话会写进对话历史并影响这次生成，属于写操作：只有应用创建者可以，管理员也不开这个口子（同 app/chat/gen/code、app/generation/cancel）。
+  await getApp(appId, user, true);
+  const task = await generationFor(appId);
+  // 队列只属于本进程里正在跑的那次生成：任务已结束或没有活跃流时插话无处可去。
+  const queue = task && task.status === 'generating' ? steerings.get(task.id) : undefined;
+  if (!task || !queue) throw new BusinessError(409, 40900, '当前没有正在生成的步骤，插话不适用');
+  await saveUserMessage(appId, user, text, task.id);
+  queue.push(text);
   return true;
 }
 
@@ -127,7 +164,20 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
   // 步数预算在首轮与修复轮之间共享：stopWhen 只在 settings 上，所以用闭包变量控制每轮剩余步数。
   const maxSteps = 30;
   let remainingSteps = maxSteps;
-  const agent = new ToolLoopAgent({ model, tools, stopWhen: ({ steps }) => steps.length >= remainingSteps, maxRetries: modelRetryLimit, instructions });
+  // 本轮 prepareStep 注入的插话消息：修复轮重建 messages 时要带上，否则下一轮丢上下文。
+  let steeredMessages: ModelMessage[] = [];
+  const agent = new ToolLoopAgent({
+    model, tools, stopWhen: ({ steps }) => steps.length >= remainingSteps, maxRetries: modelRetryLimit, instructions,
+    // 中途插话只在这里生效：prepareStep 收到的是上一步返回的 messages（含此前注入的内容），
+    // 所以每次只追加新 drain 出来的文本，不会重复注入。
+    prepareStep: ({ messages }) => {
+      const queued = steerings.get(input.requestId)?.splice(0) ?? [];
+      if (!queued.length) return {};
+      const injected: ModelMessage[] = queued.map(text => ({ role: 'user', content: text }));
+      steeredMessages.push(...injected);
+      return { messages: [...messages, ...injected] };
+    },
+  });
   const overhead = contextOverheadTokens(instructions, toolSchemas, toolDescriptions);
   let context: BeginGenerationContext;
   let acquired = false;
@@ -142,6 +192,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
     throw error;
   }
   controllers.set(input.requestId, controller);
+  steerings.set(input.requestId, []);
   let timeout = armGenerationTimeout(controller);
   const pulse = setInterval(() => {
     void heartbeat(input.requestId).then(status => {
@@ -216,12 +267,19 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
       const hintBuild = (data: { status: 'repairing'; attempt: number; maxAttempts: number }) => {
         try { writer.write({ type: 'data-build', data, transient: true }); } catch {}
       };
+      // 瞬时进度事件：发送失败只丢弃事件，绝不能因为发事件失败而中断生成。
+      const progress = (data: BuildProgressEvent) => {
+        try { writer.write({ type: 'data-progress', data, transient: true }); } catch {}
+      };
+      // 静态应用的 workspace 就是预览目录：写完文件就能看，不需要构建，所以按时间节流发预览版本。
+      let previewVersion = 0;
+      let lastPreviewAt = 0;
       // 服务端拥有验证权：每次构建尝试单独记账，失败时带上分类与阶段。
       const verify = async (round: number) => {
         const startedAt = Date.now();
         const stepNumber = buildSteps++;
         try {
-          await write(() => buildApp(app, building.signal));
+          await write(() => buildApp(app, building.signal, (stage, status, ms) => progress({ stage, status, ms, at: Date.now() })));
           await recordBuildStep({ generationId: input.requestId, round, stepNumber, durationMs: Date.now() - startedAt, outcome: { status: 'ok' } });
         } catch (problem) {
           const detail = problem instanceof Error ? problem.message.slice(0, 1000) : '构建失败';
@@ -237,6 +295,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
       // 每一轮模型循环复用同一个 Agent、工具与租约；修复轮只是把诊断拼在上一轮消息之后。
       const runRound = async (messages: ModelMessage[], originalMessages: UIMessage[], round: number) => {
         await ensureWritable();
+        steeredMessages = [];
         const result = await agent.stream({
           messages,
           abortSignal: controller.signal,
@@ -244,6 +303,13 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
           onStepEnd: async step => {
             clearReplyTimer();
             await recordModelStep(step, { generationId: input.requestId, round, model: taskModels.generation });
+            const paths = writtenPathsOf(step);
+            if (!paths.length) return;
+            const at = Date.now();
+            progress({ stage: 'files', paths, at });
+            if (isProjectCodeGenType(app.codeGenType) || at - lastPreviewAt < previewThrottleMs) return;
+            lastPreviewAt = at;
+            progress({ stage: 'preview', version: ++previewVersion, at });
           },
         });
         let message: UIMessage | undefined;
@@ -276,7 +342,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
           throw new Error(`Agent 未正常结束 ${finish}`);
         }
         if (!message) throw new Error('模型响应未完成');
-        return { responseMessages: await result.responseMessages, message };
+        return { responseMessages: await result.responseMessages, message, steered: steeredMessages };
       };
       try {
         check();
@@ -303,6 +369,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
             status = 'ready';
             stopReason = 'completed';
             settle({ status: 'completed' });
+            progress({ stage: 'ready', at: Date.now() });
             break;
           } catch (problem) {
             if (phase.aborted) throw problem;
@@ -319,7 +386,8 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
             timeout = armGenerationTimeout(controller);
             check();
             const feedback: ModelMessage = { role: 'user', content: formatBuildFeedback(problem, repairs, maxRepairs) };
-            messages = [...messages, ...round.responseMessages, feedback];
+            // 上一轮注入的插话消息也要带上：它原本在上一轮步骤之前，修复轮不能把这段上下文丢掉。
+            messages = [...messages, ...round.steered, ...round.responseMessages, feedback];
             uiMessages = [...uiMessages, round.message];
             round = await runRound(messages, uiMessages, repairs + 1);
             const current = await sourceDigest(app);
@@ -339,6 +407,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
         error = cancelled ? '生成已取消' : reason instanceof Error ? reason.message.slice(0, 1000) : '生成失败';
         stopReason = stopReasonOf({ current: stopReason, cancelled, abortedReason });
         settle(cancelled ? { status: 'aborted' } : { status: 'failed', error: reason });
+        progress({ stage: status, at: Date.now() });
         throw problem;
       } finally {
         try {
@@ -348,6 +417,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
           clearTimeout(timeout);
           clearReplyTimer();
           controllers.delete(input.requestId);
+          steerings.delete(input.requestId);
           req.signal.removeEventListener('abort', abortRequest);
         }
       }

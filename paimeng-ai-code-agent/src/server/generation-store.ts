@@ -132,6 +132,16 @@ export async function saveMessage(appId: string, message: UIMessage, generationI
   await withAppWriter(appId, tx => storeMessage(tx, appId, message), generationId);
 }
 
+/** 中途插话（steering）：把追加的约束当成一条普通 user 消息持久化，重载对话后仍能看到。 */
+export async function saveUserMessage(appId: string, user: User, text: string, generationId: string) {
+  const message: UIMessage = { id: String(await nextSnowflakeId()), role: 'user', parts: [{ type: 'text', text }] };
+  const historyId = await nextSnowflakeId();
+  await withAppWriter(appId, async tx => {
+    await storeMessage(tx, appId, message);
+    await tx.insert(histories).values({ id: historyId, appId: BigInt(appId), userId: BigInt(user.id), messageType: 'user', message: text, createTime: now(), updateTime: now() });
+  }, generationId);
+}
+
 export type BeginGenerationContext = { history: UIMessage[]; turns: LoadedTurn[]; summary: SummarySnapshot | null };
 
 export async function beginGenerationContext(appId: string, id: string, user: User, message: UIMessage, clientAddress = 'unknown'): Promise<BeginGenerationContext> {

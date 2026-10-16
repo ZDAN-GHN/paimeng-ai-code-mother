@@ -4,7 +4,7 @@ import { login, logout, register, requireUser, requireAdmin } from '@/server/aut
 import * as business from '@/server/business';
 import { generationFor, loadMessages } from '@/server/generation-store';
 import { generationAccounts } from '@/server/generation-accounting';
-import { chatResponse, cancelGeneration } from '@/server/agent';
+import { chatResponse, cancelGeneration, steerGeneration } from '@/server/agent';
 import { applyModelConfigNow, deleteModelAlias, deleteModelProvider, probeProviderModels, readModelAdminConfig, upsertModelAlias, upsertModelProvider } from '@/server/models/admin';
 import { idSchema } from '@/shared/contracts';
 export const runtime='nodejs';
@@ -41,6 +41,7 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/build')return withHeartbeat(async()=>success(await business.rebuildPreview(value,user)));
    if(path==='app/chat/gen/code')return await chatResponse(req,value,user);
    if(path==='app/generation/cancel')return success(await cancelGeneration(z.object({appId:idSchema}).parse(value).appId,user));
+   if(path==='app/chat/steer'){const steer=z.object({appId:idSchema,text:z.string().trim().min(1).max(1000)}).parse(value);return success(await steerGeneration(steer.appId,user,steer.text));}
    await requireAdmin(req);
    if(path==='model/admin/config')return success(await readModelAdminConfig(value));
    if(path==='model/admin/provider/upsert')return success(await upsertModelProvider(value));
