@@ -6,12 +6,17 @@ import { generationFor, loadMessages } from '@/server/generation-store';
 import { generationAccounts } from '@/server/generation-accounting';
 import { chatResponse, cancelGeneration, steerGeneration } from '@/server/agent';
 import { applyModelConfigNow, deleteModelAlias, deleteModelProvider, probeProviderModels, readModelAdminConfig, upsertModelAlias, upsertModelProvider } from '@/server/models/admin';
+import { uploadImages } from '@/server/image-upload';
+import { readAttachmentOriginal } from '@/server/attachment-store';
 import { idSchema } from '@/shared/contracts';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
  try{
-  guardRequest(req);const path=(await context.params).path.join('/');const query=new URL(req.url).searchParams;const method=req.method;
+  const path=(await context.params).path.join('/');
+  // 上传通道是 multipart 且体积超过 JSON 上限，所以在 guardRequest/body 之前单独分流。
+  if(req.method==='POST'&&path==='app/attachment/upload'){const user=await requireUser(req);return success({attachments:await uploadImages({userId:user.id,req})});}
+  guardRequest(req);const query=new URL(req.url).searchParams;const method=req.method;
   const value=method==='POST'?await body(req):undefined;
   if(method==='GET'){
    if(path==='health'||path==='health/')return success('ok');
@@ -24,6 +29,7 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/generation'){const user=await requireUser(req);const id=idSchema.parse(query.get('appId'));await business.getApp(id,user,true,true);return success(await generationFor(id));}
    if(path==='app/generation/accounts'){const user=await requireUser(req);const id=idSchema.parse(query.get('appId'));await business.getApp(id,user,true,true);const limit=z.coerce.number().int().min(1).max(20).default(10).parse(query.get('limit')??undefined);return success(await generationAccounts(id,limit));}
    if(path==='app/asset'){const user=await requireUser(req);const id=idSchema.parse(query.get('appId'));const asset=await business.readAppAsset(id,z.string().min(1).max(512).parse(query.get('path')),user);return new Response(new Uint8Array(asset.bytes),{headers:{'content-type':asset.mime,'content-length':String(asset.bytes.length),'cache-control':'private, max-age=300','x-content-type-options':'nosniff'}});}
+   if(path==='app/attachment'){const user=await requireUser(req);const appId=idSchema.parse(query.get('appId'));const attachmentId=z.uuid().parse(query.get('id'));await business.getApp(appId,user,true);const file=await readAttachmentOriginal({attachmentId,userId:user.id,appId});return new Response(new Uint8Array(file.bytes),{headers:{'content-type':file.mediaType,'content-length':String(file.bytes.length),'cache-control':'private, max-age=300','x-content-type-options':'nosniff'}});}
    if(path.startsWith('app/download/')){const user=await requireUser(req);const id=idSchema.parse(path.slice('app/download/'.length));return await business.download(id,user);}
    if(path.startsWith('chatHistory/app/')){const user=await requireUser(req);const id=idSchema.parse(path.slice('chatHistory/app/'.length));return success(await business.listHistory({appId:id,pageSize:Number(query.get('pageSize')??10),pageNum:Number(query.get('pageNum')??1),sortField:query.get('sortField')??undefined,sortOrder:query.get('sortOrder')??undefined},user,false,query.get('lastCreateTime')??undefined));}
   }
