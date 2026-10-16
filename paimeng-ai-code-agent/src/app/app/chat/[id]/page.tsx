@@ -1,5 +1,5 @@
 'use client';
-import { use, useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { use, useState, useEffect, useMemo, useRef, useCallback, type ComponentRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
@@ -11,6 +11,7 @@ import { type AppInfo, type Generation, type GenerationAccount, isProjectCodeGen
 import { imageLimits, type AttachmentPart } from '@/shared/attachments';
 import { draggingFiles, filesFromClipboard, filesFromDrop } from '@/components/clipboard-images';
 import { ImageAttachments, MessageImages, messageAttachments, outgoingParts, useImageAttachments } from '@/components/chat/image-attachments';
+import { VoiceInput, appendTranscript } from '@/components/chat/voice-input';
 import { MarkdownMessage } from '@/components/chat/markdown-message';
 import { GenerationUsage } from '@/components/chat/generation-usage';
 import { BuildProgress } from '@/components/chat/build-progress';
@@ -102,6 +103,7 @@ function Chat({ id }: { id: string }) {
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
   const [dragging, setDragging] = useState(false);
   const [queuePaused, setQueuePaused] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [drainArmed, setDrainArmed] = useState(false);
   const [sending, setSending] = useState(false);
   const [steered, setSteered] = useState(false);
@@ -117,6 +119,7 @@ function Chat({ id }: { id: string }) {
   const rebuildTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialPromptHandled = useRef(false);
   const imageInput = useRef<HTMLInputElement>(null);
+  const voiceInput = useRef<ComponentRef<typeof Input.TextArea>>(null);
   const loadingOlder = useRef(false);
   const activeGenerationId = useRef<string | null>(null);
   const settledTask = useRef<string | null>(null);
@@ -127,6 +130,25 @@ function Chat({ id }: { id: string }) {
   const loaded = appLoaded && historySettled;
   const canAttachImages = canEdit && loaded;
   const { drafts: imageDrafts, parts: imageParts, blockReason: imageBlockReason, add: addImages, remove: removeImage, retry: retryImage, clearSent: clearSentImages } = useImageAttachments(id);
+  // 转写别名是否配置由服务端回答（需要登录）：未配置时麦克风禁用并说明，不假装可用。
+  useEffect(() => {
+    if (!canEdit) return;
+    let active = true;
+    api<{ enabled: boolean }>('app/chat/transcribe')
+      .then(result => { if (active) setVoiceEnabled(result.enabled); })
+      .catch(() => { if (active) setVoiceEnabled(false); });
+    return () => { active = false; };
+  }, [canEdit]);
+  /** 转写结果追加到已有输入后面（不自动发送），渲染落地后把光标放到末尾，用户可以直接接着写。 */
+  const appendVoiceText = useCallback((text: string) => {
+    setInput(current => appendTranscript(current, text));
+    requestAnimationFrame(() => {
+      const element = voiceInput.current?.resizableTextArea?.textArea;
+      if (!element) return;
+      element.focus();
+      element.setSelectionRange(element.value.length, element.value.length);
+    });
+  }, []);
 
   const refresh = useCallback(async () => {
     const [info, generation] = await Promise.allSettled([
@@ -560,7 +582,7 @@ function Chat({ id }: { id: string }) {
               {selected.textContent && <div className="element-item">内容: {selected.textContent.slice(0, 50)}{selected.textContent.length > 50 ? '…' : ''}</div>}
             </div>} />}
           <ImageAttachments appId={id} drafts={imageDrafts} onRemove={removeImage} onRetry={retryImage} />
-          <Input.TextArea aria-label="对话消息" placeholder={canEdit ? '请描述你想生成的网站，越详细效果越好哦' : '无法在别人的作品下对话哦~'} value={input}
+          <Input.TextArea aria-label="对话消息" ref={voiceInput} placeholder={canEdit ? '请描述你想生成的网站，越详细效果越好哦' : '无法在别人的作品下对话哦~'} value={input}
             onChange={e => setInput(e.target.value)} disabled={!canEdit || !loaded} autoSize={{ minRows: 3, maxRows: 6 }} maxLength={textareaMax}
             onKeyDown={e => {
               if (e.nativeEvent.isComposing) return;
@@ -577,6 +599,7 @@ function Chat({ id }: { id: string }) {
           <div className="prompt-actions"><span className="composer-hint">{imageBlockReason ?? 'Enter 排队发送 · Ctrl + Enter 中途插话 · Shift + Enter 换行'}</span>
             <Space>
               <Button icon={<PictureOutlined aria-hidden="true" />} disabled={!canAttachImages || imageDrafts.length >= imageLimits.maxImages} onClick={() => imageInput.current?.click()}>添加图片</Button>
+              <VoiceInput editable={canEdit && loaded} serverEnabled={voiceEnabled} onTranscript={appendVoiceText} />
               {generating ? <Button danger icon={<StopOutlined aria-hidden="true" />} loading={cancelling} disabled={building} title={building ? '代码已生成，正在完成构建，构建无法取消' : undefined} onClick={() => { void cancel(); }}>{building ? '构建中' : '停止生成'}</Button> :
                 <Button type="primary" icon={<SendOutlined aria-hidden="true" />} disabled={!canEdit || !loaded || !input.trim() || imageBlockReason !== null} onClick={() => { void submit(input, imageParts); }}>发送</Button>}
             </Space>
