@@ -249,8 +249,10 @@ export async function finishGeneration(id: string, status: 'ready' | 'failed' | 
       stopReason = stopReasonFrom(current.stopReason) ?? stopReason;
     }
     const effectiveStopReason = stopReason ?? (status === 'ready' ? 'completed' : status === 'cancelled' ? 'cancelled' : null);
-    if (responseMessage?.parts.length && historyId !== null) await storeAssistant(tx, String(task.appId), task.userId, responseMessage, historyId);
-    await tx.update(generations).set({ status, error, stopReason: effectiveStopReason, updateTime: now() }).where(eq(generations.id, id));
+    const stored = responseMessage?.parts.length ? responseMessage : null;
+    if (stored && historyId !== null) await storeAssistant(tx, String(task.appId), task.userId, stored, historyId);
+    // 助手消息 id 就是这次生成的回复（agent.ts 的 generateId 生成），前端靠它把用量挂在对应的回复上。
+    await tx.update(generations).set({ status, error, stopReason: effectiveStopReason, messageId: stored?.id ?? null, updateTime: now() }).where(eq(generations.id, id));
     await tx.delete(leases).where(and(eq(leases.appId, task.appId), eq(leases.generationId, id)));
   });
 }

@@ -1,9 +1,8 @@
 import 'server-only';
-import { asc, eq } from 'drizzle-orm';
+import { asc, desc, eq, inArray } from 'drizzle-orm';
 import type { StepResult, ToolSet } from 'ai';
 import { db, now } from './db';
 import { generationSteps, generations } from './schema';
-import type { GenerationStatus } from '@/shared/contracts';
 import type { SummaryCallResult } from './memory-model';
 import type { BuildVerdict } from './build-feedback';
 
@@ -14,75 +13,21 @@ import type { BuildVerdict } from './build-feedback';
  * ts_generation.stopReason。写入全部是尽力而为：记账失败只告警，不影响生成与状态转移。
  * 上游没有返回的用量记为 NULL（未知），不记成 0；读取端用 usageUnknown 区分「已知的零」和「未知」。
  * 只保存工具名、成败与耗时，不保存提示词、工具正文或模型输出。
+ * 读模型类型（AccountStep / GenerationAccount）定义在 @/shared/contracts，前后端共用。
  */
-export const generationStopReasons = ['completed', 'no-changes', 'step-limit', 'verification-failed', 'timeout', 'cancelled', 'lease-lost', 'model-error', 'initialization-failed', 'interrupted'] as const;
-export type GenerationStopReason = typeof generationStopReasons[number];
+import { generationStopReasons, type AccountStep, type AccountStepKind, type AccountToolCall, type GenerationAccount, type GenerationStopReason, type ModelIdentity } from '@/shared/contracts';
+
+export type { AccountStep, AccountStepKind, AccountToolCall, GenerationAccount, GenerationStopReason, ModelIdentity };
 
 /** 数据库里读回的停止原因按词汇表验证；未知值当没有（不把脏字符串透给调用方）。 */
 export function stopReasonFrom(value: string | null): GenerationStopReason | null {
   return value !== null && (generationStopReasons as readonly string[]).includes(value) ? value as GenerationStopReason : null;
 }
 
-export type ModelIdentity = { alias: string | null; providerId: string | null; modelName: string | null };
-export type AccountStepKind = 'model' | 'build' | 'summary';
-export type AccountToolCall = { name: string; ok: boolean; ms: number | null };
-
 export type BuildStepOutcome =
   | { status: 'ok' }
   | { status: 'failed'; verdict: BuildVerdict; detail: string }
   | { status: 'cancelled'; detail: string };
-
-export type AccountStep = {
-  id: string;
-  kind: AccountStepKind;
-  round: number;
-  stepNumber: number;
-  status: string;
-  stage: string | null;
-  repairable: boolean | null;
-  finishReason: string | null;
-  durationMs: number | null;
-  modelMs: number | null;
-  toolMs: number | null;
-  inputTokens: number | null;
-  outputTokens: number | null;
-  cacheReadTokens: number | null;
-  cacheWriteTokens: number | null;
-  reasoningTokens: number | null;
-  modelAlias: string | null;
-  providerId: string | null;
-  modelName: string | null;
-  upstreamProvider: string | null;
-  upstreamModelId: string | null;
-  toolCalls: AccountToolCall[];
-  detail: string | null;
-};
-
-export type GenerationAccount = {
-  generationId: string;
-  status: GenerationStatus;
-  error: string | null;
-  stopReason: GenerationStopReason | null;
-  model: ModelIdentity;
-  totals: {
-    rounds: number;
-    model: {
-      steps: number;
-      inputTokens: number | null;
-      outputTokens: number | null;
-      cacheReadTokens: number | null;
-      cacheWriteTokens: number | null;
-      reasoningTokens: number | null;
-      usageUnknown: boolean;
-      modelMs: number;
-      toolMs: number;
-    };
-    summary: { calls: number; inputTokens: number | null; outputTokens: number | null; usageUnknown: boolean; summaryMs: number };
-    build: { attempts: number; buildMs: number };
-    totalMs: number | null;
-  };
-  steps: AccountStep[];
-};
 
 const detailChars = 1000;
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, detailChars);
@@ -254,20 +199,41 @@ const wallClockMs = (task: typeof generations.$inferSelect) => {
   return Number.isFinite(created) && Number.isFinite(updated) ? Math.max(0, updated - created) : null;
 };
 
-/** 读一次任务记账：任务行 + 按写入顺序的步骤明细 + 分 kind 的合计。没有任务时返回 null。 */
-export async function generationAccount(generationId: string): Promise<GenerationAccount | null> {
-  const [task] = await db().select().from(generations).where(eq(generations.id, generationId)).limit(1);
-  if (!task) return null;
-  const rows = await db().select().from(generationSteps).where(eq(generationSteps.generationId, generationId)).orderBy(asc(generationSteps.id));
-  const steps = rows.map(toAccountStep);
+function accountOf(task: typeof generations.$inferSelect, steps: AccountStep[]): GenerationAccount {
   const firstModel = steps.find(step => step.kind === 'model');
   return {
-    generationId,
-    status: task.status as GenerationStatus,
+    generationId: task.id,
+    messageId: task.messageId,
+    status: task.status as GenerationAccount['status'],
     error: task.error,
     stopReason: stopReasonFrom(task.stopReason),
     model: { alias: firstModel?.modelAlias ?? null, providerId: firstModel?.providerId ?? null, modelName: firstModel?.modelName ?? null },
     totals: { ...totalsOf(steps), totalMs: wallClockMs(task) },
     steps,
   };
+}
+
+/** 读一次任务记账：任务行 + 按写入顺序的步骤明细 + 分 kind 的合计。没有任务时返回 null。 */
+export async function generationAccount(generationId: string): Promise<GenerationAccount | null> {
+  const [task] = await db().select().from(generations).where(eq(generations.id, generationId)).limit(1);
+  if (!task) return null;
+  const rows = await db().select().from(generationSteps).where(eq(generationSteps.generationId, generationId)).orderBy(asc(generationSteps.id));
+  return accountOf(task, rows.map(toAccountStep));
+}
+
+/**
+ * 一个应用最近几次生成的记账（新→旧），前端按 messageId 把用量挂到对应的助手回复上。
+ * limit 由调用方限幅；这里只做一次 IN 查询，不逐条读步骤。
+ */
+export async function generationAccounts(appId: string, limit: number): Promise<GenerationAccount[]> {
+  const tasks = await db().select().from(generations).where(eq(generations.appId, BigInt(appId))).orderBy(desc(generations.createTime)).limit(limit);
+  if (!tasks.length) return [];
+  const rows = await db().select().from(generationSteps).where(inArray(generationSteps.generationId, tasks.map(task => task.id))).orderBy(asc(generationSteps.id));
+  const byGeneration = new Map<string, AccountStep[]>();
+  for (const row of rows) {
+    const steps = byGeneration.get(row.generationId) ?? [];
+    steps.push(toAccountStep(row));
+    byGeneration.set(row.generationId, steps);
+  }
+  return tasks.map(task => accountOf(task, byGeneration.get(task.id) ?? []));
 }

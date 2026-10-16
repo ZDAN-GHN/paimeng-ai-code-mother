@@ -7,8 +7,9 @@ import { App, Button, Input, Alert, Tag, Space, Spin, Avatar } from 'antd';
 import { SendOutlined, DownloadOutlined, CloudUploadOutlined, EditOutlined, StopOutlined, InfoCircleOutlined, ExportOutlined, UserOutlined } from '@ant-design/icons';
 import { api } from '@/client/api';
 import { useAuth } from '@/components/providers';
-import { type AppInfo, type Generation, isProjectCodeGenType } from '@/shared/contracts';
+import { type AppInfo, type Generation, type GenerationAccount, isProjectCodeGenType } from '@/shared/contracts';
 import { MarkdownMessage } from '@/components/chat/markdown-message';
+import { GenerationUsage } from '@/components/chat/generation-usage';
 import { AppDetailModal, formatCodeGenType } from '@/components/chat/app-detail-modal';
 import { DeploySuccessModal } from '@/components/chat/deploy-success-modal';
 import './chat.css';
@@ -55,6 +56,7 @@ function Chat({ id }: { id: string }) {
   const [app, setApp] = useState<AppInfo | null>(null);
   const [input, setInput] = useState('');
   const [task, setTask] = useState<Generation | null>(null);
+  const [usageByMessage, setUsageByMessage] = useState<Map<string, GenerationAccount>>(new Map());
   const [error, setError] = useState('');
   const [dismissedTaskError, setDismissedTaskError] = useState('');
   const [historyError, setHistoryError] = useState('');
@@ -110,6 +112,19 @@ function Chat({ id }: { id: string }) {
     },
   });
   const generating = status === 'submitted' || status === 'streaming' || task?.status === 'generating' || task?.status === 'building';
+  const taskStatus = task?.status;
+  // 每次生成结束时取一次用量：一条助手回复对应一次生成，按消息 id 挂到气泡上；生成中不轮询明细。
+  const refreshUsage = useCallback(async () => {
+    try {
+      const accounts = await api<GenerationAccount[]>('app/generation/accounts?appId=' + encodeURIComponent(id));
+      if (!mounted.current) return;
+      setUsageByMessage(new Map(accounts.flatMap(account => account.messageId ? [[account.messageId, account] as [string, GenerationAccount]] : [])));
+    } catch { if (mounted.current) setUsageByMessage(new Map()); }
+  }, [id]);
+  useEffect(() => {
+    if (!task?.id || taskStatus === 'generating' || taskStatus === 'building') return;
+    void refreshUsage();
+  }, [task?.id, taskStatus, refreshUsage]);
   useEffect(() => { if (!generating) { setMemoryBusy(false); setRepairing(null); } }, [generating]);
   const buildPending = publishing || rebuilding;
   useEffect(() => {
@@ -314,20 +329,23 @@ function Chat({ id }: { id: string }) {
         <div className="messages" ref={messageList}>
           {messages.length > visibleHistory && <Button type="link" onClick={() => { loadingOlder.current = true; setVisibleHistory(count => count + historyPageSize); }}>加载更多历史消息</Button>}
           {!messages.length && <div className="message-item initial-prompt"><div className="message-role">初始需求</div><div className="message-text">{app?.initPrompt || '加载应用…'}</div></div>}
-          {visibleMessages.map(item => item.role === 'user'
-            ? <div className="message-item message-user" key={item.id}>
-                <div className="message-bubble">{item.parts.map((part, index) => part.type === 'text' ? <div className="message-text" key={index}>{part.text}</div> : null)}</div>
-                <Avatar className="message-avatar" src={user?.userAvatar ?? undefined} icon={<UserOutlined />} />
-              </div>
-            : <div className="message-item message-ai" key={item.id}>
-                <Avatar className="message-avatar" src="/paimeng.png" alt="AI 助手" />
-                <div className="message-bubble">{item.parts.map((part, index) =>
-                  part.type === 'text' ? <MarkdownMessage key={index} content={part.text} /> :
-                  part.type === 'reasoning' ? <details className="reasoning" key={index}><summary>思考过程</summary><div className="message-text">{part.text}</div></details> :
-                  part.type.startsWith('tool-') ? <details className="tool-result" key={index}><summary>{part.type.replace('tool-', '')} 工具状态</summary><pre>{JSON.stringify(part, null, 2)}</pre></details> : null)}
+          {visibleMessages.map(item => {
+            const usage = usageByMessage.get(item.id);
+            return item.role === 'user'
+              ? <div className="message-item message-user" key={item.id}>
+                  <div className="message-bubble">{item.parts.map((part, index) => part.type === 'text' ? <div className="message-text" key={index}>{part.text}</div> : null)}</div>
+                  <Avatar className="message-avatar" src={user?.userAvatar ?? undefined} icon={<UserOutlined />} />
                 </div>
-              </div>
-          )}
+              : <div className="message-item message-ai" key={item.id}>
+                  <Avatar className="message-avatar" src="/paimeng.png" alt="AI 助手" />
+                  <div className="message-bubble">{item.parts.map((part, index) =>
+                    part.type === 'text' ? <MarkdownMessage key={index} content={part.text} /> :
+                    part.type === 'reasoning' ? <details className="reasoning" key={index}><summary>思考过程</summary><div className="message-text">{part.text}</div></details> :
+                    part.type.startsWith('tool-') ? <details className="tool-result" key={index}><summary>{part.type.replace('tool-', '')} 工具状态</summary><pre>{JSON.stringify(part, null, 2)}</pre></details> : null)}
+                    {usage && <GenerationUsage usage={usage} />}
+                  </div>
+                </div>;
+          })}
         </div>
         {memoryBusy && <p className="memory-hint" role="status">正在整理历史上下文，请稍候…</p>}
         {generating && <p className="generating-hint" role="status">{repairing ? '构建未通过，正在进行第 ' + repairing.attempt + '/' + repairing.maxAttempts + ' 次修复…' : '正在生成或构建，请稍候…'}</p>}

@@ -367,11 +367,13 @@ UX 结果：构建期间仍是“代码已生成，正在完成构建，构建�
 
 ## 9. D2 详细设计：生成任务统一记账
 
-实现状态：2026-10-16 已落地（`migrations/010_generation_accounting.sql`、`src/server/generation-accounting.ts`），未提交；评估工具的执行记录仍保留在 §8.11。
+实现状态：2026-10-16 已落地（`migrations/010_generation_accounting.sql` + `011_generation_message.sql`、`src/server/generation-accounting.ts`、前端 `src/components/chat/generation-usage.tsx`），评估工具的执行记录仍保留在 §8.11。
+
+补充（同日）：最初只把读接口留在服务端，用户反馈「前端看不到用量」——一次生成对应一条助手回复，所以用量改成挂在回复气泡上（`ts_generation.messageId` 记录这次生成写出的助手消息 id，`GET app/generation/accounts?appId=&limit=` 返回最近几次生成的记账，前端按消息 id 匹配）。看板、跨应用聚合、费用估算仍然不做。
 
 ### 9.1 目标与边界
 
-要回答的问题：一次生成在哪里花时间、调用了什么、用了多少 token、为什么停下。不做的事：不新增后台/看板/HTTP 接口（数据留在 MySQL，用 SQL 或脚本读）；不做费用估算（按 D2 原文，价格来源可追溯之前不把聚合商官价当账单）；不保存提示词、工具正文、模型输出或构建日志正文（§8.10 第 4 条：诊断不落库）；不改 API 响应（`stopReason` 随现有 `app/generation` 查询返回，前端暂不使用）。
+要回答的问题：一次生成在哪里花时间、调用了什么、用了多少 token、为什么停下。不做的事：不新增后台/看板/跨应用聚合（只读「这个应用最近几次生成」，不做趋势图与费用汇总）；不做费用估算（按 D2 原文，价格来源可追溯之前不把聚合商官价当账单）；不保存提示词、工具正文、模型输出或构建日志正文（§8.10 第 4 条：诊断不落库）；生成中不轮询明细（回复结束后取一次，避免把气泡里的用量做成实时看板）。
 
 ### 9.2 数据模型
 
@@ -385,13 +387,17 @@ UX 结果：构建期间仍是“代码已生成，正在完成构建，构建�
 - `finishReason` 记模型自己的停止原因（`stop`/`length`/`tool-calls`…），与任务级 `stopReason` 分开。
 - 外键 `generationId → ts_generation(id) ON DELETE CASCADE`：测试或未来的数据保留策略硬删任务时步骤随之回收；表不设 `createTime` 之外的区间索引，读法是按任务整段取。
 
+`ts_generation.messageId`：这次生成写出的助手消息 id（`agent.ts` 的 `generateId` 生成，形如 `<generationId>-assistant`），前端据此把用量挂到对应的回复气泡上；没有落库回复（初始化失败等）时为 NULL。存 id 而不是让前端解析字符串，也不给 `ts_message` 加列（消息体本身是 JSON）。
+
 `ts_generation.stopReason`：任务级停止原因，取值 `completed` / `no-changes` / `step-limit` / `verification-failed` / `timeout` / `cancelled` / `lease-lost` / `model-error` / `initialization-failed` / `interrupted`。取消与超时从 abort 信号区分（带原因的 abort 不是用户取消）；`interrupted` 由租约回收写；`beginGeneration` 的启动恢复写 `initialization-failed`。停止原因只在终态写一次，`finishGeneration` 遇到并发取消/回收时保留已有值。
 
 ### 9.3 写入与读取
 
 写入全是尽力而为：记账失败只告警，不影响生成与状态转移。写入点在 `agent.ts` 的四个位置——`onStepEnd`（模型步骤，复用给刷新回复计时器的钩子，不额外注册），`verify()`（每次构建，成功/失败/取消都记，失败带 `build-feedback` 的分类与阶段），`consolidateHistory`（每次摘要调用，含失败），以及 `finishGeneration`（任务级）。
 
-读取用 `generationAccount(generationId)`：返回任务状态、停止原因、模型标识、按 `kind` 的合计（模型/摘要/构建、墙钟总时长）和逐步明细。它只有服务端调用方，暂不对前端开放。
+读取有两个入口：`generationAccount(generationId)`（单次任务，服务端评估/脚本用）与 `generationAccounts(appId, limit)`（一个应用最近几次生成，新→旧，一次 `IN` 查询取回所有步骤）。HTTP 上只暴露后者：`GET app/generation/accounts?appId=&limit=`（默认 10、上限 20，权限与 `app/generation` 一致：创建者或管理员）。返回形状是 `GenerationAccount`（`@/shared/contracts`）：状态、停止原因、模型标识、按 `kind` 的合计（模型/摘要/构建、墙钟总时长）与逐步明细。
+
+前端：`src/components/chat/generation-usage.tsx` 渲染一条回复的用量（`<details>` 摘要行 + 逐步表格），挂在对应的助手气泡里；生成结束后取一次，失败静默（读不到记账不影响对话）。
 
 ### 9.4 与 D1 / D6 的衔接
 
@@ -402,3 +408,4 @@ D1 的评估报告可以直接用 `totals`（构建通过率、步数、耗时�
 - `tests/generation-accounting.test.ts`：停止原因分类的纯函数用例。
 - `tests/integration/generation-accounting.test.ts`：真实 `buildApp`（html 校验，不需要 Docker）跑五种任务——成功、工具参数错误后重试、上游不返回用量、模型不写文件、客户端取消——从 `ts_generation_step` 读回断言步骤、工具成败、token 与停止原因。
 - 既有用例补了 `stopReason` 断言（超时/取消/不可修复/无进展/修复耗尽/模型流失败/长度截断）。
+- `tests/integration/http.test.ts`：`app/generation/accounts` 返回的 `messageId` 与持久化的助手消息 id 一致，合计里有模型步骤与一次通过的构建；`tests/e2e/platform.spec.ts` 断言用量块出现在助手气泡里、展开后能看到逐步行。

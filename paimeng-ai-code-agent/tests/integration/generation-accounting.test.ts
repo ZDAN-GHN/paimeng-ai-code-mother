@@ -6,7 +6,7 @@ import { eq, inArray } from 'drizzle-orm';
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { testDatabaseUrl } from '../test-database-url';
 import { chatResponse } from '@/server/agent';
-import { generationAccount } from '@/server/generation-accounting';
+import { generationAccount, generationAccounts } from '@/server/generation-accounting';
 import { db, getPool, now } from '@/server/db';
 import { nextSnowflakeId } from '@/server/snowflake';
 import { users, apps, histories, messages, generations, generationSteps, leases, rateLimits } from '@/server/schema';
@@ -115,6 +115,12 @@ it('成功任务：模型步骤、工具、构建与 token 都记账，停止原
   expect(account.totals.totalMs).toBeGreaterThanOrEqual(0);
   expect(account.model).toEqual({ alias: 'codegen.default', providerId: 'local-test-fixture', modelName: 'fixture-accounting' });
   expect(account.error).toBeNull();
+  // 用量按助手消息挂到前端：messageId 是 agent.ts 生成的回复 id，列表接口按应用最近几次生成返回。
+  expect(account.messageId).toBe(requestId + '-assistant');
+  const list = await generationAccounts(appId, 10);
+  expect(list).toHaveLength(1);
+  expect(list[0]).toMatchObject({ generationId: requestId, messageId: requestId + '-assistant', status: 'ready' });
+  expect(list[0].steps).toHaveLength(account.steps.length);
 });
 
 it('工具参数错误的步骤留下一条失败工具记录，模型重试后的步骤仍是成功', async () => {

@@ -57,6 +57,14 @@ test('浏览器完成注册、登录、生成、编辑、预览、发布和下�
   const appId = page.url().split('/').at(-1)!;
   await expect(page.getByText(/文件已生成/)).toBeVisible();
   await expect(page.getByText('可预览', { exact: true })).toBeVisible();
+  // 用量挂在对应的助手回复上（一条回复一个用量），展开后能看到逐步明细。
+  const usage = page.locator('.message-ai .generation-usage');
+  await expect(usage).toBeVisible();
+  await expect(usage.locator('summary')).toContainText('本次生成用量');
+  await expect(usage.locator('summary')).toContainText('已完成');
+  await usage.locator('summary').click();
+  await expect(usage.locator('tbody tr').first()).toContainText(/第 1 轮/);
+  await expect(usage).toContainText('模型绑定');
   const preview = page.frameLocator('iframe[title="应用预览"]');
   await expect(preview.getByRole('heading', { name: '浏览器测试首页' })).toBeVisible();
   await page.getByRole('button', { name: '可视化编辑', exact: true }).click();
@@ -162,6 +170,14 @@ test('普通用户不能打开管理员页面，管理员可查询和编辑', as
   await page.goto('/app/chat/' + appId);
   await expect(page.getByText(/文件已生成/)).toBeVisible();
   await expect(page.getByText('可预览', { exact: true })).toBeVisible();
+  // 用量挂在对应的助手回复上（一条回复一个用量），展开后能看到逐步明细。
+  const usage = page.locator('.message-ai .generation-usage');
+  await expect(usage).toBeVisible();
+  await expect(usage.locator('summary')).toContainText('本次生成用量');
+  await expect(usage.locator('summary')).toContainText('已完成');
+  await usage.locator('summary').click();
+  await expect(usage.locator('tbody tr').first()).toContainText(/第 1 轮/);
+  await expect(usage).toContainText('模型绑定');
   await page.goto('/admin/chatManage');
   await expect(page.getByRole('heading', { name: '对话管理', exact: true })).toBeVisible();
   await page.getByLabel('应用 ID', { exact: true }).fill(appId);
