@@ -26,17 +26,23 @@ export function composerAction(input: {
   return input.ctrlKey || input.metaKey ? 'steer' : 'queue';
 }
 
-/** 生成中按 Enter 的消息按先后排队；空白文本不入队。 */
-export function enqueue(queue: readonly string[], text: string): string[] {
-  const trimmed = text.trim();
-  return trimmed ? [...queue, trimmed] : [...queue];
+/**
+ * 生成中按 Enter 的消息按先后排队；空白文本不入队。元素可以是纯文本，也可以是带附件的
+ * `{ text }` 对象（U3）：文本统一 trim，其余字段原样保留。
+ */
+export function enqueue(queue: readonly string[], text: string): string[];
+export function enqueue<T extends { text: string }>(queue: readonly T[], item: T): T[];
+export function enqueue(queue: readonly (string | { text: string })[], item: string | { text: string }): (string | { text: string })[] {
+  const text = (typeof item === 'string' ? item : item.text).trim();
+  if (!text) return [...queue];
+  return [...queue, typeof item === 'string' ? text : Object.assign({}, item, { text })];
 }
 
-export function dequeue(queue: readonly string[]): { head: string | null; rest: string[] } {
+export function dequeue<T>(queue: readonly T[]): { head: T | null; rest: T[] } {
   return queue.length ? { head: queue[0], rest: queue.slice(1) } : { head: null, rest: [] };
 }
 
-export function removeQueued(queue: readonly string[], index: number): string[] {
+export function removeQueued<T>(queue: readonly T[], index: number): T[] {
   return queue.filter((_, position) => position !== index);
 }
 

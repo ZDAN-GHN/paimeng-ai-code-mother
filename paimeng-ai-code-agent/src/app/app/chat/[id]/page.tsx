@@ -4,10 +4,13 @@ import { useRouter } from 'next/navigation';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
 import { App, Button, Input, Alert, Tag, Space, Spin, Avatar } from 'antd';
-import { SendOutlined, DownloadOutlined, CloudUploadOutlined, EditOutlined, StopOutlined, InfoCircleOutlined, ExportOutlined, UserOutlined } from '@ant-design/icons';
+import { SendOutlined, DownloadOutlined, CloudUploadOutlined, EditOutlined, StopOutlined, InfoCircleOutlined, ExportOutlined, PictureOutlined, UserOutlined } from '@ant-design/icons';
 import { api } from '@/client/api';
 import { useAuth } from '@/components/providers';
 import { type AppInfo, type Generation, type GenerationAccount, isProjectCodeGenType } from '@/shared/contracts';
+import { imageLimits, type AttachmentPart } from '@/shared/attachments';
+import { draggingFiles, filesFromClipboard, filesFromDrop } from '@/components/clipboard-images';
+import { ImageAttachments, MessageImages, messageAttachments, outgoingParts, useImageAttachments } from '@/components/chat/image-attachments';
 import { MarkdownMessage } from '@/components/chat/markdown-message';
 import { GenerationUsage } from '@/components/chat/generation-usage';
 import { BuildProgress } from '@/components/chat/build-progress';
@@ -18,6 +21,13 @@ import { DeploySuccessModal } from '@/components/chat/deploy-success-modal';
 import './chat.css';
 
 type Selected = { selector: string; tagName: string; id: string; className: string; textContent: string; pagePath: string };
+/**
+ * SDK 的 `UIMessagePart` 联合里没有契约的 attachment part，所以附件只挂在消息 metadata 上：
+ * 发送时由 transport 拼成 `{ type: 'attachment', … }` 发到服务端，本地回显与刷新后的历史都走
+ * `messageAttachments` 这一条读取路径。
+ */
+type ChatMessage = UIMessage<{ attachments?: AttachmentPart[] }>;
+type QueuedMessage = { text: string; attachments: AttachmentPart[] };
 const statusLabels = { generating: '生成中', building: '构建中', ready: '可预览', failed: '失败', cancelled: '已取消' } as const;
 const historyPageSize = 10;
 const inputLimit = 1000;
@@ -89,7 +99,8 @@ function Chat({ id }: { id: string }) {
   const [deployModal, setDeployModal] = useState<{ open: boolean; url: string }>({ open: false, url: '' });
   const [memoryBusy, setMemoryBusy] = useState(false);
   const [progress, setProgress] = useState<ProgressState>(initialProgress);
-  const [queue, setQueue] = useState<string[]>([]);
+  const [queue, setQueue] = useState<QueuedMessage[]>([]);
+  const [dragging, setDragging] = useState(false);
   const [queuePaused, setQueuePaused] = useState(false);
   const [drainArmed, setDrainArmed] = useState(false);
   const [sending, setSending] = useState(false);
@@ -105,6 +116,7 @@ function Chat({ id }: { id: string }) {
   const rebuildAt = useRef(0);
   const rebuildTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialPromptHandled = useRef(false);
+  const imageInput = useRef<HTMLInputElement>(null);
   const loadingOlder = useRef(false);
   const activeGenerationId = useRef<string | null>(null);
   const settledTask = useRef<string | null>(null);
@@ -113,6 +125,8 @@ function Chat({ id }: { id: string }) {
   const canEdit = !!user && user.id === app?.userId;
   const isAdmin = user?.userRole === 'admin';
   const loaded = appLoaded && historySettled;
+  const canAttachImages = canEdit && loaded;
+  const { drafts: imageDrafts, parts: imageParts, blockReason: imageBlockReason, add: addImages, remove: removeImage, retry: retryImage, clearSent: clearSentImages } = useImageAttachments(id);
 
   const refresh = useCallback(async () => {
     const [info, generation] = await Promise.allSettled([
@@ -125,12 +139,14 @@ function Chat({ id }: { id: string }) {
     if (generation.status === 'fulfilled') setTask(generation.value);
     return fresh;
   }, [id]);
-  const transport = useMemo(() => new DefaultChatTransport({
+  const transport = useMemo(() => new DefaultChatTransport<ChatMessage>({
     api: '/api/app/chat/gen/code',
+    // 本地回显挂在 metadata 上的附件在这里变成契约的 attachment part；排队消息自动发送走的是同一条路。
     prepareSendMessagesRequest: ({ messages }) => {
       const requestId = crypto.randomUUID();
       activeGenerationId.current = requestId;
-      return { body: { appId: id, message: messages[messages.length - 1], requestId } };
+      const message = messages[messages.length - 1];
+      return { body: { appId: id, message: { ...message, parts: outgoingParts(message) }, requestId } };
     },
   }), [id]);
   /** 消费服务端的瞬时 `data-progress`：推进时间线、按 >=1s 节流刷新 iframe、终态接管队列。 */
@@ -155,7 +171,7 @@ function Chat({ id }: { id: string }) {
       else { setTask(current => current ? { ...current, id: activeGenerationId.current ?? current.id, status: event.stage } : current); setDrainArmed(true); }
     }
   }
-  const { messages, setMessages, sendMessage, stop, clearError, status, error: chatError } = useChat<UIMessage>({
+  const { messages, setMessages, sendMessage, stop, clearError, status, error: chatError } = useChat<ChatMessage>({
     id, transport,
     // 流结束只重新取任务状态：断流后任务可能仍在跑，这里不乐观标 ready，统一由下面的终态收尾。
     onFinish: async () => { await refresh(); },
@@ -220,7 +236,7 @@ function Chat({ id }: { id: string }) {
       setAppLoaded(true);
       try {
         const [history, generation] = await Promise.all([
-          api<UIMessage[]>('app/messages?appId=' + encodeURIComponent(id)),
+          api<ChatMessage[]>('app/messages?appId=' + encodeURIComponent(id)),
           api<Generation | null>('app/generation?appId=' + encodeURIComponent(id)),
         ]);
         if (!live) return;
@@ -313,8 +329,22 @@ function Chat({ id }: { id: string }) {
     return () => window.removeEventListener('message', receive);
   }, [previewOrigin, editing, canEdit, editorMessage]);
 
-  const submit = useCallback(async (original: string = input) => {
+  // 粘贴附图：只要还能编辑就监听（生成中也要能附图，排队发送会带上它）；没有文件时不插手粘贴。
+  useEffect(() => {
+    if (!canAttachImages) return;
+    function receive(event: ClipboardEvent) {
+      const files = filesFromClipboard(event.clipboardData);
+      if (!files.length) return;
+      event.preventDefault();
+      addImages(files);
+    }
+    window.addEventListener('paste', receive);
+    return () => window.removeEventListener('paste', receive);
+  }, [canAttachImages, addImages]);
+
+  const submit = useCallback(async (original: string, attachments: readonly AttachmentPart[] = []) => {
     if (!original.trim() || generating || submitting.current || !canEdit || !loaded) return;
+    if (imageBlockReason) { message.warning(imageBlockReason); return; }
     const context = selected ? selectionContext(selected) : '';
     const text = original.trim() + context;
     if (text.length > inputLimit) { setError('消息与选中元素信息合计不能超过 1000 字，请精简后重试'); return; }
@@ -329,22 +359,28 @@ function Chat({ id }: { id: string }) {
     setPreviewVersion(null);
     setSteered(false);
     setDrainArmed(false);
-    setError(''); clearError(); setDismissedTaskError(''); setInput(''); setSelected(null); setEditing(false);
+    setError(''); clearError(); setDismissedTaskError(''); setInput(''); setSelected(null); setEditing(false); clearSentImages(attachments);
     try {
-      await sendMessage({ text });
+      await sendMessage({ text, metadata: attachments.length ? { attachments: [...attachments] } : undefined });
       await refresh();
     } catch (e) {
-      if (mounted.current) { setInput(original); setError((e as Error).message); }
+      if (mounted.current) {
+        setInput(original);
+        setError((e as Error).message);
+        if (attachments.length) message.warning('图片未随消息发出，请重新添加');
+      }
     } finally { submitting.current = false; setSending(false); }
-  }, [input, generating, canEdit, loaded, selected, clearError, sendMessage, refresh]);
+  }, [generating, canEdit, loaded, selected, clearError, sendMessage, refresh, imageBlockReason, clearSentImages, message]);
 
-  /** 生成中按 Enter：本地排队，等终态事件（或 onFinish 兜底）后自动发队首。 */
+  /** 生成中按 Enter：本地排队，等终态事件（或 onFinish 兜底）后自动发队首；附件跟着队首一起发。 */
   const queueMessage = useCallback(() => {
     const text = input.trim();
     if (!text || !canEdit || !loaded) return;
-    setQueue(current => enqueue(current, text));
+    if (imageBlockReason) { message.warning(imageBlockReason); return; }
+    setQueue(current => enqueue(current, { text, attachments: [...imageParts] }));
     setInput('');
-  }, [input, canEdit, loaded]);
+    clearSentImages(imageParts);
+  }, [input, canEdit, loaded, imageBlockReason, imageParts, clearSentImages, message]);
 
   /** 生成中按 Ctrl/⌘ + Enter：注入模型上下文，这条消息立即出现在对话里。 */
   const steer = useCallback(async () => {
@@ -356,7 +392,7 @@ function Chat({ id }: { id: string }) {
       setInput('');
       setSteered(true);
       setMessages(previous => {
-        const message: UIMessage = { id: 'steer-' + crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text }] };
+        const message: ChatMessage = { id: 'steer-' + crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text }] };
         const lastAssistant = previous.findLastIndex(item => item.role === 'assistant');
         return lastAssistant < 0 ? [...previous, message] : [...previous.slice(0, lastAssistant), message, ...previous.slice(lastAssistant)];
       });
@@ -373,7 +409,7 @@ function Chat({ id }: { id: string }) {
     if (head === null) return;
     setDrainArmed(false);
     setQueue(rest);
-    void submit(head);
+    void submit(head.text, head.attachments);
   }, [drainArmed, generating, queuePaused, sending, queue, canEdit, loaded, submit]);
 
   useEffect(() => {
@@ -484,7 +520,10 @@ function Chat({ id }: { id: string }) {
               const usage = usageByMessage.get(item.id);
               return item.role === 'user'
                 ? <div className="message-item message-user" key={item.id}>
-                    <div className="message-bubble">{item.parts.map((part, index) => part.type === 'text' ? <div className="message-text" key={index}>{part.text}</div> : null)}</div>
+                    <div className="message-bubble">
+                      <MessageImages appId={id} attachments={messageAttachments(item)} />
+                      {item.parts.map((part, index) => part.type === 'text' ? <div className="message-text" key={index}>{part.text}</div> : null)}
+                    </div>
                     <Avatar className="message-avatar" src={user?.userAvatar ?? undefined} icon={<UserOutlined />} />
                   </div>
                 : <div className="message-item message-ai" key={item.id}>
@@ -498,11 +537,15 @@ function Chat({ id }: { id: string }) {
         {memoryBusy && <p className="memory-hint" role="status">正在整理历史上下文，请稍候…</p>}
         <BuildProgress state={progress} error={taskError} />
         {generating && <p className="generating-hint" role="status">{repairing ? '构建未通过，正在进行第 ' + repairing.attempt + '/' + repairing.maxAttempts + ' 次修复…' : steered ? '已插话，模型会在当前步骤结束后处理' : '正在生成或构建，请稍候…'}</p>}
-        <div className="chat-input">
+        <div className="chat-input" style={dragging ? { outline: '2px dashed #cb573e', outlineOffset: -4 } : undefined}
+          onDragOver={event => { if (!canAttachImages || !draggingFiles(event.dataTransfer)) return; event.preventDefault(); if (!dragging) setDragging(true); }}
+          onDragLeave={event => { if (!canAttachImages) return; const target = event.relatedTarget instanceof Node ? event.relatedTarget : null; if (!event.currentTarget.contains(target)) setDragging(false); }}
+          onDrop={event => { if (!canAttachImages || !draggingFiles(event.dataTransfer)) return; event.preventDefault(); setDragging(false); addImages(filesFromDrop(event.dataTransfer)); }}>
+          {dragging && <p className="composer-hint" role="status" style={{ marginBottom: 8 }}>松开鼠标即可添加图片（JPEG / PNG / WebP，最多 {imageLimits.maxImages} 张）</p>}
           {queue.length > 0 && <div className="composer-queue">
             <span className="composer-queue-hint" role="status">{queue.length} 条消息排队中</span>
             <div className="composer-queue-chips">
-              {queue.map((text, index) => <Tag key={index} className="composer-queue-chip" closable onClose={() => setQueue(current => removeQueued(current, index))}>{text}</Tag>)}
+              {queue.map((item, index) => <Tag key={index} className="composer-queue-chip" closable onClose={() => setQueue(current => removeQueued(current, index))}>{item.text}{item.attachments.length ? ` · ${item.attachments.length} 张图` : ''}</Tag>)}
             </div>
           </div>}
           {queuePaused && queue.length > 0 && <div className="composer-queue-paused">
@@ -516,6 +559,7 @@ function Chat({ id }: { id: string }) {
               <div className="element-item">选择器: <code className="element-selector-code">{selected.selector}</code></div>
               {selected.textContent && <div className="element-item">内容: {selected.textContent.slice(0, 50)}{selected.textContent.length > 50 ? '…' : ''}</div>}
             </div>} />}
+          <ImageAttachments appId={id} drafts={imageDrafts} onRemove={removeImage} onRetry={retryImage} />
           <Input.TextArea aria-label="对话消息" placeholder={canEdit ? '请描述你想生成的网站，越详细效果越好哦' : '无法在别人的作品下对话哦~'} value={input}
             onChange={e => setInput(e.target.value)} disabled={!canEdit || !loaded} autoSize={{ minRows: 3, maxRows: 6 }} maxLength={textareaMax}
             onKeyDown={e => {
@@ -523,13 +567,19 @@ function Chat({ id }: { id: string }) {
               const action = composerAction({ key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, generating });
               if (action === 'none' || action === 'newline') return;
               e.preventDefault();
-              if (action === 'send') void submit();
+              if (action === 'send') void submit(input, imageParts);
               else if (action === 'queue') queueMessage();
+              else if (imageDrafts.length) message.warning('插话只支持文字，等本轮结束再附图');
               else void steer();
             }} />
-          <div className="prompt-actions"><span className="composer-hint">Enter 排队发送 · Ctrl + Enter 中途插话 · Shift + Enter 换行</span>
-            {generating ? <Button danger icon={<StopOutlined aria-hidden="true" />} loading={cancelling} disabled={building} title={building ? '代码已生成，正在完成构建，构建无法取消' : undefined} onClick={() => { void cancel(); }}>{building ? '构建中' : '停止生成'}</Button> :
-              <Button type="primary" icon={<SendOutlined aria-hidden="true" />} disabled={!canEdit || !loaded || !input.trim()} onClick={() => { void submit(); }}>发送</Button>}
+          <input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden
+            onChange={event => { addImages(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = ''; }} />
+          <div className="prompt-actions"><span className="composer-hint">{imageBlockReason ?? 'Enter 排队发送 · Ctrl + Enter 中途插话 · Shift + Enter 换行'}</span>
+            <Space>
+              <Button icon={<PictureOutlined aria-hidden="true" />} disabled={!canAttachImages || imageDrafts.length >= imageLimits.maxImages} onClick={() => imageInput.current?.click()}>添加图片</Button>
+              {generating ? <Button danger icon={<StopOutlined aria-hidden="true" />} loading={cancelling} disabled={building} title={building ? '代码已生成，正在完成构建，构建无法取消' : undefined} onClick={() => { void cancel(); }}>{building ? '构建中' : '停止生成'}</Button> :
+                <Button type="primary" icon={<SendOutlined aria-hidden="true" />} disabled={!canEdit || !loaded || !input.trim() || imageBlockReason !== null} onClick={() => { void submit(input, imageParts); }}>发送</Button>}
+            </Space>
           </div>
         </div>
       </section>

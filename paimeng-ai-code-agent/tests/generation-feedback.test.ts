@@ -55,6 +55,17 @@ describe('排队消息', () => {
     expect(removeQueued(['a', 'b', 'c'], 1)).toEqual(['a', 'c']);
     expect(removeQueued(['a'], 5)).toEqual(['a']);
   });
+
+  it('元素也可以是带附件的对象：文本 trim，附件原样保留', () => {
+    const attachments = [{ type: 'attachment', attachmentId: 'a-1', mediaType: 'image/png', filename: 'a.png' }];
+    const queued = enqueue<{ text: string; attachments: typeof attachments }>([], { text: '  第一条  ', attachments });
+    expect(queued).toEqual([{ text: '第一条', attachments }]);
+    const two = enqueue(queued, { text: '第二条', attachments: [] });
+    expect(two.map(item => item.text)).toEqual(['第一条', '第二条']);
+    expect(dequeue(two)).toEqual({ head: { text: '第一条', attachments }, rest: [{ text: '第二条', attachments: [] }] });
+    expect(removeQueued(two, 0)).toEqual([{ text: '第二条', attachments: [] }]);
+    expect(enqueue(queued, { text: '   ', attachments: [] })).toEqual(queued);
+  });
 });
 
 describe('进度事件校验', () => {
