@@ -183,6 +183,28 @@
 /* 次要动作（附图/语音）比主发送按钮小一号。 */
 .chat-page .chat-input .prompt-actions .ant-btn-sm { min-height: 32px; }
 .chat-page .composer-hint { font-size: 12px; color: #928278; }
+/* 键盘提示是输入框内的背景文字：绝对定位在右下角，不参与布局（所以不会把按钮行撑出面板），
+   不拦截鼠标（pointer-events:none），并给输入框留出底部内边距，避免最后一行文字压住它。 */
+.chat-page .composer-field { position: relative; }
+/* 不给输入框加底部内边距：聊天面板高度受限（844×390 时只有 195px），多出的 24px 会把按钮行顶出面板被裁掉，
+   守卫用例 tests/e2e/chat-composer.spec.ts 会失败（实测）。提示靠右下角内缩避免压字。 */
+.chat-page .composer-keys {
+  position: absolute;
+  right: 10px;
+  bottom: 5px;
+  font-size: 12px;
+  color: #c0b1a6;
+  pointer-events: none;
+  user-select: none;
+  max-width: calc(100% - 20px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* 窄屏放不下整句：只留 Enter 一条，插话与换行靠悬浮提示（title）说明。 */
+@media (max-width: 600px) {
+  .chat-page .composer-keys { font-size: 11px; }
+}
 /* 窄屏（含手机）收起录音/转写状态文案：它和「取消录音」一起会把按钮行撑到面板之外。 */
 @media (max-width: 600px) {
   .chat-page .chat-input .prompt-actions .composer-hint { display: none; }

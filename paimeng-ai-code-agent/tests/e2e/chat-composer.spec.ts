@@ -196,6 +196,36 @@ test('生成中追加消息不打断用户向上翻历史，出现回到底部�
   }
 });
 
+test('输入区常显键盘提示：未生成是直接发送，生成中变成排队发送', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  // 输入框里已有文字（应用初始需求）时提示也必须可见——这正是它从常显文字改成输入框背景文字的原因。
+  await expect(page.getByLabel('对话消息')).toHaveValue(prompt);
+  await expect(page.locator('.composer-keys')).toContainText('Enter 直接发送');
+  await expect(page.locator('.composer-keys')).toContainText('Ctrl + Enter 中途插话');
+
+  let release = () => {};
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+    response.write(`data: ${JSON.stringify({ type: 'start', messageId: 'keys-assistant' })}\n\n`);
+    response.write(`data: ${JSON.stringify({ type: 'text-start', id: 'keys-text' })}\n\n`);
+    response.write(`data: ${JSON.stringify({ type: 'text-delta', id: 'keys-text', delta: '生成中。' })}\n\n`);
+    void gate.then(() => { response.write('data: [DONE]\n\n'); response.end(); });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+  const port = (server.address() as AddressInfo).port;
+  await page.route('**/api/app/chat/gen/code', route => route.continue({ url: `http://127.0.0.1:${port}/stream` }));
+  try {
+    await page.getByRole('button', { name: /^发\s*送$/ }).click();
+    await expect(page.getByText('生成中。', { exact: true })).toBeVisible();
+    await expect(page.locator('.composer-keys')).toContainText('Enter 排队发送');
+    await expect(page.locator('.composer-keys')).toContainText('Ctrl + Enter 中途插话');
+  } finally {
+    release();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
 test('生成中按 Enter 进队列，生成结束后自动发出队首', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const bodies: Array<Record<string, unknown>> = [];

@@ -582,18 +582,23 @@ function Chat({ id }: { id: string }) {
               {selected.textContent && <div className="element-item">内容: {selected.textContent.slice(0, 50)}{selected.textContent.length > 50 ? '…' : ''}</div>}
             </div>} />}
           <ImageAttachments appId={id} drafts={imageDrafts} onRemove={removeImage} onRetry={retryImage} />
-          <Input.TextArea aria-label="对话消息" ref={voiceInput} placeholder={!canEdit ? '无法在别人的作品下对话哦~' : generating ? '生成中，可以继续说：Enter 排队发送 · Ctrl + Enter 中途插话 · Shift + Enter 换行' : '请描述你想生成的网站，越详细效果越好哦（Enter 直接发送 · Shift + Enter 换行）'} value={input}
-            onChange={e => setInput(e.target.value)} disabled={!canEdit || !loaded} autoSize={{ minRows: 3, maxRows: 6 }} maxLength={textareaMax}
-            onKeyDown={e => {
-              if (e.nativeEvent.isComposing) return;
-              const action = composerAction({ key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, generating });
-              if (action === 'none' || action === 'newline') return;
-              e.preventDefault();
-              if (action === 'send') void submit(input, imageParts);
-              else if (action === 'queue') queueMessage();
-              else if (imageDrafts.length) message.warning('插话只支持文字，等本轮结束再附图');
-              else void steer();
-            }} />
+          {/* 键盘提示固定显示在输入框右下角（绝对定位，不参与布局，所以不会像真实文字那样把按钮行撑出面板），
+              文案随状态切换：未生成时 Enter 是直接发送，生成中 Enter 是排队。 */}
+          <div className="composer-field">
+            <Input.TextArea aria-label="对话消息" ref={voiceInput} placeholder={canEdit ? '请描述你想生成的网站，越详细效果越好哦' : '无法在别人的作品下对话哦~'} value={input}
+              onChange={e => setInput(e.target.value)} disabled={!canEdit || !loaded} autoSize={{ minRows: 3, maxRows: 6 }} maxLength={textareaMax}
+              onKeyDown={e => {
+                if (e.nativeEvent.isComposing) return;
+                const action = composerAction({ key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, generating });
+                if (action === 'none' || action === 'newline') return;
+                e.preventDefault();
+                if (action === 'send') void submit(input, imageParts);
+                else if (action === 'queue') queueMessage();
+                else if (imageDrafts.length) message.warning('插话只支持文字，等本轮结束再附图');
+                else void steer();
+              }} />
+            <span className="composer-keys">{canEdit ? (generating ? 'Enter 排队发送 · Ctrl + Enter 中途插话 · Shift + Enter 换行' : 'Enter 直接发送 · Ctrl + Enter 中途插话 · Shift + Enter 换行') : ''}</span>
+          </div>
           <input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden
             onChange={event => { addImages(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = ''; }} />
           <div className="prompt-actions">
