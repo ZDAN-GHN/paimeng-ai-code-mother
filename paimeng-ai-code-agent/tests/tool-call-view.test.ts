@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { toolCallOf } from '@/components/chat/tool-call';
+import { toolCallFailed, toolCallOf } from '@/components/chat/tool-call';
 
 const part = (name: string, input: unknown, output?: unknown, state = 'output-available') => ({ type: `tool-${name}`, toolCallId: 'call_00_secret', state, input, output });
+/** 取展示模型；解析不出来就让用例直接失败，而不是静默通过。 */
+const callOf = (providerPart: unknown) => {
+  const call = toolCallOf(providerPart);
+  if (!call) throw new Error('工具 part 没有解析出展示模型');
+  return call;
+};
 
 describe('工具调用展示模型', () => {
   it('写入文件：状态、文件与行数；id 不进入展示模型', () => {
@@ -40,6 +46,32 @@ describe('工具调用展示模型', () => {
     expect(web?.view).toMatchObject({ kind: 'web-searched', query: '广州天气', results: [{ url: 'https://example.com' }] });
     expect(toolCallOf(part('webSearch', { query: 'x' }, { status: 'empty', message: '没有搜索到结果' }))?.view.kind).toBe('unknown');
     expect(toolCallOf(part('readWebPage', { url: 'https://example.com' }, { status: 'error', code: 'unavailable', message: '抓取失败' }))?.view.kind).toBe('unknown');
+  });
+
+  it('阶段构建：成功给出阶段耗时，失败按失败呈现并带诊断', () => {
+    const ok = toolCallOf(part('buildPreview', { milestone: '首页可用' }, { status: 'ok', milestone: '首页可用', ms: 21000, stages: [{ stage: 'source', status: 'ok', ms: 120 }, { stage: 'install', status: 'ok', ms: 21000 }], note: '预览已更新' }));
+    expect(ok?.status).toBe('done');
+    expect(ok?.view).toMatchObject({ kind: 'preview-built', label: '阶段构建', milestone: '首页可用', ok: true, ms: 21000 });
+    expect(ok?.view.kind === 'preview-built' && ok.view.stages).toEqual([{ stage: 'source', status: 'ok', ms: 120 }, { stage: 'install', status: 'ok', ms: 21000 }]);
+    const failed = toolCallOf(part('buildPreview', { milestone: '预约页' }, { status: 'failed', milestone: '预约页', stage: 'typecheck', repairable: true, diagnostic: '阶段：类型检查\n错误摘要：TS2304' }));
+    expect(failed?.status).toBe('done');
+    expect(failed?.view).toMatchObject({ kind: 'preview-built', ok: false, stage: 'typecheck', diagnostic: '阶段：类型检查\n错误摘要：TS2304' });
+  });
+
+  it('阶段构建进行中不算失败：只有结果失败或工具报错才按失败呈现', () => {
+    // 正在构建（参数已到、结果还没回来）：ok 还是 false，但卡片不能因此变红。
+    const running = callOf(part('buildPreview', { milestone: '预约页' }, undefined, 'input-available'));
+    expect(running.status).toBe('running');
+    expect(running.view).toMatchObject({ kind: 'preview-built', milestone: '预约页', ok: false });
+    expect(toolCallFailed(running)).toBe(false);
+    // 流式里的半截参数退化成占位，同样不能算失败。
+    const streaming = callOf(part('buildPreview', { milestone: '预约' }, undefined, 'input-streaming'));
+    expect(streaming.status).toBe('running');
+    expect(toolCallFailed(streaming)).toBe(false);
+    // 结果回来了才算数：失败的阶段构建、成功的阶段构建、工具本身报错。
+    expect(toolCallFailed(callOf(part('buildPreview', { milestone: '预约页' }, { status: 'failed', milestone: '预约页', stage: 'typecheck', repairable: true, diagnostic: '阶段：类型检查' })))).toBe(true);
+    expect(toolCallFailed(callOf(part('buildPreview', { milestone: '首页可用' }, { status: 'ok', ms: 100 })))).toBe(false);
+    expect(toolCallFailed(callOf({ type: 'tool-buildPreview', state: 'output-error', input: { milestone: '首页' }, errorText: '工具调用失败' }))).toBe(true);
   });
 
   it('失败状态带错误文本；未知工具与非工具 part 的行为', () => {

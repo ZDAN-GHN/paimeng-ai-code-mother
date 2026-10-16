@@ -79,6 +79,13 @@ export function formatBuildFeedback(error: unknown, attempt: number, maxAttempts
   ].filter(line => line).join('\n');
 }
 
+/** 阶段构建（buildPreview 工具）失败时返回给模型的诊断：保留换行与容器路径归一化，比修复提示更紧凑。 */
+export function formatBuildDiagnostic(error: unknown): string {
+  const failure = buildFailureOf(error);
+  const detail = failure?.detail ? boundedDetail(normalizeContainerPaths(failure.detail).trim()) : '';
+  return [`阶段：${stageLabels[failure?.stage ?? 'unknown']}`, `错误摘要：${messageOf(error)}`, detail ? `构建输出（保留换行；过长时省略中间）：\n${detail}` : ''].filter(line => line).join('\n');
+}
+
 /** 无进展终止：保留原始构建错误作为主错误，只补充「本轮模型没有改文件」这一事实。 */
 export function noProgressMessage(error: unknown): string {
   return `${messageOf(error)}；本轮模型未修改任何文件，已停止继续修复`;

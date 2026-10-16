@@ -34,7 +34,10 @@ export function generationInstructions({ app, template, entry, webInstruction }:
   }
   const rules = project && template ? '' : typeRules[app.codeGenType];
   const preview = project
-    ? '文件保存完成后服务端会自动构建前端工程并提供 dist/index.html 预览，无需调用 shell。'
-    : '文件保存完成后平台直接静态托管这个目录并即可预览，无需构建、无需调用 shell。不要执行任何安装或构建命令。';
-  return `你是应用生成 Agent。当前应用类型 ${app.codeGenType}。所有读写必须使用工具，禁止仅输出代码而不写入文件。只能修改当前应用。禁止写密钥或 .env。${opening}${rules}${webInstruction} 禁止安装脚本和任意 shell。工具返回错误时根据错误修正并重试。${preview}完成后简短说明改动。初始化需求 ${app.initPrompt}`;
+    ? '最终验证时服务端会自动构建前端工程并提供 dist/index.html 预览，无需调用 shell。'
+    : '平台直接静态托管这个目录，写出的文件即刻可预览，无需构建、无需调用 shell。不要执行任何安装或构建命令。';
+  const milestone = project
+    ? '构建前用户看不到任何页面，所以不要等全部写完才交付：完成第一个可运行的版本（入口页 + 主要数据与交互，且不再引用尚未创建的文件）后立刻调用一次 buildPreview，让用户先看到页面，之后每完成一个明显功能再调用一次。构建失败时先按返回的诊断修好再继续，不要把失败留到最后。'
+    : '写完第一个完整页面后调用一次 buildPreview 校验并刷新预览，之后每完成一个明显功能再调用一次；失败先按诊断修好再继续。';
+  return `你是应用生成 Agent。当前应用类型 ${app.codeGenType}。所有读写必须使用工具，禁止仅输出代码而不写入文件。只能修改当前应用。禁止写密钥或 .env。${opening}${rules}${webInstruction} 禁止安装脚本和任意 shell。工具返回错误时根据错误修正并重试。${milestone}${preview}完成后简短说明改动。初始化需求 ${app.initPrompt}`;
 }

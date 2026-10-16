@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { BuildProgressEvent } from '@/shared/contracts';
+import type { BuildProgressEvent, GenerationStatus } from '@/shared/contracts';
 
 /**
  * 对话输入与生成进度的纯逻辑。组件只做渲染与副作用，这里全部可以直接单测：
@@ -61,6 +61,14 @@ export function parseProgressEvent(input: unknown): BuildProgressEvent | null {
   return parsed.success ? parsed.data satisfies BuildProgressEvent : null;
 }
 
+/** 构建阶段的中文名：时间线、工具卡片与历史文本共用同一份。 */
+export const buildStageLabels: Record<'source' | 'install' | 'typecheck' | 'build', string> = {
+  source: '源码校验',
+  install: '安装依赖',
+  typecheck: '类型检查',
+  build: '打包构建',
+};
+
 export type StageStatus = 'running' | 'ok' | 'failed' | 'cancelled';
 export type ProgressOutcome = 'running' | 'ready' | 'failed' | 'cancelled';
 
@@ -74,6 +82,15 @@ export type ProgressState = { stages: ProgressStage[]; outcome: ProgressOutcome;
 
 export function initialProgress(): ProgressState {
   return { stages: [], outcome: 'running', startedAt: null };
+}
+
+/**
+ * 任务终态 → 时间线收尾。流被中断时收不到服务端的终态进度事件，进行中的阶段会永远停在「运行中」，
+ * 所以流结束后要按任务真实状态兜底：还在运行中的阶段判成终态，生成阶段也一并收尾。
+ */
+export function settleProgress(state: ProgressState, outcome: Exclude<ProgressOutcome, 'running'>): ProgressState {
+  const status: StageStatus = outcome === 'ready' ? 'ok' : outcome;
+  return { ...state, outcome, stages: state.stages.map(stage => stage.status === 'running' ? { ...stage, status } : stage) };
 }
 
 const generateStage = (status: StageStatus, ms: number | null): ProgressStage => ({ kind: 'generate', status, ms });
@@ -114,8 +131,39 @@ export function progressReducer(state: ProgressState, event: BuildProgressEvent)
   // `status` 只在构建阶段事件上出现；用 in 完成判别（契约里的 stage 是字面量联合）。
   if ('status' in event) {
     const status: StageStatus = event.status === 'started' ? 'running' : event.status;
-    return { stages: upsert(stages, { kind: event.stage, status, ms: event.status === 'started' ? null : event.ms }), outcome: 'running', startedAt };
+    // 进行中的构建阶段每秒有一个保活 started 事件（ms 是已用时长），所以运行中的阶段也保留耗时。
+    const ms = event.status === 'started' ? (event.ms > 0 ? event.ms : null) : event.ms;
+    return { stages: upsert(stages, { kind: event.stage, status, ms }), outcome: 'running', startedAt };
   }
   const status: StageStatus = event.stage === 'ready' ? 'ok' : event.stage;
-  return { stages: upsert(stages, generateStage(status, event.at - startedAt)), outcome: event.stage, startedAt };
+  // 终态事件也要收尾进行中的阶段：否则构建中途失败/被取消时，前面的阶段会一直停在「运行中」。
+  return settleProgress({ stages: upsert(stages, generateStage(status, event.at - startedAt)), outcome: event.stage, startedAt }, event.stage);
+}
+
+/**
+ * 浏览器与 SDK 在响应流被中断时的原文（`Failed to fetch`、`Error in input stream` 这类），
+ * 一句都不是给用户看的；命中就换成按任务状态说话的可读文案。
+ */
+const interruptedStreamPatterns = [
+  'error in input stream',
+  'networkerror',
+  'network error',
+  'failed to fetch',
+  'load failed',
+  'err_incomplete_chunked_encoding',
+  'err_connection_reset',
+  'err_connection_closed',
+  'other side closed',
+  'socket hang up',
+  'premature close',
+];
+
+/** 连接中断的可读文案；不是传输层错误时返回 null，调用方照原样展示。 */
+export function interruptedStreamMessage(input: { message: string; status: GenerationStatus | null }): string | null {
+  const text = input.message.trim().toLowerCase();
+  if (!interruptedStreamPatterns.some(pattern => text.includes(pattern))) return null;
+  if (input.status === 'cancelled') return '生成连接中断，任务已取消；可重新发送需求继续';
+  if (input.status === 'failed') return '生成连接中断，任务已失败；失败原因见上方对话，重新发送需求可继续修复';
+  if (input.status === 'ready') return '生成连接中断，但这次生成已经完成；刷新页面可看到最新结果';
+  return '生成连接中断，任务可能仍在后台；刷新页面确认，或重新发送需求继续';
 }

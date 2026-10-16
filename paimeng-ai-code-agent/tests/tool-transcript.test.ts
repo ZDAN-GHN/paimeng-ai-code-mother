@@ -56,6 +56,16 @@ describe('工具调用 → 可读历史文本', () => {
     expect(toolTranscript({ type: 'tool-readFile', state: 'output-error', input: { path: 'a.html' }, errorText: '文件不存在' })).toContain('失败：文件不存在');
   });
 
+  it('阶段构建：里程碑 + 阶段耗时；失败带诊断', () => {
+    const ok = toolTranscript(part('buildPreview', { milestone: '首页可用' }, { status: 'ok', milestone: '首页可用', ms: 21000, stages: [{ stage: 'source', status: 'ok', ms: 120 }, { stage: 'build', status: 'ok', ms: 9000 }] }));
+    expect(ok).toContain('[工具调用] 阶段构建：首页可用');
+    expect(ok).toContain('结果：预览已更新（源码校验 120ms、打包构建 9.0s）');
+    const failed = toolTranscript(part('buildPreview', { milestone: '预约页' }, { status: 'failed', stage: 'typecheck', diagnostic: '阶段：类型检查\n错误摘要：TS2304 未定义' }));
+    expect(failed).toContain('构建未通过（类型检查）');
+    expect(failed).toContain('TS2304 未定义');
+    expect(failed).not.toContain('call_00_secret');
+  });
+
   it('未知工具与非工具 part 的行为', () => {
     expect(toolTranscript(part('runShell', { command: 'ls' }, { ok: true }))).toBe('[工具调用] runShell');
     expect(toolTranscript({ type: 'text', text: '你好' })).toBeNull();

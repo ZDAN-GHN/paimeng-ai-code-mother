@@ -17,7 +17,7 @@ export type ApiResult<T> = {code:number;data:T;message:string};
 export type GenerationStatus = 'generating'|'building'|'ready'|'failed'|'cancelled';
 export type Generation = {id:string;appId:string;status:GenerationStatus;error:string|null;stopReason:string|null;createTime:string;updateTime:string};
 export type ChatHistory = {id:string;appId:string;userId:string;message:string;messageType:'user'|'ai';createTime:string};
-/** 任务级停止原因（D2 记账，设计见 docs/plans/agent-design-review.md §9）。 */
+/** 任务级停止原因（D2 记账，设计见 docs/plans/agent-design-review.md §9）。`step-limit` 是历史值：步数上限已于 2026-10-16 取消，新代码不再产生它，但旧行仍要能读回与展示。 */
 export const generationStopReasons = ['completed','no-changes','step-limit','verification-failed','timeout','cancelled','lease-lost','model-error','initialization-failed','interrupted'] as const;
 export type GenerationStopReason = typeof generationStopReasons[number];
 /**

@@ -56,7 +56,9 @@ vi.mock('@/server/model', async () => {
     model.doStream = async options => {
       control.prompts.push(options.prompt);
       const index = calls++;
-      if (first && (control.toolFailure || control.fatalFailure)) {
+      // 流中途失败现在会按 MODEL_RETRY_LIMIT 重试：致命失败要每次都失败（否则重试就成功了），
+      // 工具参数错误只失败一次，模型才有机会重试修复。
+      if (control.fatalFailure || (first && control.toolFailure)) {
         first = false;
         const chunks: LanguageModelV4StreamPart[] = control.fatalFailure
           ? [{ type: 'stream-start', warnings: [] }, { type: 'error', error: new Error('测试模型连接断开') }]

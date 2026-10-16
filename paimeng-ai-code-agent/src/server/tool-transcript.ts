@@ -20,6 +20,7 @@ const toolLabels: Record<string, string> = {
   readWebPage: '读取网页',
   searchImages: '检索图片',
   importImage: '导入图片',
+  buildPreview: '阶段构建',
 };
 
 const transcriptLimits = { file: 2000, edit: 1000, page: 500, listing: 60, results: 8, candidates: 8 };
@@ -146,6 +147,22 @@ function describeImageSearch(input: unknown, output: unknown) {
   ]))].join('\n');
 }
 
+/** 阶段构建（buildPreview）：给模型与人都只留里程碑、阶段耗时与失败诊断。 */
+function describeMilestone(input: unknown, output: unknown) {
+  const milestone = isRecord(input) ? text(input.milestone) : null;
+  const header = `[工具调用] ${toolLabel('buildPreview')}${milestone === null ? '' : `：${milestone}`}`;
+  if (!isRecord(output)) return header;
+  const stages = list(output.stages).flatMap(entry => isRecord(entry) && text(entry.stage) !== null && typeof entry.ms === 'number' ? [`${buildStageLabel(text(entry.stage) ?? '')} ${formatMs(entry.ms)}`] : []);
+  if (output.status === 'ok') return line([header, stages.length ? `结果：预览已更新（${stages.join('、')}）` : '结果：预览已更新']);
+  const stage = text(output.stage);
+  const diagnostic = text(output.diagnostic);
+  return line([header, `构建未通过（${stage === null ? '未知阶段' : buildStageLabel(stage)}）`, diagnostic === null ? null : clip(diagnostic, transcriptLimits.page)]);
+}
+
+const buildStageLabels: Record<string, string> = { source: '源码校验', install: '安装依赖', typecheck: '类型检查', build: '打包构建' };
+const buildStageLabel = (stage: string) => buildStageLabels[stage] ?? stage;
+const formatMs = (ms: number) => ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+
 function describeImport(output: unknown) {
   const data = isRecord(output) && isRecord(output.data) ? output.data : null;
   if (!data) return null;
@@ -186,6 +203,7 @@ export function toolTranscript(part: unknown): string | null {
     name === 'readWebPage' ? describePage(input, output) :
     name === 'searchImages' ? describeImageSearch(input, output) :
     name === 'importImage' ? describeImport(output) :
+    name === 'buildPreview' ? describeMilestone(input, output) :
     null;
   return described ?? `[工具调用] ${toolLabel(name)}`;
 }

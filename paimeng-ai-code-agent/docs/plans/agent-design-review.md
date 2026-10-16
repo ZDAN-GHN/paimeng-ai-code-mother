@@ -492,3 +492,90 @@ D1 的评估报告可以直接用 `totals`（构建通过率、步数、耗时�
 - `files` 事件按模型步骤聚合，一步里写多个文件合并成一条；不显示单文件级进度。
 - 队列是客户端本地的：刷新页面后排队消息丢失（已发出的插话不丢）。
 - 静态应用（html/multi_file）才有 `preview` 事件；Vue/React 项目要等构建产物，预览在构建完成后才更新。
+
+## 12. 阶段构建工具 buildPreview 与步数预算追加（2026-10-16 落地，未提交）
+
+用户提出的方案：**不要由平台去猜「阶段在哪里」，给 Agent 一个工具，它自己判断这一版功能完整了就调用一次，系统执行一次构建并更新预览。** 这样既降低等待焦虑，又不用写复杂的阶段检测逻辑。
+
+### 12.1 工具
+
+`buildPreview({ milestone })`（`milestone` ≤ 120 字，是给用户看的里程碑说明）：
+
+- 执行体就是最终验证用的 `buildApp(app, signal, onStage)`——同一条构建路径，所以构建产物与 `.paimeng-build.json` 清单一致；源码之后没再改时，最终验证的 `buildIsCurrent` 会**直接复用这份产物**，不再重复跑一次容器构建（真机实测：最后一次里程碑构建之后模型没再改文件，最终验证只做了 3ms 源码校验）。
+- 成功：更新预览（`{stage:'preview', version}` 事件 + 右栏 iframe 带 `pv=` 刷新）、把各阶段耗时写进 D2 记账，并返回 `{status:'ok', stages, note}` 告诉模型「预览已更新，继续开发」。
+- 失败：**把分类后的诊断当工具结果还给模型**（`formatBuildDiagnostic`：阶段 + 错误摘要 + 有界的构建输出，容器路径归一化），右侧保留上一次成功的预览。这是关键区别——阶段构建失败不是任务失败，而是模型当场的修复信号；真机实测里模型连续三次失败（类型检查、转义符、源码校验）都是自己修好再继续的。
+- 静态应用（html/multi_file）同样可以调用：它的构建只是一次源码校验（毫秒级），调用代价可忽略，失败诊断照样回给模型。
+
+### 12.2 生成指令
+
+`generationInstructions` 里加了里程碑纪律：项目工程「构建前用户看不到任何页面，所以不要等全部写完才交付」——完成第一个可运行版本（入口页 + 主要数据与交互，且不再引用尚未创建的文件）后立刻调用一次 `buildPreview`，之后每完成一个明显功能再调用一次；失败先修好再继续。真机实测（React 书签应用，`runtime/probe/probe-milestone.mjs`）：**首次预览 105 秒**出现（总时长 312 秒），7 次里程碑构建（首页+筛选+表单 → 编辑/删除/排序 → 导入导出 → 健壮化 → 标签同步网址 → 修复转义符 → 最终构建），生成过程中右栏就能看到可交互的页面，浏览器无报错。
+
+### 12.3 展示
+
+`toolCallOf` 新增 `preview-built` 视图：成功显示里程碑 + 「预览已更新 · 耗时」，展开可看各阶段耗时；失败按失败呈现（红色图标 + 「失败」标签）并默认展开诊断。历史文本（`toolTranscript`）同样落成 `[工具调用] 阶段构建：里程碑` + 结果或诊断。构建阶段名统一在 `generation-feedback.ts` 的 `buildStageLabels`（时间线、工具卡片、历史文本共用）。
+
+### 12.4 步数预算追加（顺带修「Agent 未正常结束 tool-calls」）
+
+用户实测反馈：9 分 42 秒、写了 53 个文件的任务，最后报 `Agent 未正常结束 tool-calls` 失败。根因不是模型调用失败没重试，而是 `stopWhen` 的步数上限（30 步）被撞到时，SDK 的 `finishReason` 恰好是 `tool-calls`（最后一步以「请求工具」结束），旧代码把这种情况当成异常直接判失败——一次都没机会收尾。修法：
+
+- 一轮里最多跑两段流：步数用尽但模型还在请求工具时，追加一次预算（`stepBudgetExtension = 15` 步），并注入一条 user 消息告知「平台已追加一轮步数预算，请接着完成剩余工作，每个可运行增量调用一次 buildPreview，收尾用文字说明」。
+- 追加只给一次；之后仍停不下来才按 `step-limit` 结束，错误文案改成「模型连续调用工具达到步数上限（30+15 步），已停止本次生成」，不再出现「未正常结束 tool-calls」这种误导文案。
+- 实测（`tests/integration/step-budget-continuation.test.ts`）：模型第 34 次调用收尾时任务正常 ready（`sawBudget=true`，确认预算消息真的进了下一段流的上下文）；永不停止的模型在 45 步后以 `step-limit` 结束。
+
+### 12.5 验证
+
+- `npm test` 497 例（新增 `tests/integration/milestone-preview.test.ts`：Vue 工程真实容器构建 → dist 与预览在最终验证前就绪、记账两次构建尝试；静态页面阶段构建失败 → 诊断回到模型 → 修好后 ready、记账 `error:source → ok → ok`；`tests/integration/step-budget-continuation.test.ts` 2 例；工具卡片与历史文本的单测各补 1 例）。
+- `test:e2e:isolated` 72 通过 / 2 跳过；`tests/e2e/chat-composer.spec.ts` 的工具渲染用例补了阶段构建卡片（成功展开看阶段耗时、失败标红带诊断、页面上不出现协议字段）。
+- 真机：见 12.2 的 React 实测与 `runtime/evidence/milestone-*.png`。
+
+### 12.6 已知取舍
+
+- 模型可能过度调用（每写几个文件就构建一次，每次 10–25s）或过少调用（一路写到底）。指令要求「有明显增量再调用」，但最终频率由模型决定；真机那次是 7 次 / 312 秒，属于合理区间。
+- 阶段构建的产物会覆盖 `dist`：中途某次构建失败时右侧仍是上一次成功的预览（`buildApp` 只在构建成功后替换 dist）。
+- 静态应用没有打包阶段，`buildPreview` 对它们只是校验 + 刷新预览；写文件后的自动预览事件受 1s 节流，显式工具调用仍按正常工具流程执行。
+- 里程碑工具卡片随助手 UI 消息保存在 `ts_message.body`，刷新后仍能显示；瞬时 `data-progress` 时间线不落库，构建尝试另存于 D2 记账。
+
+### 12.7 阶段构建失败复查（2026-10-16，未提交）
+
+- 普通构建失败在 `buildPreview.execute` 的 `catch` 内转成 `{status:'failed', stage, repairable, diagnostic, note}` 工具结果；诊断保留文件、行号与编译错误码，不因类型检查或打包失败直接结束整轮生成。输入校验失败由 SDK 转成工具错误，模型可以继续纠正参数。
+- 用户截图对应任务 `047c6088-64c1-4e4b-a86a-2ec932ee23ce` 的实际终态是 `cancelled`，阶段构建记录 `status=cancelled`、`detail=This operation was aborted`、耗时 8602ms；持久化的 `tool-buildPreview` 停在 `input-available`，没有 `output` 或 `errorText`。这次没有编译失败诊断，不能用它证明构建失败被异常抛出；现存记录也无法区分用户停止、连接断开或其他取消来源。
+- 已修复的显示问题：阶段构建仍在运行、结果未返回时显示「正在构建…」，只有真正返回失败结果或工具错误才标红；诊断随后到达时默认展开，用户手动开合仍有效。
+- 流中断后按服务端任务终态收尾时间线与队列，取消时暂停排队。收尾绑定本次发送的 `requestId`，忽略上一轮的终态，避免旧的取消记录暂停新任务的排队需求；正常的终态进度事件同样会收尾所有运行中的阶段。
+- 回归覆盖：真实 Vue 模板类型错误的诊断进入**下一次模型调用的输入**，之后模型修复再构建；失败构建保留之前成功的产物与预览版本；真实响应流断开后任务终态稍晚到达时界面仍能正确收尾。测试模型仅在收到带准确文件名和 `TS2322` 的失败工具结果后才修复，未收到时直接让用例失败。
+- 本次验收：类型检查、UI/E2E 静态检查、边界检查通过；相关纯函数 35 例、里程碑与步数预算集成 7 例通过；开发构建的对话回归与告警门禁 14 例、独立生产构建的对话回归 12 例通过。容器与浏览器测试串行执行，未重复运行全量测试或调用真实付费模型。
+
+### 12.8 构建阶段保活：流不再被浏览器掐断（2026-10-16，未提交）
+
+根因（已实验复现，不是猜测）：
+
+- 构建容器启动会在宿主机创建 veth 接口，这是一次网络链路状态变化；Firefox 在链路状态变化后会关掉**没有流量**的连接。
+- 对照实验（`runtime/tmp/silent-sse-test.mjs`，Playwright Firefox + 本地 SSE，无模型调用）：纯静默 30s 存活；静默 + 2s 时 `docker run` 一个空容器 → 8.1s 时连接被关（浏览器报 `Error in input stream`，服务端看到 socket close），即容器启动后约 6s；每 1s 写一个字节 + 同样 `docker run` → 20s 存活。
+- 因此「install 阶段十几秒没有字节」+「构建容器创建 veth」必然掉线。这正是 `src/server/http.ts` 的 `withHeartbeat` 注释里写过、并已为 `app/build`/`app/deploy` 绕开的现象；对话流此前没有等效保活。
+- 后果：客户端断开 → 响应流包装的 `cancel()` → `controller.abort()`（无 reason，DOMException AbortError）→ 进行中的构建被 SIGKILL → 工具没有返回任何结果，任务记为 `cancelled`/`生成已取消`。数据库里表现为构建记账 `status=cancelled` + `This operation was aborted`、`tool-buildPreview` 停在 `input-available`、0 步模型调用。
+
+修复（方案 A：流保活，用户选定）：
+
+- `agent.ts` 新增 `buildStageWatch(onStage)`：包一层 `buildApp` 的阶段回调，阶段进行中每 1s 写一个瞬时 `data-progress` 事件（`status='started'`，`ms` 是已用时长）。里程碑构建与最终验证都走它，`finally` 里 `stop()`。间隔 `buildKeepAliveMs = 1000`，与 `withHeartbeat` 一致。
+- 客户端 `generation-feedback.ts` 的归约对运行中的阶段保留耗时（`started` 且 `ms > 0`），`build-progress.tsx` 对运行中的阶段显示「已用 12.4s」，完成后仍显示真实耗时。
+- 已知残留：保活只在构建阶段内生效。构建结束（veth 销毁也是一次链路变化）到下一步模型首字节之间仍有几秒空窗，低于实验中约 6s 的容忍度；如果以后还有掉线，真正的解法是方案 B（断连不取消、后台继续 + 重连）。
+- 回归覆盖：真实 Vue 容器构建的集成用例边读流边记 chunk 到达时间，断言整条流没有超过 4s 的静默窗口（关掉保活时该断言实测为 12.1s，用例失败），并断言 install 阶段存在 `ms > 0` 的保活事件；归约单测覆盖运行中耗时与完成后的真实耗时；E2E 的流式阶段构建用例断言时间线出现「已用 4.2s」。
+
+### 12.9 模型调用失败的重试与原始错误日志（2026-10-16，未提交）
+
+- 现场（生成 `b7720808`，2026-10-16 18:02–18:07，`app 468585634429140992`）：11 步模型调用后第 12 步在流式输出 `buildPreview` 入参时断掉，任务 `failed` / `model-error` / 「模型响应失败」，4m29s 的工作全丢；客户端只看到可读文案，原始错误哪里都没留。
+- SDK 事实（`ai@7`）：`maxRetries` 只管**建立请求**阶段（连不上/429/5xx，指数退避）；流开始之后的 provider 错误由 `streamRetries` 管，而它**默认省略 = 0**，我们此前没传，所以这类失败一次都不重试。
+- 实现：`MODEL_RETRY_LIMIT` 默认 2 → **5**，同一个上限同时作为 `maxRetries` 与 `streamRetries` 传给 `ToolLoopAgent`（`ToolLoopAgentSettings` 类型没声明 `streamRetries`/`onError`，运行时经 `prepareCall` 原样转给 `streamText`，所以用一个单独对象带进去）。
+- 补充包装 `retryableStreamErrors`：SDK 的流式重试只对**错误 part** 生效，而传输层断裂（连接被断，`Error in input stream` 这类）是让流直接 reject，SDK 不会重试——实测把这种情况直接判失败。包装把它转成错误 part 交给同一套机制（重试只重发当前步，已完成的步骤与工具结果保留，半截的工具调用被丢弃）；**abort 必须原样抛出**，否则用户取消与超时会被当成上游抖动重试 5 次。错误 part 的文案是 `模型响应失败：<原始信息>`，原始错误挂在 `cause` 上（`console.error` 会把 cause 一起打出来）。
+- 没有动 UI 流原有的 `onError`（保留上游错误原文）：它也用于工具调用失败的文案（如 `不允许的构建依赖`），整体换成可读文案会把这些有用信息一起丢掉（`agent-vue-build` 用例就是这个断言）。
+- 日志：agent 级 `onError` 记录每一次流错误（含最终重试成功的那些，带生成 id、轮次、模型别名）；终止路径的 UI 流 `onError` 再记一条。客户端与 `ts_generation.error` 保持可读文案「模型响应失败」，原始错误只进服务端日志（`console.error`）。
+- 回归覆盖：`tests/integration/model-stream-retry.test.ts` 四例——provider 错误 part 重发当前步后跑完（3 次调用）、重试耗尽才判失败（1+5 次调用，客户端文案仍可读、日志 6 条原始错误）、传输层断裂同样按上限重试（去掉包装时该用例实测不重试而失败）、`MODEL_RETRY_LIMIT=0` 关闭重试；取消/断连路径由 `generation-disconnect-build` 用例守住没有被误重试。
+
+### 12.10 取消步数上限（2026-10-16，未提交）
+
+用户实测：球厅应用跑到「步数用尽 · 45 步模型调用 · 输入 3.3M tokens · 总用时 4m3s」被停下，明确要求取消步数限制——真实应用的步数远超原先的设定值。本节取代 12.4 的「30+15 追加」方案。
+
+- 删除 `maxSteps = 30`、`stepBudgetExtension = 15`、追加预算的 user 消息与 `step-limit` 终止分支；修复轮不再看剩余步数（仍受 `BUILD_REPAIR_ROUNDS` 限制）。
+- `stopWhen: isLoopFinished()`（SDK 提供的「永不返回 true」条件）：循环只由模型的自然终止条件结束——不再请求工具。**必须显式传**：`ToolLoopAgent` 的 `stopWhen` 默认值是 `isStepCount(20)`，省略会被静默截断在 20 步（变异验证：去掉这一行后 61 步的用例实测在第 20 步被截断并失败）。这与 pi 内置循环的行为一致（`pi-agent-core/dist/agent-loop.js` 双层 while，无步数上限）。
+- 墙钟保险丝仍是 `GENERATION_TIMEOUT_MS`（默认 `0` 不限）与单次回复的 `MODEL_REPLY_TIMEOUT_MS`（默认 15 分钟）。`step-limit` 保留在 `ts_generation.stopReason` 词表里（历史行仍要能读回），但不再由新代码产生；前端「步数用尽」标签保留给历史数据。
+- 已知风险：没有步数上限后，上下文会随步数持续增长（该次 45 步累计输入 3.3M tokens，单步上下文已近 10 万），超出模型窗口时会以 provider 错误结束（400 类不重试，记为 `model-error`）；若真实出现，下一步是 `prepareStep` 里的上下文裁剪或压缩（pi 的做法是 compaction），而不是把步数上限加回来。
+- 回归覆盖：`tests/integration/agent-unbounded-steps.test.ts` 两例——模型连续请求工具 61 次后正常 `ready`（断言调用次数 61、记账 61 步、旧的追加预算消息从未出现）；模型以 `finishReason=error` 结束时仍是 `failed` / `model-error`（`Agent 未正常结束 error`），不假装完成。

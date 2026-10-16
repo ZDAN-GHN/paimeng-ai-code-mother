@@ -1,8 +1,10 @@
 'use client';
 import { useState } from 'react';
 import { Image, Spin, Tag } from 'antd';
-import { CloseCircleFilled, DownOutlined, FileTextOutlined, FolderOpenOutlined, LoadingOutlined, PictureOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons';
+import { BuildOutlined, CloseCircleFilled, DownOutlined, FileTextOutlined, FolderOpenOutlined, LoadingOutlined, PictureOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons';
 import { z } from 'zod';
+import { buildStageLabels } from '@/components/chat/generation-feedback';
+import { formatDuration } from '@/components/chat/generation-usage';
 
 /**
  * 工具调用的展示层：把 UI 消息里的工具 part 转成可读的操作记录（对齐旧版 Java 的
@@ -26,6 +28,17 @@ const candidateSchema = z.object({
   creator: z.string().nullable().optional(), license: z.string().nullable().optional(), licenseKnown: z.boolean().optional(), width: z.number().nullable().optional(), height: z.number().nullable().optional(),
 });
 const imageSearchData = z.object({ query: z.string().optional(), candidates: z.array(candidateSchema) });
+const buildPreviewInput = z.object({ milestone: z.string() });
+const buildPreviewOutput = z.object({
+  status: z.enum(['ok', 'failed']),
+  milestone: z.string().optional(),
+  ms: z.number().optional(),
+  stages: z.array(z.object({ stage: z.string(), status: z.enum(['ok', 'failed']), ms: z.number() })).optional(),
+  stage: z.string().optional(),
+  repairable: z.boolean().optional(),
+  diagnostic: z.string().optional(),
+  note: z.string().optional(),
+});
 const importedImage = z.object({
   path: z.string(), src: z.string(), bytes: z.number().optional(), format: z.string().optional(), sourcePage: z.string().optional(),
   creator: z.string().nullable().optional(), license: z.string().nullable().optional(), licenseKnown: z.boolean().optional(), attribution: z.string().nullable().optional(),
@@ -39,6 +52,7 @@ export type ToolCallView =
   | { kind: 'file-read'; label: string; path: string; content: string | null }
   | { kind: 'files-listed'; label: string; files: string[] }
   | { kind: 'file-deleted'; label: string; path: string }
+  | { kind: 'preview-built'; label: string; milestone: string; ok: boolean; ms: number | null; stages: { stage: string; status: 'ok' | 'failed'; ms: number }[]; stage: string | null; diagnostic: string | null }
   | { kind: 'images-imported'; label: string; images: z.infer<typeof importedImage>[] }
   | { kind: 'images-searched'; label: string; query: string | null; candidates: z.infer<typeof candidateSchema>[] }
   | { kind: 'web-searched'; label: string; query: string | null; results: z.infer<typeof searchData>['results'] }
@@ -47,8 +61,16 @@ export type ToolCallView =
 
 export type ToolCall = { view: ToolCallView; status: ToolCallStatus; errorText: string | null };
 
+/**
+ * 卡片是否按失败呈现。只有真正失败才算：工具本身报错，或阶段构建的结果已经返回且没通过。
+ * 构建还在跑（running）时不能算失败——那会让「正在构建」的卡片提前变红、显示「构建未通过」。
+ */
+export function toolCallFailed(call: ToolCall) {
+  return call.status === 'error' || (call.status === 'done' && call.view.kind === 'preview-built' && !call.view.ok);
+}
+
 const labels: Record<string, string> = {
-  listFiles: '列出文件', readFile: '读取文件', writeFiles: '写入文件', modifyFile: '修改文件', deleteFile: '删除文件',
+  listFiles: '列出文件', readFile: '读取文件', writeFiles: '写入文件', modifyFile: '修改文件', deleteFile: '删除文件', buildPreview: '阶段构建',
   webSearch: '联网搜索', readWebPage: '读取网页', searchImages: '检索图片', importImage: '导入图片',
 };
 const labelOf = (name: string) => labels[name] ?? name;
@@ -105,6 +127,23 @@ export function toolCallOf(part: unknown): ToolCall | null {
     if (!parsed.success) return fallback;
     return { view: { kind: 'file-deleted', label, path: parsed.data.path }, status, errorText };
   }
+  if (name === 'buildPreview') {
+    const requested = buildPreviewInput.safeParse(input);
+    const parsed = buildPreviewOutput.safeParse(output);
+    if (!requested.success && !parsed.success) return fallback;
+    const milestone = parsed.success ? parsed.data.milestone ?? requested.data?.milestone ?? '' : requested.data?.milestone ?? '';
+    return {
+      view: {
+        kind: 'preview-built', label, milestone,
+        ok: parsed.success && parsed.data.status === 'ok',
+        ms: parsed.success ? parsed.data.ms ?? null : null,
+        stages: parsed.success ? parsed.data.stages ?? [] : [],
+        stage: parsed.success ? parsed.data.stage ?? null : null,
+        diagnostic: parsed.success ? parsed.data.diagnostic ?? null : null,
+      },
+      status, errorText,
+    };
+  }
   if (name === 'importImage') {
     const parsed = importedImage.safeParse(webData(output).data);
     if (!parsed.success) return fallback;
@@ -129,12 +168,13 @@ export function toolCallOf(part: unknown): ToolCall | null {
   return fallback;
 }
 
-const iconOf = (view: ToolCallView) => view.kind === 'files-written' || view.kind === 'file-modified' || view.kind === 'file-deleted' ? <FileTextOutlined />
+const iconOf = (view: ToolCallView) => view.kind === 'preview-built' ? <BuildOutlined /> : view.kind === 'files-written' || view.kind === 'file-modified' || view.kind === 'file-deleted' ? <FileTextOutlined />
   : view.kind === 'file-read' || view.kind === 'files-listed' ? <FolderOpenOutlined />
   : view.kind === 'images-imported' || view.kind === 'images-searched' ? <PictureOutlined />
   : <SearchOutlined />;
 
 function titleOf(view: ToolCallView) {
+  if (view.kind === 'preview-built') return `${view.label}${view.milestone ? `：${view.milestone}` : ''}`;
   if (view.kind === 'files-written') return `${view.label} ${view.files.length > 1 ? `${view.files.length} 个文件` : view.files[0]?.path ?? ''}`;
   if (view.kind === 'file-modified') return `${view.label} ${view.path}`;
   if (view.kind === 'file-read') return `${view.label} ${view.path}`;
@@ -147,8 +187,13 @@ function titleOf(view: ToolCallView) {
   return `${view.label}${view.target ? ` ${view.target}` : ''}`;
 }
 
-/** 摘要行：写文件给出行数，导入图片给出体积。 */
-function summaryOf(view: ToolCallView) {
+/** 摘要行：写文件给出行数，导入图片给出体积；阶段构建按进行中/成功/失败三态。 */
+function summaryOf(call: ToolCall) {
+  const view = call.view;
+  if (view.kind === 'preview-built') {
+    if (call.status === 'running') return '正在构建…';
+    return view.ok ? `预览已更新${view.ms === null ? '' : ` · ${formatDuration(view.ms)}`}` : `构建未通过${view.stage ? ` · ${buildStageLabels[view.stage as keyof typeof buildStageLabels] ?? view.stage}` : ''}`;
+  }
   if (view.kind === 'files-written') return view.files.length > 1 ? view.files.map(file => file.path).join('、') : `${lines(view.files[0]?.content ?? '')} 行`;
   if (view.kind === 'file-read' && view.content !== null) return `${lines(view.content)} 行`;
   if (view.kind === 'images-imported') return [view.images[0]?.format, typeof view.images[0]?.bytes === 'number' ? formatBytes(view.images[0].bytes) : null].filter(Boolean).join(' · ');
@@ -156,7 +201,10 @@ function summaryOf(view: ToolCallView) {
   return '';
 }
 
-const openByDefault = (view: ToolCallView) => view.kind === 'files-written' || view.kind === 'file-modified' || view.kind === 'images-imported';
+/** 失败（含带诊断的阶段构建失败）默认展开，写入/修改/导入类默认展开，其余默认折叠。 */
+const openByDefault = (call: ToolCall) => call.view.kind === 'files-written' || call.view.kind === 'file-modified' || call.view.kind === 'images-imported' || toolCallFailed(call);
+/** 展开状态先由默认值派生，用户手动开合后以自己的选择为准（流式过程中视图从占位变成失败诊断时能自动展开）。 */
+const isOpen = (override: boolean | null, call: ToolCall) => override ?? openByDefault(call);
 
 function Code({ content, language }: { content: string; language?: string }) {
   return <pre className="tool-call-code" data-language={language}>{content}</pre>;
@@ -185,15 +233,19 @@ function ImportedImages({ images, assetUrl }: { images: z.infer<typeof importedI
 
 /** 一条工具调用：标题行 + 可展开的明细。不显示工具调用 id、state 或原始 JSON。 */
 export function ToolCall({ call, assetUrl }: { call: ToolCall; assetUrl: (path: string) => string }) {
-  const [open, setOpen] = useState(() => openByDefault(call.view));
+  const [override, setOverride] = useState<boolean | null>(null);
   const view = call.view;
-  return <div className={`tool-call tool-call-${call.status}`}>
-    <button type="button" className="tool-call-header" aria-expanded={open} onClick={() => setOpen(value => !value)}>
+  const open = isOpen(override, call);
+  // 工具调用本身成功、但阶段构建没通过时，卡片按失败呈现（红色图标 + 诊断），不误导成绿色完成。
+  const failed = toolCallFailed(call);
+  const summary = summaryOf(call);
+  return <div className={`tool-call tool-call-${failed ? 'error' : call.status}`}>
+    <button type="button" className="tool-call-header" aria-expanded={open} onClick={() => setOverride(!open)}>
       <span className="tool-call-caret" aria-hidden="true">{open ? <DownOutlined /> : <RightOutlined />}</span>
-      <span className="tool-call-icon" aria-hidden="true">{call.status === 'running' ? <Spin indicator={<LoadingOutlined />} size="small" /> : call.status === 'error' ? <CloseCircleFilled /> : iconOf(view)}</span>
+      <span className="tool-call-icon" aria-hidden="true">{call.status === 'running' ? <Spin indicator={<LoadingOutlined />} size="small" /> : failed ? <CloseCircleFilled /> : iconOf(view)}</span>
       <span className="tool-call-title">{titleOf(view)}</span>
-      {summaryOf(view) ? <span className="tool-call-meta">{summaryOf(view)}</span> : null}
-      {call.status === 'error' ? <Tag color="error" className="tool-call-tag">失败</Tag> : null}
+      {summary ? <span className="tool-call-meta">{summary}</span> : null}
+      {failed ? <Tag color="error" className="tool-call-tag">失败</Tag> : null}
     </button>
     {open && <div className="tool-call-body">
       {call.status === 'error' && <p className="tool-call-error-text">{call.errorText ?? '工具调用失败'}</p>}
@@ -205,6 +257,14 @@ export function ToolCall({ call, assetUrl }: { call: ToolCall; assetUrl: (path: 
       {view.kind === 'file-read' && (view.content === null ? <p className="tool-call-meta">未读到内容</p> : <Code content={view.content} language={view.path.slice(view.path.lastIndexOf('.') + 1)} />)}
       {view.kind === 'files-listed' && <ul className="tool-call-list">{view.files.map(file => <li key={file}><span className="tool-call-path">{file}</span></li>)}</ul>}
       {view.kind === 'file-deleted' && <p className="tool-call-meta">已删除 {view.path}</p>}
+      {view.kind === 'preview-built' && <div className="tool-call-file">
+        {view.stages.length > 0 && <ul className="tool-call-list">{view.stages.map(stage => <li key={stage.stage}>
+          <span className="tool-call-path">{buildStageLabels[stage.stage as keyof typeof buildStageLabels] ?? stage.stage}</span>
+          <span className="tool-call-meta">{stage.status === 'ok' ? '通过' : '未通过'} · {formatDuration(stage.ms)}</span>
+        </li>)}</ul>}
+        {view.diagnostic !== null && <Code content={view.diagnostic} />}
+        {call.status === 'running' ? <p className="tool-call-meta">正在构建…</p> : view.ok && view.stages.length === 0 ? <p className="tool-call-meta">预览已更新</p> : null}
+      </div>}
       {view.kind === 'images-imported' && <ImportedImages images={view.images} assetUrl={assetUrl} />}
       {view.kind === 'images-searched' && <ul className="tool-call-list">{view.candidates.map(candidate => <li key={candidate.candidateId}>
         <span className="tool-call-path">{candidate.title}</span>

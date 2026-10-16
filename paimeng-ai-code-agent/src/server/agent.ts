@@ -1,11 +1,12 @@
 import 'server-only';
 import { z } from 'zod';
-import { ToolLoopAgent, tool, convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, validateUIMessages, type ModelMessage, type StepResult, type ToolSet, type UIMessage, type UIMessageStreamWriter } from 'ai';
+import { ToolLoopAgent, tool, convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, isLoopFinished, validateUIMessages, wrapLanguageModel, type LanguageModel, type ModelMessage, type StepResult, type ToolSet, type UIMessage, type UIMessageStreamWriter } from 'ai';
+import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { idSchema, isProjectCodeGenType, type BuildProgressEvent, type User } from '@/shared/contracts';
 import { modelBindingFor, taskModelsFor } from './model';
 import { getApp } from './business';
-import { buildApp, sourceDigest } from './artifacts';
-import { classifyBuildFailure, formatBuildFeedback, noProgressMessage } from './build-feedback';
+import { buildApp, sourceDigest, type BuildStageProgress } from './artifacts';
+import { classifyBuildFailure, formatBuildDiagnostic, formatBuildFeedback, noProgressMessage, type BuildStage } from './build-feedback';
 import { recordBuildStep, recordModelStep, stopReasonOf, type GenerationStopReason } from './generation-accounting';
 import { readProjectFileAsText, writeProjectFile, listProjectFiles, modifyProjectFile, deleteProjectFile } from './workspace';
 import { beginGenerationContext, type BeginGenerationContext, heartbeat, saveMessage, saveUserMessage, setGeneration, restoreGeneration, finishGeneration, generationFor, withAppWriter } from './generation-store';
@@ -31,15 +32,17 @@ const inputSchema = z.object({
   message: z.object({ id: z.string().min(1).max(64), role: z.literal('user'), parts: z.array(z.object({ type: z.literal('text'), text: z.string().min(1).max(1000) }).strict()).min(1).max(8) }).strict(),
 }).strict();
 
-const fileToolSchemas = {
+const baseToolSchemas = {
   readFile: z.object({ path: z.string() }),
+  buildPreview: z.object({ milestone: z.string().trim().min(1).max(120) }),
   listFiles: z.object({}),
   writeFiles: z.object({ files: z.array(z.object({ path: z.string(), content: z.string().max(256000) })).min(1).max(60) }),
   modifyFile: z.object({ path: z.string(), oldText: z.string().min(1), newText: z.string() }),
   deleteFile: z.object({ path: z.string() }),
 };
-const fileToolDescriptions = {
+const baseToolDescriptions = {
   readFile: '读取当前应用的文本文件',
+  buildPreview: '提交一次阶段构建并刷新右侧预览：完成第一个可运行版本后调用一次，之后每完成一个明显功能再调用一次。失败时按返回的诊断修复后再次调用。这只刷新预览，不代表任务完成。',
   listFiles: '列出当前应用源文件',
   writeFiles: '写入当前应用文件，必须提供完整内容。',
   modifyFile: '通过唯一精确匹配修改文件',
@@ -48,6 +51,12 @@ const fileToolDescriptions = {
 const generationOutputMarginTokens = 1024;
 const maxConsolidationRounds = 3;
 const previewThrottleMs = 1000;
+// 构建阶段保活间隔：构建容器创建/销毁 veth 是一次网络链路状态变化，Firefox 会因此关掉「无流量」的
+// SSE 连接（同 http.ts 的 withHeartbeat），而 install 阶段十几秒没有任何字节。间隔与 withHeartbeat 一致。
+const buildKeepAliveMs = 1000;
+// 不设步数上限：真实应用动辄几十步（实测球厅应用 45 步仍不够），平台的判定只会把已经写了十几分钟的
+// 任务判失败。循环自然结束条件是模型不再请求工具（与 pi 的内置循环一致），墙钟保险丝是 GENERATION_TIMEOUT_MS。
+// 注意：必须显式传 isLoopFinished()——ToolLoopAgent 的 stopWhen 默认是 isStepCount(20)，省略会被静默截断在 20 步。
 
 /** 模型步骤里成功执行的文件工具调用写到的路径（参数错误或 tool-error 的调用不算，进度不会虚报）。 */
 function writtenPathsOf<TOOLS extends ToolSet>(step: StepResult<TOOLS>): string[] {
@@ -56,10 +65,10 @@ function writtenPathsOf<TOOLS extends ToolSet>(step: StepResult<TOOLS>): string[
   for (const call of step.toolCalls) {
     if (call.invalid === true || failed.has(call.toolCallId)) continue;
     if (call.toolName === 'writeFiles') {
-      const parsed = fileToolSchemas.writeFiles.safeParse(call.input);
+      const parsed = baseToolSchemas.writeFiles.safeParse(call.input);
       if (parsed.success) paths.push(...parsed.data.files.map(file => file.path));
     } else if (call.toolName === 'modifyFile' || call.toolName === 'deleteFile') {
-      const parsed = (call.toolName === 'modifyFile' ? fileToolSchemas.modifyFile : fileToolSchemas.deleteFile).safeParse(call.input);
+      const parsed = (call.toolName === 'modifyFile' ? baseToolSchemas.modifyFile : baseToolSchemas.deleteFile).safeParse(call.input);
       if (parsed.success) paths.push(parsed.data.path);
     }
   }
@@ -98,6 +107,44 @@ export async function steerGeneration(appId: string, user: User, text: string) {
   return true;
 }
 
+/**
+ * 上游连接在流中途断掉时，provider 不会给出错误 part，而是让流直接 reject；SDK 的 streamRetries
+ * 只对错误 part 生效，所以这种失败过去完全不重试（一次上游抖动就能把跑了十几分钟的生成判失败）。
+ * 这里把非取消类的流错误转成错误 part，交给同一套重试机制：重试只重发当前步，已完成的步骤与工具结果
+ * 保留，半截的工具调用会被丢弃（SDK 的 shouldBufferToolParts）。
+ * abort 必须原样抛出：转成错误 part 会把用户取消与超时也变成重试。
+ */
+function retryableStreamErrors(model: LanguageModel): LanguageModel {
+  if (typeof model === 'string') return model;
+  return wrapLanguageModel({
+    model,
+    middleware: {
+      wrapStream: async ({ doStream, params }) => {
+        const result = await doStream();
+        const reader = result.stream.getReader();
+        return {
+          ...result,
+          stream: new ReadableStream<LanguageModelV4StreamPart>({
+            async pull(controller) {
+              try {
+                const { done, value } = await reader.read();
+                if (done) { controller.close(); return; }
+                controller.enqueue(value);
+              } catch (error) {
+                if (params.abortSignal?.aborted || (error instanceof Error && error.name === 'AbortError')) { controller.error(error); return; }
+                // 前缀保持客户端可读，原始错误挂成 cause：日志里 console.error 会把 cause 一起打出来。
+                controller.enqueue({ type: 'error', error: new Error(`模型响应失败：${error instanceof Error ? error.message : String(error)}`, { cause: error }) });
+                controller.close();
+              }
+            },
+            cancel: reason => reader.cancel(reason),
+          }),
+        };
+      },
+    },
+  });
+}
+
 export async function chatResponse(req: Request, raw: unknown, user: User) {
   const input = inputSchema.parse(raw);
   const app = await getApp(input.appId, user, true);
@@ -114,7 +161,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
   if (taskModels.summaryUnavailableReason) {
     console.warn(`历史摘要不可用，本轮跳过整理：${taskModels.summaryUnavailableReason}`);
   }
-  const model = taskModels.model;
+  const model = retryableStreamErrors(taskModels.model);
   const summarySource = taskModels.summary;
   const armGenerationTimeout = (target: AbortController) => generationTimeoutMs > 0
     ? setTimeout(() => target.abort(new Error('生成超时')), generationTimeoutMs)
@@ -131,6 +178,30 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
   let streamError: unknown;
   let responseMessage: UIMessage | undefined;
   let phase = controller.signal;
+  // 瞬时进度事件：发送失败只丢弃事件，绝不能因为发事件失败而中断生成。工具与验证循环共用同一个出口。
+  let writeProgress: ((data: BuildProgressEvent) => void) | null = null;
+  const progress = (data: BuildProgressEvent) => { try { writeProgress?.(data); } catch {} };
+  /**
+   * 构建阶段回调 + 保活：阶段进行中每 1s 补一个 `started` 事件（ms 是已用时长）。
+   * 既是保活（构建容器启动/销毁时的链路状态变化会让 Firefox 关掉无流量连接），也让时间线显示已用时长。
+   */
+  const buildStageWatch = (onStage: BuildStageProgress) => {
+    let running: { stage: Parameters<BuildStageProgress>[0]; startedAt: number } | null = null;
+    const timer = setInterval(() => {
+      if (running) progress({ stage: running.stage, status: 'started', ms: Date.now() - running.startedAt, at: Date.now() });
+    }, buildKeepAliveMs);
+    const watched: BuildStageProgress = (stage, status, ms) => {
+      running = status === 'started' ? { stage, startedAt: Date.now() } : null;
+      onStage(stage, status, ms);
+    };
+    return { onStage: watched, stop: () => { running = null; clearInterval(timer); } };
+  };
+  // 静态应用的 workspace 就是预览目录：写完文件就能看，不需要构建，所以按时间节流发预览版本。
+  let previewVersion = 0;
+  let lastPreviewAt = 0;
+  // 构建记账：阶段构建与最终验证共用同一个尝试序号；currentRound 记当前模型轮次（首轮 1）。
+  let buildSteps = 0;
+  let currentRound = 1;
   const check = () => phase.throwIfAborted();
   const write = <T>(work: () => Promise<T>) => withAppWriter(app.id, async () => { check(); const value = await work(); check(); return value; }, input.requestId);
   const ensureWritable = async () => {
@@ -146,28 +217,68 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
   const webNames = enabledWebToolNames(webSettings);
   const webToolSchemas = Object.fromEntries(webNames.map(name => [name, webAccessToolSchemas[name]]));
   const webToolDescriptions = Object.fromEntries(webNames.map(name => [name, webAccessToolDescriptions[name]]));
-  const toolSchemas = { ...fileToolSchemas, ...webToolSchemas };
-  const toolDescriptions = { ...fileToolDescriptions, ...webToolDescriptions, writeFiles: fileToolDescriptions.writeFiles + staticPathHint(app.codeGenType) };
-  const fileTools = {
+  const toolSchemas = { ...baseToolSchemas, ...webToolSchemas };
+  const toolDescriptions = { ...baseToolDescriptions, ...webToolDescriptions, writeFiles: baseToolDescriptions.writeFiles + staticPathHint(app.codeGenType) };
+  const baseTools = {
     readFile: tool({ description: toolDescriptions.readFile, inputSchema: toolSchemas.readFile, execute: async ({ path }) => { check(); return readProjectFileAsText(app, path); } }),
     listFiles: tool({ description: toolDescriptions.listFiles, inputSchema: toolSchemas.listFiles, execute: async () => { check(); return listProjectFiles(app); } }),
     writeFiles: tool({ description: toolDescriptions.writeFiles, inputSchema: toolSchemas.writeFiles, execute: async ({ files }) => write(async () => { for (const file of files) { check(); await writeProjectFile(app, file.path, file.content); changed = true; } return { written: files.map(f => f.path) }; }) }),
     modifyFile: tool({ description: toolDescriptions.modifyFile, inputSchema: toolSchemas.modifyFile, execute: async ({ path, oldText, newText }) => write(async () => { await modifyProjectFile(app, path, oldText, newText); changed = true; return { modified: path }; }) }),
     deleteFile: tool({ description: toolDescriptions.deleteFile, inputSchema: toolSchemas.deleteFile, execute: async ({ path }) => write(async () => { await deleteProjectFile(app, path); changed = true; return { deleted: path }; }) }),
+    // Agent 自己决定什么时候值得给用户看一版：平台只负责构建、更新预览并把失败诊断还给它。
+    buildPreview: tool({
+      description: toolDescriptions.buildPreview,
+      inputSchema: toolSchemas.buildPreview,
+      execute: async ({ milestone }) => {
+        check();
+        await ensureWritable();
+        const startedAt = Date.now();
+        const stages: { stage: BuildStage; status: 'ok' | 'failed'; ms: number }[] = [];
+        const stepNumber = buildSteps++;
+        const watch = buildStageWatch((stage, status, ms) => {
+          progress({ stage, status, ms, at: Date.now() });
+          if (status !== 'started') stages.push({ stage, status, ms });
+        });
+        try {
+          // 与最终验证走同一条构建路径：产物与构建清单一致，源码之后没再改时最终验证会直接复用这份产物。
+          await write(() => buildApp(app, controller.signal, watch.onStage));
+          await recordBuildStep({ generationId: input.requestId, round: currentRound, stepNumber, durationMs: Date.now() - startedAt, outcome: { status: 'ok' } });
+          const at = Date.now();
+          lastPreviewAt = at;
+          progress({ stage: 'preview', version: ++previewVersion, at });
+          return { status: 'ok' as const, milestone, ms: at - startedAt, stages, note: '预览已更新为这次构建的产物。继续开发下一个功能，有明显增量时再调用一次。' };
+        } catch (problem) {
+          const verdict = classifyBuildFailure(problem);
+          const detail = problem instanceof Error ? problem.message.slice(0, 1000) : '构建失败';
+          // 取消/超时打断的构建不算「构建失败」，记账与 verify() 保持同一种口径。
+          await recordBuildStep({ generationId: input.requestId, round: currentRound, stepNumber, durationMs: Date.now() - startedAt, outcome: phase.aborted ? { status: 'cancelled', detail } : { status: 'failed', verdict, detail } });
+          return { status: 'failed' as const, milestone, stage: verdict.stage, repairable: verdict.repairable, ms: Date.now() - startedAt, diagnostic: formatBuildDiagnostic(problem), note: '这次构建没有通过，右侧仍是上一次成功的预览。按诊断修改源码后再次调用 buildPreview；不要改 package.json、锁文件或模板文件。' };
+        } finally {
+          watch.stop();
+        }
+      },
+    }),
   };
   // 模型只看到已启用的工具；校验与会话转换使用超集，保证关闭开关后历史里的工具结果仍可读取。
-  const tools = { ...fileTools, ...pickEnabledWebTools(webTools, webSettings) };
-  const allTools = { ...fileTools, ...webTools };
+  const tools = { ...baseTools, ...pickEnabledWebTools(webTools, webSettings) };
+  const allTools = { ...baseTools, ...webTools };
   const entry = app.template ? templateEntry(app.template) : null;
   const webInstruction = webEnabled ? ` ${webAccessInstructions({ images: imagesEnabled, strictLicense: webAccess.strictLicense })}` : '';
   const instructions = generationInstructions({ app, template: app.template, entry, webInstruction });
-  // 步数预算在首轮与修复轮之间共享：stopWhen 只在 settings 上，所以用闭包变量控制每轮剩余步数。
-  const maxSteps = 30;
-  let remainingSteps = maxSteps;
+  // stopWhen 只在 settings 上，且默认值是 20 步，所以显式声明「不因步数停止」。
   // 本轮 prepareStep 注入的插话消息：修复轮重建 messages 时要带上，否则下一轮丢上下文。
   let steeredMessages: ModelMessage[] = [];
+  // SDK 的 ToolLoopAgentSettings 类型没声明 streamRetries 与 onError，但运行时会经 prepareCall 原样转给 streamText；
+  // 用一个单独对象带进来，并由 model-stream-retry 集成用例守住「重试真的发生」这件事。
+  const streamRetrySettings = {
+    streamRetries: modelRetryLimit,
+    // 流中途的 provider 错误：streamRetries 会重发同一步（已完成的步骤与工具结果保留）；
+    // 重试成功的调用不会经过下面的终止日志，所以在这里把每一次原始错误都记下来。
+    onError: ({ error }: { error: unknown }) => { console.error(`模型流错误（生成 ${input.requestId} 第 ${currentRound} 轮，模型 ${taskModels.generation.alias}）：`, error); },
+  };
   const agent = new ToolLoopAgent({
-    model, tools, stopWhen: ({ steps }) => steps.length >= remainingSteps, maxRetries: modelRetryLimit, instructions,
+    model, tools, stopWhen: isLoopFinished(), maxRetries: modelRetryLimit, instructions,
+    ...streamRetrySettings,
     // 中途插话只在这里生效：prepareStep 收到的是上一步返回的 messages（含此前注入的内容），
     // 所以每次只追加新 drain 出来的文本，不会重复注入。
     prepareStep: ({ messages }) => {
@@ -263,23 +374,17 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
       let error: string | null = null;
       let stopReason: GenerationStopReason = 'model-error';
       // 构建尝试的记账序号
-      let buildSteps = 0;
       const hintBuild = (data: { status: 'repairing'; attempt: number; maxAttempts: number }) => {
         try { writer.write({ type: 'data-build', data, transient: true }); } catch {}
       };
-      // 瞬时进度事件：发送失败只丢弃事件，绝不能因为发事件失败而中断生成。
-      const progress = (data: BuildProgressEvent) => {
-        try { writer.write({ type: 'data-progress', data, transient: true }); } catch {}
-      };
-      // 静态应用的 workspace 就是预览目录：写完文件就能看，不需要构建，所以按时间节流发预览版本。
-      let previewVersion = 0;
-      let lastPreviewAt = 0;
+      writeProgress = data => writer.write({ type: 'data-progress', data, transient: true });
       // 服务端拥有验证权：每次构建尝试单独记账，失败时带上分类与阶段。
       const verify = async (round: number) => {
         const startedAt = Date.now();
         const stepNumber = buildSteps++;
+        const watch = buildStageWatch((stage, status, ms) => progress({ stage, status, ms, at: Date.now() }));
         try {
-          await write(() => buildApp(app, building.signal, (stage, status, ms) => progress({ stage, status, ms, at: Date.now() })));
+          await write(() => buildApp(app, building.signal, watch.onStage));
           await recordBuildStep({ generationId: input.requestId, round, stepNumber, durationMs: Date.now() - startedAt, outcome: { status: 'ok' } });
         } catch (problem) {
           const detail = problem instanceof Error ? problem.message.slice(0, 1000) : '构建失败';
@@ -290,59 +395,70 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
             await recordBuildStep({ generationId: input.requestId, round, stepNumber, durationMs: Date.now() - startedAt, outcome: { status: 'failed', verdict: classifyBuildFailure(problem), detail } });
           }
           throw problem;
+        } finally {
+          watch.stop();
         }
       };
       // 每一轮模型循环复用同一个 Agent、工具与租约；修复轮只是把诊断拼在上一轮消息之后。
       const runRound = async (messages: ModelMessage[], originalMessages: UIMessage[], round: number) => {
         await ensureWritable();
         steeredMessages = [];
-        const result = await agent.stream({
-          messages,
-          abortSignal: controller.signal,
-          onStepStart: armReplyTimer,
-          onStepEnd: async step => {
-            clearReplyTimer();
-            await recordModelStep(step, { generationId: input.requestId, round, model: taskModels.generation });
-            const paths = writtenPathsOf(step);
-            if (!paths.length) return;
-            const at = Date.now();
-            progress({ stage: 'files', paths, at });
-            if (isProjectCodeGenType(app.codeGenType) || at - lastPreviewAt < previewThrottleMs) return;
-            lastPreviewAt = at;
-            progress({ stage: 'preview', version: ++previewVersion, at });
-          },
-        });
+        currentRound = round;
+        const responseMessages: ModelMessage[] = [];
         let message: UIMessage | undefined;
-        const uiStream = createUIMessageStream({
-          originalMessages,
-          generateId: () => `${input.requestId}-assistant`,
-          onStepEnd: async ({ responseMessage }) => { await saveMessage(app.id, responseMessage, input.requestId); },
-          onEnd: event => { responseMessage = event.responseMessage; message = event.responseMessage; },
-          onError: failure => { streamError = failure; return '模型响应失败'; },
-          execute: ({ writer: modelWriter }) => {
-            modelWriter.merge(result.toUIMessageStream({ sendReasoning: true, onError: failure => failure instanceof Error ? failure.message.slice(0, 1000) : '工具或模型响应失败' }));
-          },
-        });
-        const reader = uiStream.getReader();
-        try {
-          while (true) {
-            const chunk = await reader.read();
-            if (chunk.done) break;
-            if (chunk.value.type === 'error' && !streamError) streamError = new Error(chunk.value.errorText);
-            writer.write(chunk.value);
-          }
-        } finally { reader.releaseLock(); }
-        check();
-        if (streamError) throw streamError;
-        const steps = await result.steps;
-        const finish = await result.finishReason;
-        remainingSteps = Math.max(0, remainingSteps - steps.length);
-        if (finish !== 'stop' && finish !== 'length') {
-          stopReason = remainingSteps === 0 ? 'step-limit' : 'model-error';
+        let roundMessages = messages;
+        let roundOriginal = originalMessages;
+        for (;;) {
+          const result = await agent.stream({
+            messages: roundMessages,
+            abortSignal: controller.signal,
+            onStepStart: armReplyTimer,
+            onStepEnd: async step => {
+              clearReplyTimer();
+              await recordModelStep(step, { generationId: input.requestId, round, model: taskModels.generation });
+              const paths = writtenPathsOf(step);
+              if (!paths.length) return;
+              const at = Date.now();
+              progress({ stage: 'files', paths, at });
+              if (isProjectCodeGenType(app.codeGenType) || at - lastPreviewAt < previewThrottleMs) return;
+              lastPreviewAt = at;
+              progress({ stage: 'preview', version: ++previewVersion, at });
+            },
+          });
+          const uiStream = createUIMessageStream({
+            originalMessages: roundOriginal,
+            generateId: () => `${input.requestId}-assistant`,
+            onStepEnd: async ({ responseMessage }) => { await saveMessage(app.id, responseMessage, input.requestId); },
+            onEnd: event => { responseMessage = event.responseMessage; message = event.responseMessage; },
+            onError: failure => {
+              streamError = failure;
+              // 客户端只看到可读文案；原始错误必须落在服务端日志里，否则上游断流这类问题无从定位。
+              console.error(`模型调用失败（生成 ${input.requestId} 第 ${round} 轮，模型 ${taskModels.generation.alias}）：`, failure);
+              return '模型响应失败';
+            },
+            execute: ({ writer: modelWriter }) => {
+              modelWriter.merge(result.toUIMessageStream({ sendReasoning: true, onError: failure => failure instanceof Error ? failure.message.slice(0, 1000) : '工具或模型响应失败' }));
+            },
+          });
+          const reader = uiStream.getReader();
+          try {
+            while (true) {
+              const chunk = await reader.read();
+              if (chunk.done) break;
+              if (chunk.value.type === 'error' && !streamError) streamError = new Error(chunk.value.errorText);
+              writer.write(chunk.value);
+            }
+          } finally { reader.releaseLock(); }
+          check();
+          if (streamError) throw streamError;
+          const finish = await result.finishReason;
+          responseMessages.push(...await result.responseMessages);
+          if (finish === 'stop' || finish === 'length') break;
+          stopReason = 'model-error';
           throw new Error(`Agent 未正常结束 ${finish}`);
         }
         if (!message) throw new Error('模型响应未完成');
-        return { responseMessages: await result.responseMessages, message, steered: steeredMessages };
+        return { responseMessages, message, steered: steeredMessages };
       };
       try {
         check();
@@ -374,7 +490,7 @@ export async function chatResponse(req: Request, raw: unknown, user: User) {
           } catch (problem) {
             if (phase.aborted) throw problem;
             const verdict = classifyBuildFailure(problem);
-            if (!verdict.repairable || repairs >= maxRepairs || remainingSteps <= 0) {
+            if (!verdict.repairable || repairs >= maxRepairs) {
               stopReason = 'verification-failed';
               throw problem;
             }

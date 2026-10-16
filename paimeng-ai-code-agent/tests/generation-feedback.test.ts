@@ -4,9 +4,11 @@ import {
   dequeue,
   enqueue,
   initialProgress,
+  interruptedStreamMessage,
   parseProgressEvent,
   progressReducer,
   removeQueued,
+  settleProgress,
   type ProgressState,
 } from '@/components/chat/generation-feedback';
 import type { BuildProgressEvent } from '@/shared/contracts';
@@ -97,6 +99,17 @@ describe('进度归约', () => {
     ]);
   });
 
+  it('构建阶段进行中的保活事件刷新已用时长，完成后换成真实耗时', () => {
+    const running = feed([
+      { stage: 'install', status: 'started', ms: 0, at: 1 },
+      { stage: 'install', status: 'started', ms: 1200, at: 1201 },
+      { stage: 'install', status: 'started', ms: 3400, at: 3401 },
+    ]);
+    expect(running.stages.at(-1)).toEqual({ kind: 'install', status: 'running', ms: 3400 });
+    const done = feed([{ stage: 'install', status: 'ok', ms: 15400, at: 15400 }], running);
+    expect(done.stages.at(-1)).toEqual({ kind: 'install', status: 'ok', ms: 15400 });
+  });
+
   it('ready 收尾：生成阶段耗时取首末事件时间差', () => {
     const state = feed([
       { stage: 'files', paths: ['index.html'], at: 1000 },
@@ -139,5 +152,71 @@ describe('进度归约', () => {
       { stage: 'preview', version: 4, at: 2 },
     ]);
     expect(state.stages.find(stage => stage.kind === 'preview')).toEqual({ kind: 'preview', status: 'ok', version: 4 });
+  });
+});
+
+describe('进度归约', () => {
+  it('终态事件收尾所有进行中的阶段：构建中途被取消时不再有「运行中」', () => {
+    const cancelled = feed([
+      { stage: 'files', paths: ['index.html'], at: 1000 },
+      { stage: 'source', status: 'ok', ms: 120, at: 1200 },
+      { stage: 'install', status: 'started', ms: 0, at: 1300 },
+      { stage: 'cancelled', at: 9000 },
+    ]);
+    expect(cancelled.outcome).toBe('cancelled');
+    expect(cancelled.stages).toEqual([
+      { kind: 'generate', status: 'cancelled', ms: 8000 },
+      { kind: 'files', status: 'cancelled', count: 1, lastPath: 'index.html' },
+      { kind: 'source', status: 'ok', ms: 120 },
+      { kind: 'install', status: 'cancelled', ms: null },
+    ]);
+
+    const failed = feed([{ stage: 'typecheck', status: 'started', ms: 0, at: 5 }, { stage: 'failed', at: 9 }]);
+    expect(failed.stages.map(stage => stage.status)).toEqual(['failed', 'failed']);
+    const ready = feed([{ stage: 'install', status: 'started', ms: 0, at: 5 }, { stage: 'ready', at: 9 }]);
+    expect(ready.stages.map(stage => stage.status)).toEqual(['ok', 'ok']);
+  });
+});
+
+describe('流中断兜底', () => {
+  const interrupted = feed([
+    { stage: 'files', paths: ['index.html'], at: 1000 },
+    { stage: 'source', status: 'ok', ms: 120, at: 1200 },
+    { stage: 'install', status: 'started', ms: 0, at: 1300 },
+  ]);
+
+  it('连接中断后按任务状态收尾：运行中的阶段判成终态，不再转圈', () => {
+    const settled = settleProgress(interrupted, 'cancelled');
+    expect(settled.outcome).toBe('cancelled');
+    expect(settled.stages).toEqual([
+      { kind: 'generate', status: 'cancelled', ms: null },
+      { kind: 'files', status: 'cancelled', count: 1, lastPath: 'index.html' },
+      { kind: 'source', status: 'ok', ms: 120 },
+      { kind: 'install', status: 'cancelled', ms: null },
+    ]);
+  });
+
+  it('ready 收尾时运行中的阶段算成功，任务失败时算失败', () => {
+    expect(settleProgress(interrupted, 'ready').stages.map(stage => stage.status)).toEqual(['ok', 'ok', 'ok', 'ok']);
+    expect(settleProgress(interrupted, 'failed').stages.map(stage => stage.status)).toEqual(['failed', 'failed', 'ok', 'failed']);
+  });
+});
+
+describe('连接中断的可读文案', () => {
+  it('浏览器与 SDK 的传输层原文换成可读文案，并按任务状态区分', () => {
+    const raw = ['Error in input stream', 'Failed to fetch', 'NetworkError when attempting to fetch resource', 'network error', 'Load failed', 'socket hang up'];
+    for (const message of raw) {
+      expect(interruptedStreamMessage({ message, status: 'cancelled' })).toBe('生成连接中断，任务已取消；可重新发送需求继续');
+    }
+    expect(interruptedStreamMessage({ message: 'Error in input stream', status: 'failed' })).toContain('任务已失败');
+    expect(interruptedStreamMessage({ message: 'Error in input stream', status: 'ready' })).toContain('已经完成');
+    expect(interruptedStreamMessage({ message: 'Error in input stream', status: 'generating' })).toContain('可能仍在后台');
+    expect(interruptedStreamMessage({ message: 'Error in input stream', status: null })).toContain('可能仍在后台');
+  });
+
+  it('其它错误照原样展示：模型错误、业务错误与取消失败都不是连接中断', () => {
+    expect(interruptedStreamMessage({ message: '模型响应失败', status: 'failed' })).toBeNull();
+    expect(interruptedStreamMessage({ message: '生成或构建失败，请查看任务状态', status: 'failed' })).toBeNull();
+    expect(interruptedStreamMessage({ message: '当前没有正在生成的步骤，插话不适用', status: 'generating' })).toBeNull();
   });
 });

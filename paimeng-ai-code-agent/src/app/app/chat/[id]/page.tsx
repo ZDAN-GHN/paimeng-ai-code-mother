@@ -11,7 +11,7 @@ import { type AppInfo, type Generation, type GenerationAccount, isProjectCodeGen
 import { MarkdownMessage } from '@/components/chat/markdown-message';
 import { GenerationUsage } from '@/components/chat/generation-usage';
 import { BuildProgress } from '@/components/chat/build-progress';
-import { composerAction, dequeue, enqueue, initialProgress, parseProgressEvent, progressReducer, removeQueued, type ProgressState } from '@/components/chat/generation-feedback';
+import { composerAction, dequeue, enqueue, initialProgress, interruptedStreamMessage, parseProgressEvent, progressReducer, removeQueued, settleProgress, type ProgressState } from '@/components/chat/generation-feedback';
 import { ToolCall, toolCallOf } from '@/components/chat/tool-call';
 import { AppDetailModal, formatCodeGenType } from '@/components/chat/app-detail-modal';
 import { DeploySuccessModal } from '@/components/chat/deploy-success-modal';
@@ -106,7 +106,8 @@ function Chat({ id }: { id: string }) {
   const rebuildTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialPromptHandled = useRef(false);
   const loadingOlder = useRef(false);
-  const terminalSeen = useRef(false);
+  const activeGenerationId = useRef<string | null>(null);
+  const settledTask = useRef<string | null>(null);
   const previewRefreshAt = useRef(0);
   const previewPending = useRef<number | null>(null);
   const canEdit = !!user && user.id === app?.userId;
@@ -118,15 +119,19 @@ function Chat({ id }: { id: string }) {
       api<AppInfo>('app/get/vo?id=' + encodeURIComponent(id)),
       api<Generation | null>('app/generation?appId=' + encodeURIComponent(id)),
     ]);
-    if (!mounted.current) return;
+    if (!mounted.current) return null;
     if (info.status === 'fulfilled') setApp(info.value);
+    const fresh = generation.status === 'fulfilled' ? generation.value : null;
     if (generation.status === 'fulfilled') setTask(generation.value);
+    return fresh;
   }, [id]);
   const transport = useMemo(() => new DefaultChatTransport({
     api: '/api/app/chat/gen/code',
-    prepareSendMessagesRequest: ({ messages }) => ({
-      body: { appId: id, message: messages[messages.length - 1], requestId: crypto.randomUUID() },
-    }),
+    prepareSendMessagesRequest: ({ messages }) => {
+      const requestId = crypto.randomUUID();
+      activeGenerationId.current = requestId;
+      return { body: { appId: id, message: messages[messages.length - 1], requestId } };
+    },
   }), [id]);
   /** 消费服务端的瞬时 `data-progress`：推进时间线、按 >=1s 节流刷新 iframe、终态接管队列。 */
   function applyProgress(data: unknown) {
@@ -143,24 +148,17 @@ function Chat({ id }: { id: string }) {
       return;
     }
     if (event.stage === 'ready' || event.stage === 'failed' || event.stage === 'cancelled') {
-      terminalSeen.current = true;
       const pending = previewPending.current;
       previewPending.current = null;
       if (pending !== null) { previewRefreshAt.current = Date.now(); setPreviewVersion(pending); }
       if (event.stage === 'cancelled') setQueuePaused(true);
-      else { setTask(current => current ? { ...current, status: event.stage } : current); setDrainArmed(true); }
+      else { setTask(current => current ? { ...current, id: activeGenerationId.current ?? current.id, status: event.stage } : current); setDrainArmed(true); }
     }
   }
   const { messages, setMessages, sendMessage, stop, clearError, status, error: chatError } = useChat<UIMessage>({
     id, transport,
-    onFinish: options => {
-      // 兜底：没收到终态进度事件时按 ready 处理，清掉可能滞后的「生成中」，让队列继续发。
-      if (!terminalSeen.current && !options.isAbort) {
-        setTask(current => current && (current.status === 'generating' || current.status === 'building') ? { ...current, status: 'ready' } : current);
-        setDrainArmed(true);
-      }
-      void refresh();
-    },
+    // 流结束只重新取任务状态：断流后任务可能仍在跑，这里不乐观标 ready，统一由下面的终态收尾。
+    onFinish: async () => { await refresh(); },
     onError: e => { if (mounted.current) setError(e.message); },
     onData: part => {
       if (part.type === 'data-memory') setMemoryBusy(isConsolidating(part.data));
@@ -169,6 +167,21 @@ function Chat({ id }: { id: string }) {
     },
   });
   const generating = status === 'submitted' || status === 'streaming' || task?.status === 'generating' || task?.status === 'building';
+  /**
+   * 任务终态统一收尾时间线与队列：终态可能来自终态进度事件，也可能只有轮询才能看到
+   * （连接被切断、用户主动取消）。流还在跑时不收尾，避免上一轮的终态覆盖刚开始的新一轮。
+   */
+  useEffect(() => {
+    // 刷新页面后也能等待现有任务结束；历史终态不属于本次生成，不能影响新队列。
+    if (activeGenerationId.current === null && (task?.status === 'generating' || task?.status === 'building')) activeGenerationId.current = task.id;
+    if (status === 'submitted' || status === 'streaming') return;
+    const terminal = task?.status === 'ready' || task?.status === 'failed' || task?.status === 'cancelled' ? task.status : null;
+    if (!task || !terminal || task.id !== activeGenerationId.current || settledTask.current === task.id) return;
+    settledTask.current = task.id;
+    setProgress(current => current.outcome === 'running' ? settleProgress(current, terminal) : current);
+    if (terminal === 'cancelled') setQueuePaused(true);
+    else setDrainArmed(true);
+  }, [task, status]);
   const taskStatus = task?.status;
   // 每次生成结束时取一次用量：一条助手回复对应一次生成，按消息 id 挂到气泡上；生成中不轮询明细。
   const assetUrl = useCallback((path: string) => '/api/app/asset?appId=' + encodeURIComponent(id) + '&path=' + encodeURIComponent(path), [id]);
@@ -309,7 +322,6 @@ function Chat({ id }: { id: string }) {
     submitting.current = true;
     setSending(true);
     stick.current = true;
-    terminalSeen.current = false;
     previewPending.current = null;
     previewRefreshAt.current = 0;
     setStickToBottom(true);
@@ -422,9 +434,14 @@ function Chat({ id }: { id: string }) {
   const visibleMessages = messages.slice(-visibleHistory);
   const sourceAvailable = app?.sourceAvailable ?? !!app?.previewUrl;
   const canPreview = !!app?.previewUrl;
-  const requestError = error || chatError?.message || null;
+  const rawRequestError = error || chatError?.message || null;
+  // 响应流被浏览器/网络层切断时的原文（如 `Error in input stream`）换成可读文案。
+  const interrupted = rawRequestError ? interruptedStreamMessage({ message: rawRequestError, status: task?.status ?? null }) : null;
+  const requestError = interrupted ? null : rawRequestError;
   const taskError = !failureResolved && taskErrorKey !== dismissedTaskError ? task?.error ?? null : null;
-  const alert = requestError
+  const alert = interrupted
+    ? { type: 'warning' as const, title: interrupted, dismiss: () => { setError(''); clearError(); } }
+    : requestError
     ? { type: 'error' as const, title: requestError, dismiss: () => { setError(''); clearError(); } }
     : taskError
       ? canPreview

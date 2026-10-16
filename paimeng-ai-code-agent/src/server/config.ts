@@ -24,7 +24,8 @@ const environment = z.object({
   BUILD_REPAIR_ROUNDS:z.preprocess(blankAsUnset, z.coerce.number().int().min(0, 'BUILD_REPAIR_ROUNDS 不能为负数').max(3, 'BUILD_REPAIR_ROUNDS 不能超过 3').default(2)),
   GENERATION_TIMEOUT_MS:z.preprocess(blankAsUnset, z.coerce.number().int().min(0, 'GENERATION_TIMEOUT_MS 不能为负数').max(86400000, 'GENERATION_TIMEOUT_MS 不能超过 86400000').default(0)),
   MODEL_REPLY_TIMEOUT_MS:z.preprocess(blankAsUnset, z.coerce.number().int().min(1000, 'MODEL_REPLY_TIMEOUT_MS 必须不小于 1000').max(86400000, 'MODEL_REPLY_TIMEOUT_MS 不能超过 86400000').default(900000)),
-  MODEL_RETRY_LIMIT:z.preprocess(blankAsUnset, z.coerce.number().int().min(0, 'MODEL_RETRY_LIMIT 不能为负数').max(5, 'MODEL_RETRY_LIMIT 不能超过 5').default(2)),
+  // 模型调用重试上限，同时管两个阶段：请求阶段（连不上、429、5xx）与流开始之后的 provider 错误。
+  MODEL_RETRY_LIMIT:z.preprocess(blankAsUnset, z.coerce.number().int().min(0, 'MODEL_RETRY_LIMIT 不能为负数').max(5, 'MODEL_RETRY_LIMIT 不能超过 5').default(5)),
   MEMORY_ENABLED:z.preprocess(booleanFlag, z.enum(['true','false','1','0']).default('true').transform(value => value === 'true' || value === '1')),
   MEMORY_CONTEXT_BUDGET_TOKENS:z.preprocess(blankAsUnset, z.coerce.number().int().min(2000, 'MEMORY_CONTEXT_BUDGET_TOKENS 必须不小于 2000').max(2000000, 'MEMORY_CONTEXT_BUDGET_TOKENS 不能超过 2000000').default(24000)),
   MEMORY_RECENT_BUDGET_TOKENS:z.preprocess(blankAsUnset, z.coerce.number().int().min(500, 'MEMORY_RECENT_BUDGET_TOKENS 必须不小于 500').max(1000000, 'MEMORY_RECENT_BUDGET_TOKENS 不能超过 1000000').default(12000)),

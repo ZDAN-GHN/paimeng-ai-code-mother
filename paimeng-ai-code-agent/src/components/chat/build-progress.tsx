@@ -2,17 +2,14 @@
 import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined, MinusCircleFilled } from '@ant-design/icons';
 import { Spin } from 'antd';
 import { formatDuration } from '@/components/chat/generation-usage';
-import type { ProgressStage, ProgressState, StageStatus } from '@/components/chat/generation-feedback';
+import { buildStageLabels, type ProgressStage, type ProgressState, type StageStatus } from '@/components/chat/generation-feedback';
 
 /** 生成/构建时间线：只渲染实际发生过的阶段，已完成显示耗时，失败阶段标红。 */
 const stageLabels: Record<ProgressStage['kind'], string> = {
   generate: '生成',
   files: '写入文件',
-  source: '源码校验',
-  install: '安装依赖',
-  typecheck: '类型检查',
-  build: '打包',
   preview: '预览就绪',
+  ...buildStageLabels,
 };
 
 function iconOf(status: StageStatus) {
@@ -30,7 +27,9 @@ function metaOf(stage: ProgressStage) {
 
 function durationOf(stage: ProgressStage) {
   if (stage.kind === 'files' || stage.kind === 'preview') return null;
-  return stage.ms === null ? null : formatDuration(stage.ms);
+  if (stage.ms === null) return null;
+  // 运行中的阶段靠保活事件每秒刷新 ms：显式写「已用」，避免和已完成阶段的耗时混淆。
+  return stage.status === 'running' ? `已用 ${formatDuration(stage.ms)}` : formatDuration(stage.ms);
 }
 
 export function BuildProgress({ state, error }: { state: ProgressState; error: string | null }) {

@@ -107,6 +107,12 @@ test('工具调用渲染成可读操作记录：没有原始 JSON、工具调用
       writer.write({ type: 'tool-input-start', toolCallId: 'call_02_hidden', toolName: 'importImage' });
       writer.write({ type: 'tool-input-available', toolCallId: 'call_02_hidden', toolName: 'importImage', input: { candidateId: 'img_1' } });
       writer.write({ type: 'tool-output-available', toolCallId: 'call_02_hidden', output: { status: 'ok', data: { path: 'assets/hero.jpg', src: 'assets/hero.jpg', bytes: 204800, format: 'jpeg', sourcePage: 'https://example.com/hero', license: 'CC0', licenseKnown: true } } });
+      writer.write({ type: 'tool-input-start', toolCallId: 'call_03_hidden', toolName: 'buildPreview' });
+      writer.write({ type: 'tool-input-available', toolCallId: 'call_03_hidden', toolName: 'buildPreview', input: { milestone: '首页可用' } });
+      writer.write({ type: 'tool-output-available', toolCallId: 'call_03_hidden', output: { status: 'ok', milestone: '首页可用', ms: 21000, stages: [{ stage: 'source', status: 'ok', ms: 120 }, { stage: 'install', status: 'ok', ms: 21000 }] } });
+      writer.write({ type: 'tool-input-start', toolCallId: 'call_04_hidden', toolName: 'buildPreview' });
+      writer.write({ type: 'tool-input-available', toolCallId: 'call_04_hidden', toolName: 'buildPreview', input: { milestone: '预约页' } });
+      writer.write({ type: 'tool-output-available', toolCallId: 'call_04_hidden', output: { status: 'failed', milestone: '预约页', stage: 'typecheck', repairable: true, diagnostic: '阶段：类型检查\n错误摘要：TS2304 找不到名称 user' } });
       writer.write({ type: 'text-start', id: 'tool-render-text' });
       writer.write({ type: 'text-delta', id: 'tool-render-text', delta: '已完成修改。' });
       writer.write({ type: 'text-end', id: 'tool-render-text' });
@@ -118,7 +124,7 @@ test('工具调用渲染成可读操作记录：没有原始 JSON、工具调用
   await page.getByRole('button', { name: /^发\s*送$/ }).click();
   await expect(page.getByText('已完成修改。', { exact: true })).toBeVisible();
   const calls = page.locator('.message-ai .tool-call');
-  await expect(calls).toHaveCount(3);
+  await expect(calls).toHaveCount(5);
   await expect(calls.nth(0).locator('.tool-call-title')).toHaveText('写入文件 index.html');
   await expect(calls.nth(0).locator('.tool-call-code')).toContainText('<h1>首页</h1>');
   await expect(calls.nth(1).locator('.tool-call-title')).toHaveText('修改文件 style.css');
@@ -128,6 +134,18 @@ test('工具调用渲染成可读操作记录：没有原始 JSON、工具调用
   const thumbnail = calls.nth(2).locator('img');
   await expect(thumbnail).toHaveAttribute('src', /\/api\/app\/asset\?appId=\d+&path=assets%2Fhero.jpg/);
   await expect(calls.nth(2)).toContainText('CC0');
+  // 阶段构建：成功的显示里程碑与阶段耗时，失败的按失败呈现并把诊断留给用户看。
+  await expect(calls.nth(3).locator('.tool-call-title')).toHaveText('阶段构建：首页可用');
+  await expect(calls.nth(3)).toContainText('预览已更新');
+  await calls.nth(3).locator('.tool-call-header').click();
+  await expect(calls.nth(3)).toContainText('安装依赖');
+  await expect(calls.nth(3)).toContainText('21.0s');
+  await expect(calls.nth(4).locator('.tool-call-title')).toHaveText('阶段构建：预约页');
+  await expect(calls.nth(4)).toHaveClass(/tool-call-error/);
+  await expect(calls.nth(4)).toContainText('类型检查');
+  await expect(calls.nth(4).locator('.tool-call-code')).toContainText('TS2304');
+  // 流式内容长高（缩略图、工具明细、诊断）不能把用户踢出「贴底」状态，凭空冒出回到底部按钮。
+  await expect(page.getByRole('button', { name: /回到最新/ })).toHaveCount(0);
   // 展开/收起是用户可控的，且原始协议字段一个都不出现在页面上。
   const bubble = page.locator('.message-ai .message-bubble').last();
   await expect(bubble).not.toContainText('toolCallId');
@@ -137,8 +155,6 @@ test('工具调用渲染成可读操作记录：没有原始 JSON、工具调用
   await calls.nth(0).locator('.tool-call-header').click();
   await expect(calls.nth(0).locator('.tool-call-code')).toHaveCount(0);
   await expect(calls.nth(1).locator('.tool-call-diff')).toBeVisible();
-  // 内容长高（图片缩略图、工具明细）不能把用户踢出「贴底」状态，凭空冒出回到底部按钮。
-  await expect(page.getByRole('button', { name: /回到最新/ })).toHaveCount(0);
 });
 
 test('生成中追加消息不打断用户向上翻历史，出现回到底部按钮', async ({ page }) => {
@@ -282,4 +298,147 @@ test('进度事件画出时间线，preview 事件给 iframe 加上版本参数'
   await expect(timeline).toContainText('打包');
   await expect(timeline).toContainText('预览就绪');
   await expect(page.locator('.preview-frame')).toHaveAttribute('src', /pv=1/);
+});
+
+test('生成中连接被切断：错误条说人话，时间线不再停在运行中的阶段', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  // 真写一段 SSE 后直接断开 socket：这就是浏览器看到的「响应体传输中断」（没有终态事件）。
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+    const write = (part: unknown) => response.write(`data: ${JSON.stringify(part)}\n\n`);
+    write({ type: 'start', messageId: 'broken-assistant' });
+    write({ type: 'text-start', id: 'broken-text' });
+    write({ type: 'text-delta', id: 'broken-text', delta: '先构建一版看看。' });
+    write({ type: 'data-progress', data: { stage: 'files', paths: ['index.html'], at: 1 }, transient: true });
+    write({ type: 'data-progress', data: { stage: 'install', status: 'started', ms: 0, at: 2 }, transient: true });
+    setTimeout(() => response.destroy(), 200);
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+  const port = (server.address() as AddressInfo).port;
+  let requestId = 'broken-stream-task';
+  await page.unroute('**/api/app/generation?*');
+  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: requestId, status: 'cancelled' } } }));
+  await page.route('**/api/app/chat/gen/code', route => {
+    requestId = route.request().postDataJSON().requestId;
+    return route.continue({ url: `http://127.0.0.1:${port}/stream` });
+  });
+  try {
+    await page.getByLabel('对话消息').fill('做一个带进度的页面');
+    await page.getByRole('button', { name: /^发\s*送$/ }).click();
+    const timeline = page.locator('.build-progress');
+    await expect(timeline).toContainText('安装依赖');
+    // 当前 requestId 的任务已 cancelled：提示按任务真实状态说话，不出现浏览器/流协议原文。
+    await expect(page.locator('.ant-alert-warning')).toHaveText('生成连接中断，任务已取消；可重新发送需求继续');
+    // 「时间线停在安装依赖 运行中」就是这个 bug 的可见症状：中断后不能还有运行中的阶段。
+    await expect(timeline.locator('.build-progress-running')).toHaveCount(0);
+    await expect(timeline.locator('.anticon-loading')).toHaveCount(0);
+    await expect(timeline.locator('.build-progress-item', { hasText: '安装依赖' })).toHaveClass(/build-progress-cancelled/);
+    await expect(timeline).not.toContainText('input stream');
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+test('流式阶段构建：进行中不显示失败，结果失败后诊断默认展开', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  let release: () => void = () => {};
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+    const write = (part: unknown) => response.write(`data: ${JSON.stringify(part)}\n\n`);
+    write({ type: 'start', messageId: 'milestone-assistant' });
+    write({ type: 'tool-input-start', toolCallId: 'call_milestone', toolName: 'buildPreview' });
+    write({ type: 'tool-input-available', toolCallId: 'call_milestone', toolName: 'buildPreview', input: { milestone: '预约页可用' } });
+    // 构建阶段每秒一个保活进度事件（ms 是已用时长）：流里有字节，时间线也能显示已用时长。
+    write({ type: 'data-progress', data: { stage: 'install', status: 'started', ms: 0, at: 3 }, transient: true });
+    write({ type: 'data-progress', data: { stage: 'install', status: 'started', ms: 4200, at: 5 }, transient: true });
+    void gate.then(() => {
+      write({ type: 'tool-output-available', toolCallId: 'call_milestone', output: { status: 'failed', milestone: '预约页可用', stage: 'typecheck', repairable: true, diagnostic: '阶段：类型检查\n错误摘要：TS2304 找不到名称 user' } });
+      write({ type: 'text-start', id: 'milestone-text' });
+      write({ type: 'text-delta', id: 'milestone-text', delta: '按诊断修好了。' });
+      write({ type: 'text-end', id: 'milestone-text' });
+      response.write('data: [DONE]\n\n');
+      response.end();
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+  const port = (server.address() as AddressInfo).port;
+  await page.route('**/api/app/chat/gen/code', route => route.continue({ url: `http://127.0.0.1:${port}/stream` }));
+  try {
+    await page.getByLabel('对话消息').fill('做一个预约页');
+    await page.getByRole('button', { name: /^发\s*送$/ }).click();
+    const card = page.locator('.message-ai .tool-call');
+    await expect(card.locator('.tool-call-title')).toHaveText('阶段构建：预约页可用');
+    // 进行中：显示「正在构建…」，不能有失败标签，也不能整卡变红。
+    await expect(card).toContainText('正在构建…');
+    await expect(card.locator('.tool-call-tag')).toHaveCount(0);
+    await expect(card).not.toHaveClass(/tool-call-error/);
+    // 保活事件让时间线显示安装依赖已用时长，而不是一个没有反馈的转圈。
+    await expect(page.locator('.build-progress-item', { hasText: '安装依赖' })).toContainText('已用 4.2s');
+    release();
+    // 结果失败：变红并带失败标签，诊断默认可见（不需要用户手动展开）。
+    await expect(card).toHaveClass(/tool-call-error/);
+    await expect(card.locator('.tool-call-tag')).toHaveText('失败');
+    await expect(card.locator('.tool-call-code')).toContainText('TS2304');
+    // 手动收起仍然有效。
+    await card.locator('.tool-call-header').click();
+    await expect(card.locator('.tool-call-code')).toHaveCount(0);
+  } finally {
+    release();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+test('断流后轮询先拿到 generating 再拿到 cancelled：时间线收尾且排队消息不发', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+    const write = (part: unknown) => response.write(`data: ${JSON.stringify(part)}\n\n`);
+    write({ type: 'start', messageId: 'poll-assistant' });
+    write({ type: 'data-progress', data: { stage: 'files', paths: ['src/main.ts'], at: 1 }, transient: true });
+    write({ type: 'data-progress', data: { stage: 'install', status: 'started', ms: 0, at: 2 }, transient: true });
+    setTimeout(() => response.destroy(), 200);
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+  const port = (server.address() as AddressInfo).port;
+  let taskStatus = 'cancelled';
+  let taskId = 'poll-existing-task';
+  let polls = 0;
+  let sends = 0;
+  await page.unroute('**/api/app/generation?*');
+  await page.route('**/api/app/generation?*', route => {
+    polls += 1;
+    return route.fulfill({ json: { code: 0, data: { id: taskId, status: taskStatus, error: taskStatus === 'cancelled' ? '生成已取消' : null } } });
+  });
+  await page.route('**/api/app/chat/gen/code', route => {
+    sends += 1;
+    taskId = route.request().postDataJSON().requestId;
+    return route.continue({ url: `http://127.0.0.1:${port}/stream` });
+  });
+  try {
+    // 加载时任务已结束，发送按钮可用；发送后任务仍在生成（断流期间的真实状态）。
+    await page.reload();
+    await expect(page.getByLabel('对话消息')).toBeEnabled();
+    taskStatus = 'generating';
+    await page.getByLabel('对话消息').fill('做一个带进度的页面');
+    await page.getByRole('button', { name: /^发\s*送$/ }).click();
+    const timeline = page.locator('.build-progress');
+    await expect(timeline).toContainText('安装依赖');
+    await expect(page.locator('.ant-alert-warning')).toContainText('生成连接中断');
+    // 轮询先只拿到 generating：进行中的阶段还在转，提示不说「已取消」。
+    await expect.poll(() => polls).toBeGreaterThan(1);
+    await expect(timeline.locator('.build-progress-running')).not.toHaveCount(0);
+    await page.getByLabel('对话消息').fill('排队的需求');
+    await page.getByLabel('对话消息').press('Enter');
+    await expect(page.locator('.composer-queue-chip')).toHaveCount(1);
+    // 轮询拿到 cancelled：进行中的阶段收尾，排队的消息不发出去。
+    taskStatus = 'cancelled';
+    await expect(timeline.locator('.build-progress-running')).toHaveCount(0);
+    await expect(timeline.locator('.build-progress-item', { hasText: '安装依赖' })).toHaveClass(/build-progress-cancelled/);
+    await expect(page.locator('.ant-alert-warning')).toContainText('任务已取消');
+    await expect(page.locator('.composer-queue-paused')).toContainText('已停止，队列已暂停');
+    expect(sends).toBe(1);
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
 });
