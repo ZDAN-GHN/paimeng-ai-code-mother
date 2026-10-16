@@ -25,14 +25,14 @@ v1 明确不做：图片用途选择（素材/参考）、裁剪标注、附件�
 
 | 接口 | 形态 | 说明 |
 | --- | --- | --- |
-| `POST app/attachment/upload` | multipart，字段 `images`（可重复） | 需要登录；返回 `{ attachments: AttachmentInfo[] }`；单请求缓冲上限 13 MiB，超限 413 |
-| `GET app/attachment?appId=&id=` | 二进制 | 仅创建者或管理员；`content-type` 为真实类型，`private, max-age=300`；非本人 403 |
+| `POST app/attachment/upload` | multipart，文本字段 `appId` + 文件字段 `images`（可重复，顺序即返回顺序） | 需要登录且为应用创建者（`getApp(appId, user, true)`，管理员不例外）；响应走 `success()` 包装：`{ code, data: { attachments: AttachmentInfo[] }, message }`；单请求缓冲上限 13 MiB，超限 413 |
+| `GET app/attachment?appId=&id=` | 二进制（不走 `success()` 包装） | 仅创建者；`content-type` 为真实类型，`private, max-age=300`；非本人 403、不存在 404 |
 | `POST app/chat/transcribe` | multipart，字段 `audio` | 需要登录；返回 `{ text }`；未配置语音别名时 409/40000「未配置语音转写模型」 |
 
 服务端模块边界（U1 提供、U2/U4 消费）：
 
 - `createImageAttachment({ userId, appId, originalName, data, signal })` → `AttachmentRow`
-- `readAttachmentBytes({ attachmentId, userId, appId })` → `{ bytes, mediaType, filename }`（鉴权失败抛 403/404）
+- `readAttachmentBytes({ attachmentId, userId, appId })` → `{ bytes, mediaType, filename }`（严格校验 `ownerUserId === userId` 且附件 appId 匹配；鉴权失败抛 403/404。不放宽给管理员——管理端看的是历史文本，不展示这些图片）
 - `attachmentViewUrl(appId, attachmentId)`（客户端拼 URL 用，服务端不返回临时链接）
 
 ## 单元
