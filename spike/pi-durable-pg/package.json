@@ -1,0 +1,25 @@
+{
+  "name": "pi-durable-pg-spike",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "Feasibility spike: a Postgres Storage backend for @earendil-works/pi-durable",
+  "scripts": {
+    "test:conformance": "vitest run",
+    "exp:basic": "node --experimental-strip-types experiments/01-basic.ts",
+    "exp:compaction": "node --experimental-strip-types experiments/02-compaction.ts",
+    "exp:crash": "node --experimental-strip-types experiments/03-crash-resume.ts"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "^1.3.0",
+    "@earendil-works/pi-ai": "^1.3.0",
+    "@earendil-works/pi-durable": "^1.3.0",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/pg": "^8.11.10",
+    "typescript": "^7.0.2",
+    "vitest": "^3.2.4"
+  }
+}

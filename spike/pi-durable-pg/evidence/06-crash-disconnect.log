@@ -1,0 +1,40 @@
+=== phase: crash ===
+[2026-10-17T17:27:14.762Z] t+   114ms pid=2239286 server:listening on 127.0.0.1:46457
+[2026-10-17T17:27:14.763Z] t+   115ms pid=2239286 client: POST /submit
+[2026-10-17T17:27:14.777Z] t+   129ms pid=2239286 server:submit admitted submission 8
+[2026-10-17T17:27:14.780Z] t+   132ms pid=2239286 client: SSE attach requested
+[2026-10-17T17:27:14.788Z] t+   140ms pid=2239286 server:sse attach
+[2026-10-17T17:27:16.691Z] t+  2043ms pid=2239286 client: waiting for tool start, ticks=20 entries=[]
+[2026-10-17T17:27:18.197Z] t+  3549ms pid=2239286 tool:start (silent from here)
+[2026-10-17T17:27:18.297Z] t+  3649ms pid=2239286 client: attached, tool running — SIGKILL the whole harness process (client still connected)
+EXIT=137
+=== phase: resume ===
+[2026-10-17T17:27:20.101Z] t+    28ms pid=2239445 server restart: inspection before resume {"scheduling":"paused","tasks":["pi.tool:ready","pi.generation:waiting"],"submissions":["8:placed"]}
+[2026-10-17T17:27:20.106Z] t+    33ms pid=2239445 server:listening on 127.0.0.1:39133
+[2026-10-17T17:27:20.115Z] t+    42ms pid=2239445 server restart: submission 8 status=placed
+[2026-10-17T17:27:22.121Z] t+  2048ms pid=2239445 server restart: status=placed
+[2026-10-17T17:27:24.122Z] t+  4049ms pid=2239445 server restart: status=placed
+[2026-10-17T17:27:26.124Z] t+  6051ms pid=2239445 server restart: status=done
+[2026-10-17T17:27:26.130Z] t+  6057ms pid=2239445 server:sse attach
+[2026-10-17T17:27:26.430Z] t+  6357ms pid=2239445 ASSERT B1 the interrupted tool never reran: PASS — tool events=[{"event":"start","at":1792258038197,"phase":"crash","line":"hello","pid":2239286}]
+[2026-10-17T17:27:26.430Z] t+  6357ms pid=2239445 ASSERT B2 the run settled done after the process death: PASS — status=done tasks=[]
+[2026-10-17T17:27:26.430Z] t+  6357ms pid=2239445 ASSERT B3 the resumed transcript carries the interrupted tool and a final answer: PASS — toolResults=["[{\"role\":\"toolResult\",\"toolCallId\":\"call_6c361ace61014591b68ee0a1\",\"toolName\":\"slow_tool\",\"content\":[{\"type\":\"text\",\"text\":\"<harness>\\n[error] Tool slow_tool was interrupted and may have partially run\\n</harness>\"}],\"isError\":true,\"timestamp\":1792258040119}]"] answers=["","DONE"]
+[2026-10-17T17:27:26.430Z] t+  6357ms pid=2239445 ASSERT B4 reconnect reads the same complete result: PASS — entries=7:pi.user,10:pi.system,11:pi.assistant,13:pi.tool-result,15:pi.assistant reconnectEntries=7:pi.user,10:pi.system,11:pi.assistant,13:pi.tool-result,15:pi.assistant
+[2026-10-17T17:27:26.431Z] t+  6358ms pid=2239445 reconnect snapshot excerpt: HTTP/1.1 200 OK
+content-type: text/event-stream
+cache-control: no-cache
+connection: keep-alive
+Date: Sat, 17 Oct 2026 17:27:26 GMT
+Transfer-Encoding: chunked
+
+1bf
+event: snapshot
+data={"entries":["7:pi.user","10:pi.system","11:pi.assistant","13:pi.tool-result","15:pi.assistant"],"answers":["","DONE"],"toolResults":["[{\"role\":\"toolResult\",\"toolCallId\":\"call_6c361ace61014591b68ee0a1\",\"toolName\":\"slow_tool\",\"content\":[{\"type\":\"text\",\"text\":\"<harness>\\n[error] Tool slow_tool was interrupted and may have partially run\\n</harness>\"}],\"isError\":true,\"timestamp\":1792258040119}]"]}
+
+
+
+[2026-10-17T17:27:26.431Z] t+  6358ms pid=2239445 tool log: [{"event":"start","at":1792258038197,"phase":"crash","line":"hello","pid":2239286}]
+[2026-10-17T17:27:26.431Z] t+  6358ms pid=2239445 answers: ["","DONE"]
+[2026-10-17T17:27:26.431Z] t+  6358ms pid=2239445 VERDICT: 4/4 assertions passed — PASS
+[2026-10-17T17:27:26.433Z] t+  6360ms pid=2239445 server:sse client gone — aborting only the view context
+EXIT=0

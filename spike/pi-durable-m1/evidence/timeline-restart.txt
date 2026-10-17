@@ -1,0 +1,16 @@
+
+=== restart run 2026-10-17T17:53:28.760Z ===
+[2026-10-17T17:53:28.767Z] harness phase 1: spawn
+[2026-10-17T17:53:29.180Z] harness phase 1 up pid=2278614
+[2026-10-17T17:53:29.262Z] submitted (http 202) {"submissionId":8}
+[2026-10-17T17:53:35.480Z] m1_wait running
+[2026-10-17T17:53:37.480Z] SIGKILL harness pid=2278614 8220ms after submit
+[2026-10-17T17:53:37.985Z] harness phase 2: spawn on the same storage
+[2026-10-17T17:53:38.393Z] harness phase 2 up pid=2278947
+[2026-10-17T17:53:42.409Z] resumed run settled 4929ms after the kill
+[2026-10-17T17:53:42.409Z] ASSERT R1 the interrupted tool never ran a second time: PASS — tools=[{"event":"start","name":"m1_wait","at":1792259615017,"pid":2278614,"ms":120000}]
+[2026-10-17T17:53:42.409Z] ASSERT R2 the run settled after the process death: PASS — tasks=[] submissions=[] pid=2278947
+[2026-10-17T17:53:42.410Z] ASSERT R3 the resumed transcript carries the interrupted tool and the final answer: PASS — toolResults=["<harness>\n[error] Tool m1_wait was interrupted and may have partially run\n</harness>"] answers=["","M1_RESTART_DONE"]
+[2026-10-17T17:53:45.424Z] ASSERT R4 a reconnect reads the same complete result: PASS — snapshot bytes=608
+[2026-10-17T17:53:45.489Z] final state: pid=2278947 entries=7:pi.user,10:pi.system,11:pi.assistant,13:pi.tool-result,15:pi.assistant
+[2026-10-17T17:53:45.489Z] VERDICT: 4/4 assertions passed — PASS

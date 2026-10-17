@@ -1,0 +1,9 @@
+[2026-10-17T17:52:22.475Z] pid=2276603 storage reset (M1_RESET=1)
+[2026-10-17T17:52:22.563Z] pid=2276603 harness open conversation=1 workspace=/home/zdan/github/zdan/.pi-worktrees/pi-durable-migration/spike/pi-durable-m1/src/../runtime-out/m1/workspace storage=postgres
+[2026-10-17T17:52:22.567Z] pid=2276603 listening on http://127.0.0.1:5599
+[2026-10-17T17:52:30.396Z] pid=2276603 submit admitted submission=8 requestId=disconnect-1792259550373
+[2026-10-17T17:52:30.409Z] pid=2276603 sse attach
+[2026-10-17T17:52:38.014Z] pid=2276603 sse client gone — aborting the view only
+[2026-10-17T17:53:01.189Z] pid=2276603 sse attach
+[2026-10-17T17:53:04.194Z] pid=2276603 sse client gone — aborting the view only
+[2026-10-17T17:53:27.643Z] pid=2276603 SIGTERM — closing

@@ -1,0 +1,8 @@
+[inspect before resume] {"scheduling":"paused","tasks":["pi.generation:ready"],"submissions":["8:input:placed"]}
+[resume] reacquired submission 8 {"conversationId":1,"requestId":"crash-model-1","type":"input","status":"placed","entry":7,"id":8}
+[resume] settled {"conversationId":1,"requestId":"crash-model-1","type":"input","status":"done","entry":7,"id":8,"answer":12}
+  entry 7 pi.user
+  entry 10 pi.system
+  entry 11 pi.assistant stop=["aborted"] text="Here is a 60-item list on durability, treated as a discipline that spans materials, systems, software, organizations, and people.\n\n1. Define durability before y"
+  entry 12 pi.assistant stop=["stop"] text="1. Durability is the capacity of a thing to resist wear, decay, and failure over time under real conditions of use.\n2. It is distinct from strength: a strong ma"
+[inspect after resume] {"scheduling":"running","tasks":[],"submissions":[]}

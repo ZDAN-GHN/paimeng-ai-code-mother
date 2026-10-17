@@ -1,0 +1,44 @@
+[2026-10-17T17:16:50.660Z] t+   113ms server:listening on 127.0.0.1:32939
+[2026-10-17T17:16:50.660Z] t+   113ms client-A: POST /submit
+[2026-10-17T17:16:50.674Z] t+   127ms server:submit admitted submission 8
+[2026-10-17T17:16:50.675Z] t+   128ms client-A: admitted {"submissionId":8} (http 202)
+[2026-10-17T17:16:50.676Z] t+   129ms client-A: TCP connected
+[2026-10-17T17:16:50.683Z] t+   136ms server:sse attach (clients=1)
+[2026-10-17T17:16:50.685Z] t+   138ms client-A: first SSE bytes (259 B)
+[2026-10-17T17:16:54.130Z] t+  3583ms tool:start (silent from here)
+[2026-10-17T17:16:54.185Z] t+  3638ms client-A: tool running; socket.destroy() now (sawToolEventOnWire=true, sseBytes=769)
+[2026-10-17T17:16:54.186Z] t+  3639ms client-A: socket destroyed at 1792257414186
+[2026-10-17T17:16:54.187Z] t+  3640ms server:sse client gone (clients=0) — aborting only the view context
+[2026-10-17T17:16:54.188Z] t+  3641ms server:sse watch closed reason="cancelled"
+[2026-10-17T17:16:54.188Z] t+  3641ms client-A: inspection right after disconnect {"scheduling":"running","tasks":["pi.generation:waiting:abortRequested=false","pi.tool:running:abortRequested=false"]}
+[2026-10-17T17:16:54.194Z] t+  3647ms client-A: (0 clients attached) status=placed entries=3
+[2026-10-17T17:16:56.196Z] t+  5649ms client-A: (0 clients attached) status=placed entries=3
+[2026-10-17T17:16:58.198Z] t+  7651ms client-A: (0 clients attached) status=placed entries=3
+[2026-10-17T17:17:00.200Z] t+  9653ms client-A: (0 clients attached) status=placed entries=3
+[2026-10-17T17:17:02.201Z] t+ 11654ms client-A: (0 clients attached) status=placed entries=3
+[2026-10-17T17:17:04.204Z] t+ 13657ms client-A: (0 clients attached) status=placed entries=3
+[2026-10-17T17:17:06.205Z] t+ 15658ms client-A: (0 clients attached) status=placed entries=3
+[2026-10-17T17:17:08.206Z] t+ 17659ms client-A: (0 clients attached) status=placed entries=3
+[2026-10-17T17:17:10.206Z] t+ 19659ms client-A: (0 clients attached) status=placed entries=3
+[2026-10-17T17:17:12.209Z] t+ 21662ms client-A: (0 clients attached) status=placed entries=3
+[2026-10-17T17:17:14.132Z] t+ 23585ms tool:end
+[2026-10-17T17:17:14.211Z] t+ 23664ms client-A: (0 clients attached) status=placed entries=4
+[2026-10-17T17:17:16.213Z] t+ 25666ms client-A: (0 clients attached) status=placed entries=4
+[2026-10-17T17:17:18.214Z] t+ 27667ms client-A: (0 clients attached) status=done entries=5
+[2026-10-17T17:17:18.215Z] t+ 27668ms client-B: reconnect GET /events
+[2026-10-17T17:17:18.216Z] t+ 27669ms server:sse attach (clients=1)
+[2026-10-17T17:17:19.717Z] t+ 29170ms server:sse client gone (clients=0) — aborting only the view context
+[2026-10-17T17:17:19.717Z] t+ 29170ms server:sse watch closed reason="cancelled"
+[2026-10-17T17:17:19.719Z] t+ 29172ms ASSERT A1 task continued after the disconnect: PASS — status=done toolEnd=1792257434132 disconnect=1792257414186 (end after disconnect: true)
+[2026-10-17T17:17:19.719Z] t+ 29172ms ASSERT A2 tool executed exactly once: PASS — tool events=["start","end"]
+[2026-10-17T17:17:19.719Z] t+ 29172ms ASSERT A3 no cancellation side effect: PASS — mid-run tasks=["pi.generation:waiting:abortRequested=false","pi.tool:running:abortRequested=false"] finalTasks=[] finalSubmissions=[] entries=7:pi.user,10:pi.system,11:pi.assistant,13:pi.tool-result,15:pi.assistant
+[2026-10-17T17:17:19.719Z] t+ 29172ms ASSERT A4 reconnect sees the complete result: PASS — entries=7:pi.user,10:pi.system,11:pi.assistant,13:pi.tool-result,15:pi.assistant answers=["","DONE"] reconnectEntries=7:pi.user,10:pi.system,11:pi.assistant,13:pi.tool-result,15:pi.assistant
+[2026-10-17T17:17:19.719Z] t+ 29172ms client-B snapshot excerpt: event: snapshot
+data={"entries":["7:pi.user","10:pi.system","11:pi.assistant","13:pi.tool-result","15:pi.assistant"],"tools":[],"liveChars":0,"answers":["","DONE"]}
+
+
+[2026-10-17T17:17:19.719Z] t+ 29172ms client-B revisions seen: 0
+[2026-10-17T17:17:19.719Z] t+ 29172ms final inspection: {"scheduling":"running","tasks":[],"submissions":[]}
+[2026-10-17T17:17:19.719Z] t+ 29172ms tool log: [{"event":"start","at":1792257414130,"line":"hello","pid":2223533},{"event":"end","at":1792257434132,"line":"hello","pid":2223533}]
+[2026-10-17T17:17:19.719Z] t+ 29172ms answers: ["","DONE"]
+[2026-10-17T17:17:19.720Z] t+ 29173ms VERDICT: 4/4 assertions passed — PASS

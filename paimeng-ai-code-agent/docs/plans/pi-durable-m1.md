@@ -1,0 +1,177 @@
+# Pi Durable 迁移 · M1：单写进程 + attach 骨架
+
+状态：**已跑通**（2026-10-18）。分支 `feat/pi-durable-migration`，基线 `main@d0c9797`。
+设计输入是 `docs/plans/pi-durable-data-model.md`（数据模型与删除清单），本文件只讲 M1 的链路与证据。
+
+## 0. 一句话结论
+
+一条最小可跑链路已经通了：浏览器 → Next.js（attach 客户端）→ 常驻 harness 进程（唯一 storage writer）→
+Postgres。真实模型的一次生成（模型 + 工具 + 结果落库）端到端跑通；**断开浏览器连接**后任务继续跑完、
+重连读到完整结果（5/5）；**`kill -9` harness** 后重启同一 storage 继续跑完（4/4）。M1 把「请求的
+AbortSignal 只能作用于 SSE 视图」这条限界固化进了代码与文档。
+
+## 1. 链路结构
+
+```
+浏览器（Chromium，Next 页面 /durable-m1）
+  │  GET  /durable-m1
+  │  POST /api/durable-m1/submit            GET /api/durable-m1/events  (SSE)
+  ▼
+Next.js 服务端（127.0.0.1:3100，attach 客户端；自己不打开 storage）
+  │  proxy → POST /submit                   proxy → GET /events（request.signal 只传给这一个）
+  ▼
+常驻 harness 进程（127.0.0.1:5599）
+  │  Harness.open(postgres) → harness.resume() → root.submit() / root.watch() / root.viewState()
+  ▼
+Postgres（127.0.0.1:55432，pg_advisory_lock 保证单写者）
+```
+
+物理文件：
+
+| 文件 | 作用 |
+| --- | --- |
+| `spike/pi-durable-m1/src/server.ts` | 常驻进程：Postgres storage、最小工具集（read / write / edit / m1_wait）、HTTP attach API |
+| `spike/pi-durable-m1/src/verify-{disconnect,restart,browser}.ts` | 三条验收脚本，全部经 Next.js 的 attach 通道 |
+| `paimeng-ai-code-agent/src/app/api/durable-m1/[...path]/route.ts` | Next 侧的 attach 代理；`request.signal` 只作用 `/events` |
+| `paimeng-ai-code-agent/src/app/durable-m1/page.tsx` | 最小前端：提交、订阅 SSE、渲染转录与 live partial、刷新从存储读回 |
+
+复用了 spike 的 `pg-storage.ts`（Postgres backend，25/25 一致性套件）、`harness.ts`、`pg.sh`、`run.sh`，
+没有新写 storage 或模型层。
+
+### 接口
+
+| 方法 | 路径 | 语义 |
+| --- | --- | --- |
+| POST | `/submit` | `{content, requestId}` → 202 `{submissionId}`。durable admission，立即返回；调用方不持有任务生命周期 |
+| GET | `/events` | SSE：一个 `snapshot` + 每次视图提交一个 `revision`；每秒一个 `: ping` 保活（约束 #40/#41） |
+| GET | `/state` | 只读：pid、scheduling、tasks（kind/state/abortRequested）、submissions、转录投影 + live |
+| GET | `/health` | 存活与 pid |
+
+**必须保留的限界**：客户端断连只允许中止 `GET /events` 的那一个 `watch`（`server.ts` 里
+`clientGone → viewer.abort()`）。提交路径和 durable 任务 context 不接触任何请求 socket，所以「浏览器
+掉线 = 取消生成」在结构上不可能发生。旧实现是反例：`paimeng-ai-code-agent/src/server/agent.ts:224`
+把 `req.signal` 接进生成 AbortController。
+
+## 2. 验收证据（真实运行，未跑本项目 E2E / 全量测试）
+
+Postgres 用 spike 的 `pg.sh`（一次性容器，验证后已 `stop`）；模型是 `oc-go/deepseek-v4.1-flash`
+（真实 HTTP 调用）；工具是真实文件系统写入。原始输出在 `spike/pi-durable-m1/evidence/`。
+
+### 2.1 一次真实生成端到端（浏览器）
+
+`evidence/browser.log`、`browser-streaming.png`、`browser-final.png`
+
+```
+W1 the browser saw streamed model output: PASS
+   distinct live lengths=[107,193,222] series=[34ms:0, 12116ms:107, 12465ms:193, 12766ms:222, 13068ms:0]
+W2 the browser saw the tool call and the final answer: PASS
+W3 a reload reads the same result back from storage: PASS
+W4 the run is recorded server-side: PASS
+   entries=[7:pi.user, 10:pi.system, 11:pi.assistant, 13:pi.tool-result, 15:pi.assistant, 17:pi.tool-result, 19:pi.assistant]
+VERDICT: 4/4 assertions passed — PASS
+```
+
+模型先 `write` 再 `read`（entry 13 / 17 两条 tool-result），最后给出中文长答并落在
+`pi.assistant` 条目里；刷新页面后转录仍完整（W3）。live 长度 107 → 193 → 222 是流式 partial 的
+真实增量，不是一次到位的最后答案。
+
+### 2.2 断开浏览器连接 → 任务继续跑完 → 重连读到完整结果
+
+`evidence/disconnect.log`（原始 TCP 直接 destroy 掉 SSE 连接）
+
+```
+submitted (http 202) {"submissionId":8}
+m1_wait running                       t+4.7s   （live tools=[{m1_wait, running}]）
+socket destroyed 7615ms after submit  t+7.7s   （SSE 已收 3468 字节）
+D1 the run is still live after the client died: PASS
+   tasks=[pi.generation:waiting:abortRequested=false, pi.tool:running:abortRequested=false]
+run settled 30780ms after submit, 23165ms after the disconnect
+D2 the run completed with no client attached: PASS   answers=["","M1_DISCONNECT_DONE"]
+D3 no cancellation side effect: PASS   entries=[7:pi.user,10:pi.system,11:pi.assistant,13:pi.tool-result,15:pi.assistant]
+D4 a reconnect reads the complete result: PASS   snapshot bytes=519
+D5 the tool ran exactly once: PASS
+VERDICT: 5/5 assertions passed — PASS
+```
+
+断连之后 23.2 秒任务自己跑完；断连瞬间 `abortRequested=false`；转录里没有取消痕迹；重连的
+snapshot 直接带回完整结果。
+
+### 2.3 `kill -9` harness → 重启 → 同 storage 继续跑完
+
+`evidence/restart.log`（脚本自己 spawn / SIGKILL / spawn，要求 5599 空闲）
+
+```
+harness phase 1 up pid=2278614
+submitted (http 202) {"submissionId":8}
+m1_wait running
+SIGKILL harness pid=2278614 8220ms after submit
+harness phase 2 up pid=2278947            （同一 Postgres，advisory lock 已随进程退出释放）
+resumed run settled 4929ms after the kill
+R1 the interrupted tool never ran a second time: PASS   tools=[start(m1_wait,ms=120000)]（无 end）
+R2 the run settled after the process death: PASS        tasks=[] submissions=[] pid=2278947
+R3 the resumed transcript carries the interrupted tool and the final answer: PASS
+   toolResults=["Tool m1_wait was interrupted and may have partially run"] answers=["","M1_RESTART_DONE"]
+R4 a reconnect reads the same complete result: PASS     snapshot bytes=608
+VERDICT: 4/4 assertions passed — PASS
+```
+
+工具不是 replay-safe，所以恢复时被记为 interrupted 而不是重跑；模型拿到 interrupted 结果后继续，
+4.9 秒内收尾。
+
+## 3. 遇到的坑
+
+1. **`pkill -f "src/server.ts"` 会杀掉自己的 shell**（exit 143）。项目 AGENTS.md 已写过这条；
+   这次改用 `/health` 返回的 pid 或 `ss -ltnp` 取端口占用者。
+2. **软链 node_modules 下 Turbopack dev 拒绝启动**（约束 #24）；Next 16 的 `next dev --webpack`
+   可以跑，这也是本 worktree 的使用方式。
+3. **`node_modules` 软链不被 `.gitignore` 的 `node_modules/` 目录规则忽略**（git 把软链当文件），
+   `git status` 一直显示未跟踪。写进 `.git/info/exclude` 解决；不要把它提交。
+4. **`next.config` 的 redirect**：`APP_ORIGIN` 是 `http://localhost:3000` 时，用 `127.0.0.1:3100`
+   访问页面会被 302 到 3000。脚本和浏览器统一用 `localhost:3100`。
+5. **Playwright 选择器把「登录」按钮当成发送按钮**：`button[type="button"]` 先命中 header 里的登录
+   按钮，页面被导航到 `/user/login`，于是「页面加载成功」但什么都不发生。改成专用 `data-testid`。
+6. **判据假阳性**：prompt 里含 marker（"reply exactly: X"），用户条目的回显也含 X，一开始
+   `transcript.includes(X)` 在提交后立刻为真。改成「marker 必须出现在工具结果之后」。
+7. **Next 页面会请求 `/api/user/get/login`**，被 `guardRequest` 的 origin 门禁挡成 403（本页不依赖它）。
+   M1 的 attach 路由刻意没有接鉴权，只监听本地；M2 接产品时必须补上。
+8. **模型很快**：`deepseek-v4.1-flash` 一次回复 4–12 秒，采样间隔必须 ≤300ms 才看得到 partial；
+   想稳定观察流式，prompt 要要求长文本输出。
+9. **单写者契约**：第二个 harness 进程会被 `pg_advisory_lock` 直接拒掉，所以 `verify-restart`
+   自己负责 spawn/kill，且要求 5599 空闲。
+
+## 4. 与产品代码的关系
+
+- 产品代码只新增了两个文件（`src/app/api/durable-m1/[...path]/route.ts`、`src/app/durable-m1/page.tsx`），
+  **没有改动现有生成链路**：`agent.ts` 仍是老的（含 `req.signal` 接进 AbortController、`prepareStep`
+  插话、memory-*、`generation-store` 租约）。M1 是并列的一条链路，不是替换。
+- attach 路由没有鉴权、只绑本地；页面是验证页，不进导航。
+- 提交、事件流、转录读回都走 pi-durable 的公开接口（`submit` / `watch` / `viewState` / `inspect`），
+  没有自己造 storage 语义。
+
+## 5. M2（生成循环替换）要改的清单
+
+1. **替换生成循环**：`src/server/agent.ts` 的 `chatResponse` 换成 pi-durable 的 `GenerationTask`
+   驱动；删掉 `req.signal → controller.abort`（`agent.ts:224`）、`prepareStep` 插话注入、
+   `POST app/chat/steer` 的 409 分支，改用 `submit({whenBusy:"steer"})` + `pi.inbox`。
+2. **删自研上下文层**：`memory-window/context/consolidate/serialize/types/step`、
+   `tool-transcript.ts`、`generation-store.ts` 的窗口/游标/租约部分（清单见 data-model §2）。
+3. **工具层**：把 `buildApp`、文件、web 访问注册成 pi-durable 工具；构建输出改走工具的
+   `api.output()` 流出去（顺带解决构建静默期的保活，见 data-model §2 末段）。
+4. **会话映射**：给 `app` 加 `conversation_id`，把「一个应用一条对话」落成真实外键；
+   ownership 用 `ownerless`（外部请求驱动的会话）。
+5. **鉴权**：attach 路由接 `requireUser` + app 归属校验；harness 仍只监听 127.0.0.1，Next 是唯一入口。
+6. **前端**：从 `data-progress` 事件改成订阅视图快照（`src/app/durable-m1/page.tsx` 可作起点），
+   `generation-feedback.ts` 的时间线归约大部分作废。
+7. **记账**：按 data-model §5 保留 `generation`（任务级）与 `generation_step`（逐轮）两张业务表，
+   由 hook 写入；用量块改读条目自带 usage + `pi.usage`。
+8. **限界回归测试**：把 D1–D5 三条断言搬进集成测试（提交后断开 SSE，断言任务继续、无取消痕迹、
+   重连拿到完整转录），防止 `req.signal` 进任务 context 的老 bug 复发。
+9. **部署形态**：harness 与 Next 分进程，「单写进程 + N 个 attach 客户端」；需要决定进程编排
+   （`scripts/dev.ts` 里拉起 harness？）与重启策略。
+10. **数据库迁移**：MySQL → Postgres（Drizzle `pg-core`、`?` 占位符、`ON DUPLICATE KEY`、
+    camelCase 列名），对话数据放弃、业务表重建，见 data-model §3/§6。
+
+## 6. 复现
+
+见 `spike/pi-durable-m1/README.md`（`pg.sh start` → `npm start` → `next dev --webpack -p 3100` →
+三条 `verify:*`）。原始输出、时间线、截图在 `spike/pi-durable-m1/evidence/`。

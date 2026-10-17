@@ -1,0 +1,17 @@
+{
+  "name": "pi-durable-m1",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "M1: resident pi-durable harness process + HTTP attach channel for the Next.js server",
+  "scripts": {
+    "start": "../pi-durable-pg/run.sh src/server.ts",
+    "verify:disconnect": "../pi-durable-pg/run.sh src/verify-disconnect.ts",
+    "verify:restart": "../pi-durable-pg/run.sh src/verify-restart.ts",
+    "verify:browser": "../pi-durable-pg/run.sh src/verify-browser.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,9 @@
+[inspect before resume] {"scheduling":"paused","tasks":["pi.tool:ready","pi.generation:waiting"],"submissions":["8:input:placed"]}
+[resume] reacquired submission 8 {"conversationId":1,"requestId":"crash-safe-1","type":"input","status":"placed","entry":7,"id":8}
+[resume] settled {"conversationId":1,"requestId":"crash-safe-1","type":"input","status":"done","entry":7,"id":8,"answer":15}
+  entry 7 pi.user
+  entry 10 pi.system
+  entry 11 pi.assistant stop=["toolUse"] text=""
+  entry 13 pi.tool-result [{"role":"toolResult","toolCallId":"call_00_ET_52t9VPeHeiaP155ne3Yb0027","toolName":"read_only_tool","content":[{"type":"text","text":"wrote: hello"}],"isError":false,"durationMs":1001,"timestamp":1792254590945}]
+  entry 15 pi.assistant stop=["stop"] text="Called `read_only_tool` once with `line='hello'` — it appended successfully."
+[inspect after resume] {"scheduling":"running","tasks":[],"submissions":[]}

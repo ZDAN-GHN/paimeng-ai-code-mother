@@ -1,0 +1,11 @@
+[2026-10-17T17:54:04.521Z] t+   899ms page loaded, EventSource connected
+[2026-10-17T17:54:04.580Z] t+   958ms clicked 发送
+[2026-10-17T17:54:16.710Z] t+ 13088ms mid-run screenshot at +12162ms (live text 107 chars)
+[2026-10-17T17:54:17.616Z] t+ 13994ms live length series=["34ms:0","12116ms:107","12465ms:193","12766ms:222","13068ms:0"]
+[2026-10-17T17:54:17.616Z] t+ 13994ms distinct non-empty live lengths=[107,193,222]
+[2026-10-17T17:54:17.640Z] t+ 14018ms ASSERT W1 the browser saw streamed model output: PASS — distinct live lengths=[107,193,222] series=["34ms:0","12116ms:107","12465ms:193","12766ms:222","13068ms:0"]
+[2026-10-17T17:54:17.640Z] t+ 14018ms ASSERT W2 the browser saw the tool call and the final answer: PASS — final transcript="\n模型：已创建 browser.txt，内容为一行：hello browser。\n\n持久化存储之所以重要，是因为内存中的数据一旦断电、刷新页面或进程崩溃就会消失，而用户的任务、聊天记录、身份凭证和浏览器会话状态往往需要跨越这些瞬间继续存在。没有持久化，用户每次重启都要从头开始，长任务无法延续，自动化代理也无法在中断后恢复上下文。持久化还让数据可以被审计、复现与共享，使并行运行的多个页面或工具之间能够协调。此外，可靠的落盘与恢复机制能在异常时提供一致性和容错，避免重复执行或数据损坏。因此，把关键状态写入磁盘或浏览器的持久层，是让系统可用、可信并可长期运行的基础。\n\nM1_BROWSER_DONE"
+[2026-10-17T17:54:18.386Z] t+ 14764ms after reload the transcript still carries the answer
+[2026-10-17T17:54:18.387Z] t+ 14765ms ASSERT W3 a reload reads the same result back from storage: PASS — marker present after reload
+[2026-10-17T17:54:18.418Z] t+ 14796ms ASSERT W4 the run is recorded server-side: PASS — entries=["7:pi.user","10:pi.system","11:pi.assistant","13:pi.tool-result","15:pi.assistant","17:pi.tool-result","19:pi.assistant"]
+[2026-10-17T17:54:18.418Z] t+ 14796ms VERDICT: 4/4 assertions passed — PASS
