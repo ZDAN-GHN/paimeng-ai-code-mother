@@ -26,7 +26,7 @@ import { withAbortSignal } from "@earendil-works/chord/context";
 import type { ConversationView, LiveState } from "@earendil-works/pi-durable";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-durable/tools";
-import { assistantText, context, entryText, modelRef, openPgHarness } from "../../pi-durable-pg/src/harness.ts";
+import { context, entryText, modelRef, openPgHarness } from "../../pi-durable-pg/src/harness.ts";
 import { resetPostgresStorage } from "../../pi-durable-pg/src/pg-storage.ts";
 
 const here = new URL(".", import.meta.url).pathname;

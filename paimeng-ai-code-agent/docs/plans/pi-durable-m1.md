@@ -148,7 +148,38 @@ VERDICT: 4/4 assertions passed — PASS
 - 提交、事件流、转录读回都走 pi-durable 的公开接口（`submit` / `watch` / `viewState` / `inspect`），
   没有自己造 storage 语义。
 
-## 5. M2（生成循环替换）要改的清单
+## 5. 未完成 / 待办
+
+M1 的四项目标（常驻进程、attach 通道、前端最小链路、三条验收）都已跑通，下面是不在 M1 范围内或
+没做到位的部分，按「下一步该做什么 → 从哪个文件开始」列出。
+
+### 5.1 M1 内部没做干净的
+
+1. **attach 路由没有鉴权**：`durable-m1/[...path]/route.ts` 谁都能调，也没有 app 归属校验。
+   → 接产品时加 `requireUser` 与 app 校验；harness 仍只监听 127.0.0.1。
+2. **不是集成测试**：三条验收是手工脚本（`spike/pi-durable-m1/src/verify-*.ts`），没进 `npm test`。
+   → 至少把 D1–D5 搬成一个集成用例（见 5.2 第 8 条）。
+3. **只验证了 root 会话（conversation 1）**：没有「一个应用一条 conversation」的映射，也没测多会话。
+   → 从 `app.conversation_id` 开始（data-model §4）。
+4. **工具集最小**：只有 `read` / `write` / `edit` / `m1_wait`，`buildApp`、联网、附件都没接。
+   → 从 `spike/pi-durable-m1/src/server.ts` 的 `defineExtension` 处接真实工具。
+5. **保活只在 SSE 里**：`/events` 每秒一个 `: ping`，但没有复现「构建容器的链路状态变化掐断连接」
+   那个真实场景（旧实现对应 `agent.ts` 的 `buildKeepAliveMs`、`http.ts` 的 `withHeartbeat`）。
+   → 给 `verify-disconnect.ts` 加一次 `docker run` 触发链路变化，断言连接仍在。
+6. **传输层断裂的重试没验证**：data-model §7.2 的未验证项（`settings.retry` / `settings.stream` 是否覆盖
+   「进程活着但连接被掐」）在 M1 里依然未验证；M1 证明的是「断连不影响任务」，不是「断连后仍拿得到模型回复」。
+   → 在 `verify-disconnect.ts` 的基础上，断连发生在模型请求进行中而非工具执行中。
+7. **单写者排他只在 pg spike 验证过**：M1 没写「第二个 harness 进程被拒」的用例，只靠 advisory lock 的既有行为。
+   → 在 `verify-restart.ts` 里加一条：phase 2 启动时第一个进程还活着，期望启动失败。
+8. **前端只做最小展示**：每次 revision 用全量快照覆盖状态（EventSource 自动重连会重发 snapshot，所以安全），
+   没有 lastEventId / 增量合并；没有断线提示之外的错误处理。
+   → 从 `src/app/durable-m1/page.tsx` 起步，接口换成产品聊天页需要的形态。
+9. **进程编排没做**：harness 和 Next 现在是手工两个终端；`scripts/dev.ts` 没接。
+   → 在 `paimeng-ai-code-agent/scripts/dev.ts` 里拉起 harness（并处理启动顺序与重试）。
+10. **`127.0.0.1` 访问会被 next.config 重定向到 `APP_ORIGIN`**（本机是 `http://localhost:3000`），
+    这次靠脚本改用 `localhost:3100` 绕开，没有改配置。
+
+### 5.2 M2：生成循环替换要改的清单
 
 1. **替换生成循环**：`src/server/agent.ts` 的 `chatResponse` 换成 pi-durable 的 `GenerationTask`
    驱动；删掉 `req.signal → controller.abort`（`agent.ts:224`）、`prepareStep` 插话注入、
