@@ -2,12 +2,30 @@
  * Minimal HTTP client shared by the M1 verification scripts. Every call goes
  * through the Next.js server (`/api/durable-m1/*`), which is the attach client;
  * nothing here talks to the harness process directly except reading its log.
+ *
+ * The attach route is owner-only (same permission level as `app/chat/gen/code`),
+ * so the scripts need a logged-in creator's session: set `M1_APP_ID` to one of the
+ * user's apps and `M1_COOKIE` to the `paimeng_ts_session=...` cookie pair.
  */
 import { get } from "node:http";
 import { connect, type Socket } from "node:net";
 
 export const baseUrl = (process.env.M1_BASE_URL ?? "http://localhost:3100").replace(/\/$/, "");
 export const startedAt = Date.now();
+
+const appId = process.env.M1_APP_ID ?? "";
+const sessionCookie = process.env.M1_COOKIE ?? "";
+if (!appId || !sessionCookie) {
+	console.warn("M1_APP_ID 或 M1_COOKIE 未设置：attach 路由仅创建者可访问，请求会返回 401/400");
+}
+
+function authQuery() {
+	return `appId=${encodeURIComponent(appId)}`;
+}
+
+function authHeaders(): Record<string, string> {
+	return sessionCookie ? { cookie: sessionCookie } : {};
+}
 
 export function log(message: string) {
 	console.log(`[${new Date().toISOString()}] t+${String(Date.now() - startedAt).padStart(6, " ")}ms ${message}`);
@@ -36,13 +54,13 @@ export async function submit(content: string, requestId: string): Promise<Respon
 	// Deliberately no AbortSignal: this is the durable admission, not a view.
 	return fetch(`${baseUrl}/api/durable-m1/submit`, {
 		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify({ content, requestId }),
+		headers: { "content-type": "application/json", ...authHeaders() },
+		body: JSON.stringify({ appId, content, requestId }),
 	});
 }
 
 export async function getState(): Promise<StateBody> {
-	const response = await fetch(`${baseUrl}/api/durable-m1/state`, { headers: { accept: "application/json" } });
+	const response = await fetch(`${baseUrl}/api/durable-m1/state?${authQuery()}`, { headers: { accept: "application/json", ...authHeaders() } });
 	if (!response.ok) throw new Error(`state ${response.status}`);
 	return (await response.json()) as StateBody;
 }
@@ -69,7 +87,7 @@ export async function waitForState(done: (state: StateBody) => boolean, timeoutM
  * the socket read.
  */
 export function attachSse(timeoutMs: number): { socket: Socket; text: () => string; firstByte: Promise<number> } {
-	const url = new URL(`${baseUrl}/api/durable-m1/events`);
+	const url = new URL(`${baseUrl}/api/durable-m1/events?${authQuery()}`);
 	const socket = connect(Number(url.port || 80), url.hostname);
 	let text = "";
 	let resolveFirst: (at: number) => void = () => undefined;
@@ -81,7 +99,7 @@ export function attachSse(timeoutMs: number): { socket: Socket; text: () => stri
 		text += chunk.toString("utf8");
 	});
 	socket.on("error", () => undefined);
-	socket.write(`GET ${url.pathname} HTTP/1.1\r\nHost: ${url.host}\r\nAccept: text/event-stream\r\nConnection: keep-alive\r\n\r\n`);
+	socket.write(`GET ${url.pathname}${url.search} HTTP/1.1\r\nHost: ${url.host}\r\nAccept: text/event-stream\r\nConnection: keep-alive\r\n${sessionCookie ? `Cookie: ${sessionCookie}\r\n` : ""}\r\n`);
 	const timer = setTimeout(() => socket.destroy(), timeoutMs);
 	socket.on("close", () => clearTimeout(timer));
 	return { socket, text: () => text, firstByte };
@@ -91,7 +109,7 @@ export function attachSse(timeoutMs: number): { socket: Socket; text: () => stri
 export function readSse(timeoutMs: number): Promise<string> {
 	return new Promise((resolve, reject) => {
 		let text = "";
-		const request = get(`${baseUrl}/api/durable-m1/events`, { headers: { accept: "text/event-stream" } }, (response) => {
+		const request = get(`${baseUrl}/api/durable-m1/events?${authQuery()}`, { headers: { accept: "text/event-stream", ...authHeaders() } }, (response) => {
 			response.on("data", (chunk) => (text += chunk.toString("utf8")));
 			response.on("error", () => undefined);
 			setTimeout(() => {

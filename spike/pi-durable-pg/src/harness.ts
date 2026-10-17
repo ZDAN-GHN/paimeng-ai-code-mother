@@ -17,6 +17,7 @@ import type { AssistantMessage, Message, Model } from "@earendil-works/pi-ai";
 import { createRegistry, Harness, type Extension, type HarnessOptions, type JsonObject } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
+import { fauxModelEnabled, fauxModelRef, fauxModels } from "./faux-model.ts";
 import { PostgresStorage } from "./pg-storage.ts";
 
 export const context: Context = BACKGROUND_CONTEXT;
@@ -55,6 +56,7 @@ function spikeModel(baseUrl: string, modelId: string, contextWindow = 1_000_000)
 }
 
 export function spikeModels(contextWindow = 1_000_000): MutableModels {
+	if (fauxModelEnabled()) return fauxModels();
 	const { baseUrl, apiKey, modelId } = spikeConfig();
 	const provider = createProvider<"openai-completions">({
 		id: "spike",
@@ -77,8 +79,9 @@ export function spikeModels(contextWindow = 1_000_000): MutableModels {
 	return models;
 }
 
-export function modelRef(modelId = spikeConfig().modelId) {
-	return { provider: "spike", modelId };
+export function modelRef(modelId?: string) {
+	if (fauxModelEnabled()) return fauxModelRef();
+	return { provider: "spike", modelId: modelId ?? spikeConfig().modelId };
 }
 
 export function spikeRegistry(options: { codingTools?: boolean; extensions?: readonly Extension[] } = {}) {

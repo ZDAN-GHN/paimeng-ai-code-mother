@@ -13,10 +13,14 @@ const entryLabels: Record<string, string> = { 'pi.user': '我', 'pi.assistant': 
 /**
  * M1 迁移页：浏览器只连 Next.js 的 attach 通道，真正持有存储与任务的是常驻 harness 进程。
  * 刷新或断线重连都会从存储里读回完整转录（EventSource 自己会重连）。
+ *
+ * attach 通道与 app/chat/gen/code 同级鉴权，所以页面必须带上 ?appId=<应用 ID>，
+ * 且当前登录用户要是该应用的创建者；M1 里 appId 只作授权主体，不参与会话路由。
  */
 export default function DurableM1Page() {
   const [prompt, setPrompt] = useState('用 write 工具写一个 hello.txt，内容是一行 hello M1，然后回复一句完成');
   const [frame, setFrame] = useState<Frame | null>(null);
+  const [appId, setAppId] = useState('');
   const [connection, setConnection] = useState<'connecting' | 'open' | 'closed'>('connecting');
   const [error, setError] = useState('');
   const source = useRef<EventSource | null>(null);
@@ -25,9 +29,10 @@ export default function DurableM1Page() {
     setFrame(JSON.parse(event.data) as Frame);
   }, []);
 
-  const connect = useCallback(() => {
+  const connect = useCallback((id: string) => {
     source.current?.close();
-    const es = new EventSource('/api/durable-m1/events');
+    if (!id) return;
+    const es = new EventSource(`/api/durable-m1/events?appId=${encodeURIComponent(id)}`);
     source.current = es;
     setConnection('connecting');
     es.addEventListener('snapshot', apply);
@@ -37,18 +42,20 @@ export default function DurableM1Page() {
   }, [apply]);
 
   useEffect(() => {
-    connect();
+    const id = new URLSearchParams(window.location.search).get('appId') ?? '';
+    setAppId(id);
+    connect(id);
     return () => source.current?.close();
   }, [connect]);
 
   async function send() {
     const content = prompt.trim();
-    if (!content) return;
+    if (!content || !appId) return;
     setError('');
     // 提交不带任何 AbortSignal：断连只能断掉视图，不能取消任务。
-    const response = await fetch('/api/durable-m1/submit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content, requestId: `page-${Date.now()}` }) });
+    const response = await fetch('/api/durable-m1/submit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ appId, content, requestId: `page-${Date.now()}` }) });
     if (!response.ok) setError(`提交失败：HTTP ${response.status}`);
-    connect();
+    connect(appId);
   }
 
   const busy = frame?.view.live.busy ?? false;
@@ -57,6 +64,7 @@ export default function DurableM1Page() {
   return <div className="page-container">
     <h2>M1 链路验证页</h2>
     <p>浏览器 → Next.js（attach 客户端）→ 常驻 harness 进程（唯一 writer）→ Postgres。</p>
+    {appId ? null : <p role="alert">请在 URL 上补 <code>?appId=&lt;应用 ID&gt;</code>，并以该应用创建者身份登录（attach 通道仅创建者可访问）。</p>}
     <p data-testid="m1-status">
       连接：{connection === 'open' ? '已连接' : connection === 'connecting' ? '连接中' : '已断开，浏览器会自动重连'} ·
       {busy ? ' 生成中' : ' 空闲'} · pid {frame?.pid ?? '-'} · 提交 {frame?.submissions.map((item) => `${item.id}:${item.status}`).join(',') || '无'}

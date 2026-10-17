@@ -28,6 +28,11 @@ function check(id: string, ok: boolean, detail: string) {
 }
 
 const base = (process.env.M1_BASE_URL ?? "http://localhost:3100").replace(/\/$/, "");
+const appId = process.env.M1_APP_ID ?? "";
+const sessionCookie = /^([^=]+)=(.*)$/.exec(process.env.M1_COOKIE ?? "");
+if (!appId || !sessionCookie) {
+	note("M1_APP_ID 或 M1_COOKIE 未设置：attach 路由仅创建者可访问，页面会显示鉴权失败");
+}
 const marker = "M1_BROWSER_DONE";
 /** The prompt echoes the marker, so require it after the tool result: only the model's answer is there. */
 function answered(view: string): boolean {
@@ -36,8 +41,13 @@ function answered(view: string): boolean {
 }
 
 const browser = await chromium.launch();
-const page = await browser.newPage();
-await page.goto(`${base}/durable-m1`, { waitUntil: "domcontentloaded" });
+const context = await browser.newContext();
+if (sessionCookie) {
+	const hostname = new URL(base).hostname;
+	await context.addCookies([{ name: sessionCookie[1]!, value: sessionCookie[2]!, domain: hostname, path: "/" }]);
+}
+const page = await context.newPage();
+await page.goto(`${base}/durable-m1?appId=${encodeURIComponent(appId)}`, { waitUntil: "domcontentloaded" });
 await page.waitForFunction(() => document.querySelector('[data-testid="m1-status"]')?.textContent?.includes("已连接"), undefined, { timeout: 30_000 });
 note("page loaded, EventSource connected");
 

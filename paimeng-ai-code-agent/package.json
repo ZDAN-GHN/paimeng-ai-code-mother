@@ -14,6 +14,7 @@
     "verify:infra": "tsx --env-file=.env scripts/verify-infra.ts",
     "dev": "next dev --hostname 127.0.0.1 --port 3000",
     "dev:all": "tsx scripts/dev.ts",
+  "dev:durable-m1": "tsx scripts/durable-m1-dev.ts",
     "build": "next build --webpack",
     "start": "next start --hostname 127.0.0.1 --port 3000",
     "type-check": "next typegen && tsc --noEmit",

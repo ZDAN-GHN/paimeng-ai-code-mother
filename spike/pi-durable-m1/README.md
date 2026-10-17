@@ -20,6 +20,16 @@ node_modules/              指向 ../pi-durable-pg/node_modules 的软链（tsc 
 
 ## 跑起来
 
+一条命令（推荐，从 app 目录）：
+
+```bash
+cd ../../paimeng-ai-code-agent
+npm run dev:durable-m1     # Postgres（已在跑就复用）+ harness + Next dev（3100），Ctrl-C 一起收尾
+# 浏览器用创建者身份登录，打开 http://localhost:3100/durable-m1?appId=<应用 ID>
+```
+
+手工分步：
+
 ```bash
 cd spike/pi-durable-pg && ./pg.sh start          # 127.0.0.1:55432 的一次性 Postgres
 
@@ -33,16 +43,21 @@ ln -sfn <主仓库>/paimeng-ai-code-agent/node_modules node_modules   # 本机 w
 # 浏览器访问 http://localhost:3100/durable-m1（用 localhost，127.0.0.1 会被 next.config 重定向到 APP_ORIGIN）
 ```
 
-验收脚本（各自通过 Next.js 的 attach 通道，不再直连 harness）：
+验收脚本（各自通过 Next.js 的 attach 通道，不再直连 harness）。attach 路由与 `app/chat/gen/code`
+同级鉴权，所以先要拿到**应用创建者**的登录态：浏览器登录后用 `M1_APP_ID`（该用户名下的一个应用）和
+`M1_COOKIE`（`paimeng_ts_session=...` 这一对）：
 
 ```bash
-npm run verify:disconnect    # 需要 harness + Next 都在跑
-M1_RESET=1 npm run verify:restart   # 脚本自己 spawn/kill/spawn harness，要求 5599 空闲
-npm run verify:browser       # 需要 harness + Next 都在跑
+M1_APP_ID=<应用 ID> M1_COOKIE='paimeng_ts_session=...' npm run verify:disconnect    # 需要 harness + Next 都在跑
+M1_APP_ID=... M1_COOKIE=... M1_RESET=1 npm run verify:restart   # 脚本自己 spawn/kill/spawn harness，要求 5599 空闲
+M1_APP_ID=... M1_COOKIE=... npm run verify:browser       # 需要 harness + Next 都在跑
 ```
 
-环境变量：`M1_PORT`（默认 5599）、`M1_BASE_URL`（默认 http://localhost:3100）、
-`M1_HARNESS_URL`（默认 http://127.0.0.1:5599）、`DURABLE_PG_URL`、`M1_RESET=1`（只在第一次
+不需要真实模型的回归测试在 app 目录的 `npm test` 里（用例位于 `paimeng-ai-code-agent/tests/integration/durable-m1/`）：
+没有 Postgres 时会打印原因并 skip。
+
+环境变量：`M1_PORT`（默认 5599）、`M1_BASE_URL`（默认 http://localhost:3100）、`M1_HARNESS_URL`（默认 http://127.0.0.1:5599）、
+`M1_APP_ID` / `M1_COOKIE`（attach 路由鉴权）、`DURABLE_PG_URL`、`M1_RESET=1`（只在第一次
 启动时清空 spike 库）、`M1_RUN_DIR` / `M1_WORKSPACE`。Next 侧：`DURABLE_HARNESS_URL`。
 
 ## HTTP attach API（harness 进程）
