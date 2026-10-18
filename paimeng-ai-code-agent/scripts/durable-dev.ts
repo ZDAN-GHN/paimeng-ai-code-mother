@@ -1,8 +1,7 @@
 /**
- * One command for the durable stack: Postgres (reused when it is already up),
+ * One command for the durable stack: the machine's own Postgres instance,
  * the resident harness process, and the Next.js dev server that attaches to it.
- * Ctrl-C stops the harness and Next; it also stops Postgres only when this
- * script started it, so an instance someone else launched keeps running.
+ * Ctrl-C stops the harness and Next.
  *
  *   npm run dev:durable
  *
@@ -20,7 +19,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { loadEnvFile } from 'node:process';
 
 const root = process.cwd();
@@ -30,8 +29,7 @@ try {
   console.warn('未找到 .env，直接使用当前环境变量');
 }
 
-const pgScript = resolve(root, 'scripts', 'durable-pg.sh');
-const pgUrl = process.env.DURABLE_PG_URL ?? 'postgres://spike:spike@127.0.0.1:55432/paimeng_agent';
+const pgUrl = process.env.DURABLE_PG_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/paimeng_agent';
 const harnessPort = Number(process.env.DURABLE_HARNESS_PORT ?? 5599);
 const appPort = Number(process.env.DURABLE_APP_PORT ?? 3100);
 const appOrigin = process.env.DURABLE_APP_ORIGIN ?? `http://localhost:${appPort}`;
@@ -70,7 +68,6 @@ function modelEnv(): Record<string, string> {
 
 const labels = { harness: '\u001b[36m', app: '\u001b[35m' } as const;
 const children = new Set<ChildProcess>();
-let startedPostgres = false;
 let closing = false;
 let cleanup: Promise<void> | undefined;
 
@@ -98,10 +95,6 @@ function stop(code: number) {
     const deadline = Date.now() + 5000;
     while ([...children].some(groupAlive) && Date.now() < deadline) await delay(100);
     for (const child of children) if (groupAlive(child)) signalGroup(child, 'SIGKILL');
-    if (startedPostgres) {
-      const stopPg = spawn(pgScript, ['stop'], { cwd: root, stdio: 'inherit' });
-      await new Promise<void>((done) => stopPg.once('exit', () => done()));
-    }
   })();
   return cleanup.then(() => { process.exitCode = code; });
 }
@@ -132,6 +125,7 @@ function start(label: keyof typeof labels, command: string, args: string[], opti
 
 for (const value of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(value, () => { void stop(130); });
 
+/** The instance is the machine's own container; this script never starts or stops it. */
 async function ensurePostgres() {
   const url = new URL(pgUrl);
   const host = url.hostname;
@@ -140,11 +134,7 @@ async function ensurePostgres() {
     console.log(`Postgres 已在 ${host}:${port}，直接复用`);
     return;
   }
-  console.log(`启动 Postgres（${pgScript} start）`);
-  const started = spawn(pgScript, ['start'], { cwd: root, stdio: 'inherit' });
-  const code = await new Promise<number | null>((done) => started.once('exit', (value) => done(value)));
-  if (code !== 0) throw new Error(`durable-pg.sh start 退出码 ${code}`);
-  startedPostgres = true;
+  throw new Error(`Postgres 未在 ${host}:${port} 监听。请先启动这台机器上的 Postgres 容器（zslm-postgres）再重跑；本脚本不会替你起数据库。`);
 }
 
 if (await portOpen('127.0.0.1', harnessPort)) {

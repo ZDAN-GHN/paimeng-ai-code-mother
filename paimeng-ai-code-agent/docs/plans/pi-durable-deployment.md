@@ -17,7 +17,8 @@
 `paimeng_app` 放产品业务表，`paimeng_agent` 放 pi-durable 存储表；测试库是 `paimeng_app_test` 与 `paimeng_agent_test`。
 `DURABLE_PG_URL` **不再回退到 `DATABASE_URL`**（否则会把存储表混进业务库，见 §1.5）。
 
-本机形态已收尾：Postgres 升为固定服务 `zslm-pg-paimeng`（compose 的 `postgres`，127.0.0.1:55432），
+本机形态已收尾：Postgres 是本机自己的容器 `zslm-postgres`（127.0.0.1:5432，同一个实例里四个 database）；
+2026-10-18 把四个库从临时容器 `zslm-pg-paimeng`（55432）整体搬过去并删掉了那个容器，连接串统一为 5432。
 harness 启动前清扫 `kill -9` 残留的 `paimeng-ts-build-*` 容器，提交入口有全局并发上限
 （`GENERATION_MAX_CONCURRENT`，默认 4，超限 429 拒绝），Next 重启后的状态分裂由接管对账修复（§5.2）。
 **要「上线」仍缺的是编排**（systemd 单元 / 命名卷 / 启动前置顺序、非零 `GENERATION_TIMEOUT_MS`、
@@ -31,7 +32,7 @@ harness 启动前清扫 `kill -9` 残留的 `paimeng-ts-build-*` 容器，提交
 | --- | --- | --- | --- |
 | harness（常驻） | `npm run durable:harness` → `src/server/durable/harness-server.ts` | pi-durable 存储的**唯一写者**（`pg_advisory_lock`）；`runtime/durable/workspace` 与 `runtime/durable/tools.jsonl`；harness 端自己起的构建容器 | `storage-pg.ts:312-334`（open + `pg_try_advisory_lock`，失败抛 `Postgres storage is already open by another process`）、`harness-server.ts:64-68`（runDir / port） |
 | Next（可多份） | `npm run dev` / `next start`，`src/app/api/[...path]/route.ts` | 无独占：产品业务表走行锁与 `generation_lease`，对话存储只经 `DURABLE_HARNESS_URL` 访问 | `config.ts:39-40`（`DURABLE_HARNESS_URL` 默认 `http://127.0.0.1:5599`）、`durable-engine.ts:118-136` |
-| Postgres 16 | 固定服务 `zslm-pg-paimeng`（compose 的 `postgres`，`npm run durable:pg -- start`） | 一个**实例**装两个 database：`paimeng_app` 放产品业务表（`migrations/001_initial.sql`，`app`、`app_user`、`generation*`、`model_*`…），`paimeng_agent` 放 pi-durable 存储表（`durable_*`、`conversations`、`entries`、`tasks`、`submissions`、`documents`、`document_revisions`、`record_ids`，由 storage 自己建）。测试库 `paimeng_app_test` / `paimeng_agent_test` 同实例 | `migrations/001_initial.sql`、`storage-pg.ts:177-189`、实测 `psql -d paimeng_app -c '\dt'` 13 张业务表 / `psql -d paimeng_agent -c '\dt'` 9 张存储表 |
+| Postgres 16 | 本机自己的容器 `zslm-postgres`（127.0.0.1:5432，**不归本仓库管**；`npm run durable:pg` 只连接、建缺的库并做健康检查） | 一个**实例**装两个 database：`paimeng_app` 放产品业务表（`migrations/001_initial.sql`，`app`、`app_user`、`generation*`、`model_*`…），`paimeng_agent` 放 pi-durable 存储表（`durable_*`、`conversations`、`entries`、`tasks`、`submissions`、`documents`、`document_revisions`、`record_ids`，由 storage 自己建）。测试库 `paimeng_app_test` / `paimeng_agent_test` 同实例 | `migrations/001_initial.sql`、`storage-pg.ts:177-189`、实测 `psql -d paimeng_app -c '\dt'` 13 张业务表 / `psql -d paimeng_agent -c '\dt'` 9 张存储表 |
 | Redis | `compose.yaml` 的 `redis` 服务 | 无（当前只做基础设施就绪验证） | `scripts/verify-infra.ts` |
 
 两条容易漏掉的**共享文件系统**约束：
@@ -49,7 +50,7 @@ harness 启动前清扫 `kill -9` 残留的 `paimeng-ts-build-*` 容器，提交
 | 来源 | 说法 |
 | --- | --- |
 | `.env.example:79` 注释 | 「harness 与产品共用 `DATABASE_URL`；只有在把会话存储指到别的库时才需要 `DURABLE_PG_URL`」 |
-| `scripts/durable-dev.ts:34`（实际 dev 行为） | `process.env.DURABLE_PG_URL ?? 'postgres://spike:spike@127.0.0.1:55432/durable'`，并且**总是**把它作为 `DURABLE_PG_URL` 注入 harness |
+| `scripts/durable-dev.ts:34`（当时的实际 dev 行为；2026-10-18 后默认改为 `…/paimeng_agent`） | `process.env.DURABLE_PG_URL ?? 'postgres://spike:spike@127.0.0.1:55432/durable'`，并且**总是**把它作为 `DURABLE_PG_URL` 注入 harness |
 | `src/server/durable/storage-pg.ts:58`（storage 自身的回退链） | `DURABLE_PG_URL ?? DATABASE_URL ?? '…/paimeng_ts'` |
 | `tests/integration/durable-m1/support.ts:18` | 默认 `…/paimeng_ts_test`（与产品测试表同库），允许 `DURABLE_PG_URL` 覆盖 |
 
@@ -71,14 +72,15 @@ harness 启动前清扫 `kill -9` 残留的 `paimeng-ts-build-*` 容器，提交
 ### 1.2 形态 A：本机开发（现状，已实测）
 
 ```
-Postgres（zslm-pg-paimeng，127.0.0.1:55432，paimeng_app + paimeng_agent，数据目录 runtime/durable-pg/pgdata）
+Postgres（本机容器 zslm-postgres，127.0.0.1:5432，paimeng_app + paimeng_agent，命名卷 zslm-postgres-data）
   ↑                                    ↑
 harness（127.0.0.1:5599）  ← attach ←  Next dev（127.0.0.1:3100, DURABLE_APP_PORT）
 ```
-`npm run dev:durable`（`scripts/durable-dev.ts`）= 端口探测 → 需要就 `durable-pg.sh start` → 起 harness
-（从 `~/.pi/agent/models.json` 的 `oc-go` 派生 `DURABLE_MODEL_*`，并固定注入 `DURABLE_PG_URL=…/durable`，
-都只进子进程）→ 轮询 `/health` 最多 30 s → 起 `next dev --webpack --port 3100`（`APP_ORIGIN=http://localhost:3100`）。
-Ctrl-C 对整个子进程组先 SIGTERM、5 s 后 SIGKILL；**只停自己起的** Postgres（`startedPostgres` 标志）。生产/预览/Redis 的常规命令见 README。
+`npm run dev:durable`（`scripts/durable-dev.ts`）= 端口探测 → Postgres 不在监听就直接报错退出（不再自己起数据库）
+→ 起 harness（从 `~/.pi/agent/models.json` 的 `oc-go` 派生 `DURABLE_MODEL_*`，并固定注入
+`DURABLE_PG_URL=…/paimeng_agent`，都只进子进程）→ 轮询 `/health` 最多 30 s → 起 `next dev --webpack --port 3100`
+（`APP_ORIGIN=http://localhost:3100`）。
+Ctrl-C 对整个子进程组先 SIGTERM、5 s 后 SIGKILL；数据库不属于本脚本，不会被停。生产/预览/Redis 的常规命令见 README。
 
 ### 1.3 形态 B：单机部署（推荐的第一目标）
 
@@ -86,7 +88,7 @@ Ctrl-C 对整个子进程组先 SIGTERM、5 s 后 SIGKILL；**只停自己起的
 
 | 单元 | 角色 | 关键配置 |
 | --- | --- | --- |
-| `postgres` | 数据库 | 固定容器/服务，**已经落地**为 compose 的 `postgres`（容器名 `zslm-pg-paimeng`，127.0.0.1:55432，健康检查 `pg_isready -U spike -d paimeng_agent`）；本机仍用宿主目录绑定挂载 `runtime/durable-pg/pgdata`，**生产要换命名卷**（理由见 §4 第 1 条）；四个 database：`paimeng_app`、`paimeng_app_test`、`paimeng_agent`、`paimeng_agent_test` |
+| `postgres` | 数据库 | **本机已是现成的容器** `zslm-postgres`（127.0.0.1:5432，命名卷 `zslm-postgres-data`，健康检查 `pg_isready -U postgres`）；本仓库不再提供 postgres 服务，部署时把「数据库就绪」当作前置条件而不是自己编排的单元；四个 database：`paimeng_app`、`paimeng_app_test`、`paimeng_agent`、`paimeng_agent_test` |
 | `paimeng-harness` | 唯一写者 | `Restart=always`、`WorkingDirectory=<repo>/paimeng-ai-code-agent`（runDir/runtime 是 cwd 相对）、`ExecStartPre=/usr/bin/npm run db:migrate`、完整产品 env + `DURABLE_*`、只绑 `127.0.0.1` |
 | `paimeng-app` | Next | `next build` + `next start`，`DURABLE_HARNESS_URL=http://127.0.0.1:5599`，`APP_ORIGIN`/`PREVIEW_ORIGIN` 由反代决定，`After=paimeng-harness.service` |
 | `paimeng-preview` | 预览静态服务 | 与 Next 同机（要读同一个 `runtime/`），端口取 `PREVIEW_ORIGIN` |
@@ -168,7 +170,7 @@ Postgres 就绪 (pg_isready)
 | 检查 | 现状 | 建议 |
 | --- | --- | --- |
 | harness 存活 | `GET /health` → `{ok:true,pid,conversationId}`（`harness-server.ts:605-608`） | 直接用作 liveness + readiness（resume 完成后才 listen，所以 listen 成功即就绪） |
-| Postgres | `npm run verify:infra` 探临时表读写，但**硬编码 `127.0.0.1:55432` 与账号 `spike`**（`scripts/verify-infra.ts:9-13`） | 部署版要么改脚本按 env 解析，要么只用 `pg_isready` + `/health` |
+| Postgres | `npm run verify:infra` 探临时表读写，主机、端口、账号、库名都从 `DATABASE_URL` 解析（2026-10-18 去掉了写死的 `127.0.0.1:55432` 与账号 `spike`，`scripts/verify-infra.ts`） | 部署版可以只用 `pg_isready` + `/health`；现有脚本在按 env 解析后也能直接用 |
 | Redis | `verify:infra` 硬编码 `127.0.0.1:6379` 无密码 | 同上 |
 | Next | **没有** `/health` 或 `/healthz` 路由（`src/app/api/` 下只有 `durable` 与 `[...path]`） | 需要的话新增一个只读路由（**这是新代码，属待决策项**）；临时替代：探一个只读接口（如 `GET app/get/vo`）的非 5xx |
 
@@ -223,10 +225,10 @@ Postgres 就绪 (pg_isready)
 ```bash
 cd paimeng-ai-code-agent
 # 业务库（产品表）。同实例两库，存储库必须单独再备一次（见 §1.1「存储落点」）
-docker exec zslm-pg-paimeng sh -c 'PGPASSWORD=spike pg_dump -U spike -d paimeng_app' \
+docker exec zslm-postgres pg_dump -U postgres -d paimeng_app \
   > runtime/backup/postgres-paimeng_app-$(date +%Y%m%d-%H%M%S).sql
 # 存储库（pi-durable 会话 / 任务 / 条目）
-docker exec zslm-pg-paimeng sh -c 'PGPASSWORD=spike pg_dump -U spike -d paimeng_agent' \
+docker exec zslm-postgres pg_dump -U postgres -d paimeng_agent \
   > runtime/backup/postgres-paimeng_agent-$(date +%Y%m%d-%H%M%S).sql
 # 旧 MySQL 归档（收尾时已做，见 §3.4）
 docker exec zslm-mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -uroot \
@@ -279,13 +281,57 @@ docker exec -it zslm-mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot 
    `scripts/import-mysql-rows.ts` 与 `package.json` 的 `db:import-mysql`、`mysql2` 依赖。
 3. 最后 `sudo rm -rf <main-repo>/paimeng-ai-code-agent/runtime/mysql`（普通账号删不掉，属主是容器用户）。
 
+### 3.5 搬到本机已有的容器（2026-10-18，已完成）
+
+上面 §4 第 1 条当时把产品库放在仓库自带的 `zslm-pg-paimeng`（127.0.0.1:55432，绑定挂载
+`runtime/durable-pg/pgdata`）。用户随后要求改用它自己一直在跑的容器 **`zslm-postgres`**
+（127.0.0.1:5432，镜像同样是 `pgvector/pgvector:pg16`，命名卷 `zslm-postgres-data`），
+于是四个库整体搬过去，临时容器 `zslm-pg-paimeng` 已删除，连接串统一为 5432。
+
+搬迁步骤（全部在 worktree 里执行，源库只读）：
+
+```bash
+# 0. 只读侦察：目标容器里只有 postgres/template0/template1，没有同名库，可以直接建
+docker exec zslm-postgres psql -U postgres -d postgres -c "select datname from pg_database order by 1"
+# 1. 建四个库（owner postgres）
+for db in paimeng_app paimeng_app_test paimeng_agent paimeng_agent_test; do
+  docker exec zslm-postgres psql -U postgres -d postgres -c "CREATE DATABASE $db"
+done
+# 2. 每个库 dump + restore（自定义格式；--no-owner/--no-acl 让对象归 postgres，目标端没有 spike 角色）
+for db in paimeng_app paimeng_app_test paimeng_agent paimeng_agent_test; do
+  docker exec zslm-pg-paimeng pg_dump -U spike -Fc -d "$db" \
+    | docker exec -i zslm-postgres pg_restore -U postgres --no-owner --no-acl --exit-on-error -d "$db"
+done
+```
+
+`pg_restore --exit-on-error` 四个库全部零错误。对照结果（源 55432 → 目标 5432）：
+
+| 库 | 表数 | 行数合计 | schema-only dump | data-only dump sha256 |
+| --- | --- | --- | --- | --- |
+| `paimeng_app` | 13 | 494 | 相同（仅 pg_dump 随机 `\restrict` 令牌不同） | 相同 |
+| `paimeng_app_test` | 22 | 129 | 相同 | 相同 |
+| `paimeng_agent` | 9 | 936 | 相同 | 相同 |
+| `paimeng_agent_test` | 9 | 19 | 相同 | 相同 |
+
+逐表行数完全一致（包括 harness 的 `conversations=14` / `entries=180` / `tasks=140` / `record_ids=431`）；
+序列值也一致（`paimeng_app.generation_step_id_seq=48`，其余库无序列）。目标容器原有对象未受影响：
+搬迁前后都只有 `postgres` / `template0` / `template1` 三个库与 `postgres` 一个登录角色，没有任何
+`paimeng_*` 同名库被覆盖。
+
+配置随之改的：`.env` / `.env.example` 连接串改 `127.0.0.1:5432`；`compose.yaml` 删掉 `postgres` 服务；
+`scripts/durable-pg.sh` 换成 `scripts/durable-pg.ts`（只**连接 + 建库 + 健康检查**，不再起停容器）；
+`verify-infra.ts` / `test-database.ts` 不再写死 55432 与账号；`durable-dev.ts` 不再自己起数据库（不在监听就报错退出）。
+旧数据目录 `runtime/durable-pg/pgdata/`（93 MB，PG 16 数据目录）**保留作备份**：需要回看时用当时的镜像把它挂回一个临时容器即可
+（`docker run --rm -p 127.0.0.1:55432:5432 -v $PWD/runtime/durable-pg/pgdata:/var/lib/postgresql/data pgvector/pgvector:pg16`）。
+确认新库无误后可以删掉它。
+
 ## 4. 收尾清单
 
 逐条写「做什么 / 怎么验 / 谁决定」。
 
 | # | 事项 | 做什么 | 怎么验 | 谁决定 |
 | --- | --- | --- | --- | --- |
-| 1 | **Postgres 变固定服务** | 把 `durable-pg.sh` 的一次性容器提升为 compose 服务（与 `redis` 同级）：命名卷替掉 `./runtime/durable-pg/pgdata` 绑定挂载、保留 `pg_isready` 健康检查、端口按部署决定，并按 §4 第 7 条选定的形态建库 | `docker compose up -d --wait postgres`；`npm run db:migrate`；`npm run dev:durable` 能复用同实例（`durable-dev.ts` 只在端口关闭时才 `start`） | 用户（端口/命名冲突：本机 5432 已被**别的**单元的 `zslm-postgres`（user=postgres, db=paimeng）占用，不能拿它当产品库） |
+| 1 | **Postgres 变本机实例上的库** | （原本的方案是把它提升为 compose 服务；**2026-10-18 用户改主意**：直接用本机已有的容器 `zslm-postgres`，四个库搬过去，见 §3.5。已完成） | `npm run durable:pg` 打印 5432 上四个库的版本与大小；`npm run db:migrate`；`npm run dev:durable` 直接复用（不再自己起数据库） | 用户（2026-10-18 已拍定：用本机 `zslm-postgres`，不用自建服务） |
 | 2 | **旧 MySQL 清理** | §3.4 的三步 | 每步后 `docker ps -a \| grep zslm-mysql`、`grep -rn "MYSQL_LEGACY_URL\|mysql2\|zslm-mysql" src scripts tests package.json compose.yaml .env.example` 无残留、`npx tsc --noEmit` 干净、受影响用例（`tests/integration/*` 里碰库的那批）过一次 | **用户**（删数据，不可逆） |
 | 3 | **`spike/` 残留** | ① `sudo rm -rf spike/pi-durable-pg/pgdata`（属主 uid 999，普通账号删不掉，m3 §7.3 已记录失败）；② `docker rm -f zslm-pg-durable-spike`（已 Exited 3 小时）；③ `spike/pi-durable-pg/node_modules` 是软链，随目录一起删 | `ls -ld spike/pi-durable-pg/pgdata` 不存在；`docker ps -a` 无 spike 容器；`npm run verify:m3` 仍能跑（它只走产品 HTTP 接口） | 用户（`sudo` 与删目录） |
 | 4 | **`noProgress` 结束路径验证** | 用种子破坏 + 桩模型：把 React 工程 `src/App.tsx` 种上类型错误（同 m3 §5.3）→ `DURABLE_FAUX_MODEL=1 npm run dev:durable` → 提交一次生成。桩模型不改文件，于是：第 1 轮构建失败 → 进修复轮（`snapshot` 从 null 变成第一轮的指纹）→ 修复轮模型仍不改文件 → 第 2 轮构建失败且指纹未变 → 走 `durable-engine.ts:513-521` 的 `noProgressMessage` 结束 | 生成行 `generation.status='failed'`、`stop_reason='verification-failed'`，错误文案是 `noProgressMessage` 的前缀；`generation_step` 里有 2 条 build 行（round 1、2）而不是 3 条；流里出现一次 `data-build repairing` 后不再出现 | 用户（是否要现在补这条证据） |
@@ -298,7 +344,7 @@ docker exec -it zslm-mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot 
 
 | # | 事项 | 结果 | 说明 |
 | --- | --- | --- | --- |
-| 1 | Postgres 变固定服务 | ✅ 完成 | `compose.yaml` 的 `postgres`（`zslm-pg-paimeng`，55432）+ `scripts/durable-pg.sh` 改走 compose；`npm run durable:pg -- start/stop/status/psql` 照旧 |
+| 1 | Postgres 变本机实例上的库 | ✅ 完成 | 两个阶段：先在 `compose.yaml` 里起了 `zslm-pg-paimeng`（55432），随后（2026-10-18）把四个库整体搬到用户自己的 `zslm-postgres`（5432）并删掉容器，见 §3.5；`npm run durable:pg` 现在只连接 + 建库 + 健康检查 |
 | 2 | 旧 MySQL 清理 | ⚠️ 只做了归档 | dump 到 `runtime/archive/mysql-…-20261018.sql.gz`（4.3 MB，gzip 校验通过）；**容器与 `runtime/mysql/` 未动**，删数据等用户点头（§3.4） |
 | 3 | `spike/` 残留 | ⛔ 未做 | 需 `sudo`（pgdata 属主是容器用户）且属用户数据，见 §8 |
 | 4 | `noProgress` 结束路径验证 | ✅ 完成 | 真实栈 + 桩模型 + 种入类型错误：`failed/verification-failed`，2 条 build 行（round 1/2），流里 1 次 `repairing`（§7.1） |
@@ -309,6 +355,7 @@ docker exec -it zslm-mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot 
 | 9 | **新增**：全局并发上限 | ✅ 完成 | `GENERATION_MAX_CONCURRENT`（默认 4）在 `beginGeneration` 的事务里用 advisory lock 串行计数，超限 429（§5.4） |
 | 10 | **新增**：孤儿构建容器清扫 | ✅ 完成 | harness 启动、`resume()` 之前清扫（§2.3） |
 | 11 | **新增**：重启后状态分裂修复 | ✅ 完成 | `generationStatus` / 启动时接管对账，续租 + 重新 attach（§5.2，证据 §7.3） |
+| 12 | **新增**：产品库搬到用户自己的容器 | ✅ 完成 | 四个库（schema + 数据）从 `zslm-pg-paimeng`（55432）搬到 `zslm-postgres`（5432）：逐表行数与 data-only dump 哈希全等，临时容器已 `docker rm -f`（§3.5） |
 
 ## 5. 风险与取舍
 
@@ -383,18 +430,19 @@ docker exec -it zslm-mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot 
 
 ```bash
 cd paimeng-ai-code-agent
-npm run durable:pg -- status                       # 现状：zslm-pg-paimeng，127.0.0.1:55432
-docker exec zslm-pg-paimeng psql -U spike -d postgres -tAc "select datname from pg_database order by 1"
-docker ps -a --format '{{.Names}}\t{{.Status}}'    # 现场：zslm-mysql / zslm-pg-paimeng / paimeng-ts-build-*
+npm run durable:pg -- status                       # 现状：本机容器 zslm-postgres，127.0.0.1:5432
+docker exec zslm-postgres psql -U postgres -d postgres -tAc "select datname from pg_database order by 1"
+docker ps -a --format '{{.Names}}\t{{.Status}}'    # 现场：zslm-mysql / zslm-postgres / zslm-redis / paimeng-ts-build-*
 npm run db:migrate && npm run verify:infra         # 迁移幂等 + 基础设施就绪
 npm run durable:harness                            # 手工起 harness（需自己给 DURABLE_MODEL_*）
-npm run dev:durable                                # 一条命令起 Postgres + harness + Next(3100)
+npm run dev:durable                                # 一条命令起 harness + Next(3100)
 ```
 
 ## 7. 收尾证据（2026-10-18，本机、真实进程与真实容器）
 
-三条都跑在改名后的库上（`paimeng_app` + `paimeng_agent`，Postgres 固定服务 `zslm-pg-paimeng`），
-用 `DURABLE_FAUX_MODEL=1` 的确定性桩模型 + 真实容器构建。脚本是 `/tmp` 下的一次性验收脚本（未入仓）。
+三条都跑在改名后的库上（`paimeng_app` + `paimeng_agent`，当时在 `zslm-pg-paimeng`；2026-10-18 已整体搬到
+`zslm-postgres`，见 §3.5），用 `DURABLE_FAUX_MODEL=1` 的确定性桩模型 + 真实容器构建。脚本是 `/tmp` 下的
+一次性验收脚本（未入仓）。
 
 ### 7.1 `noProgress` 结束路径（收尾清单第 4 条）
 
@@ -437,19 +485,21 @@ npm run dev:durable                                # 一条命令起 Postgres + 
 
 ## 8. 剩余待办（逐条：做什么 / 从哪个文件开始）
 
-1. **全量测试与 E2E**：`npm test`（需先 `npm run durable:pg -- start` 与 `npm run db:test:setup`）与
+1. **全量测试与 E2E**：`npm test`（需先确认本机 Postgres 在跑（`npm run durable:pg`）并跑 `npm run db:test:setup`）与
    `npm run test:e2e:isolated`。本步只跑了受影响范围（`tests/integration`、`tests/test-database-url.test.ts`）与两条静态门禁；
    从 `paimeng-ai-code-agent` 目录开始，串行跑（约束 #26/#27）。
 2. **`spike/` 残留清理**（需 `sudo`，属用户数据）：`sudo rm -rf spike/pi-durable-pg/pgdata`、
    `docker rm -f zslm-pg-durable-spike`；`spike/pi-durable-m1` 的手工验收脚本仍写死 `3100`/`5599`，
    若要重跑先改 `spike/pi-durable-m1/src/product.ts` 的默认地址。
 3. **旧 MySQL 删数据**（需用户点头）：按 §3.4 的第 1-3 步；归档已在 `runtime/archive/`。
-4. **生产编排**（不涉及业务代码）：systemd/compose 单元与启动顺序（§1.3）、**命名卷替掉 host bind mount**（§4 第 1 条）、
-   `ExecStartPre=npm run db:migrate`、非零 `GENERATION_TIMEOUT_MS`、可选 `app/health` 路由（§2.2），
-   先从 `compose.yaml` 与 `scripts/durable-pg.sh` 开始。
+4. **生产编排**（不涉及业务代码）：systemd/compose 单元与启动顺序（§1.3）、把「数据库就绪」当外部前置条件
+   并在 `ExecStartPre` 里 `npm run db:migrate`、非零 `GENERATION_TIMEOUT_MS`、可选 `app/health` 路由（§2.2）。
+   2026-10-18 后本仓库已不自带 Postgres，所以「命名卷替掉 host bind mount」不再适用于本仓库。
 5. **429 的界面提示**：`GENERATION_MAX_CONCURRENT` 超限时前端只拿到接口文案，没有专门的提示条；
    从 `src/components/chat/` 的错误展示开始。
 6. **备份落到仓库外**：`runtime/` 是 gitignored，§3.2/§3.4 的两个归档（Postgres 与 MySQL）在清理 worktree 前
    要移到仓库外的持久位置。
 7. **未入仓的验收脚本**：§7 用的两个一次性脚本在 `/tmp`（`evidence.mts`、`adopt-evidence.mts` + `adopt-run.sh`），
    没进仓库；要长期保留就照 `spike/pi-durable-m1/src/verify-*.ts` 的形式放进 `spike/pi-durable-m1/src/`。
+8. **删旧数据目录**（需用户点头）：`runtime/durable-pg/pgdata/`（临时容器的数据目录，属主是容器用户，需 `sudo`）
+   已是过期备份，确认新库稳定后可删，见 §3.5。

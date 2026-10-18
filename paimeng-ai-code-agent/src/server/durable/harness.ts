@@ -12,7 +12,9 @@
  *   DURABLE_PG_URL          Postgres connection string (defaults to the local dev instance)
  *
  * `DURABLE_FAUX_MODEL=1` swaps the network model for the deterministic stub in
- * `faux-model.ts`; regression tests use it and never need credentials.
+ * `faux-model.ts`; `DURABLE_FAUX_FIXTURE=1` swaps it for the scripted fixture in
+ * `faux-fixture.ts` (same behaviour as the product's in-process fixture). Regression
+ * tests use both and never need credentials.
  */
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -24,6 +26,7 @@ import { createRegistry, Harness, type Extension, type HarnessOptions, type Json
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { fauxModelEnabled, fauxModelRef, fauxModels } from "./faux-model";
+import { fauxFixtureEnabled, fauxFixtureModels, fauxFixtureRef } from "./faux-fixture";
 import { PostgresStorage } from "./storage-pg";
 
 export const context: Context = BACKGROUND_CONTEXT;
@@ -64,6 +67,7 @@ function durableModel(baseUrl: string, modelId: string, contextWindow = 1_000_00
 }
 
 export function durableModels(contextWindow = 1_000_000): MutableModels {
+	if (fauxFixtureEnabled()) return fauxFixtureModels();
 	if (fauxModelEnabled()) return fauxModels();
 	const { baseUrl, apiKey, modelId } = modelConfig();
 	const provider = createProvider<"openai-completions">({
@@ -88,6 +92,7 @@ export function durableModels(contextWindow = 1_000_000): MutableModels {
 }
 
 export function modelRef(modelId?: string) {
+	if (fauxFixtureEnabled()) return fauxFixtureRef();
 	if (fauxModelEnabled()) return fauxModelRef();
 	return { provider: PROVIDER_ID, modelId: modelId ?? modelConfig().modelId };
 }

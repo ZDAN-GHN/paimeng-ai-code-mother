@@ -1,22 +1,7 @@
 name: paimeng-ts-refactor
+# 本仓库不再自带 Postgres：产品库与 harness 存储都放在这台机器已有的 Postgres 16 实例里
+# （127.0.0.1:5432，四个 database，连接串在 .env，见 README「使用本机自己的数据库容器」）。
 services:
-  # 固定 Postgres 16 服务（本机一次性容器的升级版）。端口固定 55432，避开 zslm-postgres 的 5432。
-  # 数据目录沿用 dev 的绑定挂载以保留已迁移的数据；credentials 只是本机丢弃式取值。
-  postgres:
-    container_name: zslm-pg-paimeng
-    image: pgvector/pgvector:pg16
-    restart: unless-stopped
-    ports: ["127.0.0.1:55432:5432"]
-    environment:
-      POSTGRES_USER: spike
-      POSTGRES_PASSWORD: spike
-      POSTGRES_DB: paimeng_agent
-    volumes: ["./runtime/durable-pg/pgdata:/var/lib/postgresql/data"]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U spike -d paimeng_agent"]
-      interval: 3s
-      timeout: 3s
-      retries: 30
   mysql:
     container_name: zslm-mysql
     image: mysql:8.0.46

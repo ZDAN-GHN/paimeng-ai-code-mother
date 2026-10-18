@@ -7,7 +7,7 @@ const blankAsUnset = (value: unknown) => (typeof value === 'string' && value.tri
 const csv = (value: string) => value.split(',').map(part => part.trim()).filter(Boolean);
 const booleanFlag = (value: unknown) => { const text = blankAsUnset(value); return typeof text === 'string' ? text.trim().toLowerCase() : text; };
 const environment = z.object({
-  DATABASE_URL:z.string().default('postgres://spike:spike@127.0.0.1:55432/paimeng_app'),
+  DATABASE_URL:z.string().default('postgres://postgres:postgres@127.0.0.1:5432/paimeng_app'),
   APP_ORIGIN:z.url().default('http://localhost:3000'),
   PREVIEW_ORIGIN:z.url().default('http://127.0.0.1:3001'),
   AI_BASE_URL:z.url().default('https://api.openai.com/v1'),

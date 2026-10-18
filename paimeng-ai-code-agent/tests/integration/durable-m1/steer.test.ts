@@ -9,7 +9,7 @@
  *   **插话 user** → 最终 assistant，不会挤在回复前，也不会插到工具调用之前；
  * - 插话真的进了模型上下文（`/context` 的最后一次模型调用里能看到它）。
  *
- * 需要 Postgres（55432）；没有时打印原因并 skip。
+ * 需要 Postgres（127.0.0.1:5432）；没有时打印原因并 skip。
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

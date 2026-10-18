@@ -8,7 +8,7 @@
  * - 图片块真的进了模型上下文（`/context` 里该条 user 消息 images = 1）；
  * - 非法 content 会被信任边界拒绝（400），不会静默当成文本或崩溃。
  *
- * 需要 Postgres（55432）；没有时打印原因并 skip。
+ * 需要 Postgres（127.0.0.1:5432）；没有时打印原因并 skip。
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

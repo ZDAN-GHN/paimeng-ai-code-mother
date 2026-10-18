@@ -16,7 +16,7 @@ export const productRoot = process.cwd();
 const harnessEntry = resolve(productRoot, 'src', 'server', 'durable', 'harness-server.ts');
 // The storage lives in its own test database (`paimeng_agent_test`), beside the product test database
 // (`paimeng_app_test`); its tables (`durable_*`, `entries`, …) are created by the storage itself.
-export const postgresUrl = process.env.DURABLE_PG_URL ?? 'postgres://spike:spike@127.0.0.1:55432/paimeng_agent_test';
+export const postgresUrl = process.env.DURABLE_PG_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/paimeng_agent_test';
 
 /** The harness runs on the product's tsx, which resolves the product's `@/` alias. */
 export function harnessAvailable(): boolean {

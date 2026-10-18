@@ -10,7 +10,7 @@
  * - 同一条会话的第二次提交，模型输入里能看到第一次的工具结果 —— 这正是「不再从零探索」的关键，
  *   如果哪天生成入口改成每轮新建会话，这条用例会失败。
  *
- * 需要 Postgres（55432）；没有时打印原因并 skip。
+ * 需要 Postgres（127.0.0.1:5432）；没有时打印原因并 skip。
  */
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

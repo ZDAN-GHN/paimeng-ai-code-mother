@@ -6,8 +6,6 @@ import pg from 'pg';
 
 const database = new URL(process.env.DATABASE_URL ?? '');
 assert.equal(database.protocol, 'postgres:');
-assert.equal(database.hostname, '127.0.0.1');
-assert.equal(database.port, '55432');
 assert.match(database.pathname, /^\/paimeng_app(?:_test)?$/);
 const connection = new pg.Client({ connectionString: database.href });
 await connection.connect();
@@ -15,12 +13,12 @@ try {
   const name = await connection.query<{ name: string }>('SELECT current_database() AS name');
   assert.equal(name.rows[0].name, database.pathname.slice(1));
   const account = await connection.query<{ account: string }>('SELECT current_user AS account');
-  assert.equal(account.rows[0].account, 'spike');
+  assert.equal(account.rows[0].account, decodeURIComponent(database.username));
   await connection.query('CREATE TEMPORARY TABLE infra_probe(value VARCHAR(64))');
   await connection.query('INSERT INTO infra_probe(value) VALUES ($1)', ['local-development-ready']);
   const values = await connection.query<{ value: string }>('SELECT value FROM infra_probe');
   assert.equal(values.rows[0].value, 'local-development-ready');
-  console.log('VERIFIED Postgres on 127.0.0.1:55432 with a temporary read/write table');
+  console.log(`VERIFIED Postgres on ${database.hostname}:${database.port || 5432} with a temporary read/write table`);
 } finally { await connection.end(); }
 
 const redis = new URL(process.env.REDIS_URL ?? '');

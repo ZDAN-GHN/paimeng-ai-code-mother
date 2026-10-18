@@ -16,7 +16,7 @@
     "dev:all": "tsx scripts/dev.ts",
     "dev:durable": "tsx scripts/durable-dev.ts",
     "durable:harness": "node --import tsx --conditions=react-server src/server/durable/harness-server.ts",
-    "durable:pg": "bash scripts/durable-pg.sh",
+    "durable:pg": "tsx --env-file=.env scripts/durable-pg.ts",
     "build": "next build --webpack",
     "start": "next start --hostname 127.0.0.1 --port 3000",
     "type-check": "next typegen && tsc --noEmit",

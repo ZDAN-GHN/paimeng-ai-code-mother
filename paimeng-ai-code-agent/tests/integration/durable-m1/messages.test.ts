@@ -8,7 +8,7 @@
  * - `/entries` 追加展示型条目（`app.assistant`），不进入模型上下文；
  * - `/messages` 按从旧到新的顺序返回带数据的 `app.*` 条目，供 `app/messages` 读回。
  *
- * 需要 Postgres（55432）；没有时打印原因并 skip。
+ * 需要 Postgres（127.0.0.1:5432）；没有时打印原因并 skip。
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

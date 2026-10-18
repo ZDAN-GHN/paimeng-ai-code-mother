@@ -3,7 +3,7 @@ import { mkdir, rm, readFile, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path';
 import { buildApp, buildIsCurrent, deployApp, downloadApp, hasPreview, loadBuildState, saveBuildState, sourceDigest, workspace, deployedUrl } from '@/server/artifacts';
 import { writeProjectFile, deleteProjectFile, ensureWorkspace } from '@/server/workspace';
-import { fixtureFiles } from '@/server/fixture-model';
+import { fixtureFiles } from '@/server/fixture-content';
 import { getConfig } from '@/server/config';
 const html={id:String(Date.now()+1),codeGenType:'html' as const};const vue={id:String(Date.now()+2),codeGenType:'vue_project' as const};let published='';
 afterAll(async()=>{await rm(workspace(html),{recursive:true,force:true});await rm(workspace(vue),{recursive:true,force:true});if(published)await rm(join(getConfig().runtimeRoot,'deploy',published),{recursive:true,force:true});});

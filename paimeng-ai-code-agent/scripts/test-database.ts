@@ -4,8 +4,6 @@ import pg from 'pg';
 const url = new URL(process.env.DATABASE_URL ?? '');
 assert.equal(url.protocol, 'postgres:');
 assert.equal(url.hostname, '127.0.0.1', 'Test setup only targets the dedicated local Postgres');
-assert.equal(url.port, '55432');
-assert.equal(url.username, 'spike');
 assert.match(url.pathname, /^\/paimeng_app(?:_test)?$/);
 url.pathname = '/paimeng_app_test';
 // 建库要连到维护库；测试库与开发库同一个实例、不同 database。

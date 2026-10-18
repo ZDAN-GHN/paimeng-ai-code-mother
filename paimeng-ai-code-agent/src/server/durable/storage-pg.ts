@@ -60,7 +60,7 @@ import pg from "pg";
  * business database.
  */
 function defaultPgUrl(): string {
-	return process.env.DURABLE_PG_URL ?? "postgres://spike:spike@127.0.0.1:55432/paimeng_agent";
+	return process.env.DURABLE_PG_URL ?? "postgres://postgres:postgres@127.0.0.1:5432/paimeng_agent";
 }
 
 const bigintAsNumber = { getTypeParser: (oid: number, format?: "text" | "binary") => (oid === 20 ? (value: string) => Number(value) : pg.types.getTypeParser(oid, format)) };
@@ -280,7 +280,7 @@ const MIGRATIONS: readonly { version: number; statements: readonly string[] }[] 
 ];
 
 export type PostgresStorageOptions = {
-	/** Connection string; defaults to the spike's local instance. */
+	/** Connection string; defaults to this machine's own local instance. */
 	readonly connectionString?: string;
 	/** Take the session advisory lock at open. Default true. */
 	readonly lock?: boolean;

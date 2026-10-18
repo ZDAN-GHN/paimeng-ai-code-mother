@@ -8,7 +8,7 @@
  * - `WEB_ACCESS_ENABLED=1` 时，注册 webSearch / readWebPage / searchImages / importImage，
  *   且每个工具都声明了 replay 策略（读=可重跑，importImage=不可重跑）。
  *
- * 需要 Postgres（55432）；没有时打印原因并 skip。
+ * 需要 Postgres（127.0.0.1:5432）；没有时打印原因并 skip。
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

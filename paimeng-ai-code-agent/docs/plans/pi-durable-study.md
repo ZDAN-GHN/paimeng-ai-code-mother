@@ -62,7 +62,58 @@ AbortController，`ts_message` / `ts_generation` / `ts_generation_lease` / `ts_a
 | **Extension / Registry** | 具名的工具+提示词段+钩子+任务包；Registry 是进程装了哪些 | 会话里**存的是名字**，代码卸载后只是暂时不生效；同名后装的替换先装的 |
 | **Agent** | 一条会话跑什么：模型、思考等级、扩展、工具、指令、cwd | 存进 `pi.agent`；每次使用才对 registry 解析；改配置从下一次请求生效 |
 
-两个容易混的词：
+### 2.1 转录（transcript）是什么
+
+**先排歧义**：这里的 transcript **不是语音转写**（那是 `src/server/speech.ts` 的 transcribe），
+而是「会话记录 / 逐字记录」（法庭、会议记录也叫 transcript）。
+
+一条 Conversation 就是一份转录：**按时间追加、不可修改的 entry 列表**。它不等于「聊天消息列表」，三点不同：
+
+1. **一条 entry 有两个通道**：`model`（给模型的 messages）与 `data`（给 UI 的 JSON）。同一件事，
+   两个读者看到不同形状，不用再为「模型可读」和「界面可读」各存一份。
+2. **里面不只有聊天**：`pi.system`（系统提示词段）、`pi.reset`（重置点）、`pi.compaction`（摘要 +
+   `head` 指向保留的第一条）、以及自定义 kind（我们用了 `app.user`）。
+3. **它是「模型看到什么」的唯一来源**：模型看到的 = 从**最近一次 reset 之后**的 entries 的 `model`
+   通道依次拼起来（压缩会改这个可见范围，但旧条目仍留在存储里）。
+
+我们系统里一次生成的转录（压缩前）长这样：
+
+| # | kind | `model`（给模型） | `data`（给 UI） |
+| --- | --- | --- | --- |
+| 1 | `app.user` | `[user: "做个待办应用"]` | 用户气泡文本 |
+| 2 | `pi.assistant` | `[assistant: tool_call buildPreview {}]` | 工具卡片（调用中） |
+| 3 | `pi.tool-result` | `[tool: "预览已更新…用时 13815ms"]` | 工具卡片结果（stage / ms / 预览版本号） |
+| 4 | `pi.assistant` | `[assistant: "做好了，点预览看"]` | 助手气泡 + `usage`（前端的用量块） |
+
+对比旧实现就清楚了：旧的是 `ts_message`（UI 消息）+ `tool-transcript.ts`（把工具调用渲染成文本喂模型）
+两套；现在是**一份转录、两个通道**，`tool-transcript.ts` 只剩「给人读的历史文本」一个用途。
+
+「不可变 + 只追加」是后面一切的前提：fork（切到某条 entry 分叉）、压缩（追加 `pi.compaction` 而不删旧条目）、
+`head` 裁剪、崩溃重放都靠它。要改状态不是改 entry，而是**追加新 entry 或提交新的文档修订**。
+
+### 2.2 原子写（commit）是什么
+
+一次 commit = 一次数据库事务。`conversation.commit(tx => ...)` 里可以同时做三件事：
+**追加若干 entries + 改若干 documents + 创建任务**。要么全部落库，要么全部不落。
+
+为什么 durable 非它不可：**checkpoint 必须和它记录的那份进度在同一个提交里**，否则崩溃恢复时会出现
+「动作做了但记录没有」或「记录有了但动作没做」，恢复点就不干净了。
+
+具体例子，一次工具调用结束时的同一个提交里写三样：
+
+1. `pi.tool-result` 条目（给模型的 tool 结果 + 给 UI 的 details）；
+2. 这个 `pi.tool` 任务的 `outcome`（completed / failed / aborted…）；
+3. 从 `pi.live.tools` 里去掉这个工具槽。
+
+进程在这个提交**之前**死 → 任务仍是 `running`，重开后按 replay 策略决定重跑还是给 `interrupted`；
+在**之后**死 → 结果已在转录里，模型直接继续。**「写了一半」这个状态不存在。**
+
+顺带解释了另一件事：`viewState()` / `watch()` **恰好每次提交回调一次**——观察者看到的最小单位就是一次提交，
+所以 UI 永远不会渲染半个状态。
+
+类比：不是「边写边存」，而是「攒够一页，整页翻过去」。
+
+### 2.3 两个容易混的词
 
 - **turn**：一次模型响应 + 它的工具调用。
 - **run**：从一次输入到最终答复之间的所有 turn。会话在 run 进行中就是 busy。

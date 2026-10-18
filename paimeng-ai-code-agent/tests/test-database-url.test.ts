@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { testDatabaseUrl } from './test-database-url';
-const source = 'postgres://spike:spike@127.0.0.1:55432/paimeng_app';
-const target = 'postgres://spike:spike@127.0.0.1:55432/paimeng_app_test';
+const source = 'postgres://postgres:postgres@127.0.0.1:5432/paimeng_app';
+const target = 'postgres://postgres:postgres@127.0.0.1:5432/paimeng_app_test';
 describe('集成测试数据库选择边界', () => {
   it('将专用开发库 URL 转换为测试库，重复执行保持同一目标', () => {
     expect(testDatabaseUrl(source)).toBe(target);

@@ -8,7 +8,7 @@
  * - 构建成功后工具结果是成功文案（预览已刷新），进程里能读回 `buildPreview` 的工具结果；
  * - 会话没有 app 映射时 buildPreview 报错，而不是静默构建别的目录。
  *
- * 需要 Postgres（55432）与产品 tsx；任一缺失时打印原因并 skip。工作区固定在产品的
+ * 需要 Postgres（127.0.0.1:5432）与产品 tsx；任一缺失时打印原因并 skip。工作区固定在产品的
  * `runtime/code_output/html_<id>`（产品构建实现按 cwd 推导运行时根目录），用例结束会删掉。
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
