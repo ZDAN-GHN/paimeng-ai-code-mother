@@ -104,7 +104,7 @@ npm run db:import-mysql           # 一次性业务行搬迁（幂等，按主�
 | 迁移幂等 | `npm run db:migrate` ×2、`npm run db:test:setup` | 第一次 `已执行 001_initial.sql`，第二次只打印「完成」不做改动 |
 | **业务行搬迁幂等** | `npm run db:import-mysql` ×2 | 两次输出一致：`app_user 120，app 112，user_session 152，attachment 6，model_provider 4，model_alias 2，model_config_state 1，rate_limit 14，id_sequence 1` |
 | 搬迁结果抽查 | `docker exec zslm-pg-durable psql -U spike -d paimeng_ts -c "select …"` | `app_user 120 / app 112 / model_alias 2 / attachment 6 / 有会话映射的 app 0 / id_sequence.last_id 469331532352323584`；`\dt` 13 张表（12 业务 + `schema_migration`），无 `ts_*` |
-| 集成测试（**受影响范围**） | `npx vitest run tests/integration` | **24 文件 122 用例全过**（65.7s，含 `durable-m1` 9 文件 16 用例、`route-auth`、`http`、`backend-invariants`、`snowflake-ids`、模型注册与多进程用例） |
+| 集成测试（**受影响范围**） | `npx vitest run tests/integration` | **25 文件 124 用例全过**（67.7s，含 `durable-m1` 10 文件 18 用例、`route-auth`、`http`、`backend-invariants`、`snowflake-ids`、模型注册与多进程用例） |
 | 新增转录契约用例 | `npx vitest run tests/integration/durable-m1/messages.test.ts` | **2/2 过**：用户条目随 `/submit` 落地、`/entries` 追加 `app.assistant`、`/messages` 从旧到新读回、展示条目不进模型上下文、保留种类/非对象数据 400、未知会话 404 |
 | 模型与记账单元测试 | `npx vitest run tests/models tests/generation-accounting.test.ts tests/model-task-binding.test.ts tests/snowflake.test.ts tests/image-attachments.test.ts tests/heartbeat.test.ts tests/model-config.test.ts tests/model-routing.test.ts` | **21 文件 144 用例全过**（两者与上一条有重叠文件，合起来覆盖所有碰库的用例） |
 | 静态门禁 | `npm run check:ui` / `npm run check:e2e` | 23 个 tsx / 13 个 spec 通过 |
@@ -131,7 +131,7 @@ npm run db:import-mysql           # 一次性业务行搬迁（幂等，按主�
    现在是同一条连接串，部署时确认两者一致（不一致时 harness 会写到别的库）。
 3. **`spike/` 残留**：`spike/pi-durable-pg/pgdata/` 属主是容器用户，当前账号删不掉（需要 `sudo rm -rf`）；
    `spike/pi-durable-m1` 的手工验收脚本仍指向 3100 与 5599，未随本步改动（它们只走产品 HTTP 接口）。
-4. **全量测试重跑**：`npm test`（基线 58 文件 / 444 用例）与 `npm run test:e2e:isolated` 未跑；
+4. **全量测试重跑**：`npm test`（基线 58 文件 / 444 用例，本步只跑了受影响范围）与 `npm run test:e2e:isolated` 未跑（E2E 三个 spec 已按 Postgres 改好，但没在隔离生产构建里跑过）；
    `scripts/verify-restart.ts` 的快照流程（`prepare` / `verify`）没在新库上跑过。
 5. **冒烟脚本**：`scripts/verify-parity.mjs` 的对话管理入口与 `chatHistory` mock 已删，但它本身是手工对照脚本，
    未在本步运行。
