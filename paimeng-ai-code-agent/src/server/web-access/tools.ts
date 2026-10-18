@@ -50,6 +50,16 @@ export type WebAccessToolOptions = {
   deps?: HttpDeps;
 };
 
+/** 一次工具调用的运行时上下文：信号与租约检查随调用变化，所以和会话状态分开。 */
+export type WebAccessRuntime = Pick<WebAccessToolOptions, 'signal' | 'check' | 'ensureWritable' | 'write'>;
+
+export type WebAccessOperations = {
+  webSearch: (args: { query: string }, runtime: WebAccessRuntime) => Promise<ToolStatus<WebSearchData>>;
+  readWebPage: (args: { url: string }, runtime: WebAccessRuntime) => Promise<ToolStatus<WebPageData>>;
+  searchImages: (args: { query: string }, runtime: WebAccessRuntime) => Promise<ToolStatus<ImageSearchData>>;
+  importImage: (args: { candidateId: string }, runtime: WebAccessRuntime) => Promise<ToolStatus<ImportedImageData>>;
+};
+
 const budgetLabels = { search: '联网搜索', read: '网页读取', imageSearch: '图片检索', imageImport: '图片导入' } as const;
 
 function remainingChars(session: WebAccessSession, limit: number) {
@@ -102,136 +112,137 @@ function candidateView(candidate: ImageCandidate): ImageCandidateView {
   };
 }
 
-export function createWebAccessTools(options: WebAccessToolOptions) {
-  const { app, session, signal, check, ensureWritable, write, deps } = options;
+/**
+ * 四个联网工具的操作体：只依赖会话状态（预算、候选、缓存）与单次调用的运行时。
+ * legacy 用 AI SDK 的 tool() 包一层，harness 用 pi-durable 的 defineTool 包一层，行为只在这里定义一次。
+ */
+export function createWebAccessOperations(options: { app: WorkspaceApp; session: WebAccessSession; deps?: HttpDeps }): WebAccessOperations {
+  const { app, session, deps } = options;
   const searchCache = new Map<string, Promise<ToolStatus<WebSearchData>>>();
   const readCache = new Map<string, Promise<ToolStatus<WebPageData>>>();
   const imageCache = new Map<string, Promise<ToolStatus<ImageSearchData>>>();
 
-  const webSearch = tool({
-    description: webAccessToolDescriptions.webSearch,
-    inputSchema: webAccessToolSchemas.webSearch,
-    execute: async ({ query }) => {
-      const cached = searchCache.get(query);
-      if (cached) return cached;
-      const pending = (async (): Promise<ToolStatus<WebSearchData>> => {
-        try {
-          check();
-          charge(session, 'search', webAccessLimits.budgets.search);
-          const budget = remainingChars(session, webAccessLimits.search.totalChars);
-          if (budget < 300) throw new WebAccessError('budget-exceeded', '本轮联网返回内容已达上限，请改用已有资料');
-          const { results } = await tavilySearch({ query, maxResults: webAccessLimits.search.results, includeImages: false, signal, deps });
-          if (!results.length) return toolEmpty<WebSearchData>('没有搜索到结果，请调整关键词后重试');
-          const trimmed: WebSearchResult[] = [];
-          let used = 0;
-          for (const result of results) {
-            const snippet = result.snippet.slice(0, webAccessLimits.search.snippetChars);
-            const size = snippet.length + result.url.length + result.title.length;
-            if (used + size > budget && trimmed.length) break;
-            used += size;
-            trimmed.push({ title: result.title, url: result.url, snippet });
-          }
-          const data: WebSearchData = { provider: 'tavily', query, retrievedAt: new Date().toISOString(), results: trimmed };
-          countChars(session, data);
-          return toolOk(data);
-        } catch (error) {
-          return toolFailure<WebSearchData>(error);
-        }
-      })();
-      searchCache.set(query, pending);
-      return pending;
-    },
-  });
-
-  const readWebPage = tool({
-    description: webAccessToolDescriptions.readWebPage,
-    inputSchema: webAccessToolSchemas.readWebPage,
-    execute: async ({ url }) => {
-      const cached = readCache.get(url);
-      if (cached) return cached;
-      const pending = (async (): Promise<ToolStatus<WebPageData>> => {
-        try {
-          check();
-          charge(session, 'read', webAccessLimits.budgets.read);
-          const budget = remainingChars(session, webAccessLimits.page.chars);
-          if (budget < 300) throw new WebAccessError('budget-exceeded', '本轮联网返回内容已达上限，请改用已有资料');
-          const page = await readPage(url, { signal, deps });
-          if (!page) return toolEmpty<WebPageData>('无法读取该网页正文，可以换一个来源或改用搜索结果里的摘要');
-          const data: WebPageData = { ...page, content: page.content.slice(0, budget), truncated: page.truncated || page.content.length > budget };
-          countChars(session, data);
-          return toolOk(data);
-        } catch (error) {
-          return toolFailure<WebPageData>(error);
-        }
-      })();
-      readCache.set(url, pending);
-      return pending;
-    },
-  });
-
-  const searchImages = tool({
-    description: webAccessToolDescriptions.searchImages,
-    inputSchema: webAccessToolSchemas.searchImages,
-    execute: async ({ query }) => {
-      const cached = imageCache.get(query);
-      if (cached) return cached;
-      const pending = (async (): Promise<ToolStatus<ImageSearchData>> => {
-        try {
-          check();
-          charge(session, 'imageSearch', webAccessLimits.budgets.imageSearch);
-          if (remainingChars(session, webAccessLimits.search.totalChars) < 300) throw new WebAccessError('budget-exceeded', '本轮联网返回内容已达上限，请改用已有资料');
-          const strictLicense = webAccessSettings().strictLicense;
-          const { provider, candidates } = await searchImageCandidates(query, { strictLicense, signal, deps });
-          if (!candidates.length) {
-            return toolEmpty<ImageSearchData>(strictLicense
-              ? '严格许可模式下没有找到合规素材，可以换关键词，或改用 CSS 与已有本地素材'
-              : '没有找到合适的图片素材，可以换关键词，或改用 CSS 与已有本地素材');
-          }
-          for (const candidate of candidates) session.candidates.set(candidate.id, candidate);
-          const data: ImageSearchData = {
-            provider,
-            query,
-            retrievedAt: new Date().toISOString(),
-            strictLicense,
-            notice: strictLicense
-              ? '素材来自开放许可库，已按 CC0/PDM/CC BY 过滤。'
-              : '图片来自公开网络，授权状态未知；请在页面上保留来源链接并提示授权需自行确认。title 是来源页名称，description 是服务商生成的机器翻译描述，只能当参考；sourceIsPage 为 false 的候选没有来源页，只能引用图片地址，不要臆造出处。',
-            candidates: candidates.map(candidateView),
-          };
-          countChars(session, data);
-          return toolOk(data);
-        } catch (error) {
-          return toolFailure<ImageSearchData>(error);
-        }
-      })();
-      imageCache.set(query, pending);
-      return pending;
-    },
-  });
-
-  const importImage = tool({
-    description: webAccessToolDescriptions.importImage,
-    inputSchema: webAccessToolSchemas.importImage,
-    execute: async ({ candidateId }) => {
-      check();
-      const candidate = session.candidates.get(candidateId);
-      if (!candidate) return toolFailure<ImportedImageData>(new WebAccessError('unsupported', '候选不存在或不属于本轮生成，请重新调用 searchImages'));
+  const webSearch: WebAccessOperations['webSearch'] = async ({ query }, runtime) => {
+    const cached = searchCache.get(query);
+    if (cached) return cached;
+    const pending = (async (): Promise<ToolStatus<WebSearchData>> => {
       try {
-        charge(session, 'imageImport', webAccessLimits.budgets.imageImport);
-        // 下载在写入锁外完成，避免长时间占用工程写入。
-        const prepared = await prepareImport(app, candidate, { signal, deps, importedBytes: session.imageBytes });
-        if (prepared.kind === 'existing') return toolOk(prepared.data);
-        const imported = await write(async () => {
-          await ensureWritable();
-          return persistImport(app, candidate, prepared);
-        });
-        session.imageBytes += imported.bytes;
-        return toolOk(imported);
+        runtime.check();
+        charge(session, 'search', webAccessLimits.budgets.search);
+        const budget = remainingChars(session, webAccessLimits.search.totalChars);
+        if (budget < 300) throw new WebAccessError('budget-exceeded', '本轮联网返回内容已达上限，请改用已有资料');
+        const { results } = await tavilySearch({ query, maxResults: webAccessLimits.search.results, includeImages: false, signal: runtime.signal, deps });
+        if (!results.length) return toolEmpty<WebSearchData>('没有搜索到结果，请调整关键词后重试');
+        const trimmed: WebSearchResult[] = [];
+        let used = 0;
+        for (const result of results) {
+          const snippet = result.snippet.slice(0, webAccessLimits.search.snippetChars);
+          const size = snippet.length + result.url.length + result.title.length;
+          if (used + size > budget && trimmed.length) break;
+          used += size;
+          trimmed.push({ title: result.title, url: result.url, snippet });
+        }
+        const data: WebSearchData = { provider: 'tavily', query, retrievedAt: new Date().toISOString(), results: trimmed };
+        countChars(session, data);
+        return toolOk(data);
       } catch (error) {
-        return toolFailure<ImportedImageData>(error);
+        return toolFailure<WebSearchData>(error);
       }
-    },
-  });
+    })();
+    searchCache.set(query, pending);
+    return pending;
+  };
+
+  const readWebPage: WebAccessOperations['readWebPage'] = async ({ url }, runtime) => {
+    const cached = readCache.get(url);
+    if (cached) return cached;
+    const pending = (async (): Promise<ToolStatus<WebPageData>> => {
+      try {
+        runtime.check();
+        charge(session, 'read', webAccessLimits.budgets.read);
+        const budget = remainingChars(session, webAccessLimits.page.chars);
+        if (budget < 300) throw new WebAccessError('budget-exceeded', '本轮联网返回内容已达上限，请改用已有资料');
+        const page = await readPage(url, { signal: runtime.signal, deps });
+        if (!page) return toolEmpty<WebPageData>('无法读取该网页正文，可以换一个来源或改用搜索结果里的摘要');
+        const data: WebPageData = { ...page, content: page.content.slice(0, budget), truncated: page.truncated || page.content.length > budget };
+        countChars(session, data);
+        return toolOk(data);
+      } catch (error) {
+        return toolFailure<WebPageData>(error);
+      }
+    })();
+    readCache.set(url, pending);
+    return pending;
+  };
+
+  const searchImages: WebAccessOperations['searchImages'] = async ({ query }, runtime) => {
+    const cached = imageCache.get(query);
+    if (cached) return cached;
+    const pending = (async (): Promise<ToolStatus<ImageSearchData>> => {
+      try {
+        runtime.check();
+        charge(session, 'imageSearch', webAccessLimits.budgets.imageSearch);
+        if (remainingChars(session, webAccessLimits.search.totalChars) < 300) throw new WebAccessError('budget-exceeded', '本轮联网返回内容已达上限，请改用已有资料');
+        const strictLicense = webAccessSettings().strictLicense;
+        const { provider, candidates } = await searchImageCandidates(query, { strictLicense, signal: runtime.signal, deps });
+        if (!candidates.length) {
+          return toolEmpty<ImageSearchData>(strictLicense
+            ? '严格许可模式下没有找到合规素材，可以换关键词，或改用 CSS 与已有本地素材'
+            : '没有找到合适的图片素材，可以换关键词，或改用 CSS 与已有本地素材');
+        }
+        for (const candidate of candidates) session.candidates.set(candidate.id, candidate);
+        const data: ImageSearchData = {
+          provider,
+          query,
+          retrievedAt: new Date().toISOString(),
+          strictLicense,
+          notice: strictLicense
+            ? '素材来自开放许可库，已按 CC0/PDM/CC BY 过滤。'
+            : '图片来自公开网络，授权状态未知；请在页面上保留来源链接并提示授权需自行确认。title 是来源页名称，description 是服务商生成的机器翻译描述，只能当参考；sourceIsPage 为 false 的候选没有来源页，只能引用图片地址，不要臆造出处。',
+          candidates: candidates.map(candidateView),
+        };
+        countChars(session, data);
+        return toolOk(data);
+      } catch (error) {
+        return toolFailure<ImageSearchData>(error);
+      }
+    })();
+    imageCache.set(query, pending);
+    return pending;
+  };
+
+  const importImage: WebAccessOperations['importImage'] = async ({ candidateId }, runtime) => {
+    runtime.check();
+    const candidate = session.candidates.get(candidateId);
+    if (!candidate) return toolFailure<ImportedImageData>(new WebAccessError('unsupported', '候选不存在或不属于本轮生成，请重新调用 searchImages'));
+    try {
+      charge(session, 'imageImport', webAccessLimits.budgets.imageImport);
+      // 下载在写入锁外完成，避免长时间占用工程写入。
+      const prepared = await prepareImport(app, candidate, { signal: runtime.signal, deps, importedBytes: session.imageBytes });
+      if (prepared.kind === 'existing') return toolOk(prepared.data);
+      const imported = await runtime.write(async () => {
+        await runtime.ensureWritable();
+        return persistImport(app, candidate, prepared);
+      });
+      session.imageBytes += imported.bytes;
+      return toolOk(imported);
+    } catch (error) {
+      return toolFailure<ImportedImageData>(error);
+    }
+  };
 
   return { webSearch, readWebPage, searchImages, importImage };
+}
+
+export function createWebAccessTools(options: WebAccessToolOptions) {
+  const { app, session, signal, check, ensureWritable, write, deps } = options;
+  const operations = createWebAccessOperations({ app, session, deps });
+  const runtime: WebAccessRuntime = { signal, check, ensureWritable, write };
+
+  return {
+    webSearch: tool({ description: webAccessToolDescriptions.webSearch, inputSchema: webAccessToolSchemas.webSearch, execute: async (args) => operations.webSearch(args, runtime) }),
+    readWebPage: tool({ description: webAccessToolDescriptions.readWebPage, inputSchema: webAccessToolSchemas.readWebPage, execute: async (args) => operations.readWebPage(args, runtime) }),
+    searchImages: tool({ description: webAccessToolDescriptions.searchImages, inputSchema: webAccessToolSchemas.searchImages, execute: async (args) => operations.searchImages(args, runtime) }),
+    importImage: tool({ description: webAccessToolDescriptions.importImage, inputSchema: webAccessToolSchemas.importImage, execute: async (args) => operations.importImage(args, runtime) }),
+  };
 }

@@ -87,13 +87,13 @@ type AttachmentImage = { attachmentId: string; bytes: Buffer; mediaType: ImageMe
 const isAttachmentPart = (part: unknown): part is AttachmentPart => attachmentPartSchema.safeParse(part).success;
 
 /** 工作区里的上传副本命名：附件 id 前 8 位 + 清洗掉路径分隔符与控制字符的原文件名。 */
-function uploadFileName(attachmentId: string, filename: string): string {
+export function uploadFileName(attachmentId: string, filename: string): string {
   const cleaned = filename.replace(/[\\/]/g, '_').replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 128);
   return `${attachmentId.slice(0, 8)}-${cleaned || 'image'}`;
 }
 
 /** 上传副本目录：静态应用放 assets/uploads/，前端工程放 public/uploads/（Vite 只把 public/ 带进 dist）。 */
-const uploadDirectory = (type: CodeGenType): string => isProjectCodeGenType(type) ? 'public/uploads' : 'assets/uploads';
+export const uploadDirectory = (type: CodeGenType): string => isProjectCodeGenType(type) ? 'public/uploads' : 'assets/uploads';
 
 /**
  * 把图片字节附到最后一条 user 模型消息上。SDK 的 file part 接受裸 DataContent（Uint8Array/Buffer）。

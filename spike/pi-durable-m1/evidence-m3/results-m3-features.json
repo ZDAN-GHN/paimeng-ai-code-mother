@@ -1,0 +1,67 @@
+[
+  {
+    "id": "S1 运行中的插话被受理",
+    "ok": true,
+    "detail": "steer=true"
+  },
+  {
+    "id": "S2 任务正常结束",
+    "ok": true,
+    "detail": "status=ready stopReason=completed"
+  },
+  {
+    "id": "S3 插话进入模型上下文",
+    "ok": true,
+    "detail": "messages=[\"system:\",\"user:开始吧。\",\"assistant:\",\"toolResult:.paimeng-template.json\\nAGENTS.md\\nindex.h\",\"toolResult:# 静态网站约定\\n\\n- 保留 index.html 作为唯一入口。\\n- 只写 i\",\"assistant:\",\"toolResult:<!doctype html>\\n<html lang=\\\"zh-CN\\\">\\n<hea\",\"toolResult:{\\\"id\\\":\\\"html\\\",\\\"version\\\":\\\"1.0.0\\\"}\",\"user:M3_STEER_M3S-dec7 另外，请在页面底部加一行注释标记 M3S-d\",\"assistant:\",\"toolResult:{\\\"status\\\":\\\"ok\\\",\\\"data\\\":{\\\"provider\\\":\\\"tavil\",\"toolResult:{\\\"status\\\":\\\"ok\\\",\\\"data\\\":{\\\"provider\\\":\\\"tavil\",\"assistant:未检索到 “M3S-dec7” 的公开资料（下面会在页面里注明这个缺口，不编造参\",\"toolResult:已写入 index.html\",\"assistant:\",\"toolResult:预览已更新（M3S-dec7 介绍页首版：标题区 + 三个功能区块（可展开细节）\",\"assistant:已写入并校验通过（预览已刷新）。有一处**必须说明的调整**：你要求的多文件结构\"]"
+  },
+  {
+    "id": "S4 插话落在第一次回复之后（不挤在回复前）",
+    "ok": true,
+    "detail": "steerIndex=8 firstAssistant=2 entries=[\"pi.user:开始吧。\",\"pi.system:\",\"pi.assistant:\",\"pi.tool-result:.paimeng-template.json\\nA\",\"pi.tool-result:# 静态网站约定\\n\\n- 保留 index.htm\",\"pi.assistant:\",\"pi.tool-result:<!doctype html>\\n<html la\",\"pi.tool-result:{\\\"id\\\":\\\"html\\\",\\\"version\\\":\\\"\",\"pi.user:M3_STEER_M3S-dec7 另外，请在页\",\"pi.assistant:\",\"pi.tool-result:{\\\"status\\\":\\\"ok\\\",\\\"data\\\":{\\\"\",\"pi.tool-result:{\\\"status\\\":\\\"ok\\\",\\\"data\\\":{\\\"\",\"pi.assistant:未检索到 “M3S-dec7” 的公开资料（下面\",\"pi.tool-result:已写入 index.html\",\"pi.assistant:\",\"pi.tool-result:预览已更新（M3S-dec7 介绍页首版：标题区\",\"pi.assistant:已写入并校验通过（预览已刷新）。有一处**必须说\"]"
+  },
+  {
+    "id": "S5 插话作为 user 消息落库（刷新读回）",
+    "ok": true,
+    "detail": "消息数=3"
+  },
+  {
+    "id": "I1 图片生成任务正常结束",
+    "ok": true,
+    "detail": "status=ready stopReason=completed"
+  },
+  {
+    "id": "I2 图片进入模型上下文",
+    "ok": true,
+    "detail": "带图消息=[{\"role\":\"user\",\"text\":\"这张图是 M3 图片输入验证，请照它的主色调做一个页面，并在标题里写 M3_IMAGE_OK。\",\"images\":1}]"
+  },
+  {
+    "id": "I3 工作区副本写到 assets/uploads/",
+    "ok": true,
+    "detail": "目录=/home/zdan/github/zdan/.pi-worktrees/pi-durable-migration/paimeng-ai-code-agent/runtime/code_output/html_469314722521415680/assets/uploads 文件=[\"edd09285-m3-red.png\"]"
+  },
+  {
+    "id": "R1 服务端进入了修复轮（data-build repairing）",
+    "ok": true,
+    "detail": "流长度=11839 含repairing=true"
+  },
+  {
+    "id": "R2 服务端最终验证落账（build 步骤 ≥ 1）",
+    "ok": true,
+    "detail": "build attempts=2 rounds=2"
+  },
+  {
+    "id": "R3 修复后最终验证通过、任务 ready",
+    "ok": true,
+    "detail": "status=ready stopReason=completed error=null"
+  },
+  {
+    "id": "W1 四个联网工具注册进 harness",
+    "ok": true,
+    "detail": "工具=[\"readFile\",\"writeFiles\",\"modifyFile\",\"deleteFile\",\"listFiles\",\"buildPreview\",\"m1_wait\",\"webSearch\",\"readWebPage\",\"searchImages\",\"importImage\"]"
+  },
+  {
+    "id": "W2 真实生成里模型调到了 webSearch",
+    "ok": true,
+    "detail": "带 tavily 结果的条目=2"
+  }
+]

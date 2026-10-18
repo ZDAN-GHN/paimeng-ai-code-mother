@@ -8,6 +8,7 @@
  * The attach surface:
  *
  *   POST /conversations          create one ownerless conversation for an app
+ *   POST /configure              set a conversation's resident instructions for the current turn
  *   POST /submit                 admit one user input into a conversation (default: root)
  *   POST /abort                  abort a conversation's live run
  *   GET  /agent-events           NDJSON of agent events for one conversation, ends with the run
@@ -39,10 +40,21 @@ import { Type } from "@earendil-works/pi-ai";
 import { withAbortSignal } from "@earendil-works/chord/context";
 import type { AgentEvent, Conversation, ConversationId, ConversationView, LiveState, ToolExecutionApi } from "@earendil-works/pi-durable";
 import { defineExtension, defineTool, watchEvents } from "@earendil-works/pi-durable";
+import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { getOrThrow, type ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { CodeGenType } from "@/shared/contracts";
 import { buildApp, type BuildStageProgress } from "../artifacts";
 import { classifyBuildFailure, formatBuildDiagnostic } from "../build-feedback";
+import { getConfig } from "../config";
+import {
+	createWebAccessOperations,
+	createWebAccessSession,
+	enabledWebToolNames,
+	webAccessToolDescriptions,
+	type WebAccessOperations,
+	type WebAccessRuntime,
+	type WebAccessSession,
+} from "../web-access/tools";
 import { context, entryText, modelRef, openPgHarness } from "./harness";
 import { resetPostgresStorage } from "./storage-pg";
 
@@ -51,7 +63,9 @@ const rootWorkspace = process.env.DURABLE_HARNESS_WORKSPACE ?? `${runDir}/worksp
 const toolLog = `${runDir}/tools.jsonl`;
 const port = Number(process.env.DURABLE_HARNESS_PORT ?? 5599);
 const host = process.env.DURABLE_HARNESS_HOST ?? "127.0.0.1";
-const maxBodyBytes = 100_000;
+// `/submit` carries a turn's images as base64 (the product caps a message at 12 MiB of image bytes), so the
+// body limit must clear the base64 expansion of that, not just a text prompt.
+const maxBodyBytes = 24_000_000;
 /** Directories the file tools never walk into; they belong to the platform, not the app source. */
 const blockedDirectories = new Set(["node_modules", "dist", ".git", ".next", ".nuxt"]);
 const maxListedFiles = 300;
@@ -278,6 +292,87 @@ const buildPreviewTool = defineTool({
 	},
 });
 
+/**
+ * 联网工具（`WEB_ACCESS_ENABLED`，默认关）：与 legacy 共用同一份操作体
+ * （`createWebAccessOperations`），这里只把它包成 pi-durable 的 defineTool。
+ * 会话状态（预算、候选、缓存）按会话持有，一次新生成开始时重置（同 legacy 每次生成一份 session）。
+ */
+const webSessions = new Map<number, { session: WebAccessSession; operations: WebAccessOperations }>();
+
+/** 新生成开始：预算与候选属于本轮，重新计数。 */
+function resetWebSession(conversationId: number) {
+	webSessions.delete(conversationId);
+}
+
+async function webOperationsFor(conversationId: ConversationId): Promise<WebAccessOperations> {
+	const existing = webSessions.get(conversationId);
+	if (existing) return existing.operations;
+	const app = await appRefFor(conversationId);
+	if (!app) throw new Error(`会话 ${conversationId} 没有关联应用，拒绝使用联网工具`);
+	const session = createWebAccessSession();
+	const operations = createWebAccessOperations({ app, session });
+	webSessions.set(conversationId, { session, operations });
+	return operations;
+}
+
+/** 一次工具调用的运行时：信号来自本次调用，租约检查交给 pi-durable 的取消语义。 */
+function webRuntime(toolContext: { abortSignal?: AbortSignal }): WebAccessRuntime {
+	return {
+		signal: toolContext.abortSignal,
+		check: () => { if (toolContext.abortSignal?.aborted) throw new Error("生成已取消"); },
+		ensureWritable: async () => undefined,
+		write: async (work) => work(),
+	};
+}
+
+/** 工具结果是模型看到的 JSON（与 AI SDK 序列化工具结果的方式一致）。 */
+function toolResult(value: unknown) {
+	return { output: [{ type: "text" as const, text: typeof value === "string" ? value : JSON.stringify(value) }] };
+}
+
+/** 按开关注册：关闭时返回空数组（模型看不到任何联网工具），与 legacy 的 pickEnabledWebTools 同义。 */
+function webToolsForConfig(): ToolRegistration[] {
+	const settings = getConfig().webAccess;
+	const names = enabledWebToolNames({ enabled: settings.enabled, images: settings.images });
+	if (names.length === 0) return [];
+	const query = Type.Object({ query: Type.String({ minLength: 2, maxLength: 300 }) });
+	const url = Type.Object({ url: Type.String({ minLength: 8, maxLength: 2000 }) });
+	const candidate = Type.Object({ candidateId: Type.String({ minLength: 4, maxLength: 64 }) });
+	const definitions: Record<(typeof names)[number], ToolRegistration> = {
+		// 三次读都是纯读：崩溃后重跑不会产生额外副作用。
+		webSearch: defineTool({
+			name: "webSearch",
+			description: webAccessToolDescriptions.webSearch,
+			parameters: query,
+			replay: "safe",
+			execute: async (args, api, toolContext) => toolResult(await (await webOperationsFor(api.conversationId)).webSearch(args, webRuntime(toolContext))),
+		}),
+		readWebPage: defineTool({
+			name: "readWebPage",
+			description: webAccessToolDescriptions.readWebPage,
+			parameters: url,
+			replay: "safe",
+			execute: async (args, api, toolContext) => toolResult(await (await webOperationsFor(api.conversationId)).readWebPage(args, webRuntime(toolContext))),
+		}),
+		searchImages: defineTool({
+			name: "searchImages",
+			description: webAccessToolDescriptions.searchImages,
+			parameters: query,
+			replay: "safe",
+			execute: async (args, api, toolContext) => toolResult(await (await webOperationsFor(api.conversationId)).searchImages(args, webRuntime(toolContext))),
+		}),
+		// 候选只存在于本进程内存，重启后的重放拿不到它，所以不能声明为可重跑。
+		importImage: defineTool({
+			name: "importImage",
+			description: webAccessToolDescriptions.importImage,
+			parameters: candidate,
+			replay: "unsafe",
+			execute: async (args, api, toolContext) => toolResult(await (await webOperationsFor(api.conversationId)).importImage(args, webRuntime(toolContext))),
+		}),
+	};
+	return names.map((name) => definitions[name]);
+}
+
 type ProjectedEntry = { id: number; kind: string; text: string };
 type ProjectedView = {
 	entries: ProjectedEntry[];
@@ -303,6 +398,34 @@ function project(view: ConversationView): ProjectedView {
 			busy: live?.run !== undefined,
 		},
 	};
+}
+
+/** One model user-message content block an upload/submit may carry. */
+type SubmitContentBlock = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
+
+/**
+ * Decode `POST /submit` content: a plain string, or the model's user-message content array
+ * (text and image blocks) so an upload can travel with the prompt. Anything else is rejected
+ * at this trust boundary.
+ */
+function parseSubmitContent(value: unknown): SubmitContentBlock[] | undefined {
+	if (typeof value === "string") {
+		const text = value.trim();
+		return text ? [{ type: "text", text }] : undefined;
+	}
+	if (!Array.isArray(value) || value.length === 0) return undefined;
+	const content: SubmitContentBlock[] = value.map((block) => {
+		if (typeof block !== "object" || block === null) throw new Error("content block must be an object");
+		const record = block as Record<string, unknown>;
+		if (record.type === "text" && typeof record.text === "string") return { type: "text", text: record.text };
+		if (record.type === "image" && typeof record.data === "string" && typeof record.mimeType === "string") {
+			if (!record.data || !record.mimeType.startsWith("image/")) throw new Error("image block needs data and an image mimeType");
+			return { type: "image", data: record.data, mimeType: record.mimeType };
+		}
+		throw new Error("unsupported content block");
+	});
+	const hasContent = content.some((block) => block.type === "image" || (block.type === "text" && block.text.trim() !== ""));
+	return hasContent ? content : undefined;
 }
 
 function readBody(request: IncomingMessage): Promise<string> {
@@ -334,7 +457,7 @@ if (process.env.DURABLE_HARNESS_RESET === "1") {
  * execution may rerun on recovery. Reading and full-content writing are safe; in-place edits and
  * deletes are not. `m1_wait` keeps the default deliberately (see its definition).
  */
-const productTools = [readFileTool, writeFilesTool, modifyFileTool, deleteFileTool, listFilesTool, buildPreviewTool, waitTool];
+const productTools = [readFileTool, writeFilesTool, modifyFileTool, deleteFileTool, listFilesTool, buildPreviewTool, waitTool, ...webToolsForConfig()];
 
 const { harness } = await openPgHarness({
 	// 工具集就是产品那套最小文件工具（readFile / writeFiles / modifyFile / deleteFile / listFiles）加 buildPreview。
@@ -416,11 +539,18 @@ function messageText(message: { role: string; content: unknown }): string {
 		.join("");
 }
 
+/** How many image blocks a model message carries, for the attachment path's verification. */
+function messageImages(message: { content: unknown }): number {
+	const content = message.content;
+	if (!Array.isArray(content)) return 0;
+	return content.filter((block) => typeof block === "object" && block !== null && (block as { type?: unknown }).type === "image").length;
+}
+
 async function contextBody(conversation: Conversation) {
 	const view = await conversation.context(context);
 	return {
 		entries: view.entries.length,
-		messages: view.messages.map((message) => ({ role: message.role, text: messageText(message) })),
+		messages: view.messages.map((message) => ({ role: message.role, text: messageText(message), images: messageImages(message) })),
 	};
 }
 
@@ -468,9 +598,15 @@ const server = createServer(async (request, response) => {
 		}
 
 		if (request.method === "POST" && url.pathname === "/submit") {
-			const body = JSON.parse(await readBody(request)) as { content?: string; requestId?: string; conversationId?: number };
-			const content = body.content?.trim();
-			if (!content) {
+			const body = JSON.parse(await readBody(request)) as { content?: unknown; requestId?: string; conversationId?: number; whenBusy?: "steer" | "followUp" | "reject" };
+			let content: SubmitContentBlock[] | undefined;
+			try {
+				content = parseSubmitContent(body.content);
+			} catch (error) {
+				sendJson(response, 400, { error: `invalid content: ${String(error)}` });
+				return;
+			}
+			if (content === undefined) {
 				sendJson(response, 400, { error: "content is required" });
 				return;
 			}
@@ -483,9 +619,28 @@ const server = createServer(async (request, response) => {
 				return;
 			}
 			// Admission only. No request socket, timer, or viewer scope reaches this call.
-			const submission = await conversation.submit({ type: "input", content, requestId: body.requestId }, context);
-			log(`submit admitted conversation=${conversation.id} submission=${submission.id} requestId=${body.requestId ?? "-"}`);
+			// A new turn (not a steer) starts a fresh web-tool session: budgets and image candidates are per-turn.
+			if (body.whenBusy !== "steer") resetWebSession(conversation.id);
+			// `whenBusy: "steer"` is how the product's mid-run steer lands: queued in `pi.inbox` and placed
+			// at the next boundary instead of starting a competing run.
+			const submission = await conversation.submit({ type: "input", content, requestId: body.requestId, whenBusy: body.whenBusy }, context);
+			log(`submit admitted conversation=${conversation.id} submission=${submission.id} requestId=${body.requestId ?? "-"} whenBusy=${body.whenBusy ?? "-"}`);
 			sendJson(response, 202, { submissionId: submission.id });
+			return;
+		}
+
+		if (request.method === "POST" && url.pathname === "/configure") {
+			const body = JSON.parse((await readBody(request)) || "{}") as { conversationId?: number; instructions?: string | null };
+			const conversation = await conversationOf(conversationIdFrom(body.conversationId) ?? root.id);
+			if (!conversation) {
+				sendJson(response, 404, { error: "conversation not found" });
+				return;
+			}
+			// Align the resident instructions with the current turn (e.g. the "images travel with the message"
+			// hint). An equal document value records no change, so repeating it is free.
+			await conversation.configure({ instructions: body.instructions ?? null }, context);
+			log(`configured conversation=${conversation.id}`);
+			sendJson(response, 202, { ok: true });
 			return;
 		}
 

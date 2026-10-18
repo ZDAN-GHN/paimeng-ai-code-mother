@@ -12,6 +12,7 @@
     "verify:m2a": "../pi-durable-pg/run.sh src/verify-m2a.ts",
     "verify:m2a-reconnect": "../pi-durable-pg/run.sh src/verify-m2a-reconnect.ts",
     "verify:m2b-build": "../pi-durable-pg/run.sh src/verify-m2b-build.ts",
+    "verify:m3": "../pi-durable-pg/run.sh src/verify-m3.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

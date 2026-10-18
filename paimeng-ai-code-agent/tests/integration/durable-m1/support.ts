@@ -62,7 +62,7 @@ const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 export type HarnessProcess = { child: ChildProcess; output: () => string };
 
 /** Spawn the harness on its own port and run directory; `reset` empties the schema before serving. */
-export function startHarness(options: { port: number; runDir: string; reset: boolean; waitMs: number; finalText: string; workspace?: string; tool?: string; args?: unknown }): HarnessProcess {
+export function startHarness(options: { port: number; runDir: string; reset: boolean; waitMs: number; finalText: string; workspace?: string; tool?: string; args?: unknown; env?: Record<string, string> }): HarnessProcess {
   let output = '';
   const env = {
     ...process.env,
@@ -77,6 +77,7 @@ export function startHarness(options: { port: number; runDir: string; reset: boo
     ...(options.tool ? { DURABLE_FAUX_TOOL: options.tool } : {}),
     ...(options.args === undefined ? {} : { DURABLE_FAUX_ARGS: JSON.stringify(options.args) }),
     ...(options.reset ? { DURABLE_HARNESS_RESET: '1' } : {}),
+    ...options.env,
   };
   // The product root as cwd is what makes the product's `@/` alias and runtime root resolve.
   const child = spawn(process.execPath, ['--import', 'tsx', '--conditions=react-server', harnessEntry], { cwd: productRoot, env, stdio: ['ignore', 'pipe', 'pipe'] });
