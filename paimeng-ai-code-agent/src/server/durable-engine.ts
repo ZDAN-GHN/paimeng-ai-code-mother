@@ -111,7 +111,8 @@ function entryAssistantMessage(entry: unknown): unknown {
 type HarnessEvent = z.infer<typeof harnessEventSchema>;
 type UiChunk = Parameters<UIMessageStreamWriter<UIMessage>['write']>[0];
 
-/** 助手消息 id：legacy 用同一个约定（agent.ts 的 generateId），前端靠它把用量块挂到回复上。 */
+/** 助手消息 id 由请求 id 派生（Power 的消息 id 也是这个约定），前端靠它把用量块挂到回复上。
+ *  它同时写进 `generation.message_id` 与转录条目（`app.assistant`）的 `data.id`。 */
 const assistantMessageId = (requestId: string) => `${requestId}-assistant`;
 
 function harnessBase(): string {

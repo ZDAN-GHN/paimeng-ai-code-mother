@@ -63,6 +63,7 @@ camelCase 列必须处处加双引号，一次改净比每个查询记得加引�
 | 租约 | 语义未变：仍是 `SELECT … FOR UPDATE`（drizzle 的 `.for('update')` 在 pg 上生成 `FOR UPDATE`），应用行 → 租约行 → 任务行的加锁顺序照旧；`withAppWriter` 的 `lockTask` 开关（默认一致性读，避免长构建把心跳 UPDATE 卡死）原样保留 |
 | `scripts/` | `migrate.ts`（pg，逐文件事务，`schema_migration` 记校验和）、`test-database.ts`（建 `paimeng_ts_test` 并迁移）、`admin.ts`、`verify-infra.ts`、`import-legacy.ts`（快照导入改写入 Postgres）、`durable-pg.sh`（start 时顺带建 `paimeng_ts` 与 `paimeng_ts_test`） |
 | 删除 | `scripts/verify-id-migration.ts`（对照旧 MySQL 的快照校验，换库后无对象）、`002..013` 的 MySQL 增量迁移、`package.json` 的 `verify:id-migration` |
+| 依赖 | `mysql2` **只留给一次性搬迁脚本** `scripts/import-mysql-rows.ts`（产品运行期不再连接 MySQL）；运行期依赖是 `pg` |
 | E2E | `tests/e2e/model-manage.spec.ts` / `platform.spec.ts` / `dev-warnings.spec.ts` 改 `pg.Client`，SQL 改 snake_case 与 `$1` 占位，公共夹具抽到 `tests/e2e/support/model-config-fixtures.ts` |
 
 ## 4. 迁移与回滚
