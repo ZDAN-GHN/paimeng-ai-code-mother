@@ -1,6 +1,6 @@
 # Pi Durable 迁移 · M4：产品库从 MySQL 换到 Postgres，表名按业务域重建
 
-状态：**代码与迁移已完成并通过受影响范围验收**（2026-10-18）。分支 `feat/pi-durable-migration`，
+状态：**代码与迁移已完成；受影响范围验收通过，全量单测已补跑两次全绿**（2026-10-18）。分支 `feat/pi-durable-migration`，
 基线 `main@d0c9797`（本步之前的提交是 `878f3c2`，备份分支 `backup/pre-m4-postgres`）。
 旧 MySQL 容器与库**保留作归档**，本步没有删除任何旧数据。
 
@@ -118,8 +118,26 @@ npm run db:import-mysql           # 一次性业务行搬迁（幂等，按主�
 两次真实端到端都在**换库之后**跑（时间 16:13–16:2x），用的是新产品库 Postgres 与新的转录路径；
 `verify:m2b-build` 的「刷新读回」正是对 `ts_message` → harness `entries` 这次搬迁的验收。
 
-**全量 `npm test` 与 Playwright E2E 套件（`npm run test:e2e:isolated`）本步未跑**：按任务约定只验证受影响范围。
-`.env.example` / README / 本文件的描述与代码一致，但 E2E 套件（生产构建 + Chromium）与全量单测需要在集成后重跑一次。
+**全量 `npm test` 已在换库与删除之后补跑**（2026-10-18 16:26 与 16:41，两次全绿，见 §5.1）。
+Playwright E2E 套件（`npm run test:e2e:isolated`）仍未跑：它要独占测试库与端口、只能串行，留给集成后统一跑一次。
+`.env.example` / README / 本文件的描述与代码一致，剩下的缺口就是 E2E 与 `scripts/verify-restart.ts`（见 §6.4）。
+
+### 5.1 全量单测补跑（2026-10-18，换库与删除之后）
+
+| 项 | 结果 |
+| --- | --- |
+| 前置 | `npm run durable:pg -- start`（Postgres 已起，`durable-m1` 组不会 skip）＋ `npm run db:test:setup` |
+| 第一次 | `npm test` → **58 文件 / 432 用例全过**，480.29s（16:26:25 起） |
+| 第二次（查 flaky） | `npm test` → **58 文件 / 432 用例全过**，613.78s（16:40:46 起） |
+| 失败归因 | **零失败**：没有需要改代码的真回归，也没有「随 legacy 删除该改而未改」的残留——该改的测试已在 `4ab6777` 同一步处理（删 19 个 legacy 循环与自研上下文层的测试文件，改写 `http` / `feature-parity` / `backend-invariants` / `snowflake-ids` / `model-task-binding` / `test-database-url`） |
+| flaky | 两次全绿，未观察到；样本只有两次，不构成「稳定」的结论 |
+| 日志 | `/tmp/full-test-after-migration.log`、`/tmp/full-test-after-migration-run2.log` |
+| 确认测试真的打在新库上 | 跑完后 `paimeng_ts_test` 的 `pg_stat_user_tables.n_tup_ins`：`model_alias 231 / app 229 / model_provider 123 / app_user 87 / rate_limit 72 / generation 63`（`n_live_tup` 近 0，用例自己清理）；开发库 `paimeng_ts` 两次运行期间没有任何新行（`app` 最新 `create_time` 仍是真实端到端那次 08:16 UTC） |
+
+**基线口径的变化**：`pi-durable-m3.md` §7.5 记的「58 文件 / 444 用例」是 `4ab6777` 提交**前**的一次未提交工作区运行；
+该提交随后又就地改了 6 个测试文件（净减 11 条用例）并新增 `messages.test.ts`（+2 条），按此推算当时应约 441 条，
+与 444 差 3 条未追平（可能是某文件的循环生成用例数）。**本次实测的 58 文件 / 432 用例才是实现基线**；
+`m3.md` 那行不改，它是当时的记录。
 
 ## 6. 剩余待办
 
@@ -132,8 +150,9 @@ npm run db:import-mysql           # 一次性业务行搬迁（幂等，按主�
    现在是同一条连接串，部署时确认两者一致（不一致时 harness 会写到别的库）。
 3. **`spike/` 残留**：`spike/pi-durable-pg/pgdata/` 属主是容器用户，当前账号删不掉（需要 `sudo rm -rf`）；
    `spike/pi-durable-m1` 的手工验收脚本仍指向 3100 与 5599，未随本步改动（它们只走产品 HTTP 接口）。
-4. **全量测试重跑**：`npm test`（基线 58 文件 / 444 用例，本步只跑了受影响范围）与 `npm run test:e2e:isolated` 未跑（E2E 三个 spec 已按 Postgres 改好，但没在隔离生产构建里跑过）；
-   `scripts/verify-restart.ts` 的快照流程（`prepare` / `verify`）没在新库上跑过。
+4. **全量测试重跑**：`npm test` 已补跑两次全绿（**58 文件 / 432 用例**，见 §5.1，取代 `m3.md` 里的 444 口径）；
+   `npm run test:e2e:isolated` 仍未跑（E2E 三个 spec 已按 Postgres 改好，但没在隔离生产构建里跑过）；
+   `scripts/verify-restart.ts` 的快照流程（`prepare` / `verify`）也没在新库上跑过。
 5. **冒烟脚本**：`scripts/verify-parity.mjs` 的对话管理入口与 `chatHistory` mock 已删，但它本身是手工对照脚本，
    未在本步运行。
 6. **旧数据保留期**：`ts_message` / `chat_history` / `ts_app_summary` 的行仍在 MySQL 里（**没删**）。
