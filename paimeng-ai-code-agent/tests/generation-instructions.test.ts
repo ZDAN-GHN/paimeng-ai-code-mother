@@ -45,6 +45,13 @@ describe('按应用类型生成指令', () => {
     expect(typeRules[type]).toContain("base './'");
   });
 
+  it('harness 引擎（只有文件工具）不提 buildPreview', () => {
+    const value = generationInstructions({ app: { codeGenType: 'html', initPrompt: '需求' }, template: null, entry: null, webInstruction: '', previewTool: false });
+    expect(value).not.toContain('buildPreview');
+    expect(value).toContain('本轮只有文件工具');
+    expect(value).toContain('所有读写必须使用工具');
+  });
+
   it('静态模板与旧应用使用各自开场白，工程模板保留 TypeScript 入口', () => {
     expect(instructions('html', true)).toContain('从 html@1.0.0 模板初始化，骨架可直接使用或改写');
     expect(instructions('html')).toContain('HTML 与多文件应用必须有 index.html，只写静态文件');

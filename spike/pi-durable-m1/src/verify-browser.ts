@@ -53,7 +53,7 @@ note("page loaded, EventSource connected");
 
 await page.fill(
 	'textarea[aria-label="M1 输入"]',
-	`Use the write tool to create browser.txt with one line: hello browser. Then reply with about 200 Chinese characters describing why durable storage matters, ending with exactly: ${marker}`,
+	`Use the writeFiles tool to create browser.txt with one line: hello browser. Then reply with about 200 Chinese characters describing why durable storage matters, ending with exactly: ${marker}`,
 );
 const startedAt = Date.now();
 await page.click('[data-testid="m1-send"]');

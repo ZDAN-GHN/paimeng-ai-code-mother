@@ -31,7 +31,8 @@ const steerings = new Map<string, string[]>();
 const inputTextPartSchema = z.object({ type: z.literal('text'), text: z.string().min(1).max(1000) }).strict();
 // 消息片段：文本 + 用户上传图片的附件 part。附件 part 不是 SDK 的 UIMessage 片段，送模型前会整条摘掉并换成真实字节。
 const inputMessagePartSchema = z.discriminatedUnion('type', [inputTextPartSchema, attachmentPartSchema]);
-const inputSchema = z.object({
+/** 生成请求体（app/chat/gen/code）：legacy 与 harness 两个引擎共用同一份校验。 */
+export const generationRequestSchema = z.object({
   appId: idSchema,
   requestId: z.uuid(),
   // metadata 是 SDK UIMessage 的合法字段（客户端把待发送图片暂存在这里，发送时合并进 parts）；服务端不解释它。
@@ -183,7 +184,7 @@ function retryableStreamErrors(model: LanguageModel): LanguageModel {
 }
 
 export async function chatResponse(req: Request, raw: unknown, user: User) {
-  const input = inputSchema.parse(raw);
+  const input = generationRequestSchema.parse(raw);
   const app = await getApp(input.appId, user, true);
   const prompt = input.message.parts.filter(part => part.type === 'text').map(part => part.text).join('\n');
   validatePrompt(prompt);

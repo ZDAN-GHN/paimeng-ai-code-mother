@@ -10,6 +10,10 @@
  * derives SPIKE_* from ~/.pi/agent/models.json). Set SPIKE_FAUX_MODEL=1 to run
  * the deterministic stub model instead. The verification page needs an app id:
  * open http://localhost:3100/durable-m1?appId=<应用 ID> as that app's creator.
+ *
+ * M2a：同一个 Next 进程默认用harness 引擎跑产品的生成（`DURABLE_ENGINE=harness`）。
+ * 产品的写接口（guardRequest）要求请求来源等于 `APP_ORIGIN`，而 Next 在 3100 上，
+ * 所以这里给子进程显式设 `APP_ORIGIN=http://localhost:<appPort>`（可用 M1_APP_ORIGIN 覆盖）。
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createConnection } from 'node:net';
@@ -28,6 +32,8 @@ const pgDir = resolve(spikeDir, '..', 'pi-durable-pg');
 const pgUrl = process.env.DURABLE_PG_URL ?? 'postgres://spike:spike@127.0.0.1:55432/durable';
 const harnessPort = Number(process.env.M1_PORT ?? 5599);
 const appPort = Number(process.env.M1_APP_PORT ?? 3100);
+const appOrigin = process.env.M1_APP_ORIGIN ?? `http://localhost:${appPort}`;
+const engine = process.env.DURABLE_ENGINE ?? 'harness';
 const harnessUrl = `http://127.0.0.1:${harnessPort}`;
 
 const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
@@ -136,7 +142,7 @@ if (await portOpen('127.0.0.1', appPort)) {
 
 await ensurePostgres();
 
-console.log(`管理端 http://localhost:${appPort}/durable-m1，harness ${harnessUrl}；输出前缀为 [harness] 与 [app]，按 Ctrl-C 一起停止`);
+console.log(`管理端 http://localhost:${appPort}（APP_ORIGIN=${appOrigin}，生成引擎 ${engine}），harness ${harnessUrl}；输出前缀为 [harness] 与 [app]，按 Ctrl-C 一起停止`);
 start('harness', join(pgDir, 'run.sh'), ['src/server.ts'], {
   cwd: spikeDir,
   env: { ...process.env, M1_HOST: '127.0.0.1', M1_PORT: String(harnessPort), DURABLE_PG_URL: pgUrl },
@@ -155,5 +161,5 @@ if (Date.now() >= deadline) await stop(1);
 
 start('app', join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'next.cmd' : 'next'), ['dev', '--webpack', '--hostname', '127.0.0.1', '--port', String(appPort)], {
   cwd: root,
-  env: { ...process.env, DURABLE_HARNESS_URL: harnessUrl },
+  env: { ...process.env, DURABLE_HARNESS_URL: harnessUrl, DURABLE_ENGINE: engine, APP_ORIGIN: appOrigin },
 });

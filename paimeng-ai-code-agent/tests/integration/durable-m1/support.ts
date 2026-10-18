@@ -61,18 +61,20 @@ const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 export type HarnessProcess = { child: ChildProcess; output: () => string };
 
 /** Spawn the harness on its own port and run directory; `reset` empties the schema before serving. */
-export function startHarness(options: { port: number; runDir: string; reset: boolean; waitMs: number; finalText: string }): HarnessProcess {
+export function startHarness(options: { port: number; runDir: string; reset: boolean; waitMs: number; finalText: string; workspace?: string; tool?: string; args?: unknown }): HarnessProcess {
   let output = '';
   const env = {
     ...process.env,
     M1_HOST: '127.0.0.1',
     M1_PORT: String(options.port),
     M1_RUN_DIR: options.runDir,
-    M1_WORKSPACE: join(options.runDir, 'workspace'),
+    M1_WORKSPACE: options.workspace ?? join(options.runDir, 'workspace'),
     DURABLE_PG_URL: postgresUrl,
     SPIKE_FAUX_MODEL: '1',
     SPIKE_FAUX_WAIT_MS: String(options.waitMs),
     SPIKE_FAUX_FINAL: options.finalText,
+    ...(options.tool ? { SPIKE_FAUX_TOOL: options.tool } : {}),
+    ...(options.args === undefined ? {} : { SPIKE_FAUX_ARGS: JSON.stringify(options.args) }),
     ...(options.reset ? { M1_RESET: '1' } : {}),
   };
   const child = spawn(process.execPath, ['--experimental-strip-types', 'src/server.ts'], { cwd: spikeDir, env, stdio: ['ignore', 'pipe', 'pipe'] });

@@ -7,9 +7,10 @@
  * Enabled with SPIKE_FAUX_MODEL=1. Knobs:
  *   SPIKE_FAUX_TOOL     tool the scripted turn calls (default m1_wait)
  *   SPIKE_FAUX_WAIT_MS  its `ms` argument (default 3000)
+ *   SPIKE_FAUX_ARGS     JSON arguments for that call, replacing `{ms}` (default unset)
  *   SPIKE_FAUX_FINAL    final answer text (default M1_STUB_FINAL)
  */
-import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxResponseStep, type ToolCall } from "@earendil-works/pi-ai";
 import { createModels, type MutableModels } from "@earendil-works/pi-ai/models";
 
 export const FAUX_PROVIDER = "faux";
@@ -29,11 +30,13 @@ export function fauxModels(): MutableModels {
 	const toolName = process.env.SPIKE_FAUX_TOOL ?? "m1_wait";
 	const waitMs = Number(process.env.SPIKE_FAUX_WAIT_MS ?? 3_000);
 	const finalText = process.env.SPIKE_FAUX_FINAL ?? "M1_STUB_FINAL";
+	const rawArgs = process.env.SPIKE_FAUX_ARGS;
+	const args: ToolCall["arguments"] = rawArgs ? (JSON.parse(rawArgs) as ToolCall["arguments"]) : { ms: waitMs };
 	const faux = fauxProvider({ provider: FAUX_PROVIDER, models: [{ id: FAUX_MODEL_ID, contextWindow: 200_000, maxTokens: 8_192 }] });
 	const step: FauxResponseStep = (context) =>
 		context.messages.some((message) => message.role === "toolResult")
 			? fauxAssistantMessage(finalText)
-			: fauxAssistantMessage([fauxToolCall(toolName, { ms: waitMs })], { stopReason: "toolUse" });
+			: fauxAssistantMessage([fauxToolCall(toolName, args)], { stopReason: "toolUse" });
 	faux.setResponses(Array.from({ length: FAUX_STEPS }, () => step));
 	const models = createModels();
 	models.setProvider(faux.provider);
