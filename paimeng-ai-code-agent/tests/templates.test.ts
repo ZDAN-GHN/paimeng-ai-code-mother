@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { initializeTemplate, appTemplate } from '@/server/template-workspace';
 import { resolveTemplate, readTemplateFile, TEMPLATE_MARKER } from '@/server/templates';
 import { workspace, listProjectFiles, readProjectFile, writeProjectFile, deleteProjectFile } from '@/server/workspace';
-import { buildApp, hasPreview, downloadApp } from '@/server/artifacts';
+import { downloadApp } from '@/server/artifacts';
 import type { ProjectCodeGenType } from '@/shared/contracts';
 
 const cases: { id: string; type: ProjectCodeGenType; entry: string; jsEntry: string; source: string; sample: string; removable: string }[] = [
@@ -73,16 +73,5 @@ describe.each(cases)('版本化 $id 工程模板', item => {
     expect(bytes.toString()).not.toContain(TEMPLATE_MARKER);
   });
 
-  it('未经 AI 修改的示例通过真实 Docker 类型检查与构建，篡改锁或类型错误不覆盖旧产物', async () => {
-    await buildApp(fresh);
-    expect(await hasPreview(fresh)).toBe(true);
-    const before = await readFile(join(workspace(fresh), 'dist/index.html'), 'utf8');
-    expect(before).toContain('./assets/');
-    await writeFile(join(workspace(fresh), 'package-lock.json'), '{}');
-    await expect(buildApp(fresh)).rejects.toThrow('模板依赖锁已改变');
-    await writeFile(join(workspace(fresh), 'package-lock.json'), await readTemplateFile(template, 'package-lock.json'));
-    await writeProjectFile(fresh, 'src/type-error.ts', 'export const count: number = "这不是数字";');
-    await expect(buildApp(fresh)).rejects.toThrow('not assignable to type');
-    expect(await readFile(join(workspace(fresh), 'dist/index.html'), 'utf8')).toBe(before);
-  }, 360000);
+
 });

@@ -1,0 +1,58 @@
+name: Tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Run Postgres, Docker and Chromium checks too
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: paimeng-ai-code-agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: paimeng-ai-code-agent/package-lock.json
+      - run: npm ci
+      - run: npm test
+  full:
+    if: github.event_name == 'workflow_dispatch' && inputs.full
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: paimeng_app
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: paimeng-ai-code-agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: paimeng-ai-code-agent/package-lock.json
+      - run: npm ci
+      - run: |
+          echo 'DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/paimeng_app' > .env
+          echo 'DURABLE_PG_URL=postgres://postgres:postgres@127.0.0.1:5432/paimeng_agent_test' >> .env
+          npm run db:test:setup
+          npx playwright install --with-deps chromium
+          docker pull node:24-alpine
+      - run: npm run test:all

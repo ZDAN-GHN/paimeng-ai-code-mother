@@ -97,11 +97,22 @@ Redis 已作为本地开发服务提供连接。平台会话、生成任务与�
 
 语音输入用浏览器 `MediaRecorder` 录音（最长 120 秒），转写后把文本追加进输入框（不自动发送）。转写走可选别名 `speech.transcribe`：在「模型管理 → 别名」里新增该别名，指向一个 OpenAI 兼容的 `/audio/transcriptions` 服务（例如 whisper），上游模型名填 `whisper-1` 之类的转写模型。**未配置该别名时麦克风按钮禁用并说明原因**，不会假装可用。音频上限 10 MiB，只接受 webm/ogg/mp4/mpeg/wav。
 
+## 测试入口
+
+| 命令 | 范围 | 依赖 |
+| --- | --- | --- |
+| `npm test` | 日常逻辑、文件与本地 HTTP 协议测试 | 无数据库、Docker 或浏览器；按启动时 CPU/内存余量并行 |
+| `npm run test:integration` | 数据库、harness 进程、断连与重启 | 专用 Postgres 测试库，串行 |
+| `npm run test:system` | 真实容器构建、浏览器截图与素材加载 | Postgres、Docker、Chromium，串行 |
+| `npm run test:all` | 上述三组依次执行 | 完整环境 |
+
+`npm test` 的 setup 会在测试尝试启动子进程、浏览器或访问产品数据库时直接报错，并指出正确目录。不要用跳过或空 mock 隐藏这些依赖；把需要它们的测试放进对应目录。日常改动先跑相关文件，构建/发布改动再跑 system。CI 自动执行同一个 `npm test`；完整环境检查可从 Tests workflow 的 `full` 输入手动触发。
+
 ## 运行完整测试
 
 1. 执行 `npm run durable:pg` 确保本机 Postgres 已就绪，再执行 `npm run db:test:setup`。此命令确保同实例的 `paimeng_app_test` 与 `paimeng_agent_test` 存在，并在前者上执行测试库迁移。
 2. 执行 `npm run type-check`。
-3. 执行 `npm test`。完整测试需要 Postgres、Docker 镜像和 Chromium，不会因缺少依赖而跳过相关检查。durable 回归用例（`tests/integration/durable-m1`）需要同一个 Postgres；没有 Postgres 时这组用例会打印原因并 skip。
+3. 执行 `npm run test:all`。完整测试需要 Postgres、Docker 镜像和 Chromium，不会因缺少依赖而跳过相关检查。durable 回归用例（`tests/integration/durable-m1`）需要同一个 Postgres；没有 Postgres 时这组用例会打印原因并 skip。
 4. 保持开发服务和预览服务运行，并将本地模型设为 fixture。执行 `npm run test:e2e`。浏览器场景只创建带唯一前缀的验收账号及应用。
 5. 执行 `npm run verify:boundary`，核对旧项目与已有删除状态。
 
