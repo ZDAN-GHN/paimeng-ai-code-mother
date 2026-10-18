@@ -4,7 +4,7 @@ import { db, now, type Transaction } from './db';
 import { apps, generations, leases, users } from './schema';
 import { getConfig } from './config';
 import { BusinessError } from './http';
-import { enforceChatRateLimit } from './rate-limit';
+import { reserveChatRateLimit, refundChatRateLimit } from './rate-limit';
 import { stopReasonFrom, type GenerationStopReason } from './generation-accounting';
 import type { GenerationStatus, User } from '@/shared/contracts';
 
@@ -59,31 +59,37 @@ export async function withAppWriter<T>(appId: string, work: (tx: Transaction, ap
 }
 
 /**
- * 开始一次生成：限流 → 应用与任务行加锁 → 任务与租约落库。
+ * 开始一次生成：Redis 预定限流额度 → 应用与任务行加锁 → 任务与租约落库。
  * 用户消息本身不在这里落库——它随 `/submit` 作为转录条目（`app.user`）写进 harness 存储。
+ *
+ * 限流额度在 PG 事务之外先预定：额度用尽在这里直接 429，不写任何生成行或租约。事务里的权限（403）、
+ * 重复请求（409）与全局并发（429）拒绝都要把这一格退还，一次被拒的请求不能吃掉用户的生成次数。
  */
 export async function beginGeneration(appId: string, id: string, user: User, clientAddress = 'unknown'): Promise<void> {
   const [busy] = await db().select().from(leases).where(eq(leases.appId, BigInt(appId))).limit(1);
   if (busy && busy.expiresAt > now()) throw new BusinessError(409, 40900, '应用已有正在运行的生成任务');
-  return db().transaction(async tx => {
-    const [actor] = await tx.select().from(users).where(and(eq(users.id, BigInt(user.id)), eq(users.isDelete, 0))).for('update');
-    if (!actor) throw new BusinessError(401, 40100, '请先登录');
-    const app = await lockedApp(tx, appId);
-    if (app.userId !== actor.id) throw new BusinessError(403, 40300, '无权限生成该应用');
-    const [duplicate] = await tx.select().from(generations).where(eq(generations.id, id)).limit(1);
-    if (duplicate) throw new BusinessError(409, 40900, '该请求已经处理，请读取生成状态');
-    const [lease] = await tx.select().from(leases).where(eq(leases.appId, app.id)).limit(1);
-    if (lease && lease.expiresAt > now()) throw new BusinessError(409, 40900, '应用已有正在运行的生成任务');
-    if (lease) await recoverLease(tx, lease);
-    await admitGeneration(tx);
-    await enforceChatRateLimit(tx, actor.id.toString(), clientAddress);
-    await tx.insert(generations).values({ id, appId: app.id, userId: actor.id, status: 'generating', createTime: now(), updateTime: now() });
-    await tx.insert(leases).values({ appId: app.id, generationId: id, expiresAt: expiry() });
-  }).catch(error => {
+  const reservation = await reserveChatRateLimit(user.id, clientAddress);
+  try {
+    await db().transaction(async tx => {
+      const [actor] = await tx.select().from(users).where(and(eq(users.id, BigInt(user.id)), eq(users.isDelete, 0))).for('update');
+      if (!actor) throw new BusinessError(401, 40100, '请先登录');
+      const app = await lockedApp(tx, appId);
+      if (app.userId !== actor.id) throw new BusinessError(403, 40300, '无权限生成该应用');
+      const [duplicate] = await tx.select().from(generations).where(eq(generations.id, id)).limit(1);
+      if (duplicate) throw new BusinessError(409, 40900, '该请求已经处理，请读取生成状态');
+      const [lease] = await tx.select().from(leases).where(eq(leases.appId, app.id)).limit(1);
+      if (lease && lease.expiresAt > now()) throw new BusinessError(409, 40900, '应用已有正在运行的生成任务');
+      if (lease) await recoverLease(tx, lease);
+      await admitGeneration(tx);
+      await tx.insert(generations).values({ id, appId: app.id, userId: actor.id, status: 'generating', createTime: now(), updateTime: now() });
+      await tx.insert(leases).values({ appId: app.id, generationId: id, expiresAt: expiry() });
+    });
+  } catch (error) {
+    if (reservation) await refundChatRateLimit(reservation);
     const code = (error as { cause?: { code?: string }; code?: string }).cause?.code ?? (error as { code?: string }).code;
     if (code === '23505') throw new BusinessError(409, 40900, '该请求或消息已经处理，请读取生成状态');
     throw error;
-  });
+  }
 }
 
 /**

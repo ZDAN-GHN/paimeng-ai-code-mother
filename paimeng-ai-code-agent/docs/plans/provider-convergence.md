@@ -1,136 +1,57 @@
-# 模型 provider 收敛：现状与 A/B 取舍
+# 生成模型配置与 harness
 
-状态：**设计稿，待用户决策**（2026-10-18，基线 `076f022`）。本文只做调研与方案对比，不含代码改动。
-相关：库表职责见 [database-inventory.md](./database-inventory.md)，harness 部署与「两份凭据」缺口见
-[pi-durable-deployment.md](./pi-durable-deployment.md) §1（「需要显式决定的重复来源」）。
+状态：已集成产品库模型域，验证进度见 [本轮验收](./provider-redis-convergence.md)。生成由常驻 harness 执行，Next 负责鉴权、任务准入和 attach；生成模型默认来自管理端配置的 `codegen.default`。
 
-## 0. 一句话结论
+## 每轮模型准入
 
-生成链路的模型**不是**由产品库的模型管理配置决定的，而是由 harness 进程的 `DURABLE_MODEL_*` 环境变量决定的；
-产品库里的 `model_provider` / `model_alias` 对生成只起「记账身份 + 图片能力门禁」作用。要收敛只有两条路
-（A：harness 直接读产品库模型域；B：产品在每轮把绑定下推给 harness），**推荐 A 的分步路径**：
-先修两处无论选哪条都要修的错（§7 S1），再让 harness 从产品库解析别名。
+1. Next 调用 harness `POST /model`。harness 一致读取产品库模型配置，检查别名与提供商已启用、格式和凭据来源有效，并固定这轮的模型描述。
+2. 返回公开身份、图片能力、思考档位和不透明 binding token。响应不含密钥或密文。
+3. Next 校验图片、附件与产品准入，再将 token 交给会话创建和 `/submit`。预检与提交之间改配置不会更换本轮绑定。
+4. 后续运行重新解析配置；忙碌会话收到不同 token 时返回 409，不修改 provider 目录或会话配置。插话和修复轮沿用当前绑定。
 
-## 1. 现状：三样东西要分开看
+未配置/禁用的别名、密文无法解密、未允许的环境变量或不支持的 API 格式，会在任务落库前返回可读的 503。harness 可以在配置尚未完成时启动；不会因此静默选择另一模型。
 
-| 东西 | 状态 | 证据 |
+## 来源优先级与凭据
+
+| 来源 | 使用条件 | 凭据处理 |
 | --- | --- | --- |
-| Vercel AI Gateway（托管网关服务） | **从来没接** | `package.json` 无 `@ai-sdk/gateway`，无任何 gateway 路由/变量；provider 表里的 baseUrl 全是用户自己填的上游 |
-| Vercel AI SDK（`ai` 包 v7 + `@ai-sdk/*`） | 还在用，但真实上游调用只剩一处 | 生成**不再**经它；实调用是路由分类 `model.ts:57-66`（`generateText` + `Output.object`）。其余用途：`models/adapters.ts` 构造 `LanguageModel`（供身份、能力与语音取 baseUrl/密钥）、`web-access/tools.ts` 的 `tool()` 定义、`durable-engine.ts` 的 `createUIMessageStream`、前端 `DefaultChatTransport` |
-| harness 侧的 pi-ai provider 层 | **生成链路真正在跑的那套** | `durable/harness.ts:29` `createProvider` + `withOpenCodeSessionHeader(openAICompletionsApi())`；凭据来自 `DURABLE_MODEL_BASE_URL/_API_KEY/_ID`（`harness.ts:38-41`），本机由 `scripts/durable-dev.ts:59-68` 从 `~/.pi/agent/models.json` 的 `oc-go` 派生，默认模型 id `deepseek-v4.1-flash` |
+| harness 夹具 | 显式 `DURABLE_FAUX_FIXTURE=1` 或 `DURABLE_FAUX_MODEL=1` | 不访问真实上游；生产还要求 `ALLOW_TEST_FIXTURE=1` |
+| 环境覆盖 | `DURABLE_MODEL_BASE_URL` / `_API_KEY` / `_ID` 三项完整设置 | 密钥只由 auth 回调读取；部分设置直接报错 |
+| 产品模型域 | 默认路径，解析 `codegen.default` | inline 用 `decryptModelSecret`；env 经白名单检查后读取 `process.env` |
 
-**决定性的证据**在自己的记账表里（`generation_step` 最新几行）：
+`npm run dev` 不再读取其他工具的模型配置文件。提供商 inline 密钥只以密文保存在 `model_provider`，解密使用 `MODEL_SECRET_KEY` 或已有的本地主密钥文件。明文不进入 `AliasModel`、HTTP 载荷、会话文档、日志或文件。
 
-```
-model_alias       = codegen.default        -- 来自产品库别名表（身份字段）
-provider_id       = durable                -- 来自 harness 条目上报（真实调用方）
-upstream_provider = durable
-upstream_model_id = deepseek-v4.1-flash    -- 实际跑的模型
-```
+普通运行在内存 auth 闭包中保留准入时的 inline 密文，请求时才解密，因此轮换提供商密钥不会改变正在执行的运行。持久描述不包含该密文；重启恢复时按原提供商的凭据引用读取当前可用密钥。原凭据来源不存在时明确失败，不改用当前别名的提供商。
 
-即：`model_alias` 赢了「身份与门禁」，`DURABLE_MODEL_*` 赢了「实际请求」。
+## 协议与思考设置
 
-## 2. 现在的三个后果
-
-1. **管理端改 `codegen.default` 的提供商/模型对生成无效**：别名解析（`model.ts:42` → `models/registry.ts`）仍会执行、
-   仍会解密密钥、仍会按 `capabilities.imageInput` 拒绝不支持视觉的模型（`durable-engine.ts` 生成前的 400 校验），
-   但返回的 `LanguageModel` 对象在 durable 模式下**只用于身份字段**，不会被调用。`pi-durable-deployment.md:147` 已把这条记为缺口。
-2. **别名里的 `settings.reasoning` 对生成无效**：DB 里 `codegen.default.settings = {reasoning: "max"}`，而 harness 两处
-   建会话都硬编码 `thinkingLevel: "off"`（`harness-server.ts:527`、`:673`，`durableModel()` 的 `thinkingLevelMap` 把 `off` 映成不发思考字段）。
-3. **凭据两份**：产品库密文（`MODEL_SECRET_KEY` / `runtime/model-secret.key` 解密）与 harness 的 `DURABLE_MODEL_API_KEY`
-   互不相干，部署时是两处独立的密钥管理。
-
-## 3. pi-ai 已有的 provider 能力（不用重造的部分）
-
-翻了 `node_modules/@earendil-works/pi-ai` 与 `pi-durable` 的类型与实现：
-
-- **provider 注册与替换**：`createModels()` → `MutableModels.setProvider/deleteProvider/clearProviders`（`pi-ai/dist/models.d.ts:200-203`）；
-  `createProvider` 支持单个 `api` 流实现，也支持按 `model.api` 分发的 map（同一个 provider 混合格式）。
-- **鉴权**：`ProviderAuth` 里 `apiKey.resolve()` / OAuth 可异步、可刷新；API key 也支持 OAuth 与环境凭据。
-- **模型目录**：`getModels()` 静态目录 + `refreshModels()`/`ModelsStore` 持久化刷新（对我们无用，我们自己的 DB 就是目录）。
-- **API 格式**：`pi-ai/dist/api/` 下有 30 多个 api 模块，含我们三种格式的 lazy 版本
-  `openai-completions` / `openai-responses` / `anthropic-messages`（另有 google-generative-ai、google-vertex、
-  bedrock-converse-stream、mistral-conversations、cloudflare-*、openrouter-images 等）。
-- **每模型元数据**：`thinkingLevelMap`（思考档位 → 上游字段）、`cost`（价格）、`contextWindow` / `maxTokens`、
-  `compat`（如 `thinkingFormat: "deepseek"`、`requiresReasoningContentOnAssistantMessages`）。
-- **会话级 agent 状态可改**：`Conversation.configure(change, context)`（`pi-durable/dist/harness/types.d.ts:588-600`，
-  实现 `harness/agent.js:55`），字段 `model` / `thinkingLevel` / `extensions` / `tools` / `modelTools` / `instructions` / `cwd`，
-  存在会话的 `pi.agent` 文档里。**产品已经在用这个口子**下发每轮 `instructions`（`harness-server.ts:751` 的 `POST /configure`
-  ← `durable-engine.ts:224` `configureHarnessInstructions`）。
-- **一轮内固定、跨轮生效**：`generation.js:28` 注释与 checkpoint 结构说明「agent 与 settings 在此解析，本请求内固定」，
-  模型在每次请求/续跑时用 `models.getModel(provider, modelId)` 查（`generation.js:36,112,147,180`）。
-  → **运行中 `configure` 改了模型，从下一轮开始生效**；反过来说，进程重启后 `resume()` 能用已持久化的
-  `ModelRef` 继续跑，前提是那个 provider 在当前进程里注册过。
-
-## 4. 方案 A：harness 直接读产品库的模型域
-
-**做法**：harness 进程按 `model_provider` / `model_alias` / `model_config_state` 三张表解析别名 → 注册 provider →
-每轮 `conversation.configure({ model, thinkingLevel })`（或建会话时给 `agent.model`）。
-
-- 复用条件已经具备：harness 启动时本来就要读产品 env（`webToolsForConfig()` → `getConfig()`，见 deployment.md §1
-  「产品 env 必须在 harness 的环境里合法」），`DATABASE_URL` 可用；`MODEL_SECRET_KEY` 同一台机器上也能读到
-  （多实例部署时 deployment.md 已要求共享）。
-- 热更新复用现成机制：`model_config_state.refresh_epoch` 变了就重建 provider 目录并把变化推给活跃会话
-  （对齐 `models/registry.ts` 的 5s TTL / 60s 降级语义）。
-- 重启续跑安全：密钥随时可从 DB 重新解密，`resume()` 恢复的任务能找到 provider。
-- 风险：harness 从此依赖产品库 schema。把耦合限制在一个只读小模块里（三张表、三个函数：读快照 / 读 epoch / 解密密钥），
-  并注意 `src/server/db.ts` 的注释——产品池把 int8 留字符串，而 harness 存储自己的连接把 int8 当数字，
-  两套解析器不能混（模型域没有 int8 列，风险低但仍要显式复用产品池而不是 harness 的那个 client）。
-- 改动点（预估）：新增 `src/server/durable/model-domain.ts`（读快照 + 组装 pi-ai provider/model 列表）；
-  `harness.ts` 的 `durableModels()` 从「env 单 provider」改成「DB 多 provider + env 兜底」；
-  `harness-server.ts` 建会话/`POST /configure` 处带上 `model` 与 `thinkingLevel`；`api_format → pi-ai api` 的映射表
-  （`openai-chat → openai-completions`、`openai-responses → openai-responses`、`anthropic-messages → anthropic-messages`）。
-
-## 5. 方案 B：每轮把绑定下推给 harness
-
-**做法**：产品侧仍是唯一真源；扩展 `POST /configure`（或 `/submit`）让它同时接收
-`{ provider: { id, baseUrl, apiKey, apiFormat }, model: { modelId, thinkingLevel } }`，harness 现场
-`models.setProvider(createProvider(...))` + `conversation.configure({ model, thinkingLevel })`。
-
-- 优点：harness 保持「不认识产品库」的执行器；产品侧唯一真源，改动集中在 HTTP 契约。
-- 硬伤一（重启续跑）：进程重启后 provider 不在表里，而 `resume()` 恢复的生成有持久化的 `ModelRef`，
-  查不到就报 `Model ... is not available`（`generation.js:36-39`）。要补就得在 harness 侧也存一份绑定与密钥
-  （等于走回 A 的一半），或回退 env（等于现状）。
-- 硬伤二（密钥暴露面）：harness 的 HTTP 服务目前**没有鉴权**、默认只监听 `127.0.0.1`（`harness-server.ts:70`），
-  `durable/harness.ts` 头部注释也承诺「secrets never logged，never written to disk」——下推密钥会破坏这条，
-  需要新增：不落日志（`log()` 与错误路径都要脱敏）、生产环境改用同机 unix socket 或 TLS，且密钥只驻内存。
-- 硬伤三（并发）：多实例或多个 Next 进程时，每次 generation 都要 upsert provider，需要幂等与清理策略。
-
-## 6. A / B 对比
-
-| 维度 | A（harness 读产品库） | B（每轮下推） |
+| 产品 API 格式 | pi-ai API | 地址约定 |
 | --- | --- | --- |
-| 单一真源 | 是 | 是 |
-| 密钥暴露面 | 不新增（harness 读本机 DB + 本机密钥） | 新增（密钥经 HTTP 传给 harness，无鉴权服务） |
-| 重启续跑 | 安全（随时可重新解析） | 不安全（要额外持久化绑定，或回退 env） |
-| 热更新 | 复用 `refresh_epoch` | 每次 generation 都在推，天然最新 |
-| 耦合 | harness 依赖产品库三张表（可用只读模块隔离） | harness 不认识产品库，但 HTTP 契约变大 |
-| 改动量 | 中（新模块 + `durableModels()` 改写 + 两处 configure） | 小（HTTP 契约 + 每次 upsert provider） |
-| 中途改模型 | 下一轮生效（框架语义） | 同 |
+| `openai-chat` | `openai-completions` | `{baseUrl}/chat/completions` |
+| `openai-responses` | `openai-responses` | `{baseUrl}/responses` |
+| `anthropic-messages` | `anthropic-messages` | 产品地址末尾的 `/v1` 由适配器归一，避免重复 `/v1/v1/messages` |
 
-## 7. 推荐的分步路径
+请求使用提供商自定义 headers 和别名 modelName、reasoning，输出预算来自别名设置。通用 OpenAI Chat 不附带 DeepSeek 的 thinking 字段；显式设置 `thinkingSwitch` 时按保存值强制开启/关闭。关闭优先于 alias reasoning，开启且未指定强度时只发送开启指令。
 
-- **S1（无论选哪条都该做，独立可交付）**
-  1. 模型管理页面对 `codegen.default` 加一句说明：**目前只影响图片能力校验与记账身份，实际模型由 harness 的
-     `DURABLE_MODEL_*` 决定**（或直接把生成模型也做成 env 派生 + UI 只读）。避免「改了没生效」的错觉。
-  2. 把 `thinkingLevel` 从硬编码 `"off"` 改成读别名的 `settings.reasoning`（映射表在 `durableModel()` 的 `thinkingLevelMap` 里已有）。
-  3. 记账身份以**实际调用者**为准（`provider_id` 已经是 `durable`；`model_alias` 只能作「期望值」，别让两者混在同一列语义里）。
-- **S2（选 A 时的最小实现）**：产品库模型域 → pi-ai provider 目录 + 每轮 `configure({ model })`；先只支持
-  `openai-chat`（现网在用的那条），`openai-responses` / `anthropic-messages` 随后补。
-- **S3**：能力（`capabilities.imageInput` / 工具调用）与思考档位改从同一处解析，产品侧的图片门禁与实际调用不再可能不一致。
+价格、上下文窗口等模型元数据暂时沿用原 harness 默认值；产品表没有这些字段。本次不新增模型目录或推断价格/上下文预算。
 
-## 8. 待决策问题
+## 重启与记账
 
-1. 选 A 还是 B？（本文推荐 A；若认为「harness 不读业务库」是必须守住的边界，则选 B 并接受 §5 的三条代价。）
-2. 模型管理页面要对生成链路**真正生效**，还是明确降级为「路由分类 / 语音 / 探活」的配置？（现状是第二种，但 UI 没说明。）
-3. `settings.reasoning` 要不要在 S1 就接通？（涉及成本与延迟，deepseek 系 `max` 明显更慢。）
-4. `cost` / `contextWindow` / `maxTokens` 目前是 `durableModel()` 里的常量（0.15 / 0.6 / 0.003 / 0、1e6、32k），
-   要不要进 DB？不进的话换模型后成本与上下文预算都是错的（用量块只展示 token，暂时不影响正确性）。
-5. 生产部署时 harness 是否允许读产品库（A），或是否允许接收密钥（B）？对应 `MODEL_SECRET_KEY` 共享与 harness 服务加固。
+每轮公开描述保存在 pi-durable 会话文档 `app.run-model`：原 providerId、模型引用、地址、API 格式、请求头、设置、能力和凭据引用。没有明文或密文，不新增产品表。
 
-## 9. 未验证项
+恢复不重新解释当前别名：即使别名已改指 P2，旧运行仍按原 P1 的描述重建。已结束模型循环的会话也可通过只读 `GET /model?conversationId=` 返回原身份，支持产品最终构建阶段的接管。显式环境覆盖恢复时同样使用持久引用里的模型与地址。
 
-- 运行中 `configure({ model })` 之后，**已经进入 `tools` 阶段**的那一轮是否真的按旧模型跑完（源码语义是 checkpoint 里固定，
-  未在真实 harness 上跑过对照实验）。
-- pi-ai 的 `createProvider` 在同一进程里注册多个 provider 并同时活跃（多会话用不同上游）的行为只在类型层面确认过，未实测。
-- `models.setProvider()` 热替换时正在运行的请求是否安全（预期是：下一轮才查表，安全）。
+账目继续记录 alias、产品 providerId 与实际模型名；上游请求元数据另存。实时助手消息使用合法 SDK metadata 的 generationId 对应用量，刷新后的历史使用原助手条目 id。
+
+## 类型分类仍在 Next
+
+`createApp` 在创建应用前调用 `route.classify`，只返回一个结构化类型，不需要建立生成会话。因此保留现有 AI SDK 路径及同一模型注册表。它沿用 5 秒 TTL / refresh epoch；生成则每轮直接读取产品配置。
+
+## 实现与验证落点
+
+- 运行描述、凭据与适配：`src/server/durable/model-domain.ts`。
+- 公开 HTTP schema：`src/shared/durable-model.ts`。
+- 准入、持久化与恢复：`src/server/durable/harness-server.ts`。
+- 产品任务、attach、记账与实时 metadata：`src/server/durable-engine.ts`。
+- 请求契约单测：`tests/models/durable-model-domain.test.ts`。
+- 热更新、忙碌拒绝、凭据隔离与重启：`tests/integration/durable-m1/model-config.test.ts`。

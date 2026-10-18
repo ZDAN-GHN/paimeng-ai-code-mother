@@ -1,25 +1,26 @@
 # 数据库表职责清单（两个库 + 归档库）
 
-状态：**现状说明**（2026-10-18，基线 `076f022`）。只描述「哪张表解决什么问题、谁在读写、删掉要在别处补什么」，
+状态：**现状说明**（文件工具迁移与 Redis 限流之后）。只描述「哪张表解决什么问题、谁在读写、删掉要在别处补什么」，
 不是迁移计划。表名/列名的搬迁历史见 [pi-durable-m4.md](./pi-durable-m4.md)，部署形态见
 [pi-durable-deployment.md](./pi-durable-deployment.md)。模型配置三张表的现状与收敛方向见
 [provider-convergence.md](./provider-convergence.md)。
 
 ## 0. 一句话结论
 
-1. 产品库 13 张表**没有一张是废表**：它们是「身份 / 生成状态机 / 逐轮账目 / 配置 / 基础设施」五件事各占若干行。
-2. 真正该删的表在**归档 MySQL 库**里：`ts_message` / `chat_history` / `ts_app_summary` 已被 pi-durable 取代，整库只剩备份价值。
+1. 产品库现有 12 张表，分别承担身份、生成状态、逐轮账目、配置与发号/迁移台账。`rate_limit` 已由新迁移删除，限流窗口转到 Redis。
+2. 旧 MySQL 库只作归档保留；`ts_message` / `chat_history` / `ts_app_summary` 的运行期职责已由 pi-durable 取代。
 3. 容易误判成冗余的地方有四处（§3），每处都有产品侧的唯一职责，删掉要在别处重新造一个机制。
 
 ## 1. 三个存储的分工
 
 | 存储 | 位置 | 表数 | 谁写 | 内容 |
 | --- | --- | --- | --- | --- |
-| 产品库 `paimeng_app` | `zslm-postgres` `127.0.0.1:5432`（本机自己的容器，不归本仓库管） | 13 | 只有 Next 进程（`src/server/db.ts` 的池 + `src/server/schema.ts` 的映射） | 账号、应用、登录态、附件元数据、生成状态与账目、模型配置、限流、发号下界、迁移台账 |
+| 产品库 `paimeng_app` | `zslm-postgres` `127.0.0.1:5432` | 12 | Next 写业务数据；harness 只读模型域（产品池与存储池分离） | 账号、应用、登录态、附件元数据、生成状态与账目、模型配置、发号下界、迁移台账 |
+| Redis | `zslm-redis` `127.0.0.1:6379`，开发 DB0 / 测试 DB15 | 无业务表 | 生成准入 Lua 脚本 | 固定窗口计数与窗口 id；TTL 到期重置，不保存任务、登录态或对话 |
 | harness 存储库 `paimeng_agent` | 同一 Postgres 实例 | 9 | 只有 harness 进程（`src/server/durable/storage-pg.ts`，单写者互斥是库级锁） | 会话、转录条目、任务、输入提交、文档与文档版本、记录号、元数据、schema 版本 |
 | 归档库 `paimeng_ai_code_mother_ts` | `zslm-mysql` `127.0.0.1:3306`（旧 MySQL 容器，只作归档保留） | 16 | 无（运行期不连接；`scripts/import-mysql-rows.ts` 一次性读） | 搬迁前的旧业务行；`ts_message` / `chat_history` / `ts_app_summary` 已无去向 |
 
-**对话不存在产品库里**：用户与助手气泡是 harness 的 `entries`（种类 `app.user` / `app.assistant`），
+**对话不存在产品库里**：用户、助手和工具结果是 harness 的 `entries`（种类 `app.user` / `pi.assistant` / `pi.tool-result`），
 `GET app/messages` 经 harness `/messages` 读回（m4 §2）。这是最容易被误判成「消息表不见了/重复了」的地方。
 
 复现命令（本机没有 `psql` 客户端，用容器里的）：
@@ -29,7 +30,7 @@ docker exec -i zslm-postgres psql -U postgres -d paimeng_app   -c "select relnam
 docker exec -i zslm-postgres psql -U postgres -d paimeng_agent -c "select relname, n_live_tup from pg_stat_user_tables order by relname"
 ```
 
-## 2. 产品库 13 张表
+## 2. 产品库 12 张表
 
 行数为 2026-10-18 开发库实测值，只作「这张表在不在用」的证据。
 
@@ -38,7 +39,7 @@ docker exec -i zslm-postgres psql -U postgres -d paimeng_agent -c "select relnam
 | 表 | 作用 | 谁读写 | 行数 | 删除代价 |
 | --- | --- | --- | --- | --- |
 | `app_user` | 账号、密码哈希、昵称头像、角色、软删除 | `auth.ts`（登录注册）、`business.ts`、管理端 | 122 | 不能删：一切归属与鉴权的根 |
-| `app` | 应用：初始需求、`code_gen_type`、封面、部署键与部署时间、`priority`、**`conversation_id`（→ harness 会话的映射）** | `business.ts`、`artifacts.ts`、`project-shape.ts` | 123 | 不能删：`conversation_id` 是产品与 harness 唯一的连接点 |
+| `app` | 应用：初始需求、`code_gen_type`、封面、部署键与部署时间、`priority`、**`conversation_id`（→ harness 会话的映射）** | `business.ts`、`artifacts.ts`、`durable-engine.ts` | 123 | 不能删：`conversation_id` 是产品与 harness 唯一的连接点 |
 | `user_session` | 登录态：token 哈希 + 过期时间 | `auth.ts:17`（每次请求联表校验）、`:30`（登录写入） | 162 | 不能删：改签名 Cookie/JWT 才能省，代价是取消会话要另造黑名单 |
 | `attachment` | 图片附件**元数据**（字节在 `runtime/attachments/`）：原图 `object_key`、派生图 `preview_key`、`hash`、宽高、归属 | `attachment-store.ts`、`image-upload.ts`、`image-files.ts`、`GET app/asset` | 7 | 不能删：`GET app/asset` 只服务这张表登记过的路径与归属，否则就是任意文件读 |
 
@@ -76,9 +77,8 @@ docker exec -i zslm-postgres psql -U postgres -d paimeng_agent -c "select relnam
 
 | 表 | 作用 | 谁读写 | 行数 | 删除代价 |
 | --- | --- | --- | --- | --- |
-| `rate_limit` | 生成限流窗口计数（`USER` / `IP` / `API` 三种键） | `rate-limit.ts` | 16 | 可搬到已经在跑的 Redis；收益是一张表，代价是限流变成两个存储的一致性问题 |
 | `id_sequence` | 产品雪花 ID 的发号下界（`node_id` 主键 + `last_id`） | `snowflake.ts:29`（`SELECT … FOR UPDATE` 预留号段） | 1（`last_id=469396143160164352`） | 可换 Postgres 序列；代价是丢掉与旧库 MyBatis Flex 一致的位布局/起始时间，且要重新保证「已提交下界」跨进程共享 |
-| `schema_migration` | 迁移台账 `name` + `checksum` + `applied_at` | `scripts/migrate.ts:9` | 1（`001_initial.sql`） | 不能删：没有它就无法判断库执行到哪一步、也无法禁止改已执行迁移的内容 |
+| `schema_migration` | 迁移台账 `name` + `checksum` + `applied_at` | `scripts/migrate.ts` | 已含 `001_initial.sql` 与 `002_drop_rate_limit.sql` | 不能删：没有它就无法判断库执行到哪一步、也无法禁止改已执行迁移的内容 |
 
 `id_sequence` 与 harness 的 `mintId` 是**两个独立命名空间**：产品不读 harness 的号段，harness 只给会话/记录发号。
 
@@ -89,7 +89,7 @@ docker exec -i zslm-postgres psql -U postgres -d paimeng_agent -c "select relnam
 | `generation` + `generation_lease` vs harness `tasks` + 会话 busy | 前者是**产品语义**（应用状态、取消、超时、重启接管、全局并发上限），后者是**harness 自己的运行状态**；跨库跨进程，字段也不等价 | 各自保留；把产品状态外租给另一个进程的内部表是净损失 |
 | `generation_step` vs `pi.usage` | 逐轮明细 vs 累计桶（且摘要调用混在一起） | 各自保留 |
 | `id_sequence` vs `mintId` | 两个发号命名空间 | 各自保留 |
-| `rate_limit` vs Redis（已在跑） | 功能重叠，DB 是当前实现 | 可选优化，非缺陷 |
+| PostgreSQL 生成准入 vs Redis 频率限流 | Redis 事务外预留额度；PG 仍负责权限、任务/租约与全局并发 | PG 拒绝后只退还原 Redis 窗口；Redis 故障放行并记录结构化 warn |
 
 ## 4. 归档库：16 张旧表
 
@@ -106,10 +106,9 @@ docker exec -i zslm-postgres psql -U postgres -d paimeng_agent -c "select relnam
 | 目标 | 可行做法 | 代价 |
 | --- | --- | --- |
 | 少一个库 | 删归档 MySQL（保留 dump） | 失去回看旧数据的能力 |
-| 少一张表 | `rate_limit` → Redis | 限流跨两个存储，收益小 |
+| 少一张表 | `rate_limit` → Redis（已完成） | 通过原子窗口 token 和拒绝退还处理两种存储的边界 |
 | 少一张表 | `id_sequence` → Postgres 序列 | 丢掉旧库位布局兼容与已提交下界语义 |
 | 少一张表 | 删 `generation` / `generation_step` / `generation_lease` | 应用状态机、取消与接管、用量块、修复率统计全部要重建 |
 | 少一张表 | 合 `model_*` 三张 | 见 §2.3，会丢掉 N:1 角色映射与「整份配置一个版本」 |
 
-生成链路现在横跨两个库、两套 provider（见 [provider-convergence.md](./provider-convergence.md)），
-这才是「同一件事两边各留一份记录」的真正来源；整理方向是收敛 provider，而不是删表。
+生成执行与产品状态仍各自保留职责；模型连接配置统一来自产品模型域，密钥由 harness 按需解析，见 [provider-convergence.md](./provider-convergence.md)。Redis 只承担可降级的频率限制，不能取代 Postgres 的任务与租约。

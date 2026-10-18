@@ -5,7 +5,7 @@ import { rm } from 'node:fs/promises';
 import { eq } from 'drizzle-orm';
 import { testDatabaseUrl } from '../test-database-url';
 import { db, getPool, now } from '@/server/db';
-import { users, apps, generations, leases, rateLimits } from '@/server/schema';
+import { users, apps, generations, leases } from '@/server/schema';
 import { nextSnowflakeId } from '@/server/snowflake';
 import { publicUser } from '@/server/auth';
 import { createApp, getApp } from '@/server/business';
@@ -15,6 +15,7 @@ import type { CodeGenType, ProjectCodeGenType, User } from '@/shared/contracts';
 loadEnvFile('.env');
 process.env.DATABASE_URL = testDatabaseUrl(process.env.DATABASE_URL ?? '');
 process.env.AI_MODE = 'fixture';
+
 let actor: User;
 const created: { id: string; codeGenType: CodeGenType }[] = [];
 const cases: { templateId: string; codeGenType: ProjectCodeGenType; source: string; entry: string; jsEntry: string; changed: string }[] = [
@@ -34,7 +35,6 @@ afterAll(async () => {
     await rm(workspace(app), { recursive: true, force: true });
   }
   if (actor) {
-    await db().delete(rateLimits).where(eq(rateLimits.limitKey, 'user:' + actor.id));
     await db().delete(users).where(eq(users.id, BigInt(actor.id)));
   }
   await getPool().end();

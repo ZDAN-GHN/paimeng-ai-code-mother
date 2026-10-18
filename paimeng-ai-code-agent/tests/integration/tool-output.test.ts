@@ -6,6 +6,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { publicUser } from '@/server/auth';
 import { db, getPool, now } from '@/server/db';
+import { withRateLimitRedis } from '@/server/redis';
 import { harnessChatResponse, loadMessages } from '@/server/durable-engine';
 import { apps, generations, leases, users } from '@/server/schema';
 import { nextSnowflakeId } from '@/server/snowflake';
@@ -73,6 +74,7 @@ describe.skipIf(!available)('原生工具结果在实时流和历史中的转换
       await db().delete(leases).where(eq(leases.appId, appId));
       await db().delete(generations).where(eq(generations.appId, appId));
       await db().delete(apps).where(eq(apps.id, appId));
+      await withRateLimitRedis(client => client.del('user:' + userId));
       await db().delete(users).where(eq(users.id, userId));
       await rm(workspace(app), { recursive: true, force: true });
       await rm(runDir, { recursive: true, force: true });

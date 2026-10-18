@@ -9,13 +9,13 @@ import { cancelGeneration, generationRequestSchema, uploadDirectory, uploadFileN
 import { readAttachmentBytes, readAttachmentOriginal } from './attachment-store';
 import { buildApp, sourceDigest, type BuildStageProgress } from './artifacts';
 import { harnessProtocol } from './durable/protocol';
+import { conversationModelSchema, harnessModelFailureSchema, modelAdmissionSchema, type ModelAdmission } from '@/shared/durable-model';
 import { classifyBuildFailure, formatBuildFeedback, noProgressMessage } from './build-feedback';
 import { appForAdoption, getApp } from './business';
 import { getConfig } from './config';
 import { db } from './db';
 import { adoptLease, beginGeneration, finishGeneration, generationFor, heartbeat, restoreGeneration, setGeneration, staleActiveGenerations } from './generation-store';
 import { recordAssistantStep, recordBuildStep, type AccountToolCall, type EntryUsage, type GenerationStopReason, type ModelIdentity } from './generation-accounting';
-import { modelBindingFor } from './model';
 import { BusinessError } from './http';
 import { clientIp } from './rate-limit';
 import { apps } from './schema';
@@ -117,18 +117,52 @@ function harnessBase(): string {
 
 const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
-async function harnessFetch(path: string, init?: RequestInit): Promise<Response> {
-  let response: Response;
+async function harnessFetchRaw(path: string, init?: RequestInit): Promise<Response> {
   try {
-    response = await fetch(`${harnessBase()}${path}`, init);
+    return await fetch(`${harnessBase()}${path}`, init);
   } catch (error) {
     // 常驻 harness 没起来时 fetch 只会报一句 "fetch failed"，用户看到的是 500「服务处理失败」。
     // 生成全部在 harness 里跑，这里把连接失败翻成可操作的消息。
     if (init?.signal?.aborted) throw error;
     throw new BusinessError(503, 50300, `生成服务未启动或不可达（${harnessBase()}）：请先运行 npm run durable:harness，或用 npm run dev 一次启动全套`);
   }
+}
+
+async function harnessFetch(path: string, init?: RequestInit): Promise<Response> {
+  const response = await harnessFetchRaw(path, init);
   if (!response.ok) throw new HarnessRequestError(response.status, `harness ${path} 返回 ${response.status}：${(await response.text()).slice(0, 300)}`);
   return response;
+}
+
+/**
+ * 生成前在常驻 harness 里解析并固定本次生成的模型（产品库默认，`DURABLE_MODEL_*` 可显式覆盖）：
+ * 返回的只有公开身份、图片能力与一个不透明令牌，密钥留在 harness 进程里，不经 Next。
+ * 别名未配置、配置非法或 harness 不可达都在这里变成可读的业务错误，此时还没有生成记录。
+ */
+async function admitGenerationModel(): Promise<ModelAdmission> {
+  await ensureHarnessProtocol();
+  const response = await harnessFetchRaw('/model', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  const body: unknown = await response.json().catch(() => undefined);
+  if (!response.ok) {
+    const failure = harnessModelFailureSchema.safeParse(body);
+    if (failure.success) throw new BusinessError(response.status, failure.data.code, failure.data.error);
+    throw new HarnessRequestError(response.status, `harness /model 返回 ${response.status}`);
+  }
+  const parsed = modelAdmissionSchema.safeParse(body);
+  if (!parsed.success) throw new Error('harness /model 返回了预期之外的结构');
+  return parsed.data;
+}
+
+/**
+ * 某会话当前这次生成实际用的模型身份（只读）。接管重启前遗留的生成时记账要用它：
+ * 这次运行的模型是 harness 解析的，Next 手里没有。
+ */
+async function harnessModelIdentity(conversationId: number): Promise<ModelIdentity | null> {
+  const parsed = conversationModelSchema.safeParse(await harnessJson<unknown>(`/model?conversationId=${conversationId}`));
+  if (!parsed.success) return null;
+  const { model, identity } = parsed.data;
+  if (identity) return { alias: identity.alias, providerId: identity.providerId, modelName: identity.modelName };
+  return model ? { alias: null, providerId: null, modelName: model.modelId } : null;
 }
 
 /** harness HTTP 失败；404 单独可辨，用来发现「应用映射指向了一条不存在的会话」。 */
@@ -221,14 +255,17 @@ function toolOutputPayload(toolName: string, details: unknown, text: string) {
  * 应用 → harness 会话映射（docs/plans/pi-durable-data-model.md §4）：一个应用恰好一条会话，
  * 第一次为该应用生成时创建并写回 `app.conversationId`。同一应用的后续生成复用这条会话，
  * 模型因此能看到上一次的工具结果与文件内容，而不是每轮从零探索。
+ *
+ * `binding` 是本次生成在 harness 里准入的模型绑定令牌：新建会话直接按它建，避免「预检用一种模型、
+ * 提交用另一种」的竞态。
  */
-async function conversationFor(app: AppInfo, options: { fresh?: boolean } = {}): Promise<number> {
+async function conversationFor(app: AppInfo, options: { fresh?: boolean; binding?: string } = {}): Promise<number> {
   const [row] = await db().select({ conversationId: apps.conversationId }).from(apps).where(eq(apps.id, BigInt(app.id))).limit(1);
   if (row?.conversationId && !options.fresh) return row.conversationId;
   const created = await harnessJson<{ conversationId: number }>('/conversations', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ workspace: workspace(app), instructions: harnessInstructions(app, false), title: app.id, app: { id: app.id, codeGenType: app.codeGenType } }),
+    body: JSON.stringify({ workspace: workspace(app), instructions: harnessInstructions(app, false), title: app.id, app: { id: app.id, codeGenType: app.codeGenType }, binding: options.binding }),
   });
   await db().update(apps).set({ conversationId: created.conversationId }).where(eq(apps.id, BigInt(app.id)));
   return created.conversationId;
@@ -791,7 +828,7 @@ class RunTranslator {
     const { provider, model, responseModel, stopReason, durationMs, usage } = parsed.data;
     this.#pending = {
       stepNumber: this.#stepNumber++,
-      model: { alias: this.model.alias, providerId: provider ?? this.model.providerId ?? null, modelName: responseModel ?? model ?? this.model.modelName ?? null },
+      model: { alias: this.model.alias, providerId: this.model.providerId ?? provider ?? null, modelName: responseModel ?? model ?? this.model.modelName ?? null },
       upstreamProvider: provider ?? null,
       upstreamModelId: responseModel ?? model ?? null,
       usage: usage ? { input: usage.input, output: usage.output, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite, reasoning: usage.reasoning ?? null } : null,
@@ -875,11 +912,11 @@ type SubmitContentBlock = { type: 'text'; text: string } | { type: 'image'; data
 const userEntryKind = 'app.user';
 
 /** 一次 harness 提交。入参里没有任何请求 socket 或 signal，断连影响不到它。 */
-async function submitHarness(conversationId: number, content: string | SubmitContentBlock[], requestId: string | undefined, options: { whenBusy?: 'steer'; entry?: { kind: string; data: UIMessage } } = {}): Promise<void> {
+async function submitHarness(conversationId: number, content: string | SubmitContentBlock[], requestId: string | undefined, options: { whenBusy?: 'steer'; entry?: { kind: string; data: UIMessage }; binding?: string } = {}): Promise<void> {
   await harnessJson('/submit', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ conversationId, content, requestId, whenBusy: options.whenBusy, entry: options.entry }),
+    body: JSON.stringify({ conversationId, content, requestId, whenBusy: options.whenBusy, entry: options.entry, binding: options.binding }),
   });
 }
 
@@ -1007,8 +1044,8 @@ async function adoptGeneration(row: { id: string; appId: string; conversationId:
   const app = await appForAdoption(appId);
   if (!app) return;
   if (!await adoptLease(id)) return;
-  const { generation } = await modelBindingFor(app.codeGenType, '', app.template);
-  const model: ModelIdentity = { alias: generation.alias, providerId: generation.providerId, modelName: generation.modelName };
+  // 这次运行的模型是 harness 解析的（产品库或显式覆盖），身份从 harness 读回来记在同一个口径上。
+  const model = await harnessModelIdentity(conversationId) ?? { alias: null, providerId: null, modelName: null };
   void observeHarnessRun({ conversationId, requestId: id, app, model, channel: new DetachedChannel(), stop: new AbortController() });
   console.warn(`接管重启前遗留的生成 ${id}（应用 ${appId}，会话 ${conversationId}）：等待运行结束后做最终验证`);
 }
@@ -1067,11 +1104,12 @@ export async function harnessChatResponse(req: Request, raw: unknown, user: User
   // 附件 part 不在 SDK 的 UIMessage 联合类型里，但它要作为转录条目（`app.user`）的 UI 载荷保存供前端回显；
   // 这里在校验后的边界上显式放宽。
   const incoming = { ...input.message, id: `${input.requestId}-user` } as UIMessage;
-  // 与 legacy 同源：生成模型绑定在任务开始时固定（解析失败报 503，此时还没有落库任务）。
-  // 只取身份字段进记账行；模型调用仍由 harness 进程按其自己的 provider 配置完成。
-  const { generation, imageInput } = await modelBindingFor(app.codeGenType, prompt, app.template);
+  // 与 legacy 同源：生成模型在任务开始时固定。解析在常驻 harness 里做（产品库的 codegen.default 别名，
+  // `DURABLE_MODEL_*` 可显式覆盖），Next 只拿到公开身份与图片能力，再加一个绑定令牌；
+  // 别名未配置/不可用在这里就是可读的 503，还没落库任务。密钥不经 Next。
+  const admission = await admitGenerationModel();
   // 能力校验发生在生成开始之前：没有声明图片输入的模型直接拒绝，不把 provider 的原始报错丢给用户。
-  if (attachmentParts.length > 0 && !imageInput) {
+  if (attachmentParts.length > 0 && !admission.imageInput) {
     throw new BusinessError(400, 40000, '当前生成模型不支持图片输入：请在模型管理里为别名开启「图片输入」，或换用支持视觉的模型');
   }
   // 解析附件字节（送模型的派生图）。越权或不存在会在生成开始前抛 403/404，不会留下生成记录。
@@ -1084,23 +1122,24 @@ export async function harnessChatResponse(req: Request, raw: unknown, user: User
     ...attachmentImages.map(image => ({ type: 'image' as const, data: image.bytes.toString('base64'), mimeType: image.mediaType })),
   ];
   const instructions = harnessInstructions(app, attachmentImages.length > 0);
-  const model: ModelIdentity = { alias: generation.alias, providerId: generation.providerId, modelName: generation.modelName };
+  const model: ModelIdentity = { alias: admission.identity.alias, providerId: admission.identity.providerId, modelName: admission.identity.modelName };
+  const binding = admission.token ?? undefined;
   const stop = new AbortController();
   await beginGeneration(app.id, input.requestId, user, clientIp(req.headers));
   // 上传原图副本写进工作区，供用户明确要求当素材时引用（辅助能力，失败不影响生成）。
   await uploadAttachmentImages(app, user, attachmentImages);
   let conversationId: number;
   try {
-    conversationId = await conversationFor(app);
+    conversationId = await conversationFor(app, { binding });
     // 指令按当前轮次对齐（带图轮次多一句「图片已随消息提供」）；只提交，不观察。
     await configureHarnessInstructions(conversationId, instructions);
-    const submitOptions = { entry: { kind: userEntryKind, data: incoming } };
+    const submitOptions = { entry: { kind: userEntryKind, data: incoming }, binding };
     try {
       await submitHarness(conversationId, content, input.requestId, submitOptions);
     } catch (problem) {
       // 映射指向的会话在 harness 里不存在（换过 Postgres、或会话数据被清过）：清掉映射重建一次。
       if (!(problem instanceof HarnessRequestError) || problem.status !== 404) throw problem;
-      conversationId = await conversationFor(app, { fresh: true });
+      conversationId = await conversationFor(app, { fresh: true, binding });
       await configureHarnessInstructions(conversationId, instructions);
       await submitHarness(conversationId, content, input.requestId, submitOptions);
     }
@@ -1116,6 +1155,9 @@ export async function harnessChatResponse(req: Request, raw: unknown, user: User
   const stream = createUIMessageStream({
     onError: () => (stop.signal.aborted ? '生成已取消' : '生成失败，请查看任务状态'),
     execute: async ({ writer }) => {
+      // 消息 id 与 metadata 在流的第一帧就固定：前端按 metadata.generationId 找本次生成的记账
+      // （GenerationAccount.generationId），刷新后的历史仍按 pi 条目 id 读回，两者互不影响。
+      writer.write({ type: 'start', messageId: `${input.requestId}-assistant`, messageMetadata: { generationId: input.requestId } });
       for await (const chunk of channel.drain()) {
         // 客户端断开只让转发停下：上面的观察线程继续跑，任务照常结束。
         try { writer.write(chunk); } catch { /* 客户端已经走了 */ }

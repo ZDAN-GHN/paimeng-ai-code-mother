@@ -37,6 +37,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db, getPool, now } from '@/server/db';
+import { withRateLimitRedis } from '@/server/redis';
 import { nextSnowflakeId } from '@/server/snowflake';
 import { apps, generations, generationSteps, leases, users } from '@/server/schema';
 import { publicUser } from '@/server/auth';
@@ -191,6 +192,7 @@ async function stopGeneration(running: Running) {
     await rmSync(workspace({ id: app, codeGenType: 'html' }), { recursive: true, force: true });
   }
   createdApps.length = 0;
+  await withRateLimitRedis(client => client.del('user:' + running.actor.id));
   await db().delete(users).where(eq(users.id, BigInt(running.actor.id)));
 }
 

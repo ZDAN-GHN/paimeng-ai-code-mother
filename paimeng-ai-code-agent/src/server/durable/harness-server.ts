@@ -8,6 +8,7 @@
  * The attach surface:
  *
  *   POST /conversations          create one ownerless conversation for an app
+ *   POST /model                  admit the generation model for one run (sanitized identity + capabilities)
  *   POST /configure              set a conversation's resident instructions for the current turn
  *   POST /submit                 admit one user input into a conversation (default: root), optionally as a display entry
  *   POST /entries                append one display-only entry (no model message, visible to the product's UI only)
@@ -15,10 +16,17 @@
  *   GET  /agent-events           NDJSON of agent events for one conversation, ends with the run
  *   GET  /events                 SSE view of the structure (snapshot + revisions), stays open
  *   GET  /state                  read-only projection of one conversation
+ *   GET  /model                  the model identity and thinking level of one conversation's run
  *   GET  /messages               every transcript entry of one conversation (id, kind, model, data), oldest first
  *   GET  /context                the model context of one conversation (verification evidence)
  *   GET  /tools                  the offered tools and their replay policy
  *   GET  /health                 liveness
+ *
+ * The generation model comes from the product database's `codegen.default` alias (see `model-domain.ts`).
+ * `POST /model` resolves it before the product opens a generation row and pins it under an opaque token;
+ * `POST /conversations` and `POST /submit` consume that token, so a config change between the preflight and
+ * the run cannot silently swap the model or the key. Keys never leave this process and never enter an
+ * HTTP body, a stored record, or a log line.
  *
  * `buildPreview` calls the product's own `buildApp` and reports each stage as
  * running details. Every tool declares its `replay` policy: whether a
@@ -35,20 +43,23 @@
  * submit path and the durable task context never see a request socket.
  */
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
-import { Type } from "@earendil-works/pi-ai";
+import { Type, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { JsonValue } from "@earendil-works/chord";
 import { withAbortSignal } from "@earendil-works/chord/context";
-import type { AgentEvent, Conversation, ConversationId, ConversationView, Cursor, EntryDraft, LiveState, ToolExecutionApi } from "@earendil-works/pi-durable";
+import type { AgentEvent, Conversation, ConversationId, ConversationView, Cursor, EntryDraft, LiveState, ModelRef, ToolExecutionApi } from "@earendil-works/pi-durable";
 import { ToolTask, defineExtension, defineTool, hook, watchEvents } from "@earendil-works/pi-durable";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { createCodingTools } from "@earendil-works/pi-durable/tools";
 import { getOrThrow, type ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { CodeGenType } from "@/shared/contracts";
+import type { GenerationModelIdentity } from "@/shared/durable-model";
 import { buildApp, type BuildStageProgress } from "../artifacts";
+import { BusinessError } from "../http";
 import { harnessProtocol } from "./protocol";
 import { classifyBuildFailure, formatBuildDiagnostic } from "../build-feedback";
 import { getConfig } from "../config";
@@ -61,7 +72,17 @@ import {
 	type WebAccessRuntime,
 	type WebAccessSession,
 } from "../web-access/tools";
-import { context, entryText, modelRef, openPgHarness } from "./harness";
+import { context, entryText, openPgHarness } from "./harness";
+import {
+	admitGenerationModel,
+	identityOfDescriptor,
+	rebuildRunModel,
+	runModelDoc,
+	runModelOf,
+	thinkingLevelOfDescriptor,
+	type GenerationModelBinding,
+	type RunModelDescriptor,
+} from "./model-domain";
 import { resetPostgresStorage } from "./storage-pg";
 
 const runDir = process.env.DURABLE_HARNESS_RUN_DIR ?? resolve(process.cwd(), "runtime", "durable");
@@ -468,7 +489,7 @@ if (process.env.DURABLE_HARNESS_RESET === "1") {
  */
 const productTools = [...fileTools, listFilesTool, buildPreviewTool, waitTool, ...webToolsForConfig()];
 
-const { harness } = await openPgHarness({
+const { harness, models } = await openPgHarness({
 	// 文件工具取自框架的 coding-tools（read / write / edit），加上产品的 listFiles 与 buildPreview。
 	// 那个扩展里还有一个 `bash`（任意 shell），而产品明确不提供 shell，所以只取这三个，不整包安装。
 	codingTools: false,
@@ -483,14 +504,210 @@ const { harness } = await openPgHarness({
 });
 // Sweep build containers a killed process left behind, then schedule the work it left behind.
 await sweepOrphanBuildContainers();
-harness.resume();
-const root = await harness.root(context, { agent: { model: modelRef(), cwd: rootWorkspace, thinkingLevel: "off" } });
-log(`harness open conversation=${root.id} workspace=${rootWorkspace} storage=postgres`);
+const root = await harness.root(context, { agent: { cwd: rootWorkspace } });
 
 /** Handles by conversation id; the resident process keeps serving the same conversation across requests. */
 const handles = new Map<number, Conversation>([[root.id, root]]);
 /** Workspaces, so a caller can find the conversation it created for an app (debug/evidence endpoint). */
 const workspaces = new Map<number, string>([[root.id, rootWorkspace]]);
+
+/**
+ * The model a conversation's current run uses. Provider instances live only in this process, so a restart
+ * rebuilds them from the stored `ModelRef` (see `restoreConversationModels`).
+ */
+type ConversationModel = {
+	readonly ref: ModelRef;
+	readonly thinkingLevel: ModelThinkingLevel;
+	readonly identity: GenerationModelIdentity | null;
+	/** The admission token this binding came from; the same run's later submits (repair round, steer) reuse it. */
+	readonly token?: string;
+};
+
+const conversationModels = new Map<number, ConversationModel>();
+/** Admission token -> resolved binding, so a config change between the preflight and the run cannot swap the model. */
+const admittedModels = new Map<string, { at: number; binding: GenerationModelBinding }>();
+const admissionTtlMs = 120_000;
+const admissionLimit = 32;
+/** Per-conversation "bind + submit" chains: concurrent handlers cannot both decide to swap the binding. */
+const admissionChains = new Map<number, Promise<unknown>>();
+
+/** Run `work` after every earlier admission of the same conversation settled. */
+function serializeAdmission<T>(conversationId: number, work: () => Promise<T>): Promise<T> {
+	const previous = admissionChains.get(conversationId) ?? Promise.resolve();
+	const next = previous.then(work, work);
+	admissionChains.set(conversationId, next.catch(() => undefined));
+	return next;
+}
+
+/** Register the run's provider and drop this conversation's previous instance, so concurrent runs never share one. */
+function rememberModel(conversationId: number, binding: GenerationModelBinding, token?: string): ConversationModel {
+	const previous = conversationModels.get(conversationId);
+	if (previous && previous.ref.provider !== binding.ref.provider) models.deleteProvider(previous.ref.provider);
+	if (binding.provider) models.setProvider(binding.provider);
+	const installed: ConversationModel = {
+		ref: binding.ref,
+		thinkingLevel: binding.thinkingLevel,
+		identity: binding.identity,
+		...(token === undefined ? {} : { token }),
+	};
+	conversationModels.set(conversationId, installed);
+	return installed;
+}
+
+/**
+ * Persist the run's model descriptor in the conversation's own document, so a restart (or a read-only
+ * `GET /model`) can rebuild the exact binding without re-reading the alias. Holds no key: only the
+ * reference it is read from.
+ */
+async function persistRunModel(conversationId: ConversationId, descriptor: RunModelDescriptor): Promise<void> {
+	await harness.commit(async tx => {
+		(await tx.doc(runModelDoc, conversationId)).run = descriptor as unknown as JsonValue;
+	}, context);
+}
+
+/** The conversation's persisted run descriptor; undefined when it has none or the stored shape is unknown. */
+async function storedRunModel(conversationId: ConversationId): Promise<RunModelDescriptor | null> {
+	return runModelOf(await harness.snapshot(runModelDoc, conversationId, context));
+}
+
+/** Whether the conversation still holds an unfinished run: a live task, an unsettled submission, or a live run. */
+async function conversationRunning(conversation: Conversation): Promise<boolean> {
+	const inspection = await harness.inspect(context);
+	if (inspection.tasks.some(task => task.record.conversationId === conversation.id)) return true;
+	if (inspection.submissions.some(submission => submission.conversationId === conversation.id)) return true;
+	return liveState((await conversation.viewState(context)).value)?.run !== undefined;
+}
+
+/** Resolve the model for one run and pin it under an opaque token; only public identity and capabilities go out. */
+async function admitModel(): Promise<{ token: string; binding: GenerationModelBinding }> {
+	const binding = await admitGenerationModel();
+	const now = Date.now();
+	for (const [token, entry] of admittedModels) if (now - entry.at > admissionTtlMs) admittedModels.delete(token);
+	while (admittedModels.size >= admissionLimit) {
+		const oldest = admittedModels.keys().next().value;
+		if (oldest === undefined) break;
+		admittedModels.delete(oldest);
+	}
+	const token = randomUUID();
+	admittedModels.set(token, { at: now, binding });
+	return { token, binding };
+}
+
+/** The `binding` field of `/conversations` and `/submit`; absent means "keep the conversation's current model". */
+function bindingToken(value: unknown): string | undefined {
+	if (value === undefined || value === null) return undefined;
+	if (typeof value !== "string" || value === "") throw new BusinessError(400, 40000, "binding 必须是非空字符串");
+	return value;
+}
+
+/** An already admitted binding; a token lost to a harness restart asks the caller to admit again. */
+function admittedBinding(token: string): GenerationModelBinding {
+	const admitted = admittedModels.get(token);
+	if (!admitted) throw new BusinessError(409, 40900, "模型准入已失效，请重新提交这次生成");
+	return admitted.binding;
+}
+
+/** Abort a request with a readable model-configuration error instead of a bare 500. */
+function sendModelFailure(response: ServerResponse, error: unknown, path: string) {
+	const failure = error instanceof BusinessError ? error : new BusinessError(503, 50300, "模型配置不可用");
+	log(`${path} model binding failed: ${failure.message}`);
+	sendJson(response, failure.status, { error: failure.message, code: failure.code });
+}
+
+/**
+ * Bind the model of one run:
+ * - with a token: that run's admitted binding; the same token again (repair round, steer) keeps it;
+ * - without a token: keep the conversation's current model, rebuilding it from durable state when this
+ *   process has none (a restart), and only admitting a fresh one when the conversation never had a run.
+ *
+ * A different token is refused while the conversation still has an unfinished run: swapping the binding
+ * mid-run would send the run's next step to another provider and record it under another identity. The
+ * refusal happens before anything is registered or configured.
+ */
+async function bindConversationModel(conversation: Conversation, token: string | undefined): Promise<void> {
+	if (token === undefined) {
+		await ensureConversationModel(conversation);
+		return;
+	}
+	if (conversationModels.get(conversation.id)?.token === token) return;
+	const binding = admittedBinding(token);
+	if (await conversationRunning(conversation)) throw new BusinessError(409, 40900, "该会话还有正在运行的生成，不能换用另一个模型绑定");
+	await applyBinding(conversation, binding, token);
+}
+
+/** Register the binding, align the conversation's agent with it, and persist its run descriptor. */
+async function applyBinding(conversation: Conversation, binding: GenerationModelBinding, token?: string): Promise<ConversationModel> {
+	const installed = rememberModel(conversation.id, binding, token);
+	await conversation.configure({ model: installed.ref, thinkingLevel: installed.thinkingLevel }, context);
+	await persistRunModel(conversation.id, binding.descriptor);
+	return installed;
+}
+
+/**
+ * The conversation's current binding; on a miss, the binding rebuilt from its persisted run descriptor (no
+ * alias read, no credential fetch), and only for a conversation that never ran anything a fresh admission.
+ */
+async function ensureConversationModel(conversation: Conversation): Promise<ConversationModel> {
+	const current = conversationModels.get(conversation.id);
+	if (current) return current;
+	const rebuilt = await bindingFromDescriptor(conversation);
+	return applyBinding(conversation, rebuilt ?? await admitGenerationModel());
+}
+
+/**
+ * Rebuild the conversation's model from its persisted descriptor. Returns null (logged, and the run then fails
+ * as "model not available" for that conversation only) when the descriptor is absent or its ref is not the one
+ * the conversation's agent holds, so an unknown conversation is never routed to whatever the alias says now.
+ */
+async function bindingFromDescriptor(conversation: Conversation): Promise<GenerationModelBinding | null> {
+	const descriptor = await storedRunModel(conversation.id);
+	if (!descriptor) return null;
+	const agentModel = (await conversation.agent(context)).model;
+	if (agentModel && agentModel.provider !== descriptor.ref.provider) {
+		log(`run model descriptor ref mismatch conversation=${conversation.id} agent=${agentModel.provider} stored=${descriptor.ref.provider}`);
+		return null;
+	}
+	const binding = rebuildRunModel(descriptor);
+	if (!binding) {
+		log(`run model rebuild skipped conversation=${conversation.id} source=${descriptor.source}`);
+		return null;
+	}
+	log(`run model rebuilt conversation=${conversation.id} provider=${binding.identity.providerId ?? "-"} model=${binding.ref.modelId}`);
+	return binding;
+}
+
+/**
+ * Re-register the model of every conversation with unfinished work before `resume()` schedules anything: a
+ * resumed run resolves its `ModelRef` from its checkpoint on the first step, and the provider instances of the
+ * previous process are gone. The binding is rebuilt from the conversation's persisted run descriptor, never
+ * from the current alias, so a repointed alias cannot move an old run to another provider. A conversation
+ * without a descriptor is logged and skipped; its run then fails as "model not available" for itself only.
+ */
+async function restoreConversationModels(rootConversation: Conversation): Promise<void> {
+	const conversations = new Map<number, Conversation>([[rootConversation.id, rootConversation]]);
+	for (const task of (await harness.inspect(context)).tasks) {
+		const id = task.record.conversationId;
+		if (conversations.has(id)) continue;
+		const conversation = await harness.conversation(id, context).catch(() => undefined);
+		if (conversation) conversations.set(id, conversation);
+	}
+	for (const [id, conversation] of conversations) {
+		try {
+			const ref = (await conversation.agent(context)).model;
+			if (!ref) continue;
+			if (models.getModel(ref.provider, ref.modelId)) continue;
+			const binding = await bindingFromDescriptor(conversation);
+			if (binding) await applyBinding(conversation, binding);
+		} catch (error) {
+			log(`restore model failed conversation=${id}: ${String(error)}`);
+		}
+	}
+}
+
+// Every live conversation has a model again, so the work the previous process left behind can be scheduled.
+await restoreConversationModels(root);
+harness.resume();
+log(`harness open conversation=${root.id} workspace=${rootWorkspace} storage=postgres`);
 
 async function conversationOf(id: ConversationId): Promise<Conversation | undefined> {
 	const cached = handles.get(id);
@@ -619,32 +836,75 @@ const server = createServer(async (request, response) => {
 			return;
 		}
 
+		if (request.method === "POST" && url.pathname === "/model") {
+			// Admission before the product opens a generation row: resolve the run's model (product DB by
+			// default), pin it, and answer with the public identity and capabilities only. No key leaves here.
+			try {
+				const { token, binding } = await admitModel();
+				log(`model admitted alias=${binding.identity.alias} provider=${binding.identity.providerId ?? "-"} model=${binding.identity.modelName ?? "-"}`);
+				sendJson(response, 201, { token, identity: binding.identity, imageInput: binding.imageInput, thinkingLevel: binding.thinkingLevel });
+			} catch (error) {
+				sendModelFailure(response, error, "POST /model");
+			}
+			return;
+		}
+
+		if (request.method === "GET" && url.pathname === "/model") {
+			// Read-only: the model one conversation's run uses. The in-memory binding is the live answer; after a
+			// restart (or once the run finished) the persisted run descriptor answers instead — no alias read and no
+			// credential fetch, so a repointed or disabled alias cannot change what the finished run reports.
+			const conversation = await conversationOf(conversationIdFrom(url.searchParams.get("conversationId")) ?? root.id);
+			if (!conversation) {
+				sendJson(response, 404, { error: "conversation not found" });
+				return;
+			}
+			const current = conversationModels.get(conversation.id);
+			if (current) {
+				sendJson(response, 200, { model: current.ref, thinkingLevel: current.thinkingLevel, identity: current.identity });
+				return;
+			}
+			const descriptor = await storedRunModel(conversation.id);
+			sendJson(response, 200, descriptor
+				? { model: descriptor.ref, thinkingLevel: thinkingLevelOfDescriptor(descriptor), identity: identityOfDescriptor(descriptor) }
+				: { model: null, thinkingLevel: null, identity: null });
+			return;
+		}
+
 		if (request.method === "POST" && url.pathname === "/conversations") {
-			const body = JSON.parse((await readBody(request)) || "{}") as { workspace?: string; instructions?: string; title?: string; app?: AppRef };
+			const body = JSON.parse((await readBody(request)) || "{}") as { workspace?: string; instructions?: string; title?: string; app?: AppRef; binding?: unknown };
 			if (!body.workspace) {
 				sendJson(response, 400, { error: "workspace is required" });
 				return;
 			}
-			// Ownerless: driven by external requests, not owned by another conversation's task (data-model §4).
-			const conversation = await harness.createConversation({
-				ownership: { kind: "ownerless" },
-				agent: { model: modelRef(), cwd: body.workspace, thinkingLevel: "off", instructions: body.instructions ?? null },
-			}, context);
-			handles.set(conversation.id, conversation);
-			workspaces.set(conversation.id, body.workspace);
-			if (body.app) apps.set(conversation.id, body.app);
-			// Fallback for tools that run before any request: derive the app from the durable workspace too.
-			else {
-				const ref = appRefFromWorkspace(body.workspace);
-				if (ref) apps.set(conversation.id, ref);
+			try {
+				// A caller that admitted a run binds it here; a direct caller (scripts) gets the model resolved now.
+				const token = bindingToken(body.binding);
+				const binding = token === undefined ? await admitGenerationModel() : admittedBinding(token);
+				// Ownerless: driven by external requests, not owned by another conversation's task (data-model §4).
+				const conversation = await harness.createConversation({
+					ownership: { kind: "ownerless" },
+					agent: { model: binding.ref, cwd: body.workspace, thinkingLevel: binding.thinkingLevel, instructions: body.instructions ?? null },
+				}, context);
+				rememberModel(conversation.id, binding, token);
+				await persistRunModel(conversation.id, binding.descriptor);
+				handles.set(conversation.id, conversation);
+				workspaces.set(conversation.id, body.workspace);
+				if (body.app) apps.set(conversation.id, body.app);
+				// Fallback for tools that run before any request: derive the app from the durable workspace too.
+				else {
+					const ref = appRefFromWorkspace(body.workspace);
+					if (ref) apps.set(conversation.id, ref);
+				}
+				log(`conversation created id=${conversation.id} workspace=${body.workspace} model=${binding.identity.modelName ?? "-"}${body.title ? ` title=${body.title}` : ""}`);
+				sendJson(response, 201, { conversationId: conversation.id });
+			} catch (error) {
+				sendModelFailure(response, error, "POST /conversations");
 			}
-			log(`conversation created id=${conversation.id} workspace=${body.workspace}${body.title ? ` title=${body.title}` : ""}`);
-			sendJson(response, 201, { conversationId: conversation.id });
 			return;
 		}
 
 		if (request.method === "POST" && url.pathname === "/submit") {
-			const body = JSON.parse(await readBody(request)) as { content?: unknown; requestId?: string; conversationId?: number; whenBusy?: "steer" | "followUp" | "reject"; entry?: unknown };
+			const body = JSON.parse(await readBody(request)) as { content?: unknown; requestId?: string; conversationId?: number; whenBusy?: "steer" | "followUp" | "reject"; entry?: unknown; binding?: unknown };
 			let content: SubmitContentBlock[] | undefined;
 			try {
 				content = parseSubmitContent(body.content);
@@ -672,11 +932,25 @@ const server = createServer(async (request, response) => {
 				return;
 			}
 			// Admission only. No request socket, timer, or viewer scope reaches this call.
-			// A new turn (not a steer) starts a fresh web-tool session: budgets and image candidates are per-turn.
-			if (body.whenBusy !== "steer") resetWebSession(conversation.id);
-			// `whenBusy: "steer"` is how the product's mid-run steer lands: queued in `pi.inbox` and placed
-			// at the next boundary instead of starting a competing run.
-			const submission = await conversation.submit({ type: "input", content, requestId: body.requestId, whenBusy: body.whenBusy, entry }, context);
+			// The binding decision and the admission are one serialized step per conversation: two concurrent
+			// handlers cannot both pass the "no unfinished run" check before either submission is admitted.
+			const outcome = await serializeAdmission(conversation.id, async () => {
+				try {
+					await bindConversationModel(conversation, bindingToken(body.binding));
+				} catch (error) {
+					return { kind: "refused" as const, error };
+				}
+				// A new turn (not a steer) starts a fresh web-tool session: budgets and image candidates are per-turn.
+				if (body.whenBusy !== "steer") resetWebSession(conversation.id);
+				// `whenBusy: "steer"` is how the product's mid-run steer lands: queued in `pi.inbox` and placed
+				// at the next boundary instead of starting a competing run.
+				return { kind: "admitted" as const, submission: await conversation.submit({ type: "input", content, requestId: body.requestId, whenBusy: body.whenBusy, entry }, context) };
+			});
+			if (outcome.kind === "refused") {
+				sendModelFailure(response, outcome.error, "POST /submit");
+				return;
+			}
+			const submission = outcome.submission;
 			log(`submit admitted conversation=${conversation.id} submission=${submission.id} requestId=${body.requestId ?? "-"} whenBusy=${body.whenBusy ?? "-"}`);
 			sendJson(response, 202, { submissionId: submission.id });
 			return;

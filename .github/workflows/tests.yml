@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       full:
-        description: Run Postgres, Docker and Chromium checks too
+        description: Run Postgres, Redis, Docker and Chromium checks too
         type: boolean
         default: false
 permissions:
@@ -38,6 +38,11 @@ jobs:
         ports:
           - 5432:5432
         options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
     defaults:
       run:
         working-directory: paimeng-ai-code-agent
@@ -52,6 +57,7 @@ jobs:
       - run: |
           echo 'DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/paimeng_app' > .env
           echo 'DURABLE_PG_URL=postgres://postgres:postgres@127.0.0.1:5432/paimeng_agent_test' >> .env
+          echo 'REDIS_URL=redis://127.0.0.1:6379/15' >> .env
           npm run db:test:setup
           npx playwright install --with-deps chromium
           docker pull node:24-alpine

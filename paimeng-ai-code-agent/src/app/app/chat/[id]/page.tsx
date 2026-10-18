@@ -27,7 +27,7 @@ type Selected = { selector: string; tagName: string; id: string; className: stri
  * 发送时由 transport 拼成 `{ type: 'attachment', … }` 发到服务端，本地回显与刷新后的历史都走
  * `messageAttachments` 这一条读取路径。
  */
-type ChatMessage = UIMessage<{ attachments?: AttachmentPart[] }>;
+type ChatMessage = UIMessage<{ attachments?: AttachmentPart[]; generationId?: string }>;
 type QueuedMessage = { text: string; attachments: AttachmentPart[] };
 const statusLabels = { generating: '生成中', building: '构建中', ready: '可预览', failed: '失败', cancelled: '已取消' } as const;
 const historyPageSize = 10;
@@ -112,6 +112,7 @@ function Chat({ id }: { id: string }) {
   const messageList = useRef<HTMLDivElement>(null);
   const messageContent = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  const followedScrollTop = useRef(0);
   const mounted = useRef(false);
   const submitting = useRef(false);
   const rebuildCount = useRef(0);
@@ -233,7 +234,10 @@ function Chat({ id }: { id: string }) {
     try {
       const accounts = await api<GenerationAccount[]>('app/generation/accounts?appId=' + encodeURIComponent(id));
       if (!mounted.current) return;
-      setUsageByMessage(new Map(accounts.flatMap(account => account.messageId ? [[account.messageId, account] as [string, GenerationAccount]] : [])));
+      setUsageByMessage(new Map(accounts.flatMap(account => [
+        [account.generationId, account] as [string, GenerationAccount],
+        ...(account.messageId ? [[account.messageId, account] as [string, GenerationAccount]] : []),
+      ])));
     } catch { if (mounted.current) setUsageByMessage(new Map()); }
   }, [id]);
   useEffect(() => {
@@ -292,6 +296,7 @@ function Chat({ id }: { id: string }) {
     const list = messageList.current;
     if (!list) return;
     list.scrollTo({ top: list.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+    followedScrollTop.current = list.scrollTop;
     stick.current = true;
     setStickToBottom(true);
   }, []);
@@ -300,25 +305,33 @@ function Chat({ id }: { id: string }) {
     if (!list) return;
     const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
     stick.current = atBottom;
+    if (atBottom) followedScrollTop.current = list.scrollTop;
     setStickToBottom(atBottom);
   }, []);
-  useEffect(() => {
+  const followNewContent = useCallback(() => {
     const list = messageList.current;
-    if (!list) return;
+    if (!list || !stick.current) return;
+    // scroll 事件可能晚于流式更新到达，先检查用户是否已经上移，避免把他拉回底部。
+    if (list.scrollTop < followedScrollTop.current - 1) {
+      stick.current = false;
+      setStickToBottom(false);
+      return;
+    }
+    list.scrollTop = list.scrollHeight;
+    followedScrollTop.current = list.scrollTop;
+  }, []);
+  useEffect(() => {
     if (loadingOlder.current) { loadingOlder.current = false; return; }
-    if (stick.current) list.scrollTop = list.scrollHeight;
-  }, [messages, visibleHistory]);
+    followNewContent();
+  }, [messages, visibleHistory, followNewContent]);
   // 内容长高时（流式文字、图片缩略图加载、用量块出现）保持贴底；用户向上翻历史后不再强制滚动。
   useEffect(() => {
     const content = messageContent.current;
     if (!content || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => {
-      const list = messageList.current;
-      if (list && stick.current) list.scrollTop = list.scrollHeight;
-    });
+    const observer = new ResizeObserver(followNewContent);
     observer.observe(content);
     return () => observer.disconnect();
-  }, []);
+  }, [followNewContent]);
 
   const previewOrigin = app?.previewUrl ? new URL(app.previewUrl).origin : null;
   // iframe 加载完成前它的文档还是 about:blank（源继承自本页），此时向预览源发消息会被浏览器拒绝并报错。
@@ -544,7 +557,7 @@ function Chat({ id }: { id: string }) {
             {messages.length > visibleHistory && <Button type="link" onClick={() => { loadingOlder.current = true; setVisibleHistory(count => count + historyPageSize); }}>加载更多历史消息</Button>}
             {!messages.length && <div className="message-item initial-prompt"><div className="message-role">初始需求</div><div className="message-text">{app?.initPrompt || '加载应用…'}</div></div>}
             {visibleMessages.map(item => {
-              const usage = usageByMessage.get(item.id);
+              const usage = usageByMessage.get(item.id) ?? (item.metadata?.generationId ? usageByMessage.get(item.metadata.generationId) : undefined);
               return item.role === 'user'
                 ? <div className="message-item message-user" key={item.id}>
                     <div className="message-bubble">

@@ -1,14 +1,17 @@
 /**
- * Wiring for the product's resident pi-durable harness: Postgres storage, the
- * OpenAI-compatible provider, and the tool registry.
+ * Wiring for the product's resident pi-durable harness: Postgres storage, the model
+ * directory, and the tool registry.
  *
  * The harness process is the only writer of conversation storage, so nothing
  * else in the product opens `storage-pg.ts`.
  *
- * Env (never logged, never written to disk):
- *   DURABLE_MODEL_BASE_URL  OpenAI-compatible endpoint
- *   DURABLE_MODEL_API_KEY   api key
- *   DURABLE_MODEL_ID        model id
+ * The generation model itself is resolved per run by `model-domain.ts`: the product
+ * database's `codegen.default` alias by default, `DURABLE_MODEL_*` as an explicit
+ * override, and the deterministic stubs under the faux flags. Env
+ * (never logged, never written to disk):
+ *   DURABLE_MODEL_BASE_URL  OpenAI-compatible endpoint (explicit override)
+ *   DURABLE_MODEL_API_KEY   api key (explicit override)
+ *   DURABLE_MODEL_ID        model id (explicit override)
  *   DURABLE_PG_URL          Postgres connection string (defaults to the local dev instance)
  *
  * `DURABLE_FAUX_MODEL=1` swaps the network model for the deterministic stub in
@@ -18,83 +21,26 @@
  */
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { createModels, createProvider, type MutableModels } from "@earendil-works/pi-ai/models";
-import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
-import { withOpenCodeSessionHeader } from "@earendil-works/pi-ai/providers/opencode-headers";
-import type { AssistantMessage, Message, Model } from "@earendil-works/pi-ai";
+import { createModels, type MutableModels } from "@earendil-works/pi-ai/models";
+import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import { createRegistry, Harness, type Extension, type HarnessOptions, type JsonObject } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
-import { fauxModelEnabled, fauxModelRef, fauxModels } from "./faux-model";
-import { fauxFixtureEnabled, fauxFixtureModels, fauxFixtureRef } from "./faux-fixture";
+import { fauxModelEnabled, fauxModels } from "./faux-model";
+import { fauxFixtureEnabled, fauxFixtureModels } from "./faux-fixture";
 import { PostgresStorage } from "./storage-pg";
 
 export const context: Context = BACKGROUND_CONTEXT;
 
-const PROVIDER_ID = "durable";
-
-/** The endpoint the harness talks to. Throws early if unset. */
-export function modelConfig(): { baseUrl: string; apiKey: string; modelId: string } {
-	const baseUrl = process.env.DURABLE_MODEL_BASE_URL;
-	const apiKey = process.env.DURABLE_MODEL_API_KEY;
-	const modelId = process.env.DURABLE_MODEL_ID;
-	if (!baseUrl || !apiKey || !modelId) throw new Error("set DURABLE_MODEL_BASE_URL, DURABLE_MODEL_API_KEY and DURABLE_MODEL_ID");
-	return { baseUrl, apiKey, modelId };
-}
-
-function durableModel(baseUrl: string, modelId: string, contextWindow = 1_000_000): Model<"openai-completions"> {
-	return {
-		id: modelId,
-		name: modelId,
-		api: "openai-completions",
-		provider: PROVIDER_ID,
-		baseUrl,
-		reasoning: true,
-		thinkingLevelMap: { off: null, minimal: "low", low: "low", medium: null, high: "high", xhigh: null, max: "max" },
-		input: ["text", "image"],
-		cost: { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 },
-		compat: {
-			supportsStore: false,
-			supportsDeveloperRole: false,
-			supportsStrictMode: true,
-			maxTokensField: "max_tokens",
-			requiresReasoningContentOnAssistantMessages: true,
-			thinkingFormat: "deepseek",
-		},
-		contextWindow,
-		maxTokens: 32_000,
-	};
-}
-
-export function durableModels(contextWindow = 1_000_000): MutableModels {
+/**
+ * The model directory the harness serves. Managed runs register their provider through
+ * `model-domain.ts` per admission (`setProvider`), so the directory starts empty; the faux
+ * flags register their own provider here.
+ */
+export function durableModels(): MutableModels {
 	if (fauxFixtureEnabled()) return fauxFixtureModels();
 	if (fauxModelEnabled()) return fauxModels();
-	const { baseUrl, apiKey, modelId } = modelConfig();
-	const provider = createProvider<"openai-completions">({
-		id: PROVIDER_ID,
-		name: "Durable (product model endpoint)",
-		baseUrl,
-		auth: {
-			apiKey: {
-				name: "Durable model API key",
-				resolve: async ({ signal }) => {
-					signal.throwIfAborted();
-					return { auth: { apiKey }, source: "DURABLE_MODEL_API_KEY" };
-				},
-			},
-		},
-		models: [durableModel(baseUrl, modelId, contextWindow)],
-		api: withOpenCodeSessionHeader(openAICompletionsApi()),
-	});
-	const models = createModels();
-	models.setProvider(provider);
-	return models;
-}
-
-export function modelRef(modelId?: string) {
-	if (fauxFixtureEnabled()) return fauxFixtureRef();
-	if (fauxModelEnabled()) return fauxModelRef();
-	return { provider: PROVIDER_ID, modelId: modelId ?? modelConfig().modelId };
+	return createModels();
 }
 
 export function createHarnessRegistry(options: { codingTools?: boolean; extensions?: readonly Extension[] } = {}) {
@@ -120,13 +66,12 @@ export function buildHarnessOptions(
 
 /** Open the Postgres-backed harness. Callers reset the schema first when they need a clean run. */
 export async function openPgHarness(options: {
-	contextWindow?: number;
 	settings?: HarnessOptions["settings"];
 	codingTools?: boolean;
 	extensions?: readonly Extension[];
 } = {}) {
 	const storage = await PostgresStorage.open();
-	const models = durableModels(options.contextWindow);
+	const models = durableModels();
 	const registry = createHarnessRegistry({ codingTools: options.codingTools, extensions: options.extensions });
 	const harness = await Harness.open(storage, buildHarnessOptions(models, registry, options.settings), context);
 	return { harness, storage, models, registry };

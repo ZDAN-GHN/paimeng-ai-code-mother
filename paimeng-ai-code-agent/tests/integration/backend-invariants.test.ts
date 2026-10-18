@@ -5,7 +5,9 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { db, getPool, now } from '@/server/db';
 import { nextSnowflakeId } from '@/server/snowflake';
-import { users, apps, leases, generations, rateLimits } from '@/server/schema';
+import { users, apps, leases, generations } from '@/server/schema';
+import { chatRateLimitKey } from '@/server/rate-limit';
+import { closeRateLimitRedis, rateLimitRedis } from '@/server/redis';
 import { publicUser } from '@/server/auth';
 import { beginGeneration, finishGeneration, generationFor, heartbeat, setGeneration, withAppWriter } from '@/server/generation-store';
 import { deleteApp, getApp, listApps, updateApp, download, publish } from '@/server/business';
@@ -13,11 +15,20 @@ import type { User } from '@/shared/contracts';
 
 loadEnvFile('.env');
 process.env.DATABASE_URL = testDatabaseUrl(process.env.DATABASE_URL ?? '');
+process.env.REDIS_URL = testRedisUrl(process.env.REDIS_URL ?? 'redis://127.0.0.1:6379/0');
 let actor: User;
 let appId: string;
 
+/** 限流测试只碰独立的 /15 测试库；生产库（/0）与开发数据都不清、不写。 */
+function testRedisUrl(raw: string) {
+  const url = new URL(raw);
+  if (url.protocol !== 'redis:') throw new Error('Integration tests require a Redis URL');
+  url.pathname = '/15';
+  return url.href;
+}
+
 // The rate limit window lives outside the generation rows, so tests must clear it explicitly.
-async function clearRateLimit() { await db().delete(rateLimits).where(eq(rateLimits.limitKey, 'user:' + actor.id)); }
+async function clearRateLimit() { await (await rateLimitRedis()).del(chatRateLimitKey(actor.id, 'unknown')); }
 
 describe('后端关键不变量（独立 Postgres 测试库）', () => {
   beforeAll(async () => {
@@ -36,7 +47,7 @@ describe('后端关键不变量（独立 Postgres 测试库）', () => {
     await db().delete(apps).where(eq(apps.id, BigInt(appId)));
     await clearRateLimit();
   });
-  afterAll(async () => { await db().delete(users).where(eq(users.id, BigInt(actor.id))); await getPool().end(); });
+  afterAll(async () => { await closeRateLimitRedis(); await db().delete(users).where(eq(users.id, BigInt(actor.id))); await getPool().end(); });
 
   it('完成状态、助手消息 id 与租约释放一起提交，重复回调不能覆盖终态', async () => {
     const id = randomUUID();
@@ -90,7 +101,7 @@ describe('后端关键不变量（独立 Postgres 测试库）', () => {
     for (const id of [secondId, thirdId]) await db().insert(apps).values({ id, initPrompt: '跨应用限流', codeGenType: 'html', userId: BigInt(actor.id), createTime: now(), updateTime: now() });
     const secondApp = secondId.toString(); const thirdApp = thirdId.toString();
     try {
-      // The shared rate limit row makes the per-user check atomic across different apps.
+      // The shared Redis window makes the per-user check atomic across different apps.
       const results = await Promise.allSettled([
         beginGeneration(secondApp, randomUUID(), actor),
         beginGeneration(thirdApp, randomUUID(), actor),
@@ -99,6 +110,9 @@ describe('后端关键不变量（独立 Postgres 测试库）', () => {
       const rows = await db().select().from(generations).where(eq(generations.userId, BigInt(actor.id)));
       expect(rows).toHaveLength(1);
       await expect(beginGeneration(appId, randomUUID(), actor)).rejects.toMatchObject({ status: 429 });
+      // 限流拒绝发生在 PG 事务之前：不写任何生成行或租约。
+      expect(await db().select().from(generations).where(eq(generations.appId, BigInt(appId)))).toEqual([]);
+      expect(await db().select().from(leases).where(eq(leases.appId, BigInt(appId)))).toEqual([]);
       await clearRateLimit();
       const next = randomUUID();
       await expect(beginGeneration(appId, next, actor)).resolves.toBeUndefined();
@@ -119,8 +133,10 @@ describe('后端关键不变量（独立 Postgres 测试库）', () => {
     try {
       await beginGeneration(appId, randomUUID(), actor);
       await clearRateLimit();
-      // 并发准入在限流之前：这个拒绝不消耗用户的限流额度，报文说的是并发而不是频率。
+      // 限流额度先预定、并发拒绝后退还：这次 429 说的是并发而不是频率，也不吃掉用户的生成次数。
       await expect(beginGeneration(otherApp, randomUUID(), actor)).rejects.toMatchObject({ status: 429, message: expect.stringContaining('并发') });
+      expect(await db().select().from(generations).where(eq(generations.appId, BigInt(otherApp)))).toEqual([]);
+      expect(await db().select().from(leases).where(eq(leases.appId, BigInt(otherApp)))).toEqual([]);
       process.env.GENERATION_MAX_CONCURRENT = '2';
       await expect(beginGeneration(otherApp, randomUUID(), actor)).resolves.toBeUndefined();
     } finally {

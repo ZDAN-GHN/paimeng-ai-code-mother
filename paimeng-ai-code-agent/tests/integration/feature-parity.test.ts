@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm';
 import { readFile, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { db, getPool, now } from '@/server/db';
+import { withRateLimitRedis } from '@/server/redis';
 import { nextSnowflakeId } from '@/server/snowflake';
 import { users, apps, leases, generations } from '@/server/schema';
 import { publicUser } from '@/server/auth';
@@ -58,6 +59,7 @@ describe('功能补齐的后端行为（独立 Postgres 测试库）', () => {
       await rm(join(getConfig().runtimeRoot, 'deploy', key), { recursive: true, force: true });
       await rm(join(getConfig().runtimeRoot, 'covers', key + '.png'), { force: true });
     }
+    await withRateLimitRedis(client => client.del('user:' + actor.id));
     await db().delete(generations).where(eq(generations.userId, BigInt(actor.id)));
     created.length = 0;
     deployedKeys.length = 0;

@@ -12,20 +12,20 @@
 2. 执行 `npm ci`。
 3. 执行 `npm run assets:import`。此命令只读取旧平台的派蒙图片，写入新应用的 `public/`。
 4. 执行 `npm run infra:up`。固定命名的 Redis 容器启动并等待健康检查；产品 Postgres 不在这个 compose 里，由本机自己的容器提供（见第 5 步）。该命令读取 `.env`，不生成或改写凭据。
-5. 执行 `npm run durable:pg` 确保 Postgres 就绪（连接本机自己的 Postgres 容器 `zslm-postgres`，127.0.0.1:5432，建好 `paimeng_app`、`paimeng_app_test`、`paimeng_agent`、`paimeng_agent_test` 四个 database，再打印 server_version 与各库大小），再执行 `npm run db:migrate`。迁移完成后显示“产品 Postgres 库迁移完成”，只执行 `migrations/001_initial.sql`（业务表全套，含模型配置表与状态行）；重复执行会核对已有迁移的校验和。随后执行一次 `npm run db:init-models`，把现有 `.env` 的模型配置写入数据库（仅当表仍为空且版本为零；幂等，已有配置不会被覆盖）。从旧 MySQL 库升级时额外跑一次 `npm run db:import-mysql`（只搬业务行，幂等，见 `docs/plans/pi-durable-m4.md`）。
+5. 执行 `npm run durable:pg` 确保 Postgres 就绪（连接本机自己的 Postgres 容器 `zslm-postgres`，127.0.0.1:5432，建好 `paimeng_app`、`paimeng_app_test`、`paimeng_agent`、`paimeng_agent_test` 四个 database，再打印 server_version 与各库大小），再执行 `npm run db:migrate`。迁移完成后显示“产品 Postgres 库迁移完成”，依次执行尚未应用的 SQL 迁移；`001_initial.sql` 建业务表，`002_drop_rate_limit.sql` 删除已迁往 Redis 的限流表。重复执行会核对已有迁移的校验和。随后执行一次 `npm run db:init-models`，把现有 `.env` 的模型配置写入数据库（仅当表仍为空且版本为零；幂等，已有配置不会被覆盖）。从旧 MySQL 库升级时额外跑一次 `npm run db:import-mysql`（只搬业务行，幂等，见 `docs/plans/pi-durable-m4.md`）。
 6. 执行 `docker pull node:24-alpine`。Vue 生成工程使用该镜像进行隔离构建。
 7. 执行 `npx playwright install chromium`。发布封面截图和浏览器测试都需要 Chromium。若系统缺少浏览器依赖，按 Playwright 的报错安装系统依赖。
 8. 执行 `npm run dev` 启动全套开发进程：harness（5599）、预览（3001）与管理端（3000），输出按 `[harness]`、`[preview]`、`[app]` 前缀合并，Ctrl-C 一起停止。它要求本机 Postgres 容器已在跑（不在跑就直接报错，不会自己起数据库）。也可以分开跑：`npm run durable:harness`、`npm run preview`、`npm run dev:web`（只起 Next）。
 9. 打开 `http://localhost:3000`，注册并登录。
 10. 浏览器打开 `http://localhost:3000` 登录后进入应用，生成由第 8 步起的 harness 执行；`http://localhost:3000/app/chat/<应用 ID>` 是对话页。Ctrl-C 会一起收尾 harness、预览与 Next；数据库不属于该脚本，不会被停。
 
-`DURABLE_*` 环境变量：`DURABLE_HARNESS_URL`（Next 侧 attach 地址，默认 `http://127.0.0.1:5599`）、`DURABLE_PG_URL`（harness 的会话存储，默认 `postgres://postgres:postgres@127.0.0.1:5432/paimeng_agent`）、`DURABLE_HARNESS_PORT`、`DURABLE_MODEL_BASE_URL` / `DURABLE_MODEL_API_KEY` / `DURABLE_MODEL_ID`（harness 直连模型，`npm run dev` 会从 `~/.pi/agent/models.json` 派生并只注入子进程）、`DURABLE_FAUX_MODEL=1`（确定性桩模型）。
+`DURABLE_HARNESS_URL` 是 Next 的 attach 地址（默认 `http://127.0.0.1:5599`），`DURABLE_PG_URL` 是 harness 存储库，`DURABLE_HARNESS_PORT` 配置监听端口。生成模型默认每轮从产品库解析 `codegen.default`，管理端修改后无需重启。只有本地/测试需要显式覆盖时，才同时设置 `DURABLE_MODEL_BASE_URL` / `DURABLE_MODEL_API_KEY` / `DURABLE_MODEL_ID`；缺项会报错。`npm run dev` 不再从其他工具的模型配置派生凭据。
 
-`.env.example` 默认使用真实模型。配置真实模型前可以在本地 `.env` 里设 `AI_MODE=fixture`，让产品侧的模型解析走确定样本；harness 侧的确定性模型是 `DURABLE_FAUX_MODEL=1`（`tests/integration/durable-m1` 用它）。两者都不代表真实模型质量已验证。
+确定性生成夹具运行在 harness：`DURABLE_FAUX_MODEL=1` 用于可控等待/工具行为，`DURABLE_FAUX_FIXTURE=1` 用于完整文件生成。`AI_MODE=fixture` 只控制产品侧的测试行为，不能单独开启 harness 夹具。生产环境必须额外显式设置 `ALLOW_TEST_FIXTURE=1` 才允许夹具，隔离 E2E 启动器会自动设置这些测试变量。
 
 平台统一入口为 `http://localhost:3000`。普通页面使用 `/`、`/user/login`、`/user/register`、`/app/chat/{id}` 和 `/app/edit/{id}`。管理员页面使用同一入口下的 `/admin/userManage`、`/admin/appManage` 和 `/admin/chatManage`，登录角色决定是否显示管理菜单，服务端再次校验权限。
 
-生成限流默认沿用旧版策略，按用户每 60 秒允许 1 次，跨应用共享。`CHAT_RATE_LIMIT_TYPE` 可选 `API`、`USER`、`IP`，其中 `API` 表示整个生成接口共用一个窗口；`CHAT_RATE_LIMIT_RATE` 与 `CHAT_RATE_LIMIT_INTERVAL` 覆盖次数（1-1000）与窗口秒数（1-86400）。`IP` 类型沿用旧版做法，按 `X-Forwarded-For` 首段计数、缺失时用 `X-Real-IP`，因此必须由可信前置代理覆盖这两个请求头并阻止直连应用，否则调用方更换该头即可绕过限制；两个头都缺失时，直连请求会共用 `ip:unknown` 窗口。`CHAT_RATE_LIMIT_MESSAGE` 覆盖提示文案，留空时按窗口与次数生成默认文案。
+生成限流默认沿用旧版策略，按用户每 60 秒允许 1 次，跨应用共享。`CHAT_RATE_LIMIT_TYPE` 可选 `API`、`USER`、`IP`，其中 `API` 表示整个生成接口共用一个窗口；`CHAT_RATE_LIMIT_RATE` 与 `CHAT_RATE_LIMIT_INTERVAL` 覆盖次数（1-1000）与窗口秒数（1-86400）。`IP` 类型沿用旧版做法，按 `X-Forwarded-For` 首段计数、缺失时用 `X-Real-IP`，因此必须由可信前置代理覆盖这两个请求头并阻止直连应用，否则调用方更换该头即可绕过限制；两个头都缺失时，直连请求会共用 `ip:unknown` 窗口。`CHAT_RATE_LIMIT_MESSAGE` 覆盖提示文案，留空时按窗口与次数生成默认文案。窗口由 `REDIS_URL` 指向的 Redis 原子 Lua 操作维护，键为 `user:<id>` / `ip:<ip>` / `api:app.chat.gen.code`。额度在 Postgres 事务前预留，后续权限、重复请求或全局并发拒绝时只退还原窗口；频率超限返回原有 429/42900，且不写生成行或租约。Redis 不可用时放行，并记录脱敏的结构化 warn。
 
 `http://127.0.0.1:3001` 只提供 AI 生成网站的预览、发布副本及封面，不是管理员前端，也不是另一套用户平台。预览在平台页面中通过 iframe 打开，使用不同主机名隔离登录 Cookie。日常操作只需打开统一平台入口。默认本地配置下，打开 `127.0.0.1:3000` 的平台页面会自动跳转到 `localhost:3000`，保留页面路径与查询参数。API 不执行此跳转，直接来自别名或预览来源的写请求仍会被来源校验拒绝。
 
@@ -49,7 +49,7 @@ Redis 启用 AOF 持久化，数据存入固定命名卷 `paimeng-ts-refactor-re
 
 执行 `npm run verify:infra`，检查 `.env` 里 Postgres 连接串指向的库能建临时表并读写（主机、端口、账号都从连接串解析），以及 Redis 无密码连接和键值读写。需要验证 Redis 重启持久化时，执行 `npm run verify:infra -- --restart-redis`。该命令只重启本项目 Redis，并在验证后删除自己创建的唯一测试键。
 
-Redis 已作为本地开发服务提供连接。平台会话、生成任务与对话转录都保存在 Postgres（转录作为 pi-durable 条目），未改为依赖 Redis。旧项目的数据库及缓存服务不受影响。
+Redis 承担生成频率限流；登录会话、生成任务与对话转录仍保存在 Postgres（转录作为 pi-durable 条目）。测试固定使用独立 Redis DB15，只清理精确测试键。
 
 ## 业务主键与升级
 
@@ -69,13 +69,13 @@ Redis 已作为本地开发服务提供连接。平台会话、生成任务与�
 
 ## 模型统一管理
 
-模型配置保存在产品 Postgres 库的 `model_provider` / `model_alias` / `model_config_state` 三张表，由 `migrations/001_initial.sql` 创建、`npm run db:migrate` 执行；迁移后执行一次 `npm run db:init-models`，把当前 `.env` 的 `AI_BASE_URL` / `AI_MODEL` / `AI_API_KEY` 写入数据库。初始化只在配置仍为初始空态时进行，已有配置不会被覆盖。表已迁移且为空时，解析会临时用环境变量构造两个别名以兼容升级；读取失败不等于表空，不会回退到环境变量；DB 初始化后 DB 是唯一来源。
+模型配置保存在产品 Postgres 库的 `model_provider` / `model_alias` / `model_config_state` 三张表，由 `migrations/001_initial.sql` 创建、`npm run db:migrate` 执行；迁移后执行一次 `npm run db:init-models`，把当前 `.env` 的 `AI_BASE_URL` / `AI_MODEL` / `AI_API_KEY` 写入数据库。初始化只在配置仍为初始空态时进行，已有配置不会被覆盖。类型分类等 Next 调用在配置仍为初始空态时保留环境变量兼容路径；生成入口要求产品库已配置并启用 `codegen.default`，或显式设置完整 `DURABLE_MODEL_*` 覆盖。读取失败不会静默选择另一模型。
 
-注册表支持两个业务别名：`codegen.default`（应用生成 Agent，需流式与工具调用）和 `route.classify`（生成类型分类，需结构化输出）。管理员在 `/admin/modelManage` 编辑提供商与别名；“保存”约 5 秒内对后续请求生效，“保存并立即生效”会在事务中递增共享刷新序号，让其他实例在下一次解析时跳过 TTL。在途生成任务继续使用开始时解析的绑定。
+`codegen.default` 驱动 harness 的应用生成（流式与工具调用），`route.classify` 驱动应用创建前的类型分类（结构化输出）。管理员在 `/admin/modelManage` 编辑提供商与别名；生成每轮重新读取配置，保存后对下一轮生效，在途运行保持原绑定。类型分类仍在 Next，通过同一模型注册表解析 `route.classify`，沿用 5 秒 TTL 与“保存并立即生效”的共享刷新序号。它只返回应用类型，不需要创建持久化生成会话。
 
 提供商按 API 格式构造模型：`openai-chat`（OpenAI 兼容 `/chat/completions`，支持 `includeUsage`、`supportsStructuredOutputs`、`supportsMultiPartToolContent` 三个布尔选项，以及命名选项 `thinkingSwitch`）、`openai-responses`（OpenAI Responses API `/responses`）、`anthropic-messages`（Anthropic Messages API `/messages`）。后两种格式没有可配置协议选项，管理端会隐藏相应开关；提交该格式不支持的选项会返回 400。`thinkingSwitch` 只对 `openai-chat` 生效，取值 `none`（默认，不追加）、`enabled`、`disabled`；非 `none` 时在请求体追加 DeepSeek 的 `thinking: {"type": …}`。
 
-每个提供商可额外配置一组自定义请求头（`headers`），单独存在 `ts_model_provider.headers`（JSON），与协议选项分开。名称须是 RFC 7230 token（字母、数字及 `!#$%&'*+-.^_|~` 与反引号），大小写不敏感去重；值须是首尾无空白的可打印/扩展 ASCII（可编码为 ByteString）；最多 32 条，名称最多 128、值最多 1024 字符。`authorization`、`proxy-authorization`、`x-api-key`、`x-goog-api-key`、`api-key`、`host`、`content-length`、`connection`、`transfer-encoding`、`te`、`trailer`、`upgrade`、`keep-alive`、`proxy-authenticate`、`cookie`、`set-cookie` 由系统生成，不能自定义；鉴权仍走密钥来源，避免 SDK 与探测鉴权不一致。自定义头对三种格式的生成、流式与结构化调用都生效，也随「测试连接」「获取模型」的 `GET /models` 一起发送；上游错误回显这些值时，响应片段先脱敏再截断。示例：`User-Agent: paimeng-ai-code-mother/1.0`（本应用自己的标识，不是伪装成其他客户端）。OpenCode Go 那种每对话动态稳定的会话头（如 `x-opencode-session`）不是固定值，暂未接入。
+每个提供商可额外配置一组自定义请求头（`headers`），单独存在 `model_provider.headers`（JSON），与协议选项分开。名称须是 RFC 7230 token（字母、数字及 `!#$%&'*+-.^_|~` 与反引号），大小写不敏感去重；值须是首尾无空白的可打印/扩展 ASCII（可编码为 ByteString）；最多 32 条，名称最多 128、值最多 1024 字符。`authorization`、`proxy-authorization`、`x-api-key`、`x-goog-api-key`、`api-key`、`host`、`content-length`、`connection`、`transfer-encoding`、`te`、`trailer`、`upgrade`、`keep-alive`、`proxy-authenticate`、`cookie`、`set-cookie` 由系统生成，不能自定义；鉴权仍走密钥来源，避免 SDK 与探测鉴权不一致。自定义头对三种格式的生成、流式与结构化调用都生效，也随「测试连接」「获取模型」的 `GET /models` 一起发送；上游错误回显这些值时，响应片段先脱敏再截断。示例：`User-Agent: paimeng-ai-code-mother/1.0`（本应用自己的标识，不是伪装成其他客户端）。OpenCode Go 那种每对话动态稳定的会话头（如 `x-opencode-session`）不是固定值，暂未接入。
 
 别名弹窗的「思考强度」写入 `settings.reasoning`，取值 `none`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`，留空表示不指定（不传思考参数）。SDK 的统一 `reasoning` 参数由 `src/server/models/adapters.ts` 的自定义 middleware 注入，各格式映射为：`openai-chat` → `reasoning_effort`；`openai-responses` → `reasoning.effort`（适配层同时打开 `forceReasoning`，否则上游会忽略未知模型名的思考配置）；`anthropic-messages` → `thinking` 预算（按 `max_tokens` 比例换算，最低 1024）。上游不支持的等级由上游自行拒绝，本项目不做收窄。
 
@@ -83,7 +83,7 @@ Redis 已作为本地开发服务提供连接。平台会话、生成任务与�
 
 生成的时长预算都在 `.env`：`GENERATION_TIMEOUT_MS`（毫秒，默认 `0`，表示不限制整次生成任务；旧版写死 10 分钟）；`MODEL_REPLY_TIMEOUT_MS`（毫秒，默认 `900000`）限制单次模型回复的时长，超时中止并记为「单次回复超时」；每个模型请求的失败重试次数由 `MODEL_RETRY_LIMIT`（默认 `5`，0-5）控制，请求阶段与流开始之后的失败共用这个上限。上游输出到达 token 上限（`finishReason = length`）不再判为失败：文件已经落盘就继续构建，模型可以在下一轮对话里根据构建结果补齐。
 
-长对话的上下文由 harness 进程自己管理：pi-durable 的会话转录按容量阈值压缩。平台没有自研的窗口/滚动摘要层——`MEMORY_*` 环境变量、`src/server/memory-*.ts` 与摘要别名 `memory.summarize` 已随整合第三步删除；`ts_app_summary` 表与 `migrations/009_conversation_summary.sql` 保留但不再读写，等换 Postgres 时一并清掉。原始聊天记录与界面上的完整历史都不删减（`ts_message` / `ts_chat_history` 继续写）。
+长对话上下文由 harness 的 pi-durable compaction 管理。用户消息、模型消息和工具结果保存在 harness 转录中，`GET app/messages` 直接从转录派生页面历史；产品库不保留另一份消息表或滚动摘要表。
 
 密钥有两种来源。引用环境变量时只存引用名（`apiKeyEnv`），默认允许 `AI_API_KEY`，其余通过 `MODEL_API_KEY_ENV_ALLOWLIST`（逗号分隔）加入；直接输入时明文不落库，服务端用 AES-256-GCM 加密后只存密文（`apiKeyCiphertext`，格式 `v1:<iv>:<tag>:<ciphertext>`），主密钥取自 `MODEL_SECRET_KEY`（64 位十六进制、32 字节 base64 或任意口令，scrypt 派生），未设置时自动生成 `runtime/model-secret.key`（权限 600）。管理接口只返回 `apiKeySource` 与当前实例是否已配置，绝不返回明文或密文；编辑态密钥留空表示保持已保存的值。该密钥文件丢失后已保存的密钥无法解密，需要在管理端重新输入。
 
@@ -102,21 +102,21 @@ Redis 已作为本地开发服务提供连接。平台会话、生成任务与�
 | 命令 | 范围 | 依赖 |
 | --- | --- | --- |
 | `npm test` | 日常逻辑、文件与本地 HTTP 协议测试 | 无数据库、Docker 或浏览器；按启动时 CPU/内存余量并行 |
-| `npm run test:integration` | 数据库、harness 进程、断连与重启 | 专用 Postgres 测试库，串行 |
+| `npm run test:integration` | 数据库、Redis 限流、harness、断连与重启 | Postgres 测试库和 Redis DB15，串行 |
 | `npm run test:system` | 真实容器构建、浏览器截图与素材加载 | Postgres、Docker、Chromium，串行 |
 | `npm run test:all` | 上述三组依次执行 | 完整环境 |
 
-`npm test` 的 setup 会在测试尝试启动子进程、浏览器或访问产品数据库时直接报错，并指出正确目录。不要用跳过或空 mock 隐藏这些依赖；把需要它们的测试放进对应目录。日常改动先跑相关文件，构建/发布改动再跑 system。CI 自动执行同一个 `npm test`；完整环境检查可从 Tests workflow 的 `full` 输入手动触发。
+`npm test` 的 setup 会在测试尝试启动子进程、浏览器、Redis 客户端或访问产品数据库时直接报错，并指出正确目录。不要用跳过或空 mock 隐藏这些依赖；把需要它们的测试放进对应目录。日常改动先跑相关文件，构建/发布改动再跑 system。CI 自动执行同一个 `npm test`；完整环境检查可从 Tests workflow 的 `full` 输入手动触发。
 
 ## 运行完整测试
 
 1. 执行 `npm run durable:pg` 确保本机 Postgres 已就绪，再执行 `npm run db:test:setup`。此命令确保同实例的 `paimeng_app_test` 与 `paimeng_agent_test` 存在，并在前者上执行测试库迁移。
 2. 执行 `npm run type-check`。
 3. 执行 `npm run test:all`。完整测试需要 Postgres、Docker 镜像和 Chromium，不会因缺少依赖而跳过相关检查。durable 回归用例（`tests/integration/durable-m1`）需要同一个 Postgres；没有 Postgres 时这组用例会打印原因并 skip。
-4. 保持开发服务和预览服务运行，并将本地模型设为 fixture。执行 `npm run test:e2e`。浏览器场景只创建带唯一前缀的验收账号及应用。
+4. 串行执行 `npm run test:e2e:isolated`。启动器负责构建并启动 Next、预览和独立端口的夹具 harness，强制使用两个 Postgres 测试库与 Redis DB15，等待健康检查并在退出时清理进程。默认使用 3000/3001；端口被开发栈占用时可设置 `E2E_APP_PORT=3020 E2E_PREVIEW_PORT=3021`，harness 端口默认自动分配，也可用 `E2E_HARNESS_PORT` 指定。
 5. 执行 `npm run verify:boundary`，核对旧项目与已有删除状态。
 
-集成测试在数据库操作前统一解析 URL，只将专用开发库或测试库映射到 `paimeng_app_test`；URL 不允许查询选项，防止测试连接目标含糊。`tests/integration/durable-m1` 的 harness 存储用 `paimeng_agent_test`。测试只清理自己创建的记录。浏览器测试使用开发库 `paimeng_app`，保留验收样本。运行浏览器测试时一次只启动一个测试命令，避免报告目录被另一轮测试覆盖。
+集成测试在数据库操作前统一解析 URL，只将专用开发库或测试库映射到 `paimeng_app_test`；URL 不允许查询选项，防止测试连接目标含糊。`tests/integration/durable-m1` 的 harness 存储用 `paimeng_agent_test`。测试只清理自己创建的记录。隔离浏览器测试使用 `paimeng_app_test` 与 `paimeng_agent_test`，不会复用开发 harness。运行浏览器测试时一次只启动一个测试命令，避免报告目录被另一轮测试覆盖。
 
 浏览器截图写入 `runtime/evidence/`，HTML 报告写入 `playwright-report/`。这些运行文件已被忽略。只验证默认入口跳转、注册登录、会话 Cookie 隔离与来源拒绝时，执行 `npm run test:e2e -- tests/e2e/platform-origin.spec.ts`。这两项浏览器回归测试不调用模型，也不需要预览服务运行。
 
@@ -161,13 +161,11 @@ Redis 已作为本地开发服务提供连接。平台会话、生成任务与�
 - `src/shared/templates.ts` 的 `projectTemplates` 声明模板 id、版本、生成类型与运行形态；当前只有静态前端模板（Vue 与 React）。首页技术栈下拉里可显式选择模板；选「自动选择」时由模型按需求复杂度路由，需求指明 React 或 Vue 就按需求选，未指明技术栈的复杂应用默认 Vue。
 - 初始化只在创建应用时发生一次，工程内 `.paimeng-template.json` 记录所用模板版本。已经有工程的应用不会被模板覆盖，模板升级需要单独的迁移流程。
 - `templates/<id>/<version>/` 的 `AGENTS.md` 是给模型的开发说明：先读工程再改源码、保留入口文件与 `vite.config.ts`、不增删依赖。Vue 模板入口是 `src/main.ts`，React 模板入口是 `src/main.tsx`。
-- 模板工程只允许保留该模板版本的依赖集合；改锁文件、删入口、改 `vite.config.js` 或缩减依赖会被工具拒绝。构建仍走容器隔离，但模板工程用 `npm ci` 安装，再按模板定义的命令做类型检查（Vue 用 `vue-tsc --noEmit`，React 用 `tsc --noEmit`）与 `vite build`。
+- 文件操作使用 pi-durable 的 `read/write/edit`；写入不检查产品形状。模板依赖集合、版本和锁文件在构建的 source 阶段核对，再在隔离容器里执行 `npm ci`、类型检查（Vue 用 `vue-tsc --noEmit`，React 用 `tsc --noEmit`）与 `vite build`。失败诊断交回模型，旧 `dist` 与预览保留，只有验证通过才替换产物。
 - 新增模板：把目录放到 `templates/<id>/<version>/`，在 `projectTemplates` 注册，并在 `src/server/templates.ts` 的 `definitions` 里补文件清单、入口与类型检查命令。依赖必须落在该技术栈的允许集合内（Vue 为 `BUILD_DEPENDENCIES`，React 为 `REACT_DEPENDENCIES`）。
 
 ## 查阅实现与限制
 
 [接口与模块契约](docs/implementation-contract.md) 描述权限、消息及任务状态。[迁移差异](docs/migration-contracts.md) 说明原路径和有意变更。[产物与隔离限制](docs/artifacts.md) 记录构建依赖、预览与本地封面行为。[决策与验收记录](docs/migrations/ts-unified/decisions.tsv) 保存实施证据。
 
-本次保留 HTML、多文件和 Vue 工程生成模式及八个页面 URL。样式使用集中式 CSS，未采用计划中提出的 CSS Modules。关键桌面和移动流程经过浏览器验证，未做逐像素对比验收。
-
-原 Java、Vue、Maven、SQL 与根目录配置保持原样。本次不删除旧入口、不切换旧服务、不提交或推送。真实模型配置由本地 `.env` 提供。本轮已观察到真实模型思考和工具调用，尚未完成生成到预览的全流程验收。外部 COS 对象存储缺少凭据，仍未验证。封面当前存储在本目录的 `runtime/covers/`。
+支持 HTML、多文件、Vue 和 React 静态前端生成。模板构建、预览、下载、发布及本地封面均由产品服务负责；封面保存在 `runtime/covers/`。旧 Java/Vue 代码与 MySQL 容器保留归档，运行新平台无需启动旧应用。

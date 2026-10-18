@@ -25,3 +25,8 @@ vi.mock('@/server/db', async (importOriginal) => ({
   db: () => outsideUnit('Postgres'),
   getPool: () => outsideUnit('Postgres'),
 }));
+
+vi.mock('redis', async (importOriginal) => ({
+  ...await importOriginal<typeof import('redis')>(),
+  createClient: () => outsideUnit('Redis'),
+}));

@@ -16,6 +16,7 @@ export default defineConfig({
     testTimeout: 30000,
     env: {
       APP_ORIGIN: 'http://localhost:3000', PREVIEW_ORIGIN: 'http://127.0.0.1:3001',
+      REDIS_URL: 'redis://127.0.0.1:6379/15',
       CHAT_RATE_LIMIT_TYPE: 'USER', CHAT_RATE_LIMIT_RATE: '1',
       CHAT_RATE_LIMIT_INTERVAL: '60', CHAT_RATE_LIMIT_MESSAGE: '', BUILD_TIMEOUT_MS: '300000',
     },
@@ -29,9 +30,11 @@ export default defineConfig({
       } },
       { extends: true, test: {
         name: 'integration', sequence: { groupOrder: 1 }, include: ['tests/integration/**/*.test.ts'], fileParallelism: false,
+        setupFiles: ['tests/integration-resources.ts'],
       } },
       { extends: true, test: {
         name: 'system', sequence: { groupOrder: 2 }, include: ['tests/system/**/*.test.ts'], fileParallelism: false,
+        setupFiles: ['tests/integration-resources.ts'],
       } },
     ],
   },

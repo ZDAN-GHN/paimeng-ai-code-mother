@@ -3,7 +3,7 @@
  *
  *   MYSQL_LEGACY_URL=mysql://… npm run db:import-mysql
  *
- * 搬的是业务行：用户 / 应用 / 登录会话 / 附件 / 模型配置 / 限流 / 发号器。对话数据**不搬**——
+ * 搬的是业务行：用户 / 应用 / 登录会话 / 附件 / 模型配置 / 发号器。对话数据**不搬**——
  * 转录已经迁到 pi-durable 的 `entries`（旧 `ts_message`、`chat_history`、`ts_app_summary` 放弃），
  * 所以 `app.conversation_id` 一律留空，让 harness 在下次生成时重新建会话。
  *
@@ -78,13 +78,6 @@ try {
     await db.insert(schema.modelConfigState).values(values).onConflictDoUpdate({ target: schema.modelConfigState.id, set: values });
   }
   counts.model_config_state = states.length;
-
-  const limits = await read('SELECT limitKey, windowStart, hits FROM ts_rate_limit');
-  for (const row of limits) {
-    const values = { limitKey: row.limitKey, windowStart: row.windowStart, hits: Number(row.hits) };
-    await db.insert(schema.rateLimits).values(values).onConflictDoUpdate({ target: schema.rateLimits.limitKey, set: values });
-  }
-  counts.rate_limit = limits.length;
 
   // 发号器下界取「旧状态」与「搬过来的主键」的较大者：旧库迁移 003 之后 ID 就在这两个空间里。
   const sequences = await read('SELECT nodeId, lastId FROM ts_snowflake_state');

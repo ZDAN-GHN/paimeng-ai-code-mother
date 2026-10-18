@@ -5,20 +5,18 @@
  *
  *   npm run dev
  *
- * The harness talks to a real OpenAI-compatible endpoint derived from
- * ~/.pi/agent/models.json (the `oc-go` provider). Set DURABLE_FAUX_MODEL=1 to
- * run the deterministic stub model instead, or set DURABLE_MODEL_BASE_URL /
- * DURABLE_MODEL_API_KEY / DURABLE_MODEL_ID explicitly. Secrets only enter the
- * child process environment; they are never written to disk.
+ * The harness resolves the generation model from the product database's
+ * `codegen.default` alias (change it in「模型管理」). `DURABLE_MODEL_BASE_URL` /
+ * `DURABLE_MODEL_API_KEY` / `DURABLE_MODEL_ID` override it explicitly (all three,
+ * never derived); `DURABLE_FAUX_MODEL=1` runs the deterministic stub instead.
+ * Secrets only enter the child process environment; they are never written to disk.
  *
  * The product generation entry requires the request origin to equal APP_ORIGIN
  * (guardRequest), and Next listens on DURABLE_APP_PORT, so the child process
  * gets an explicit APP_ORIGIN.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { loadEnvFile } from 'node:process';
 
@@ -51,21 +49,6 @@ function portOpen(host: string, port: number): Promise<boolean> {
       else fail(new Error(`无法探测 ${host}:${port}`));
     });
   });
-}
-
-/** The real model endpoint, from the machine's pi model config unless the caller set it. */
-function modelEnv(): Record<string, string> {
-  if (process.env.DURABLE_FAUX_MODEL === '1') return {};
-  const { DURABLE_MODEL_BASE_URL, DURABLE_MODEL_API_KEY, DURABLE_MODEL_ID } = process.env;
-  if (DURABLE_MODEL_BASE_URL && DURABLE_MODEL_API_KEY && DURABLE_MODEL_ID) return {};
-  const config = JSON.parse(readFileSync(join(homedir(), '.pi', 'agent', 'models.json'), 'utf8')) as { providers?: Record<string, { baseUrl?: string; apiKey?: string }> };
-  const provider = config.providers?.['oc-go'];
-  if (!provider?.baseUrl || !provider.apiKey) throw new Error('~/.pi/agent/models.json 里没有 oc-go 的 baseUrl/apiKey；请显式设置 DURABLE_MODEL_* 或 DURABLE_FAUX_MODEL=1');
-  return {
-    DURABLE_MODEL_BASE_URL: DURABLE_MODEL_BASE_URL ?? provider.baseUrl,
-    DURABLE_MODEL_API_KEY: DURABLE_MODEL_API_KEY ?? provider.apiKey,
-    DURABLE_MODEL_ID: DURABLE_MODEL_ID ?? 'deepseek-v4.1-flash',
-  };
 }
 
 const labels = { harness: '\u001b[36m', preview: '\u001b[35m', app: '\u001b[32m' } as const;
@@ -155,7 +138,10 @@ if (await portOpen(previewOrigin.hostname, Number(previewOrigin.port || 80))) {
 await ensurePostgres();
 
 console.log(`管理端 ${appOrigin}，预览 ${previewOrigin.origin}，harness ${harnessUrl}；输出前缀为 [harness] / [preview] / [app]，按 Ctrl-C 一起停止`);
-const harnessEnv: NodeJS.ProcessEnv = { ...process.env, ...modelEnv(), DURABLE_HARNESS_HOST: '127.0.0.1', DURABLE_HARNESS_PORT: String(harnessPort), DURABLE_PG_URL: pgUrl };
+console.log(process.env.DURABLE_FAUX_MODEL === '1' || process.env.DURABLE_FAUX_FIXTURE === '1'
+  ? '生成模型：夹具/桩模型'
+  : '生成模型：产品库的 codegen.default 别名（模型管理里改）' + (process.env.DURABLE_MODEL_BASE_URL || process.env.DURABLE_MODEL_API_KEY || process.env.DURABLE_MODEL_ID ? '（已设置 DURABLE_MODEL_*，三件套全覆盖）' : ''));
+const harnessEnv: NodeJS.ProcessEnv = { ...process.env, DURABLE_HARNESS_HOST: '127.0.0.1', DURABLE_HARNESS_PORT: String(harnessPort), DURABLE_PG_URL: pgUrl };
 start('harness', process.execPath, ['--import', 'tsx', '--conditions=react-server', join(root, 'src', 'server', 'durable', 'harness-server.ts')], { cwd: root, env: harnessEnv });
 
 const deadline = Date.now() + 30_000;
