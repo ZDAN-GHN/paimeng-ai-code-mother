@@ -1,7 +1,7 @@
 /**
  * One command for the durable stack: the machine's own Postgres instance,
- * the resident harness process, and the Next.js dev server that attaches to it.
- * Ctrl-C stops the harness and Next.
+ * the resident harness process, the preview server, and the Next.js dev server
+ * that attaches to the harness. Ctrl-C stops them all.
  *
  *   npm run dev:durable
  *
@@ -34,6 +34,8 @@ const harnessPort = Number(process.env.DURABLE_HARNESS_PORT ?? 5599);
 const appPort = Number(process.env.DURABLE_APP_PORT ?? 3100);
 const appOrigin = process.env.DURABLE_APP_ORIGIN ?? `http://localhost:${appPort}`;
 const harnessUrl = `http://127.0.0.1:${harnessPort}`;
+// 预览服务器既服务生成产物的 iframe，也服务应用封面（/covers/<key>.png）：不起它，首页封面与预览都是空的。
+const previewOrigin = new URL(process.env.PREVIEW_ORIGIN ?? 'http://127.0.0.1:3001');
 
 const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
@@ -66,7 +68,7 @@ function modelEnv(): Record<string, string> {
   };
 }
 
-const labels = { harness: '\u001b[36m', app: '\u001b[35m' } as const;
+const labels = { harness: '\u001b[36m', preview: '\u001b[35m', app: '\u001b[32m' } as const;
 const children = new Set<ChildProcess>();
 let closing = false;
 let cleanup: Promise<void> | undefined;
@@ -145,10 +147,14 @@ if (await portOpen('127.0.0.1', appPort)) {
   console.error(`端口 ${appPort} 已被占用，请先停止占用进程，或用 DURABLE_APP_PORT 指定其他端口`);
   process.exit(1);
 }
+if (await portOpen(previewOrigin.hostname, Number(previewOrigin.port || 80))) {
+  console.error(`端口 ${previewOrigin.port} 已被占用，请先停止占用进程，或用 PREVIEW_ORIGIN 指定其他地址`);
+  process.exit(1);
+}
 
 await ensurePostgres();
 
-console.log(`管理端 http://localhost:${appPort}（APP_ORIGIN=${appOrigin}），harness ${harnessUrl}；输出前缀为 [harness] 与 [app]，按 Ctrl-C 一起停止`);
+console.log(`管理端 ${appOrigin}，预览 ${previewOrigin.origin}，harness ${harnessUrl}；输出前缀为 [harness] / [preview] / [app]，按 Ctrl-C 一起停止`);
 const harnessEnv: NodeJS.ProcessEnv = { ...process.env, ...modelEnv(), DURABLE_HARNESS_HOST: '127.0.0.1', DURABLE_HARNESS_PORT: String(harnessPort), DURABLE_PG_URL: pgUrl };
 start('harness', process.execPath, ['--import', 'tsx', '--conditions=react-server', join(root, 'src', 'server', 'durable', 'harness-server.ts')], { cwd: root, env: harnessEnv });
 
@@ -167,3 +173,4 @@ start('app', join(root, 'node_modules', '.bin', process.platform === 'win32' ? '
   cwd: root,
   env: { ...process.env, DURABLE_HARNESS_URL: harnessUrl, APP_ORIGIN: appOrigin },
 });
+start('preview', join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'tsx.cmd' : 'tsx'), ['--conditions=react-server', join(root, 'scripts', 'preview.ts')], { cwd: root });

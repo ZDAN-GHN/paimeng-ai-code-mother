@@ -122,7 +122,15 @@ function harnessBase(): string {
 const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
 async function harnessFetch(path: string, init?: RequestInit): Promise<Response> {
-  const response = await fetch(`${harnessBase()}${path}`, init);
+  let response: Response;
+  try {
+    response = await fetch(`${harnessBase()}${path}`, init);
+  } catch (error) {
+    // 常驻 harness 没起来时 fetch 只会报一句 "fetch failed"，用户看到的是 500「服务处理失败」。
+    // 生成全部在 harness 里跑，这里把连接失败翻成可操作的消息。
+    if (init?.signal?.aborted) throw error;
+    throw new BusinessError(503, 50300, `生成服务未启动或不可达（${harnessBase()}）：请先运行 npm run durable:harness，或用 npm run dev:durable 一次启动全套`);
+  }
   if (!response.ok) throw new HarnessRequestError(response.status, `harness ${path} 返回 ${response.status}：${(await response.text()).slice(0, 300)}`);
   return response;
 }
