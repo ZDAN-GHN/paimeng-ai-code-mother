@@ -31,3 +31,26 @@ npm run test:e2e:isolated # 隔离的完整 E2E（生产构建）
 | 端口被占用时不要用 `pkill -f`/`pgrep -f` 清理：模式串会匹配到你自己的命令行并把当前 shell 杀掉（exit 143）。用 `ss -ltnp` 取 PID，或 `[n]ext` 这类括号技巧。 | `scripts/test-e2e.ts` 的端口报错文案（会告诉你怎么换端口） |
 | 只改 `paimeng-ai-code-agent/`，旧代码与开发库只读：旧 Java（`archive/paimeng-ai-code-backend/`，含其下的 `paimeng-ai-code-mother-microservice/` 微服务骨架）与旧 Vue（`archive/paimeng-ai-code-mother-frontend/`）都只归档不动。 | 人工复核 + `git status`；`npm run verify:boundary` 对整树取 sha256（改动后哈希会变，不要为了让哈希通过而改它） |
 | html/multi_file 直接静态托管，不要生成 package.json、构建配置或 Vue/React/TypeScript 工程源码；需要框架时用对应模板新建应用。 | `src/server/project-shape.ts` 工具层拒绝 + `buildApp` 全文件校验；`tests/static-templates.test.ts` |
+| 类型检查用 `npm run type-check`（= `next typegen && tsc --noEmit`），不要用裸 `npx tsc --noEmit`：它会报 `.next/types/*` 的过期生成类型（删过页面之后尤其明显），把 4 条假错误当成源码问题（2026-10-18 返工三次）。 | `package.json` 的 `type-check`；`pre-push` 钩子 |
+
+## 命令与落点（省掉重复摸索）
+
+```bash
+npm run type-check                                  # 类型检查的正确入口
+npm run check:fast                                  # check:ui + check:e2e + verify:boundary（各 0.24s）
+npm run durable:inspect -- <conversationId>         # 只读看某会话的转录与运行状态
+npm run durable:inspect -- --conversations          # 列出 harness 已打开的会话
+```
+
+生成链路（pi-durable 之后）的落点：
+
+| 想知道什么 | 去哪看 |
+| --- | --- |
+| 工具注册（read/write/edit/listFiles/buildPreview/联网） | `src/server/durable/harness-server.ts` |
+| harness 事件 → 前端协议、记账、落库 | `src/server/durable-engine.ts` |
+| attach 路由（仅创建者鉴权） | `src/app/api/durable/[...path]/route.ts` |
+| Postgres 存储（pi-durable 的 Storage 实现） | `src/server/durable/storage-pg.ts` |
+| 一条命令起全套 / 数据库 | `npm run dev:durable`、`npm run durable:pg` |
+| 设计记录与待办 | `docs/plans/pi-durable-{m1,m2,m3,m4,deployment,data-model}.md` |
+
+git 钩子：`pre-commit` 跑 `check:fast`，`pre-push` 跑 `type-check`；紧急时用 `git commit --no-verify` 绕过。

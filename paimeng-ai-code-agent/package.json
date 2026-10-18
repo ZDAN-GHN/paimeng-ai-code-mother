@@ -19,7 +19,7 @@
     "durable:pg": "tsx --env-file=.env scripts/durable-pg.ts",
     "build": "next build --webpack",
     "start": "next start --hostname 127.0.0.1 --port 3000",
-    "type-check": "next typegen && tsc --noEmit",
+    "type-check": "rm -rf .next/types && next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:integration": "vitest run tests/integration",
     "test:e2e": "playwright test",
@@ -36,7 +36,10 @@
     "verify:restart": "tsx --env-file=.env scripts/verify-restart.ts",
     "preview": "tsx --conditions=react-server --env-file=.env scripts/preview.ts",
     "test:e2e:isolated": "tsx scripts/test-e2e.ts",
-    "verify:parity": "node scripts/verify-parity.mjs"
+    "verify:parity": "node scripts/verify-parity.mjs",
+    "check:fast": "npm run check:ui && npm run check:e2e && npm run verify:boundary",
+    "durable:inspect": "tsx --env-file=.env scripts/durable-inspect.ts",
+    "hooks:install": "git config core.hooksPath paimeng-ai-code-agent/scripts/hooks && echo \"hooks 已启用：pre-commit=check:fast, pre-push=type-check\""
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.78",
