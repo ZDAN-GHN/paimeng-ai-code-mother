@@ -1,6 +1,6 @@
 # Pi Durable 迁移 · M3：整合进产品（提拔 + 切默认引擎 + 删临时物）
 
-状态：**整合第一步已完成、第二步已完成**（2026-10-18）。分支 `feat/pi-durable-migration`，基线 `main@d0c9797`
+状态：**整合第一步、第二步、第三步均已完成**（2026-10-18）。第三步删掉 legacy 引擎与自研上下文层，见 §7。分支 `feat/pi-durable-migration`，基线 `main@d0c9797`
 （M1 `4edbdd0`/`1554dcc`/`345d60a`，M2a `d8acf2d`，M2b `3b9279f`，整合前状态提交 `9c7ee52`，
 备份分支 `backup/pre-integration-20261018`）。
 
@@ -132,8 +132,8 @@ npm run verify:m2a               # 产品路径两轮生成：流式 + 工具条
 
 ### 4.1 四项缺口已补（整合第二步，见 §5），自研上下文层仍未删
 
-原计划的第 ③ 步（删 `memory-*.ts`、窗口/摘要/游标/租约、流式重试包装、`tool-transcript.ts`，
-data-model §2）**仍未做**。当时的原因是「删它们等于删整个 legacy 引擎，而 harness 还缺四项已上线能力」，
+原计划的第 ③ 步（删 `memory-*.ts`、窗口/摘要/游标、流式重试包装、`agent.ts` 的旧循环）**已在整合第三步完成**（§7）；
+`tool-transcript.ts` 与 `generation-store.ts` 的租约/心跳/终态保留，理由见 §7.2。当时的阻塞原因与最终处置记录如下。当时的原因是「删它们等于删整个 legacy 引擎，而 harness 还缺四项已上线能力」，
 这四项已在整合第二步补齐并有真实证据（§5）；删除动作仍未开始，剩余卡点改为 §6 的判据清单。
 
 删除时应一次性做：删 `agent.ts` 的 `chatResponse`、`memory-window/context/consolidate/serialize/types/model`
@@ -280,3 +280,197 @@ data-model §2）**仍未做**。当时的原因是「删它们等于删整个 l
 
 要点：第 3 条是删 legacy 的硬门槛（不接产品模型配置，删掉 legacy 后用户在模型管理里的改动就完全
 不生效）；第 5、6 条可以先判定为「可接受的差异」再删，但必须写成显式决定而不是默认忽略。
+
+## 7. 整合第三步：删掉 legacy 引擎与自研上下文层（2026-10-18）
+
+本步把 `agent.ts` 的旧 AI SDK 循环与只为它存在的自研上下文层整块删掉。生成入口现在只有一条路径：
+`app/chat/gen/code` → `harnessChatResponse`（`src/server/durable-engine.ts`）→ 常驻 pi-durable harness。
+判据清单（§6）的第 1–2 条已满足；第 3–10 条没有在删除前补完，处置与本步的差异显式记在 §7.6。
+
+### 7.1 删除清单（文件级）
+
+**整文件删除 —— 源码（自研上下文层）**
+
+| 文件 | 原来干什么 |
+| --- | --- |
+| `src/server/memory-window.ts` | 摘要窗口规划（预算、最小新回合、冷却） |
+| `src/server/memory-context.ts` | 回合装载（`groupTurns`/`turnsAfter`/`recentWithinBudget`） |
+| `src/server/memory-consolidate.ts` | 摘要模型调用与提交 |
+| `src/server/memory-serialize.ts` | 回合序列化、token 估算、摘要提示词 |
+| `src/server/memory-store.ts` | `ts_app_summary` 读写与版本 CAS |
+| `src/server/memory-types.ts` | 摘要游标与回合类型 |
+| `src/server/memory-model.ts` | 可选摘要别名 `memory.summarize` 解析与 `summarizeHistory` |
+
+**整文件删除 —— 测试**
+
+| 文件 | 原因 |
+| --- | --- |
+| `tests/memory-window.test.ts`、`tests/memory-context.test.ts`、`tests/memory-serialize.test.ts`、`tests/memory-model.test.ts`、`tests/memory-config.test.ts`、`tests/memory-fixtures.ts` | 只测上面这些模块 |
+| `tests/integration/memory-generation.test.ts` | 走 legacy 循环的摘要端到端 |
+| `tests/e2e/memory-summary.spec.ts` | 前端「正在整理历史上下文」提示的浏览器用例；harness 用 pi-durable 自己的 compaction，不发 `data-memory` |
+| `tests/integration/agent-persistence.test.ts`、`agent-image-input.test.ts`、`agent-unbounded-steps.test.ts`、`agent-vue-build.test.ts`、`build-progress.test.ts`、`build-repair-loop.test.ts`、`chat-steering.test.ts`、`generation-accounting.test.ts`、`generation-disconnect-build.test.ts`、`milestone-preview.test.ts`、`model-stream-retry.test.ts`、`rate-limit-http.test.ts` | 全部直接调 `chatResponse` / `steerGeneration` 或经 HTTP 路由驱动 legacy 循环（后者的引擎分流在整合第二步就已把它们变成 500，属既有红） |
+| `tests/manual/build-repair.eval.ts` + `vitest.eval.config.ts` + `package.json` 的 `eval:repair` | 手工评估工具包在 legacy 循环的边界上（包 `taskModelsFor`、包 `chatResponse`），无法移植；需要时按 harness 重写 |
+
+**改写（保留产品行为，去掉 legacy 依赖）**
+
+| 文件 | 改法 |
+| --- | --- |
+| `tests/integration/http.test.ts` | 删 3 例 legacy 生成用例（工具循环持久化 / 多文件两轮 / 取消+重复运行），把「图片素材按应用权限读取」的历史文本断言去掉，把租约用例改成只测「过期租约恢复为失败 + 伪造系统消息被拒」，`chatHistory` 计数改 0。保留其余 10 例（鉴权、跨来源、注册登录、分页、管理员编辑、下载 ZIP、逻辑删除） |
+| `tests/integration/feature-parity.test.ts` | F18（敏感词/注入/超长输入在创建任务前被拒）改调 `harnessChatResponse`：`validatePrompt` 与请求体校验在提交 harness 之前，语义不变 |
+| `tests/integration/template-generation.test.ts` | 删 2 例 legacy 生成用例，保留「显式模板覆盖自动路由 + 类型/模板冲突拒绝」 |
+| `tests/model-task-binding.test.ts` | 删 4 例 `taskModelsFor` 用例（摘要模型绑定），保留「任务进行中的模型绑定冻结」 |
+| `tests/integration/durable-m1/*` | 契约级回归；`verify:m3` 的四项能力证据保留为手工脚本 |
+
+**源码内的删除**
+
+| 位置 | 删了什么 | 保留了什么 |
+| --- | --- | --- |
+| `src/server/agent.ts` | 旧 AI SDK 循环整体：`chatResponse`、`steerGeneration`、`retryableStreamErrors`、`buildModelMessages`、`attachModelImages`、工具集与描述、构建看门狗、修复轮循环、SSE 响应包装（约 570 行） | `generationRequestSchema`（两个入口共用的请求体校验）、`uploadFileName` / `uploadDirectory`（harness 路径复用）、`cancelGeneration`（任务态是权威，两个引擎共用） |
+| `src/server/generation-store.ts` | 回合/终态装配（`groupTurns`+`statuses`）、`BeginGenerationContext.turns/summary`、`messagesFrom`、`readSummaryInTx` 调用 | 租约/心跳/终态/`withAppWriter`、用户消息历史文本镜像、旧 `ts_chat_history` 补迁（`legacyMessage`/`pendingLegacyRows`/`orderRows`）、`loadMessages` 的区块排序 |
+| `src/server/generation-accounting.ts` | `recordModelStep`+`toolCallsOf`（SDK `StepResult` 口径）、`recordSummaryStep`、对 `StepResult`/`SummaryCallResult` 的依赖 | `recordAssistantStep`（harness 条目口径）、`recordBuildStep`、读取端与 `stopReasonOf`/`stopReasonFrom` |
+| `src/server/model.ts` | `taskModelsFor`、`TaskModels`、对 `memory-model` 的依赖 | `modelBindingFor`（含 `imageInput` 能力）、`modelFor`、`routeCodeGenType`；`aliasNotConfiguredMessage`/`isAliasNotConfigured`/`ModelBindingSource` 移到这里定义 |
+| `src/server/speech.ts` | — | `isAliasNotConfigured` 改从 `./model` 导入（别名解析的共用判断，`speech.transcribe` 仍用它区分「未配置」与其它错误） |
+| `src/server/config.ts` | `DURABLE_ENGINE`、9 个 `MEMORY_*` 变量与 3 条互斥校验 | 其余配置不变 |
+| `src/app/api/[...path]/route.ts` | 引擎分流（`getConfig().durable.engine`），生成/取消/插话直接走 harness 入口 | — |
+| `scripts/durable-dev.ts`、`.env.example` | `DURABLE_ENGINE` 与 `MEMORY_*` 段落 | 新增 `DURABLE_*` 说明与「一条命令起全套」的注释 |
+| `package.json` | `eval:repair` 脚本 | — |
+
+### 7.2 保留 `tool-transcript.ts` 与租约/终态的理由
+
+这两块**不是**只为 legacy 存在，删掉会造成真实回退，所以留在产品路径：
+
+- `src/server/tool-transcript.ts`：`generation-store.storeAssistant` 用它把助手消息的工具条目渲染成
+  `ts_chat_history` 里给人读的文本（列表、管理员查询、下载历史）。harness 路径也走同一条
+  `finishGeneration`，所以这个渲染仍然生效。
+- `generation-store` 的租约、心跳、`restoreGeneration`、终态与 `withAppWriter`：任务行是权威，
+  harness 路径的取消/超时/「失去租约」判断（`observeHarnessRun` 的 5 秒心跳）与阶段构建的写锁都靠它。
+  `ts_generation_step` 记账同理（harness 写 `recordAssistantStep`/`recordBuildStep`）。
+
+### 7.3 `spike/` 的去向
+
+| 位置 | 处置 |
+| --- | --- |
+| `spike/pi-durable-pg/src/*`、`pg.sh` | 整合第一步已移进产品（`src/server/durable/storage-pg.ts`、`harness.ts`、`faux-model.ts`、`scripts/durable-pg.sh`），spike 不留第二份 |
+| `spike/pi-durable-pg/experiments/`、`test/`、`evidence/`、`vitest.config.ts` | **删除**（一次性可行性实验与一致性套件；storage 的回归现在由 `tests/integration/durable-m1` 的 restart/replay/conversation 覆盖） |
+| `spike/pi-durable-pg/run.sh`、`package.json`、`README.md`、`tsconfig.json`、`pgdata/` | **保留**：`run.sh` 是 `spike/pi-durable-m1` 手工脚本的入口（模型环境派生 + `node --experimental-strip-types`）。`package.json` 只剩依赖清单 |
+| `spike/pi-durable-pg/node_modules` | 我误删过一次，已重建为 `→ paimeng-ai-code-agent/node_modules` 的软链（gitignored）；缺了在 `spike/pi-durable-pg` 里 `npm install` |
+| `spike/pi-durable-m1/src/verify-*.ts`、`client.ts`、`product.ts`、`run.sh`、`setup.sh` | **保留**：唯一还值得跑的是真实模型 + 浏览器的验收脚本（`verify:m3`、`verify:m2b-build`、`verify:m2a`） |
+| `spike/pi-durable-m1/evidence/`、`evidence-m2a/`、`evidence-m2b/`、`runtime-out/` | **删除**（同一套脚本的旧证据，已被 `evidence-m3/` 取代） |
+| `spike/pi-durable-m1/evidence-m3/` | **保留**：§5 四项能力与产品主流程那次验收的原始输出与截图 |
+| `spike/pi-durable-pg/pgdata/` | 删除**失败**（目录属主是容器用的 `dnsmasq` 用户，当前账号无权限）。无容器在用它（`docker ps` 没有 `zslm-pg-durable-spike`），需要时手工 `sudo rm -rf spike/pi-durable-pg/pgdata` |
+
+`spike/` 现在的定位写在 `spike/pi-durable-m1/README.md`：**已停止维护的手工验收脚本**，契约级回归在产品目录的
+`tests/integration/durable-m1/`。
+
+### 7.4 残留检查
+
+命令与输出（产品树，`src` / `tests` / `scripts`）：
+
+```bash
+$ grep -rn "memory-window\|memory-context\|memory-consolidate\|memory-serialize\|memory-types\|memory-store\|memory-model\
+\|taskModelsFor\|TaskModels\|SummaryModelSource\|SummaryCallResult\|recordModelStep\|recordSummaryStep\
+\|MEMORY_\|DURABLE_ENGINE\|chatResponse\|steerGeneration\|retryableStreamErrors\|buildModelMessages" \
+  src tests scripts --include=*.ts --include=*.tsx
+(无输出，exit 1)
+
+$ grep -rln "memory-window\|memory-context\|memory-consolidate\|memory-serialize\|memory-model\|tool-transcript" src tests scripts
+src/server/generation-store.ts      # tool-transcript（保留，见 §7.2）
+tests/tool-transcript.test.ts       # 同上
+```
+
+历史计划文档仍有指向已删模块的叙述（`pi-durable-m1.md`、`pi-durable-m2.md`、`pi-durable-data-model.md`、
+`agent-design-review.md`）；它们是有日期的设计记录，改成现状会抹掉当时的判断，所以在每篇开头加了一行
+「历史文档，见 §7」的提示，不逐句改写。
+
+### 7.5 本步验收结果（2026-10-18）
+
+| 验收 | 命令 | 结果 |
+| --- | --- | --- |
+| 类型检查 | `npx tsc --noEmit` | 干净（exit 0） |
+| **全量测试（串行单跑）** | `npm test`（= `vitest run`） | **58 文件 / 444 用例全过**，749.57s；Postgres 已起，所以 `tests/integration/durable-m1` 9 文件 16 用例也在内 |
+| durable 回归 | `npx vitest run tests/integration/durable-m1` | 9 文件 16/16（需 `npm run durable:pg -- start`） |
+| 静态门禁 | `npm run check:ui` / `npm run check:e2e` | 通过（24 个 tsx / 13 个 spec） |
+| 残留检查 | 见 §7.4 的两条 grep | 无源码引用残留 |
+| **真实端到端**（真实模型 + 真实 Postgres + 真实容器构建 + 浏览器） | `npm run dev:durable` + `spike/pi-durable-m1` 的 `verify:m3` / `verify:m2b-build` | **13/13 + 8/8 PASS**（删除之后重跑，见下） |
+
+删除前先确认过「红的是该删的，不是删错了」：在 HEAD（`878f3c2`，未删除任何东西）上单跑
+`tests/integration/http.test.ts` 与 `tests/integration/rate-limit-http.test.ts`，它们是**既有红**
+（整合第二步把默认引擎切成 harness 后，这两组用例驱动的还是 legacy 循环，路由分流让 HTTP 路径返回 500）。
+所以删除后重跑全量是「58 文件 444 用例全过」，没有把真回归掩盖掉；其中能保住产品行为的断言已按 §7.1 改写。
+
+**真实端到端已在删除之后重跑**（2026-10-18 15:33–15:37，`npm run dev:durable` 起的真实链路）：
+
+- `verify:m3`（`spike/pi-durable-m1`）**13/13 PASS**：真实模型 `oc-go/deepseek-v4.1-flash`、真实 Postgres、
+  真实上传（`app/attachment/upload`）。四项能力各自的断言全过——插话 S1–S5（运行中受理、进入模型上下文、
+  位置在第一次回复之后、落 `ts_message`）、图片 I1–I3（生成 `ready/completed`、模型上下文 `images:1`、
+  工作区副本写到 `assets/uploads/`）、修复轮 R1–R3（流里出现 `repairing`、`ts_generation_step` 记
+  `build attempts=2 rounds=2`、最终 `ready/completed`）、联网 W1–W2（四个工具都注册、真实生成里模型调到了 `webSearch`）。
+- `verify:m2b-build`（浏览器层）**8/8 PASS**：气泡长度序列 12 个不同值（真流式）、工具条目
+  （列出/读取/修改文件 + 阶段构建）、构建时间线四个阶段全部 `ok`、**真实容器构建 13545ms**、
+  预览刷新（`pv=1`）、刷新后读回文本与工具条目。
+
+原始输出与截图在 `spike/pi-durable-m1/evidence-m3/`（`timeline-m3-features.txt`、`timeline-m3.txt`、
+`m3-streaming.png`、`m3-final.png`、`m3-reloaded.png`、`results-m3-features.json`，都是本步这次运行的）。
+
+```bash
+cd paimeng-ai-code-agent && npm run dev:durable      # Postgres + harness + Next dev(3100)
+cd ../spike/pi-durable-m1 && npm run verify:m3       # 四项能力 13 项断言
+npm run verify:m2b-build                             # 产品主流程 8 项断言（真实容器构建 + 预览刷新）
+```
+
+### 7.6 判据清单的最终处置（§6 → 现状）
+
+判据是为「敢不敢删」写的；删除已经执行，所以下表改成**产品能力缺口清单**：第 3–8 条是**已知差异/待办**，
+不是回归（legacy 的行为在删除前就没被 harness 完全覆盖，删掉它不会让现状变差，只是少了一条回退路径）。
+
+| # | 判据 | 处置 |
+| --- | --- | --- |
+| 1 | 四项能力有真实证据 | 满足（§5） |
+| 2 | durable 回归 + `tsc`/`check:ui`/`check:e2e` | 满足（§7.5，含全量） |
+| 3 | 模型选择接到产品模型配置 | **待办**：harness 仍走 `DURABLE_MODEL_*`，管理端改别名对生成不生效（模型管理页面上的别名只进记账行） |
+| 4 | `toolMs` 在 harness 路径有值 | **待办**：`RunTranslator` 已有 `#toolOutcomes`，用 `tool_execution_start/end` 时间差填 `ms` 即可 |
+| 5 | 历史整理提示的对等物 | **接受差异**：harness 用 pi-durable 的 compaction，不发 `data-memory`，前端不再出现「正在整理历史上下文」提示。已删除对应的浏览器用例与前端文案依赖 |
+| 6 | 联网工具租约检查等价 | **接受差异**：`harness-server.ts` 的 `webRuntime` 仍是 `ensureWritable` no-op + `write` 直通；取消由 pi-durable 自己的 abort 语义承担 |
+| 7 | 工程模式 `public/uploads/` 真实构建 | **待办**：接口层已验证，真实 Vite 构建下的素材路径未跑（与 web-access U4 同类） |
+| 8 | 修复轮 `noProgress` / `BUILD_REPAIR_ROUNDS=0` | **待办**：只有代码与 legacy 同口径，没有真实证据 |
+| 9 | 一次产品主流程端到端（浏览器层） | **待办**（§7.5 末段；脚本现成） |
+| 10 | 数据库换 Postgres | **下一步**（§7.7） |
+
+### 7.7 剩余待办：数据库换 Postgres（下一步的清单）
+
+1. **Drizzle 驱动**：`mysql-core` → `pg-core`；`src/server/schema.ts` 全部表按域重建，列名改 snake_case
+   （data-model §3）。`src/server/db.ts` 的 pool、`now()`、`onDuplicateKeyUpdate`、`.for('update')` 与
+   `affectedRows` 这些 MySQL 口径要逐个换（`onDuplicateKeyUpdate` → `onConflictDoUpdate`）。
+2. **连接串校验**：`getConfig()` 现在硬性要求 `mysql:` 前缀与库名白名单（`paimeng_ai_code_mother_ts(_test)`），
+   要改成 Postgres 的库名/账号策略；`DURABLE_PG_URL` 与 `DATABASE_URL` 合并成一条（harness 已经有 pg 实现）。
+3. **业务行搬迁**：user / app / model_provider / model_alias / attachment / ts_rate_limit / 登录会话。
+   对话数据放弃：`ts_message`、`ts_generation`、`ts_generation_step`、`ts_chat_history`、
+   `ts_app_summary`、`ts_lease`、`ts_snowflake_state`（发号下界要么搬，要么确认不再需要）。
+4. **`app.conversation_id` 清空**：harness 的会话在另一个库/实例里，换库时一次性清空该列
+   （`durable-engine.ts` 的 404 自愈能兜住，但一次性清更干净）。
+5. **删旧表与迁移**：`migrations/` 里建 `ts_*` 表的那些 SQL 与 drizzle 定义同步删除，只保留 Postgres 的新迁移；
+   `scripts/migrate.ts` / `scripts/test-database.ts` / `scripts/import-legacy.ts` 一起改。
+6. **一次性 Postgres 换成常驻服务**：`scripts/durable-pg.sh` 现在起 `zslm-pg-durable`（127.0.0.1:55432）；
+   换库时改成 `compose.yaml` 里的固定服务（与 `zslm-mysql` 同级的 `zslm-postgres`，或复用已有的 5432 实例），
+   并把 `runtime/durable-pg/pgdata` 的落点与权限写进 README。
+7. **回归基线**：迁移后重跑 `npm test`（本轮基线：58 文件 / 444 用例）、`tests/integration/durable-m1`，
+   再跑一次 §7.5 的真实端到端；`scripts/verify-restart.ts` 的快照流程也要按新库核对。
+8. **顺带**：`tests/integration/http.test.ts` 的 `chatHistory` 计数、`scripts/admin.ts`、管理员历史分页都直接读
+   `ts_chat_history`，换库时一起验。
+
+### 7.8 删除的外溢：两个「暂时没有产品调用方」的记账助手
+
+`src/server/generation-accounting.ts` 里有两个符号的唯一调用方是 legacy 循环与它的集成用例，删完后产品路径不再调它们，
+但**保留**（它们是记账模块的读侧与停止原因策略，harness 路径正好该用）：
+
+- `generationAccount(generationId)`（单次读取）：原本由 `agent-unbounded-steps.test.ts`、
+  `generation-accounting.test.ts`、`milestone-preview.test.ts` 使用，这些用例已删；HTTP 侧只用 `generationAccounts`。
+- `stopReasonOf(...)`：原来由 `agent.ts` 的 legacy 循环调用（`tests/generation-accounting.test.ts` 仍在测它）。
+  **顺带发现的行为差异**：harness 路径的 `observeHarnessRun` 直接用状态机写 `stopReason`
+  （`cancelled`/`model-error`/`verification-failed`/`completed`），不再走 `stopReasonOf`，所以
+  `GENERATION_TIMEOUT_MS` 超时会被记成 `cancelled`、失去租约会被记成 `model-error`，而不是旧口径的
+  `timeout` / `lease-lost`。默认不限时（`GENERATION_TIMEOUT_MS=0`）时很难触发，但这是一条真实的记账口径差异，
+  属 §4.3-6 那一类，留作待办（接法：`observeHarnessRun` 的 catch 用 `stopReasonOf` 归一化 abort 原因）。
+
+其它与本步相关、不属于换库的待办：§7.6 的第 3、4、7、8、9 条；`tests/e2e` 里 `chat-*` 用例当前只拦接口不调真实模型，
+若要覆盖「浏览器里真实生成一次」需要 `dev:durable` 常驻在 E2E 环境里；`spike/pi-durable-pg/pgdata` 的权限残留（§7.3）。

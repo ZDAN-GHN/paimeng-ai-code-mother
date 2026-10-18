@@ -59,3 +59,39 @@
 [2026-10-18T05:51:20.901Z] ASSERT B1 助手消息（文本 + 工具条目）落库: PASS — 答案尾="题、引导语与输入占位文案调成面包房语境），任务的新增、筛选、完成切换、删除与本地存储等原有功能全部保留，构建已成功刷新预览。 M3-REACT-BUILD-OK" 工具=["listFiles","readFile","listFiles","readFile","readFile","readFile","modifyFile","modifyFile","buildPreview"]
 [2026-10-18T05:51:22.245Z] ASSERT B2 刷新后读回文本与工具条目: PASS — 工具条目=["列出文件","读取文件 src/App.tsx","读取文件 package.json","读取文件 src/main.tsx","读取文件 src/hooks/useTasks.ts","修改文件 src/App.tsx","阶段构建：初版"]
 [2026-10-18T05:51:22.283Z] VERDICT: 8/8 assertions passed — PASS
+
+=== M3 real react run 2026-10-18T07:35:52.423Z ===
+[2026-10-18T07:35:52.639Z] 应用 appId=469331261563863040（react_project）已创建
+[2026-10-18T07:36:03.039Z] 产品对话页已加载，等待自动发起的初始生成
+[2026-10-18T07:36:04.628Z] 生成 06f546ff-7358-4cd3-a8fa-62168934c4f5 已开始
+[2026-10-18T07:36:09.008Z] 4380ms 首段文本截图（2347 字符）
+[2026-10-18T07:36:57.507Z] 气泡长度序列=[2347,2351,2431,5387,6008,9457,9738,9824,9836,9865]（共 12 个不同长度）
+[2026-10-18T07:36:57.507Z] 工具条目=["列出文件","读取文件 src/App.tsx","读取文件 package.json","读取文件 src/main.tsx","读取文件 src/hooks/useTasks.ts","读取文件 AGENTS.md","读取文件 src/components/TaskItem.tsx","读取文件 src/style.css","修改文件 src/App.tsx","阶段构建：初版"]
+[2026-10-18T07:36:57.507Z] 构建阶段采样=["50116ms 生成:running,写入文件:running,源码校验:ok,安装依赖:ok,类型检查:ok,打包构建:ok,预览就绪:ok","50664ms 生成:running,写入文件:running,源码校验:ok,安装依赖:ok,类型检查:ok,打包构建:ok,预览就绪:ok","51189ms 生成:running,写入文件:running,源码校验:ok,安装依赖:ok,类型检查:ok,打包构建:ok,预览就绪:ok","51709ms 生成:running,写入文件:running,源码校验:ok,安装依赖:ok,类型检查:ok,打包构建:ok,预览就绪:ok","52259ms 生成:running,写入文件:running,源码校验:ok,安装依赖:ok,类型检查:ok,打包构建:ok,预览就绪:ok","52820ms 生成:ok,写入文件:ok,源码校验:ok,安装依赖:ok,类型检查:ok,打包构建:ok,预览就绪:ok"]
+[2026-10-18T07:36:57.508Z] ASSERT A1 浏览器看到流式文本增量: PASS — 不同气泡长度=[2347,2351,2431,5387,6008,9457]
+[2026-10-18T07:36:57.508Z] ASSERT A2 浏览器看到工具条目（写入 + 阶段构建）: PASS — 工具条目=["列出文件","读取文件 src/App.tsx","读取文件 package.json","读取文件 src/main.tsx","读取文件 src/hooks/useTasks.ts","读取文件 AGENTS.md","读取文件 src/components/TaskItem.tsx","读取文件 src/style.css","修改文件 src/App.tsx","阶段构建：初版"]
+[2026-10-18T07:36:57.508Z] ASSERT A3 构建阶段进度出现在时间线: PASS — 阶段=["生成","写入文件","源码校验","安装依赖","类型检查","打包构建","预览就绪"]
+[2026-10-18T07:36:57.508Z] ASSERT A4 构建阶段全部成功: PASS — 成功阶段=["源码校验","安装依赖","类型检查","打包构建"]
+[2026-10-18T07:36:57.508Z] ASSERT A5 预览被刷新（pv 版本号出现）: PASS — pv=1
+[2026-10-18T07:36:57.512Z] ASSERT A6 真实容器构建（构建耗时 > 5s）: PASS — 构建结果=["预览已更新（初版），用时 13545ms。"]
+[2026-10-18T07:36:57.534Z] ASSERT B1 助手消息（文本 + 工具条目）落库: PASS — 答案尾="入框占位文字做了同主题措辞），添加/筛选/完成/删除/localStorage 等原有功能与组件结构均保持不变，构建通过。\n\nM3-REACT-BUILD-OK" 工具=["listFiles","readFile","listFiles","readFile","readFile","readFile","readFile","readFile","readFile","modifyFile","modifyFile","buildPreview"]
+[2026-10-18T07:36:58.833Z] ASSERT B2 刷新后读回文本与工具条目: PASS — 工具条目=["列出文件","读取文件 src/App.tsx","读取文件 package.json","读取文件 src/main.tsx","读取文件 src/hooks/useTasks.ts","读取文件 AGENTS.md","读取文件 src/components/TaskItem.tsx","读取文件 src/style.css","修改文件 src/App.tsx","阶段构建：初版"]
+[2026-10-18T07:36:58.879Z] VERDICT: 8/8 assertions passed — PASS
+
+=== M3 real react run 2026-10-18T08:13:06.021Z ===
+[2026-10-18T08:13:09.347Z] 应用 appId=469340641873100800（react_project）已创建
+[2026-10-18T08:13:19.246Z] 产品对话页已加载，等待自动发起的初始生成
+[2026-10-18T08:13:20.826Z] 生成 2800c810-de1a-4ba4-8ba7-ee0a90b9b41a 已开始
+[2026-10-18T08:13:24.564Z] 3738ms 首段文本截图（46 字符）
+[2026-10-18T08:14:25.417Z] 气泡长度序列=[46,144,765,849,3660,6741,9664,9727,10724,11474]（共 18 个不同长度）
+[2026-10-18T08:14:25.417Z] 工具条目=["列出文件","读取文件 AGENTS.md","读取文件 package.json","读取文件 src/App.tsx","读取文件 src/main.tsx","读取文件 index.html","读取文件 src/components/TaskItem.tsx","读取文件 src/hooks/useTasks.ts","读取文件 src/types/task.ts","读取文件 src/style.css","修改文件 src/App.tsx","修改文件 src/hooks/useTasks.ts","修改文件 index.html","修改文件 src/style.css","阶段构建：初版"]
+[2026-10-18T08:14:25.417Z] 构建阶段采样=["61661ms 生成:running,写入文件:running,源码校验:ok,安装依赖:ok,类型检查:ok,打包构建:ok,预览就绪:ok","62181ms 生成:running,写入文件:running,源码校验:ok,安装依赖:ok,类型检查:ok,打包构建:ok,预览就绪:ok","62727ms 生成:running,写入文件:running,源码校验:ok,安装依赖:ok,类型检查:ok,打包构建:ok,预览就绪:ok","63247ms 生成:running,写入文件:running,源码校验:ok,安装依赖:ok,类型检查:ok,打包构建:ok,预览就绪:ok","63765ms 生成:running,写入文件:running,源码校验:ok,安装依赖:ok,类型检查:ok,打包构建:ok,预览就绪:ok","64372ms 生成:ok,写入文件:ok,源码校验:ok,安装依赖:ok,类型检查:ok,打包构建:ok,预览就绪:ok"]
+[2026-10-18T08:14:25.417Z] ASSERT A1 浏览器看到流式文本增量: PASS — 不同气泡长度=[46,144,765,849,3660,6741]
+[2026-10-18T08:14:25.417Z] ASSERT A2 浏览器看到工具条目（写入 + 阶段构建）: PASS — 工具条目=["列出文件","读取文件 AGENTS.md","读取文件 package.json","读取文件 src/App.tsx","读取文件 src/main.tsx","读取文件 index.html","读取文件 src/components/TaskItem.tsx","读取文件 src/hooks/useTasks.ts","读取文件 src/types/task.ts","读取文件 src/style.css","修改文件 src/App.tsx","修改文件 src/hooks/useTasks.ts","修改文件 index.html","修改文件 src/style.css","阶段构建：初版"]
+[2026-10-18T08:14:25.417Z] ASSERT A3 构建阶段进度出现在时间线: PASS — 阶段=["生成","写入文件","源码校验","安装依赖","类型检查","打包构建","预览就绪"]
+[2026-10-18T08:14:25.417Z] ASSERT A4 构建阶段全部成功: PASS — 成功阶段=["源码校验","安装依赖","类型检查","打包构建"]
+[2026-10-18T08:14:25.417Z] ASSERT A5 预览被刷新（pv 版本号出现）: PASS — pv=1
+[2026-10-18T08:14:25.422Z] ASSERT A6 真实容器构建（构建耗时 > 5s）: PASS — 构建结果=["预览已更新（初版），用时 13623ms。"]
+[2026-10-18T08:14:25.476Z] ASSERT B1 助手消息（文本 + 工具条目）落库: PASS — 答案尾="ml` 标题、配色也一并调整为面包房主题），添加/勾选/筛选/删除与本地存储等原有功能完整保留且未改动依赖、锁文件与模板文件。M3-REACT-BUILD-OK" 工具=["listFiles","readFile","listFiles","readFile","readFile","readFile","readFile","readFile","readFile","readFile","readFile","modifyFile","modifyFile","modifyFile","modifyFile","modifyFile","modifyFile","modifyFile","modifyFile","modifyFile","modifyFile","readFile","modifyFile","buildPreview"]
+[2026-10-18T08:14:27.520Z] ASSERT B2 刷新后读回文本与工具条目: PASS — 工具条目=["列出文件","读取文件 AGENTS.md","读取文件 package.json","读取文件 src/App.tsx","读取文件 src/main.tsx","读取文件 index.html","读取文件 src/components/TaskItem.tsx","读取文件 src/hooks/useTasks.ts","读取文件 src/types/task.ts","读取文件 src/style.css","修改文件 src/App.tsx","修改文件 src/hooks/useTasks.ts","修改文件 index.html","修改文件 src/style.css","阶段构建：初版"]
+[2026-10-18T08:14:27.564Z] VERDICT: 8/8 assertions passed — PASS

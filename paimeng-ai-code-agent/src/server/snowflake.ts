@@ -48,5 +48,5 @@ export async function reserveImportedSnowflakeIds(tx: Pick<Transaction, 'update'
   for (const id of ids) {
     if (id > maximum && id <= maxId && ((id >> 12n) & 1023n) === SNOWFLAKE_NODE) maximum = id;
   }
-  if (maximum > 0n) await tx.update(snowflakeState).set({ lastId: sql`GREATEST(${snowflakeState.lastId}, ${maximum.toString()})` }).where(eq(snowflakeState.nodeId, Number(SNOWFLAKE_NODE)));
+  if (maximum > 0n) await tx.update(snowflakeState).set({ lastId: sql`GREATEST(${snowflakeState.lastId}, ${maximum.toString()}::bigint)` }).where(eq(snowflakeState.nodeId, Number(SNOWFLAKE_NODE)));
 }

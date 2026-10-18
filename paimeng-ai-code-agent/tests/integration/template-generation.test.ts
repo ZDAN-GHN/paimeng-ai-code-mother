@@ -5,13 +5,11 @@ import { rm } from 'node:fs/promises';
 import { eq } from 'drizzle-orm';
 import { testDatabaseUrl } from '../test-database-url';
 import { db, getPool, now } from '@/server/db';
-import { users, apps, histories, messages, generations, leases, rateLimits } from '@/server/schema';
+import { users, apps, generations, leases, rateLimits } from '@/server/schema';
 import { nextSnowflakeId } from '@/server/snowflake';
 import { publicUser } from '@/server/auth';
 import { createApp, getApp } from '@/server/business';
-import { chatResponse } from '@/server/agent';
-import { generationFor, loadMessages } from '@/server/generation-store';
-import { workspace, readProjectFile, listProjectFiles } from '@/server/workspace';
+import { workspace, readProjectFile } from '@/server/workspace';
 import type { CodeGenType, ProjectCodeGenType, User } from '@/shared/contracts';
 
 loadEnvFile('.env');
@@ -31,7 +29,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   for (const app of created) {
-    for (const table of [leases, generations, messages, histories]) await db().delete(table).where(eq(table.appId, BigInt(app.id)));
+    for (const table of [leases, generations]) await db().delete(table).where(eq(table.appId, BigInt(app.id)));
     await db().delete(apps).where(eq(apps.id, BigInt(app.id)));
     await rm(workspace(app), { recursive: true, force: true });
   }
@@ -63,54 +61,4 @@ it('显式模板覆盖自动路由，新工程默认使用对应技术栈模板�
   expect((await getApp(routed, actor)).template).toEqual({ id: 'html', version: '1.0.0' });
   await expect(createApp({ initPrompt: '简单网页', templateId: 'missing' }, actor)).rejects.toThrow();
   for (const item of cases) await expect(createApp({ initPrompt: '简单网页', templateId: item.templateId, codeGenType: 'html' }, actor)).rejects.toThrow('模板与应用类型不匹配');
-});
-
-for (const item of cases) it(`真实 SDK 在 ${item.templateId} 模板上修改入口源码，保留入口与依赖，自动容器构建达到 ready`, async () => {
-  const id = await createApp({ initPrompt: '在模板上生成页面', templateId: item.templateId }, actor);
-  const app = { id, codeGenType: item.codeGenType };
-  created.push(app);
-  const before = await readProjectFile(app, 'package.json');
-  const lock = await readProjectFile(app, 'package-lock.json');
-  await db().delete(rateLimits).where(eq(rateLimits.limitKey, 'user:' + actor.id));
-  const requestId = randomUUID();
-  const response = await chatResponse(new Request('http://localhost:3000/api/app/chat/gen/code'), {
-    appId: id, requestId, message: { id: randomUUID(), role: 'user', parts: [{ type: 'text', text: '在模板上生成页面' }] },
-  }, actor);
-  expect(await response.text()).not.toContain('"type":"error"');
-  expect(await generationFor(id)).toMatchObject({ id: requestId, status: 'ready', error: null });
-  expect((await getApp(id, actor)).previewUrl).toContain(`/preview/${item.codeGenType}_${id}/`);
-  expect(await readProjectFile(app, 'package.json')).toBe(before);
-  expect(await readProjectFile(app, 'package-lock.json')).toBe(lock);
-  expect(await readProjectFile(app, item.source)).toContain('在模板上生成页面');
-  expect(await readProjectFile(app, item.source)).toContain(item.changed);
-  const files = await listProjectFiles(app);
-  expect(files).toContain(item.entry);
-  expect(files).not.toContain(item.jsEntry);
-  const stored = await loadMessages(id);
-  const parts = stored[1].parts;
-  expect(parts).toEqual(expect.arrayContaining([
-    expect.objectContaining({ type: 'tool-listFiles', state: 'output-available' }),
-    expect.objectContaining({ type: 'tool-readFile', state: 'output-available', input: { path: 'AGENTS.md' } }),
-    expect.objectContaining({ type: 'tool-writeFiles', state: 'output-available' }),
-  ]));
-}, 180000);
-
-for (const type of ['html', 'multi_file'] as const) it(`fixture 模型在 ${type} 默认静态模板上生成并直接预览`, async () => {
-  const title = '静态模板需求标题';
-  const id = await createApp({ initPrompt: title, codeGenType: type }, actor);
-  const app = { id, codeGenType: type };
-  created.push(app);
-  await db().delete(rateLimits).where(eq(rateLimits.limitKey, 'user:' + actor.id));
-  const requestId = randomUUID();
-  const response = await chatResponse(new Request('http://localhost:3000/api/app/chat/gen/code'), {
-    appId: id, requestId, message: { id: randomUUID(), role: 'user', parts: [{ type: 'text', text: title }] },
-  }, actor);
-  expect(await response.text()).not.toContain('"type":"error"');
-  expect(await generationFor(id)).toMatchObject({ id: requestId, status: 'ready', error: null });
-  expect((await getApp(id, actor)).previewUrl).toContain(`/preview/${type}_${id}/`);
-  expect(await readProjectFile(app, 'index.html')).toContain(title);
-  const files = await listProjectFiles(app);
-  expect(files.some(path => /(?:^|\/)package\.json$|(?:^|\/)vite\.config\.|\.(?:vue|tsx)$/i.test(path))).toBe(false);
-  const parts = (await loadMessages(id))[1].parts;
-  expect(parts).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'tool-readFile', state: 'output-available', input: { path: 'index.html' } })]));
 });

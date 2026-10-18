@@ -50,8 +50,15 @@ import {
 import pg from "pg";
 
 // BIGINT arrives as a string by default; every ID and sequence here is small
-// enough to be an exact JS number.
-pg.types.setTypeParser(20, (value: string) => Number(value));
+// enough to be an exact JS number. The parser is set on this backend's own
+// clients rather than globally: the product's pool (src/server/db.ts) keeps
+// BIGINT in the string domain because its snowflake IDs exceed 2^53.
+/** The storage lives in the product's Postgres unless the caller points it elsewhere. */
+function defaultPgUrl(): string {
+	return process.env.DURABLE_PG_URL ?? process.env.DATABASE_URL ?? "postgres://spike:spike@127.0.0.1:55432/paimeng_ts";
+}
+
+const bigintAsNumber = { getTypeParser: (oid: number, format?: "text" | "binary") => (oid === 20 ? (value: string) => Number(value) : pg.types.getTypeParser(oid, format)) };
 
 type StoredTask = TaskRecord<JsonValue, JsonValue, JsonValue>;
 
@@ -305,7 +312,8 @@ export class PostgresStorage implements Storage {
 	/** Connect, migrate, take the exclusive lock, and read the ID counter. */
 	static async open(options: PostgresStorageOptions = {}): Promise<PostgresStorage> {
 		const client = new pg.Client({
-			connectionString: options.connectionString ?? process.env.DURABLE_PG_URL ?? "postgres://spike:spike@127.0.0.1:55432/durable",
+			connectionString: options.connectionString ?? defaultPgUrl(),
+			types: bigintAsNumber as never,
 		});
 		await client.connect();
 		try {
@@ -1080,7 +1088,8 @@ async function applyMigrations(client: pg.Client): Promise<void> {
 /** Drop and recreate the whole durable schema; used to reset a spike database between runs. */
 export async function resetPostgresStorage(options: PostgresStorageOptions = {}): Promise<void> {
 	const client = new pg.Client({
-		connectionString: options.connectionString ?? process.env.DURABLE_PG_URL ?? "postgres://spike:spike@127.0.0.1:55432/durable",
+		connectionString: options.connectionString ?? defaultPgUrl(),
+		types: bigintAsNumber as never,
 	});
 	await client.connect();
 	try {

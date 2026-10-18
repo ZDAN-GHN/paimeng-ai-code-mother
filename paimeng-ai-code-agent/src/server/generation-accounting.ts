@@ -1,16 +1,13 @@
 import 'server-only';
 import { asc, desc, eq, inArray } from 'drizzle-orm';
-import type { StepResult, ToolSet } from 'ai';
 import { db, now } from './db';
 import { generationSteps, generations } from './schema';
-import type { SummaryCallResult } from './memory-model';
 import type { BuildVerdict } from './build-feedback';
 
 /**
  * 生成任务统一记账（docs/plans/agent-design-review.md D2）。
  *
- * 每个模型步骤、每次摘要调用、每次构建尝试各写一行 ts_generation_step；任务级停止原因写在
- * ts_generation.stopReason。写入全部是尽力而为：记账失败只告警，不影响生成与状态转移。
+ * 每个模型步骤、每次构建尝试各写一行 generation_step；任务级停止原因写在 generation.stop_reason。写入全部是尽力而为：记账失败只告警，不影响生成与状态转移。
  * 上游没有返回的用量记为 NULL（未知），不记成 0；读取端用 usageUnknown 区分「已知的零」和「未知」。
  * 只保存工具名、成败与耗时，不保存提示词、工具正文或模型输出。
  * 读模型类型（AccountStep / GenerationAccount）定义在 @/shared/contracts，前后端共用。
@@ -53,42 +50,6 @@ async function insertStep(values: typeof generationSteps.$inferInsert): Promise<
   } catch (error) {
     console.warn(`生成记账写入失败（${values.kind}）：${messageOf(error)}`);
   }
-}
-
-/** 工具调用明细：耗时来自 SDK 的单步统计，工具正文不进记账。 */
-function toolCallsOf<TOOLS extends ToolSet>(step: StepResult<TOOLS>): AccountToolCall[] {
-  const failed = new Set(step.content.filter(part => part.type === 'tool-error').map(part => part.toolCallId));
-  const timings = step.performance.toolExecutionMs;
-  return step.toolCalls.map(call => ({ name: call.toolName, ok: call.invalid !== true && !failed.has(call.toolCallId), ms: timings[call.toolCallId] ?? null }));
-}
-
-/** 一个模型步骤（一次 LLM 调用及其工具执行）。finishReason 是模型自己的停止原因。 */
-export async function recordModelStep<TOOLS extends ToolSet>(step: StepResult<TOOLS>, context: { generationId: string; round: number; model: ModelIdentity }): Promise<void> {
-  const { usage } = step;
-  const toolMs = Object.values(step.performance.toolExecutionMs).reduce((total, value) => total + value, 0);
-  await insertStep({
-    generationId: context.generationId,
-    kind: 'model',
-    round: context.round,
-    stepNumber: step.stepNumber,
-    modelAlias: context.model.alias,
-    providerId: context.model.providerId,
-    modelName: context.model.modelName,
-    upstreamProvider: step.model.provider,
-    upstreamModelId: step.model.modelId,
-    durationMs: Math.round(step.performance.stepTimeMs),
-    modelMs: Math.round(step.performance.responseTimeMs),
-    toolMs: Math.round(toolMs),
-    inputTokens: usage.inputTokens ?? null,
-    outputTokens: usage.outputTokens ?? null,
-    cacheReadTokens: usage.inputTokenDetails.cacheReadTokens ?? null,
-    cacheWriteTokens: usage.inputTokenDetails.cacheWriteTokens ?? null,
-    reasoningTokens: usage.outputTokenDetails.reasoningTokens ?? null,
-    finishReason: step.finishReason,
-    status: 'ok',
-    toolCalls: toolCallsOf(step),
-    createTime: now(),
-  });
 }
 
 /** pi-durable assistant 条目自带的用量（harness 引擎），字段名与 SDK 的 Usage 不同。 */
@@ -144,27 +105,6 @@ export async function recordBuildStep(input: { generationId: string; round: numb
     stage: outcome.status === 'failed' ? outcome.verdict.stage : null,
     repairable: outcome.status === 'failed' ? (outcome.verdict.repairable ? 1 : 0) : null,
     detail: outcome.status === 'ok' ? null : outcome.detail,
-    createTime: now(),
-  });
-}
-
-/** 一次摘要模型调用（含失败；失败的调用同样有价值和耗时）。 */
-export async function recordSummaryStep(input: { generationId: string; round: number; stepNumber: number; durationMs: number; model: ModelIdentity; result: SummaryCallResult }): Promise<void> {
-  await insertStep({
-    generationId: input.generationId,
-    kind: 'summary',
-    round: input.round,
-    stepNumber: input.stepNumber,
-    modelAlias: input.model.alias,
-    providerId: input.model.providerId,
-    modelName: input.model.modelName,
-    durationMs: Math.round(input.durationMs),
-    modelMs: Math.round(input.durationMs),
-    inputTokens: input.result.ok ? input.result.inputTokens : null,
-    outputTokens: input.result.ok ? input.result.outputTokens : null,
-    finishReason: input.result.ok ? input.result.finishReason : null,
-    status: input.result.ok ? 'ok' : input.result.reason === 'cancelled' ? 'cancelled' : 'error',
-    detail: input.result.ok ? null : `${input.result.reason}：${input.result.detail}`,
     createTime: now(),
   });
 }

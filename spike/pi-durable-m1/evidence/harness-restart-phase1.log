@@ -1,4 +1,0 @@
-[2026-10-17T17:53:29.014Z] pid=2278614 storage reset (M1_RESET=1)
-[2026-10-17T17:53:29.096Z] pid=2278614 harness open conversation=1 workspace=/home/zdan/github/zdan/.pi-worktrees/pi-durable-migration/spike/pi-durable-m1/src/../runtime-out/m1/workspace storage=postgres
-[2026-10-17T17:53:29.100Z] pid=2278614 listening on http://127.0.0.1:5599
-[2026-10-17T17:53:29.257Z] pid=2278614 submit admitted submission=8 requestId=restart-1792259609180

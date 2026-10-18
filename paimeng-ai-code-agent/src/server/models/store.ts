@@ -189,7 +189,7 @@ async function upsertProviderRow(tx: Transaction, provider: ModelProviderInput, 
     enabled: provider.enabled ? 1 : 0,
     updateTime: now(),
   };
-  await tx.insert(modelProviders).values({ id: provider.id, ...set, createTime: existing?.createTime ?? now() }).onDuplicateKeyUpdate({ set });
+  await tx.insert(modelProviders).values({ id: provider.id, ...set, createTime: existing?.createTime ?? now() }).onConflictDoUpdate({ target: modelProviders.id, set });
 }
 
 async function upsertAliasRow(tx: Transaction, alias: ModelAliasInput, existing: ModelAlias | undefined) {
@@ -201,7 +201,7 @@ async function upsertAliasRow(tx: Transaction, alias: ModelAliasInput, existing:
     enabled: alias.enabled ? 1 : 0,
     updateTime: now(),
   };
-  await tx.insert(modelAliases).values({ alias: alias.alias, ...set, createTime: existing?.createTime ?? now() }).onDuplicateKeyUpdate({ set });
+  await tx.insert(modelAliases).values({ alias: alias.alias, ...set, createTime: existing?.createTime ?? now() }).onConflictDoUpdate({ target: modelAliases.alias, set });
 }
 
 async function persistMutation(tx: Transaction, mutation: StoredModelConfigMutation, providers: readonly ModelProvider[], aliases: readonly ModelAlias[]) {

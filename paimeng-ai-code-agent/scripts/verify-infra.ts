@@ -2,30 +2,26 @@ import assert from 'node:assert/strict';
 import { createConnection } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import mysql from 'mysql2/promise';
+import pg from 'pg';
 
 const database = new URL(process.env.DATABASE_URL ?? '');
-assert.equal(database.protocol, 'mysql:');
+assert.equal(database.protocol, 'postgres:');
 assert.equal(database.hostname, '127.0.0.1');
-assert.equal(database.port, '3306');
-assert.match(database.pathname, /^\/paimeng_ai_code_mother_ts(?:_test)?$/);
-for (const key of database.searchParams.keys()) assert.equal(key, 'charset');
-const connection = await mysql.createConnection(database.href);
+assert.equal(database.port, '55432');
+assert.match(database.pathname, /^\/paimeng_ts(?:_test)?$/);
+const connection = new pg.Client({ connectionString: database.href });
+await connection.connect();
 try {
-  const [rows] = await connection.query<mysql.RowDataPacket[]>('SELECT DATABASE() AS name');
-  assert.equal(rows[0].name, database.pathname.slice(1));
-  await connection.query('CREATE TEMPORARY TABLE ts_infra_probe(value VARCHAR(64))');
-  await connection.execute('INSERT INTO ts_infra_probe(value) VALUES (?)', ['local-development-ready']);
-  const [values] = await connection.query<mysql.RowDataPacket[]>('SELECT value FROM ts_infra_probe');
-  assert.equal(values[0].value, 'local-development-ready');
-  console.log('VERIFIED MySQL on 127.0.0.1:3306 with a temporary read/write table');
+  const name = await connection.query<{ name: string }>('SELECT current_database() AS name');
+  assert.equal(name.rows[0].name, database.pathname.slice(1));
+  const account = await connection.query<{ account: string }>('SELECT current_user AS account');
+  assert.equal(account.rows[0].account, 'spike');
+  await connection.query('CREATE TEMPORARY TABLE infra_probe(value VARCHAR(64))');
+  await connection.query('INSERT INTO infra_probe(value) VALUES ($1)', ['local-development-ready']);
+  const values = await connection.query<{ value: string }>('SELECT value FROM infra_probe');
+  assert.equal(values.rows[0].value, 'local-development-ready');
+  console.log('VERIFIED Postgres on 127.0.0.1:55432 with a temporary read/write table');
 } finally { await connection.end(); }
-const rootConnection = await mysql.createConnection({ host: '127.0.0.1', port: 3306, user: 'root', password: process.env.MYSQL_ROOT_PASSWORD, database: database.pathname.slice(1) });
-try {
-  const [rows] = await rootConnection.query<mysql.RowDataPacket[]>('SELECT CURRENT_USER() AS account');
-  assert.equal(rows[0].account, 'root@%');
-  console.log('VERIFIED MySQL root login through the local host port');
-} finally { await rootConnection.end(); }
 
 const redis = new URL(process.env.REDIS_URL ?? '');
 assert.equal(redis.protocol, 'redis:');

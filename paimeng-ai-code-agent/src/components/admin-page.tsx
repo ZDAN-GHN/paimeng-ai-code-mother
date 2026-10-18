@@ -2,7 +2,6 @@
 import { useState, useEffect } from 'react';
 import { App, Button, Divider, Form, Image, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import Link from 'next/link';
 import { api } from '@/client/api';
 import { AdminGuard, useAuth } from './providers';
 import { UserInfo } from './user-info';
@@ -10,16 +9,16 @@ import { codeGenTypeOptions, formatCodeGenType, formatTime } from '@/shared/disp
 import type { Page } from '@/shared/contracts';
 import styles from './admin-view.module.css';
 
-type Mode = 'user' | 'app' | 'chat';
+type Mode = 'user' | 'app';
 type Row = {
   id: string;
   userAccount?: string; userName?: string | null; userRole?: string; userProfile?: string | null; userAvatar?: string | null;
   appName?: string | null; initPrompt?: string; cover?: string | null; priority?: number; userId?: string; codeGenType?: string; deployedTime?: string | null;
   user?: { userName?: string | null; userAvatar?: string | null };
-  appId?: string; message?: string; messageType?: string; createTime?: string;
+  createTime?: string;
 };
-const endpoints = { user: 'user/list/page/vo', app: 'app/admin/list/page/vo', chat: 'chatHistory/admin/list/page/vo' };
-const titles = { user: '用户管理', app: '应用管理', chat: '对话管理' };
+const endpoints = { user: 'user/list/page/vo', app: 'app/admin/list/page/vo' };
+const titles = { user: '用户管理', app: '应用管理' };
 const isFeatured = (priority?: number) => (priority ?? 0) >= 99;
 
 export function AdminPage({ mode }: { mode: Mode }) { return <AdminGuard><Manager mode={mode} /></AdminGuard>; }
@@ -90,23 +89,10 @@ function Manager({ mode }: { mode: Mode }) {
     },
   ];
 
-  const chatColumns: ColumnsType<Row> = [
-    { title: 'ID', dataIndex: 'id', width: 80, fixed: 'left' },
-    {
-      title: '消息内容', dataIndex: 'message', width: 300,
-      render: value => <Button type="link" className={styles.messageButton} onClick={() => modal.info({ title: '完整消息', width: 800, content: <pre className={styles.fullMessage}>{value}</pre> })}>{String(value ?? '').slice(0, 60)}</Button>,
-    },
-    { title: '消息类型', dataIndex: 'messageType', width: 100, render: value => <Tag color={value === 'user' ? 'blue' : 'green'}>{value === 'user' ? '用户消息' : 'AI消息'}</Tag> },
-    { title: '应用ID', dataIndex: 'appId', width: 120 },
-    { title: '用户ID', dataIndex: 'userId', width: 120 },
-    { title: '创建时间', dataIndex: 'createTime', width: 160, render: value => formatTime(value) },
-    { title: '操作', key: 'actions', width: 180, fixed: 'right', render: (_, row) => <Link href={'/app/chat/' + row.appId}><Button type="primary" size="small">查看对话</Button></Link> },
-  ];
+  const columns = mode === 'user' ? userColumns : appColumns;
+  const scroll = mode === 'app' ? { x: 1200 } : undefined;
 
-  const columns = mode === 'user' ? userColumns : mode === 'app' ? appColumns : chatColumns;
-  const scroll = mode === 'app' ? { x: 1200 } : mode === 'chat' ? { x: 1400 } : undefined;
-
-  return <main className={[styles.adminPage, mode === 'chat' ? styles.chatAdminPage : ''].filter(Boolean).join(' ')}>
+  return <main className={styles.adminPage}>
     <div className={styles.toolbar}><h1>{titles[mode]}</h1></div>
     <Form name={mode + '-search'} layout="inline" onFinish={value => { setQuery(value); void load(1, pageSize, value); }}>
       {mode === 'user' && <>
@@ -118,12 +104,6 @@ function Manager({ mode }: { mode: Mode }) {
         <Form.Item label="应用名称" name="appName"><Input aria-label="搜索应用" placeholder="输入应用名称" allowClear /></Form.Item>
         <Form.Item label="创建者" name="userId"><Input aria-label="用户 ID" placeholder="输入用户ID" allowClear /></Form.Item>
         <Form.Item label="生成类型" name="codeGenType"><Select aria-label="生成类型" placeholder="选择生成类型" allowClear style={{ width: 170 }} options={[{ value: '', label: '全部' }, ...codeGenTypeOptions]} /></Form.Item>
-      </>}
-      {mode === 'chat' && <>
-        <Form.Item label="消息内容" name="message"><Input aria-label="搜索消息内容" placeholder="输入消息内容" allowClear /></Form.Item>
-        <Form.Item label="消息类型" name="messageType"><Select aria-label="消息类型" placeholder="选择消息类型" allowClear style={{ width: 130 }} options={[{ value: 'user', label: '用户消息' }, { value: 'ai', label: 'AI消息' }]} /></Form.Item>
-        <Form.Item label="应用ID" name="appId"><Input aria-label="应用 ID" placeholder="输入应用ID" allowClear /></Form.Item>
-        <Form.Item label="用户ID" name="userId"><Input aria-label="用户 ID" placeholder="输入用户ID" allowClear /></Form.Item>
       </>}
       <Form.Item><Space><Button type="primary" htmlType="submit">搜索</Button><Button onClick={() => { void load(page.pageNumber); }}>刷新</Button></Space></Form.Item>
     </Form>

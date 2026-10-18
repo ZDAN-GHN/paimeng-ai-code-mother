@@ -23,8 +23,11 @@ export async function enforceChatRateLimit(tx: Transaction, userId: string, ip: 
   const windowStart = new Date().toISOString().slice(0, 23).replace('T', ' ');
   const cutoff = new Date(Date.now() - intervalSeconds * 1000).toISOString().slice(0, 23).replace('T', ' ');
   // windowStart is assigned after hits so both conditions read the previous window.
-  await tx.execute(sql`insert into ts_rate_limit (limitKey, windowStart, hits) values (${key}, ${windowStart}, 1)
-    on duplicate key update hits = if(windowStart <= ${cutoff}, 1, hits + 1), windowStart = if(windowStart <= ${cutoff}, ${windowStart}, windowStart)`);
+  // window_start 是在 hits 之前赋值的：Postgres 的 do update 两种写法读的都是旧行，窗口过期时 hits 重置为 1。
+  await tx.execute(sql`insert into rate_limit (limit_key, window_start, hits) values (${key}, ${windowStart}::timestamp, 1)
+    on conflict (limit_key) do update set
+      hits = case when rate_limit.window_start <= ${cutoff}::timestamp then 1 else rate_limit.hits + 1 end,
+      window_start = case when rate_limit.window_start <= ${cutoff}::timestamp then ${windowStart}::timestamp else rate_limit.window_start end`);
   const [row] = await tx.select({ hits: rateLimits.hits }).from(rateLimits).where(eq(rateLimits.limitKey, key));
   if (Number(row.hits) > rate) throw new BusinessError(429, 42900, message);
 }

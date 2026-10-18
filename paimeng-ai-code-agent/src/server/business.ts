@@ -1,8 +1,8 @@
 import 'server-only';
 import { rm } from 'node:fs/promises';
-import { and, asc, desc, eq, inArray, like, lt, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, like, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
-import { apps, users, histories, generations, generationSteps, leases, sessions, messages } from './schema';
+import { apps, users, generations, leases, sessions } from './schema';
 import { db, now } from './db';
 import { nextSnowflakeId } from './snowflake';
 import { withAppWriter } from './generation-store';
@@ -25,7 +25,7 @@ export async function getApp(id:string,user?:User,ownerOnly=false,allowAdmin=fal
 }
 async function appView(row:typeof apps.$inferSelect,connection:Pick<ReturnType<typeof db>,'select'>=db()):Promise<AppInfo>{
  const [creator]=await connection.select().from(users).where(and(eq(users.id,row.userId),eq(users.isDelete,0))).limit(1);
- // conversationId 是生成入口的内部映射（DURABLE_ENGINE=harness，见 docs/plans/pi-durable-m2.md），不属于前端契约：
+ // conversationId 是生成入口的内部映射（harness 引擎，见 docs/plans/pi-durable-m2.md），不属于前端契约：
  // 不进响应，"一个应用一条会话"的读取都在 src/server/durable-engine.ts 里。
  const {conversationId:_conversationId,...rest}=row;
  const app:AppInfo={...rest,id:String(row.id),userId:String(row.userId),codeGenType:z.enum(codeGenTypes).parse(row.codeGenType),user:creator?publicUser(creator):undefined};
@@ -71,7 +71,7 @@ export async function updateApp(raw:unknown,user:User,admin=false){
 }
 export async function deleteApp(raw:unknown,user:User){
  const {id}=z.object({id:idSchema}).parse(raw);await getApp(id,user,true,true);
- await withAppWriter(id,async(tx,row)=>{if(String(row.userId)!==user.id&&user.userRole!=='admin')throw new BusinessError(403,40300,'无权限删除该应用');await tx.update(apps).set({isDelete:1,updateTime:now()}).where(eq(apps.id,row.id));await tx.update(histories).set({isDelete:1}).where(eq(histories.appId,row.id));await tx.delete(messages).where(eq(messages.appId,row.id));await tx.delete(generationSteps).where(inArray(generationSteps.generationId, tx.select({ id: generations.id }).from(generations).where(eq(generations.appId, row.id))));});return true;
+ await withAppWriter(id,async(tx,row)=>{if(String(row.userId)!==user.id&&user.userRole!=='admin')throw new BusinessError(403,40300,'无权限删除该应用');await tx.update(apps).set({isDelete:1,updateTime:now()}).where(eq(apps.id,row.id));await tx.delete(generations).where(eq(generations.appId,row.id));});return true;
 }
 export async function assertIdle(id:string){const [lease]=await db().select().from(leases).where(eq(leases.appId,BigInt(id))).limit(1);if(lease&&lease.expiresAt>now())throw new BusinessError(409,40900,'应用正在生成，请先取消或等待完成');}
 /** 生成对话里要显示的图片素材：只放行图片类型，路径仍走 workspace 的安全解析。 */
@@ -116,10 +116,3 @@ export async function getUser(id:string,admin=false){const [row]=await db().sele
 export async function listUsers(raw:unknown){const q=pageSchema.parse(raw);const predicates:SQL[]=[eq(users.isDelete,0)];if(q.id)predicates.push(eq(users.id,BigInt(q.id)));if(q.userAccount)predicates.push(like(users.userAccount,`%${q.userAccount}%`));if(q.userName)predicates.push(like(users.userName,`%${q.userName}%`));if(q.userRole)predicates.push(eq(users.userRole,q.userRole));if(q.userProfile)predicates.push(like(users.userProfile,`%${q.userProfile}%`));const where=and(...predicates);const [count]=await db().select({total:sql<number>`count(*)`}).from(users).where(where);const sorts={id:users.id,createTime:users.createTime,updateTime:users.updateTime,userName:users.userName,userAccount:users.userAccount,userRole:users.userRole,userProfile:users.userProfile,userAvatar:users.userAvatar};const sort=sorts[q.sortField as keyof typeof sorts]??users.createTime;const rows=await db().select().from(users).where(where).orderBy(q.sortOrder.startsWith('asc')?asc(sort):desc(sort),desc(users.id)).limit(q.pageSize).offset((q.pageNum-1)*q.pageSize);return {records:rows.map(publicUser),totalRow:Number(count.total),pageNumber:q.pageNum,pageSize:q.pageSize};}
 export async function updateUser(raw:unknown){const value=z.object({id:idSchema,userName:z.string().max(256).nullable().optional(),userAvatar:z.string().max(1024).nullable().optional(),userProfile:z.string().max(512).nullable().optional(),userRole:z.enum(['user','admin']).optional()}).parse(raw);await getUser(value.id);const {id,...update}=value;await db().update(users).set({...update,updateTime:now()}).where(eq(users.id,BigInt(id)));return true;}
 export async function deleteUser(raw:unknown,actor:User){const {id}=z.object({id:idSchema}).parse(raw);if(id===actor.id)throw new BusinessError(409,40900,'不能删除当前管理员');await getUser(id);await db().transaction(async tx=>{await tx.update(users).set({isDelete:1,updateTime:now()}).where(eq(users.id,BigInt(id)));await tx.delete(sessions).where(eq(sessions.userId,BigInt(id)));});return true;}
-function cursorTime(value:string){
- const text=z.string().regex(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})?$/).parse(value);
- const local=text.replace(' ','T');const iso=z.iso.datetime({offset:true}).parse(/(?:Z|[+-]\d{2}:\d{2})$/.test(local)?local:local+'Z');const date=new Date(iso);
- if(Number.isNaN(date.getTime()))throw new BusinessError(400,40000,'时间游标不合法');
- return date.toISOString().slice(0,23).replace('T',' ');
-}
-export async function listHistory(raw:unknown,user:User,admin=false,cursor?:string){const q=pageSchema.parse(raw);if(!admin&&q.pageSize>50)throw new BusinessError(400,40000,'页面大小必须在1-50之间');const predicates:SQL[]=[eq(histories.isDelete,0)];if(q.id)predicates.push(eq(histories.id,BigInt(q.id)));if(q.appId){await getApp(q.appId,user,!admin,true);predicates.push(eq(histories.appId,BigInt(q.appId)));}else if(!admin)throw new BusinessError(400,40000,'需要应用 ID');if(q.userId)predicates.push(eq(histories.userId,BigInt(q.userId)));if(q.message)predicates.push(like(histories.message,`%${q.message}%`));if(q.messageType)predicates.push(eq(histories.messageType,q.messageType));if(cursor)predicates.push(lt(histories.createTime,cursorTime(cursor)));const where=and(...predicates);const [count]=await db().select({total:sql<number>`count(*)`}).from(histories).where(where);const sorts={id:histories.id,appId:histories.appId,userId:histories.userId,message:histories.message,messageType:histories.messageType,createTime:histories.createTime,updateTime:histories.updateTime};const sort=sorts[q.sortField as keyof typeof sorts]??histories.createTime;const rows=await db().select().from(histories).where(where).orderBy(q.sortOrder.startsWith('asc')?asc(sort):desc(sort),q.sortOrder.startsWith('asc')?asc(histories.id):desc(histories.id)).limit(q.pageSize).offset((q.pageNum-1)*q.pageSize);return {records:rows.map(r=>({...r,id:String(r.id),appId:String(r.appId),userId:String(r.userId)})),totalRow:Number(count.total),pageNumber:q.pageNum,pageSize:q.pageSize};}

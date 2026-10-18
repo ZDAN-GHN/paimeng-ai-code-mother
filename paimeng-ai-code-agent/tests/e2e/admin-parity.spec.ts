@@ -124,33 +124,6 @@ test('应用管理展示封面/初始需求/部署时间/创建者，支持类�
   expect(updates[0]).toEqual({ id: '201', priority: 0 });
 });
 
-test('对话管理支持消息内容搜索、查看对话入口与全文弹窗，且不提供删除', async ({ page }) => {
-  await mockLogin(page, admin);
-  const longMessage = '关键词 这是一条很长的消息内容'.repeat(6);
-  const requests: Record<string, unknown>[] = [];
-  await page.route(url => url.pathname === '/api/chatHistory/admin/list/page/vo', async route => {
-    const body = route.request().postDataJSON();
-    requests.push(body);
-    await route.fulfill({ json: { code: 0, data: { records: [{ id: '301', appId: '201', userId: '2', message: longMessage, messageType: 'ai', createTime: '2026-10-06 12:00:00' }], totalRow: 1, pageNumber: 1, pageSize: body.pageSize }, message: 'ok' } });
-  });
-
-  await page.goto('/admin/chatManage');
-  await expect(page.getByRole('heading', { name: '对话管理' })).toBeVisible();
-  await expect(page.getByText('AI消息', { exact: true })).toBeVisible();
-  await expect(page.getByText('2026-10-06 12:00:00', { exact: true })).toBeVisible();
-  await expect(page.getByRole('link', { name: '查看对话' })).toHaveAttribute('href', '/app/chat/201');
-  await expect(page.getByRole('button', { name: '删除' })).toHaveCount(0);
-
-  await page.getByLabel('搜索消息内容').fill('关键词');
-  await page.getByRole('button', { name: /^搜\s*索$/ }).click();
-  await expect.poll(() => requests.at(-1)?.message).toBe('关键词');
-
-  await page.getByRole('button', { name: /关键词/ }).click();
-  const full = page.getByRole('dialog').locator('pre');
-  await expect(full).toContainText('关键词');
-  expect((await full.textContent())!.length).toBeGreaterThan(60);
-});
-
 test('用户管理展示头像与原时间格式，分页显示总条数并支持切换每页条数', async ({ page }) => {
   await mockLogin(page, admin);
   const requests: Record<string, unknown>[] = [];

@@ -1,5 +1,7 @@
 # Pi Durable 数据模型设计（Postgres 迁移 · 第一阶段 · 交付二）
 
+> 历史文档：本文记录当时的状态。其中提到的 `src/server/memory-*.ts`、自研滚动摘要与 `spike/` 实验目录已随整合第三步删除，去向与判据见 [pi-durable-m3.md](./pi-durable-m3.md) §7。
+
 状态：**设计稿**（2026-10-18）。本文件在分支 `feat/pi-durable-migration` 上写成，只做设计，不含产品代码改动。可行性判据（Postgres storage 原型 + 官方一致性套件）见 `spike/pi-durable-pg/README.md`；上游 spike 的接口侦察与四实验结论见分支 `spike/pi-durable` 的 `docs/plans/pi-durable-migration.md`。
 
 基线：`main@d0c9797`。现有库为 MySQL 8，表定义在 `paimeng-ai-code-agent/migrations/001..013`，Drizzle 映射在 `src/server/schema.ts`。

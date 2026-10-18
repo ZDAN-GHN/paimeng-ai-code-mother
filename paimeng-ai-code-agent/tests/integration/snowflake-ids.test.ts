@@ -6,13 +6,12 @@ import { promisify } from 'node:util';
 import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
-import type { RowDataPacket } from 'mysql2';
 import { testDatabaseUrl } from '../test-database-url';
 import { register, publicUser } from '@/server/auth';
 import { createApp, getApp } from '@/server/business';
 import { beginGeneration, finishGeneration } from '@/server/generation-store';
 import { db, getPool, now } from '@/server/db';
-import { apps, users, histories, generations, leases, messages, snowflakeState } from '@/server/schema';
+import { apps, users, generations, leases, snowflakeState } from '@/server/schema';
 import * as snowflake from '@/server/snowflake';
 
 loadEnvFile('.env');
@@ -49,14 +48,13 @@ function importSnapshot(id: bigint, account: string, appId = id + 1n) {
   return {
     users: [{ id: id.toString(), userAccount: account, userPassword: 'a'.repeat(32), userName: null, userAvatar: null, userProfile: null, userRole: 'user', createTime: time, updateTime: time }],
     apps: [{ id: appId.toString(), userId: id.toString(), appName: '旧应用副本', cover: null, initPrompt: '原始主键保留', codeGenType: 'html', deployKey: null, deployedTime: null, priority: 0, createTime: time, updateTime: time }],
-    chatHistory: [{ id: (id + 2n).toString(), appId: appId.toString(), userId: id.toString(), message: '旧消息', messageType: 'user', createTime: time, updateTime: time }],
   };
 }
 
 describe('业务主键保持原 Java 雪花契约', () => {
   afterAll(async () => {
     for (const id of appIds) {
-      for (const table of [leases, messages, generations, histories]) await db().delete(table).where(eq(table.appId, BigInt(id)));
+      for (const table of [leases, generations]) await db().delete(table).where(eq(table.appId, BigInt(id)));
       await db().delete(apps).where(eq(apps.id, BigInt(id)));
     }
     for (const id of userIds) await db().delete(users).where(eq(users.id, BigInt(id)));
@@ -83,25 +81,14 @@ describe('业务主键保持原 Java 雪花契约', () => {
     }
   });
 
-  it('用户、应用与文本聊天记录表取消自增，内部消息排序序列保持自增', async () => {
-    const [rows] = await getPool().query<RowDataPacket[]>("SELECT TABLE_NAME AS name, EXTRA AS extra FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND COLUMN_NAME='id' AND TABLE_NAME IN ('user','app','chat_history') ORDER BY TABLE_NAME");
-    expect(rows.map(row => ({ name: row.name, extra: row.extra }))).toEqual([{ name: 'app', extra: '' }, { name: 'chat_history', extra: '' }, { name: 'user', extra: '' }]);
-    const [sequence] = await getPool().query<RowDataPacket[]>("SELECT EXTRA AS extra FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ts_message' AND COLUMN_NAME='sequence'");
-    expect(sequence[0].extra).toBe('auto_increment');
-  });
-
-  it('用户和助手文本历史都显式获得精确雪花主键', async () => {
-    const user = await actor();
-    const appId = appIds[0]; const requestId = randomUUID();
-    await beginGeneration(appId, requestId, user, { id: requestId + '-user', role: 'user', parts: [{ type: 'text', text: '当前消息' }] });
-    await finishGeneration(requestId, 'ready', null, { id: requestId + '-assistant', role: 'assistant', parts: [{ type: 'text', text: '已完成' }] });
-    const rows = await db().select().from(histories).where(eq(histories.appId, BigInt(appId)));
-    expect(rows.map(row => row.messageType)).toEqual(['user', 'ai']);
-    expect(new Set(rows.map(row => row.id.toString())).size).toBe(2);
-    for (const row of rows) {
-      expect(row.id).toBeGreaterThan(9007199254740991n);
-      expect((row.id >> 12n) & 1023n).toBe(0n);
-    }
+  it('业务主键不接受数据库发号，只有记账步骤表用自增序列', async () => {
+    const business = await getPool().query<{ table_name: string; column_default: string | null; is_identity: string }>(
+      "SELECT table_name, column_default, is_identity FROM information_schema.columns WHERE table_schema = current_schema() AND column_name = 'id' AND table_name IN ('app','app_user','attachment','generation') ORDER BY table_name");
+    expect(business.rows.map(row => row.table_name)).toEqual(['app', 'app_user', 'attachment', 'generation']);
+    for (const row of business.rows) expect({ table: row.table_name, default: row.column_default, identity: row.is_identity }).toEqual({ table: row.table_name, default: null, identity: 'NO' });
+    const steps = await getPool().query<{ column_default: string | null }>(
+      "SELECT column_default FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'generation_step' AND column_name = 'id'");
+    expect(steps.rows[0].column_default).toContain('nextval');
   });
 
   it('预留 ID 后业务事务回滚，发号状态仍然提交并且号码不复用', async () => {
@@ -141,8 +128,8 @@ describe('业务主键保持原 Java 雪花契约', () => {
     userIds.push(imported.toString()); appIds.push((imported + 1n).toString());
     const [row] = await db().select().from(apps).where(eq(apps.id, imported + 1n));
     expect(row.userId).toBe(imported);
-    expect(await stateId()).toBe(imported + 2n);
-    expect(await snowflake.nextSnowflakeId()).toBeGreaterThan(imported + 2n);
+    expect(await stateId()).toBe(imported + 1n);
+    expect(await snowflake.nextSnowflakeId()).toBeGreaterThan(imported + 1n);
   });
 
   it('导入主键冲突整体回滚，发号下界同步失败也不会留下记录', async () => {
@@ -164,7 +151,7 @@ describe('业务主键保持原 Java 雪花契约', () => {
     const spy = vi.spyOn(snowflake, 'nextSnowflakeId').mockResolvedValue(BigInt(userId));
     try {
       const password = 'snowflake-regression-password';
-      await expect(register({ userAccount: 'ts_collision_' + randomUUID().slice(0, 8), userPassword: password, checkPassword: password })).rejects.toMatchObject({ cause: { code: 'ER_DUP_ENTRY' } });
+      await expect(register({ userAccount: 'ts_collision_' + randomUUID().slice(0, 8), userPassword: password, checkPassword: password })).rejects.toMatchObject({ cause: { code: '23505' } });
     } finally { spy.mockRestore(); }
   });
 });

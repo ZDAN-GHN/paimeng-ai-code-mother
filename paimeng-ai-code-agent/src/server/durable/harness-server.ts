@@ -9,11 +9,13 @@
  *
  *   POST /conversations          create one ownerless conversation for an app
  *   POST /configure              set a conversation's resident instructions for the current turn
- *   POST /submit                 admit one user input into a conversation (default: root)
+ *   POST /submit                 admit one user input into a conversation (default: root), optionally as a display entry
+ *   POST /entries                append one display-only entry (the product's assistant bubble)
  *   POST /abort                  abort a conversation's live run
  *   GET  /agent-events           NDJSON of agent events for one conversation, ends with the run
  *   GET  /events                 SSE view of the structure (snapshot + revisions), stays open
  *   GET  /state                  read-only projection of one conversation
+ *   GET  /messages               every display entry (`app.*` kinds with data) of one conversation, oldest first
  *   GET  /context                the model context of one conversation (verification evidence)
  *   GET  /tools                  the offered tools and their replay policy
  *   GET  /health                 liveness
@@ -37,8 +39,9 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
+import type { JsonValue } from "@earendil-works/chord";
 import { withAbortSignal } from "@earendil-works/chord/context";
-import type { AgentEvent, Conversation, ConversationId, ConversationView, LiveState, ToolExecutionApi } from "@earendil-works/pi-durable";
+import type { AgentEvent, Conversation, ConversationId, ConversationView, Cursor, EntryDraft, LiveState, ToolExecutionApi } from "@earendil-works/pi-durable";
 import { defineExtension, defineTool, watchEvents } from "@earendil-works/pi-durable";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { getOrThrow, type ExecutionEnv } from "@earendil-works/pi-durable/env";
@@ -510,6 +513,43 @@ function conversationIdFrom(value: unknown): ConversationId | undefined {
 	return typeof id === "number" && Number.isInteger(id) && id > 0 ? (id as ConversationId) : undefined;
 }
 
+/** The kind of an application display entry; `pi.*` is reserved for the framework's own entries. */
+function displayKind(value: unknown): string {
+	if (typeof value !== "string" || value.length === 0 || value.startsWith("pi.")) throw new Error("entry kind must be a non-empty application kind");
+	return value;
+}
+
+function displayData(value: unknown): JsonValue {
+	if (typeof value !== "object" || value === null) throw new Error("entry data must be a JSON object");
+	return value as JsonValue;
+}
+
+/** The entry one user input is placed as, so the transcript carries the product's own bubble payload. */
+function parseInputEntry(value: unknown): { kind: string; data?: JsonValue } | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value !== "object" || value === null) throw new Error("entry must be an object");
+	const { kind, data } = value as { kind?: unknown; data?: unknown };
+	return { kind: displayKind(kind), ...(data === undefined ? {} : { data: displayData(data) }) };
+}
+
+function parseDisplayEntry(kind: unknown, data: unknown): EntryDraft {
+	return { kind: displayKind(kind), data: displayData(data) };
+}
+
+/** Every display entry of one conversation, oldest first: the product's chat bubbles live here. */
+async function displayEntries(conversation: Conversation): Promise<{ id: number; kind: string; data: JsonValue }[]> {
+	const entries: { id: number; kind: string; data: JsonValue }[] = [];
+	let cursor: Cursor | undefined;
+	for (;;) {
+		const page = await conversation.entries({ order: "ascending" }, 200, cursor, context);
+		for (const entry of page.items) {
+			if (entry.kind.startsWith("app.") && entry.data !== undefined) entries.push({ id: entry.id, kind: entry.kind, data: entry.data });
+		}
+		if (!page.next) return entries;
+		cursor = page.next;
+	}
+}
+
 async function inspection() {
 	const snapshot = await harness.inspect(context);
 	return {
@@ -598,7 +638,7 @@ const server = createServer(async (request, response) => {
 		}
 
 		if (request.method === "POST" && url.pathname === "/submit") {
-			const body = JSON.parse(await readBody(request)) as { content?: unknown; requestId?: string; conversationId?: number; whenBusy?: "steer" | "followUp" | "reject" };
+			const body = JSON.parse(await readBody(request)) as { content?: unknown; requestId?: string; conversationId?: number; whenBusy?: "steer" | "followUp" | "reject"; entry?: unknown };
 			let content: SubmitContentBlock[] | undefined;
 			try {
 				content = parseSubmitContent(body.content);
@@ -608,6 +648,13 @@ const server = createServer(async (request, response) => {
 			}
 			if (content === undefined) {
 				sendJson(response, 400, { error: "content is required" });
+				return;
+			}
+			let entry: { kind: string; data?: JsonValue } | undefined;
+			try {
+				entry = parseInputEntry(body.entry);
+			} catch (error) {
+				sendJson(response, 400, { error: `invalid entry: ${String(error)}` });
 				return;
 			}
 			// A missing id falls back to the root conversation (manual scripts); an id that points at no
@@ -623,9 +670,33 @@ const server = createServer(async (request, response) => {
 			if (body.whenBusy !== "steer") resetWebSession(conversation.id);
 			// `whenBusy: "steer"` is how the product's mid-run steer lands: queued in `pi.inbox` and placed
 			// at the next boundary instead of starting a competing run.
-			const submission = await conversation.submit({ type: "input", content, requestId: body.requestId, whenBusy: body.whenBusy }, context);
+			const submission = await conversation.submit({ type: "input", content, requestId: body.requestId, whenBusy: body.whenBusy, entry }, context);
 			log(`submit admitted conversation=${conversation.id} submission=${submission.id} requestId=${body.requestId ?? "-"} whenBusy=${body.whenBusy ?? "-"}`);
 			sendJson(response, 202, { submissionId: submission.id });
+			return;
+		}
+
+		if (request.method === "POST" && url.pathname === "/entries") {
+			const body = JSON.parse((await readBody(request)) || "{}") as { conversationId?: number; kind?: unknown; data?: unknown };
+			const conversation = await conversationOf(conversationIdFrom(body.conversationId) ?? root.id);
+			if (!conversation) {
+				sendJson(response, 404, { error: "conversation not found" });
+				return;
+			}
+			// A write of only kind and data is appended at once, even mid-run: it changes nothing the model sees.
+			// This is where the product's assistant bubble lives now that it keeps no message table of its own.
+			let entry: EntryDraft;
+			try {
+				entry = parseDisplayEntry(body.kind, body.data);
+			} catch (error) {
+				sendJson(response, 400, { error: `invalid entry: ${String(error)}` });
+				return;
+			}
+			const submission = await conversation.submit({ type: "write", entry }, context);
+			const settled = await submission.wait(context);
+			if (settled.status !== "done") throw new Error(`entry not placed: ${settled.reason}`);
+			log(`entry appended conversation=${conversation.id} kind=${String(body.kind)} submission=${submission.id}`);
+			sendJson(response, 201, { submissionId: submission.id });
 			return;
 		}
 
@@ -660,6 +731,16 @@ const server = createServer(async (request, response) => {
 		if (request.method === "GET" && url.pathname === "/conversations") {
 			// Read-only: which conversations this process opened and for which workspace.
 			sendJson(response, 200, { conversations: [...workspaces].map(([id, workspace]) => ({ conversationId: id, workspace })) });
+			return;
+		}
+
+		if (request.method === "GET" && url.pathname === "/messages") {
+			const conversation = await conversationOf(conversationIdFrom(url.searchParams.get("conversationId")) ?? root.id);
+			if (!conversation) {
+				sendJson(response, 404, { error: "conversation not found" });
+				return;
+			}
+			sendJson(response, 200, { messages: await displayEntries(conversation) });
 			return;
 		}
 

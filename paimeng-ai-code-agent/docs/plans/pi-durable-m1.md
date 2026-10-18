@@ -1,5 +1,7 @@
 # Pi Durable 迁移 · M1：单写进程 + attach 骨架
 
+> 历史文档：本文记录当时的状态。其中提到的 `src/server/memory-*.ts`、自研滚动摘要与 `spike/` 实验目录已随整合第三步删除，去向与判据见 [pi-durable-m3.md](./pi-durable-m3.md) §7。
+
 状态：**已跑通**（2026-10-18）。
 
 > 整合后文件位置与命令见 `docs/plans/pi-durable-m3.md`；本文件保留当时的原始记录（harness 进程与

@@ -2,10 +2,10 @@ import { test, expect, type Page, type Locator } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import mysql from 'mysql2/promise';
+import type pg from 'pg';
 import { loadEnvFile } from 'node:process';
-import { testDatabaseUrl } from '../test-database-url';
 import { appOrigin } from './support/app-origin';
+import { emptyModelConfig, readProviderHeaders, seedModelConfig, testConnection } from './support/model-config-fixtures';
 
 loadEnvFile('.env');
 
@@ -14,13 +14,6 @@ const origin = appOrigin();
 const uniqueAccount = () => 'ts_model_' + randomUUID().slice(0, 8);
 
 type AdminConfig = { revision: string; refreshEpoch: string; initialized: boolean };
-
-async function testConnection(): Promise<mysql.Connection> {
-  const raw = process.env.DATABASE_URL;
-  if (!raw) throw new Error('Browser tests require DATABASE_URL from the local .env file');
-  const url = new URL(testDatabaseUrl(raw));
-  return mysql.createConnection(url.href);
-}
 
 async function login(page: Page, account: string) {
   await page.getByLabel('账号', { exact: true }).fill(account);
@@ -40,51 +33,13 @@ async function adminLogin(page: Page, account: string) {
   await registerSample(page, account);
   const connection = await testConnection();
   try {
-    await connection.execute("UPDATE user SET userRole='admin' WHERE userAccount=?", [account]);
+    await connection.query("UPDATE app_user SET user_role='admin' WHERE user_account=$1", [account]);
   } finally {
     await connection.end();
   }
   await page.goto('/user/login');
   await login(page, account);
   await expect(page).toHaveURL('/');
-}
-
-async function emptyModelConfig(connection: mysql.Connection) {
-  await connection.execute('DELETE FROM ts_model_alias');
-  await connection.execute('DELETE FROM ts_model_provider');
-  await connection.execute(
-    "INSERT INTO ts_model_config_state (id, revision, refreshEpoch, updateTime) VALUES ('models', 0, 0, NOW(3)) ON DUPLICATE KEY UPDATE revision=0, refreshEpoch=0, updateTime=NOW(3)",
-  );
-}
-
-async function seedModelConfig(connection: mysql.Connection, baseUrl = 'https://api.example.test/v1') {
-  await connection.execute('DELETE FROM ts_model_alias');
-  await connection.execute('DELETE FROM ts_model_provider');
-  await connection.execute(
-    'INSERT INTO ts_model_provider (id, displayName, apiFormat, baseUrl, apiKeyEnv, options, enabled, createTime, updateTime) VALUES (?,?,?,?,?,?,?,NOW(3),NOW(3))',
-    ['env-default', '默认提供商', 'openai-chat', baseUrl, 'AI_API_KEY', JSON.stringify({}), 1],
-  );
-  const aliasInsert =
-    'INSERT INTO ts_model_alias (alias, providerId, modelName, capabilities, settings, enabled, createTime, updateTime) VALUES (?,?,?,?,?,?,NOW(3),NOW(3))';
-  await connection.execute(aliasInsert, [
-    'codegen.default',
-    'env-default',
-    'test-codegen-model',
-    JSON.stringify({ streaming: true, toolCalling: true, structuredOutput: false }),
-    JSON.stringify({}),
-    1,
-  ]);
-  await connection.execute(aliasInsert, [
-    'route.classify',
-    'env-default',
-    'test-route-model',
-    JSON.stringify({ streaming: false, toolCalling: false, structuredOutput: true }),
-    JSON.stringify({}),
-    1,
-  ]);
-  await connection.execute(
-    "INSERT INTO ts_model_config_state (id, revision, refreshEpoch, updateTime) VALUES ('models', 1, 0, NOW(3)) ON DUPLICATE KEY UPDATE revision=1, refreshEpoch=0, updateTime=NOW(3)",
-  );
 }
 
 async function readConfig(page: Page): Promise<AdminConfig> {
@@ -101,13 +56,7 @@ function providerRowByBaseUrl(page: Page, baseUrl: string) {
   return page.getByRole('row').filter({ has: page.getByRole('cell', { name: baseUrl, exact: true }) });
 }
 
-async function readProviderHeaders(connection: mysql.Connection): Promise<Record<string, string>> {
-  const [rows] = await connection.query("SELECT headers FROM ts_model_provider WHERE id='env-default'");
-  const value = (rows as { headers: unknown }[])[0]?.headers;
-  return typeof value === 'string' ? (JSON.parse(value) as Record<string, string>) : (value as Record<string, string>);
-}
-
-// MySQL JSON 列不保证键顺序，断言请求头时按名值映射比较，不能依赖行顺序。
+// jsonb 不保证键顺序，断言请求头时按名值映射比较，不能依赖行顺序。
 async function dialogHeaders(dialog: Locator): Promise<Record<string, string>> {
   const names = await dialog.getByLabel('请求头名称').evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value));
   const values = await dialog.getByLabel('请求头值').evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value));
@@ -198,7 +147,7 @@ test('管理员可编辑提供商与别名并普通保存', async ({ page }) => 
   // 开关必须真正写入表单：过去 Form.Item 里多出的空白文本节点会让 antd 跳过受控注入，开关点了等于没点。
   const stored = await testConnection();
   try {
-    const [rows] = await stored.query("SELECT options FROM ts_model_provider WHERE id='env-default'");
+    const { rows } = await stored.query("SELECT options FROM model_provider WHERE id='env-default'");
     const value = (rows as { options: unknown }[])[0]?.options;
     const options = typeof value === 'string' ? (JSON.parse(value) as Record<string, unknown>) : (value as Record<string, unknown>);
     expect(options).toMatchObject({ includeUsage: true });
@@ -244,10 +193,10 @@ test('直接输入的密钥以密文入库，界面与接口都不回显明文',
 
   const stored = await testConnection();
   try {
-    const [rows] = await stored.query("SELECT apiKeyEnv, apiKeyCiphertext FROM ts_model_provider WHERE id='env-default'");
-    const provider = (rows as { apiKeyEnv: string | null; apiKeyCiphertext: string | null }[])[0];
-    expect(provider?.apiKeyEnv).toBeNull();
-    expect(provider?.apiKeyCiphertext).toMatch(/^v1:/);
+    const { rows } = await stored.query("SELECT api_key_env, api_key_ciphertext FROM model_provider WHERE id='env-default'");
+    const provider = (rows as { api_key_env: string | null; api_key_ciphertext: string | null }[])[0];
+    expect(provider?.api_key_env).toBeNull();
+    expect(provider?.api_key_ciphertext).toMatch(/^v1:/);
     expect(JSON.stringify(provider)).not.toContain(secret);
   } finally {
     await stored.end();
@@ -281,7 +230,7 @@ test('版本冲突时保留表单输入并可重新加载', async ({ page }) => 
 
   const bump = await testConnection();
   try {
-    await bump.execute("UPDATE ts_model_config_state SET revision = revision + 1 WHERE id='models'");
+    await bump.query("UPDATE model_config_state SET revision = revision + 1 WHERE id='models'");
   } finally {
     await bump.end();
   }
@@ -396,8 +345,8 @@ test('从下拉里选中的上游模型名会写进数据库', async ({ page }) 
 
     const stored = await testConnection();
     try {
-      const [rows] = await stored.query("SELECT modelName FROM ts_model_alias WHERE alias='codegen.default'");
-      expect((rows as { modelName: string }[])[0]?.modelName).toBe('mimo-v2.6-flash');
+      const { rows } = await stored.query("SELECT model_name FROM model_alias WHERE alias='codegen.default'");
+      expect((rows as { model_name: string }[])[0]?.model_name).toBe('mimo-v2.6-flash');
     } finally {
       await stored.end();
     }

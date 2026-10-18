@@ -80,7 +80,7 @@ async function resetDatabase() {
   await db()
     .insert(modelConfigState)
     .values({ id: modelConfigStateId, revision: 0n, refreshEpoch: 0n, updateTime: now() })
-    .onDuplicateKeyUpdate({ set: { revision: 0n, refreshEpoch: 0n } });
+    .onConflictDoUpdate({ target: modelConfigState.id, set: { revision: 0n, refreshEpoch: 0n } });
 }
 
 async function seedFromEnv(modelName: string) {

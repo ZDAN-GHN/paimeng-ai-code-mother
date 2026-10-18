@@ -6,7 +6,7 @@ import { eq } from 'drizzle-orm';
 import { rm } from 'node:fs/promises';
 import { db, getPool, now } from '@/server/db';
 import { nextSnowflakeId } from '@/server/snowflake';
-import { users, apps, histories, messages, leases, generations } from '@/server/schema';
+import { users, apps, leases, generations } from '@/server/schema';
 import { publicUser } from '@/server/auth';
 import { workspace, writeProjectFile } from '@/server/workspace';
 import { publish } from '@/server/business';
@@ -48,7 +48,7 @@ describe('Vue 发布始终从源码构建（F03）', () => {
     vi.mocked(buildApp).mockClear(); vi.mocked(deployApp).mockClear();
   });
   afterEach(async () => {
-    for (const table of [leases, generations, messages, histories]) await db().delete(table).where(eq(table.appId, BigInt(appId)));
+    for (const table of [leases, generations]) await db().delete(table).where(eq(table.appId, BigInt(appId)));
     await db().delete(apps).where(eq(apps.id, BigInt(appId)));
     await rm(workspace(app()), { recursive: true, force: true });
   });

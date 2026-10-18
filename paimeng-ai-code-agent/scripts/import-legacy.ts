@@ -1,15 +1,15 @@
 import { resolve, relative, isAbsolute } from 'node:path';
 import { readFile, realpath, stat } from 'node:fs/promises';
-import mysql from 'mysql2/promise';
-import { drizzle } from 'drizzle-orm/mysql2';
-import { users, apps, histories } from '../src/server/schema';
+import pg from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { users, apps } from '../src/server/schema';
 import { reserveImportedSnowflakeIds } from '../src/server/snowflake';
 import { legacySnapshotSchema } from '../src/server/legacy-import';
 import { getConfig } from '../src/server/config';
 import { planLegacyArtifacts, applyLegacyArtifactPlan, rollbackLegacyArtifacts } from '../src/server/legacy-artifacts';
 
 const url = new URL(process.env.DATABASE_URL ?? '');
-if (!/^paimeng_ai_code_mother_ts(?:_test)?$/.test(url.pathname.slice(1))) throw new Error('导入仅支持独立 TS 库');
+if (!/^paimeng_ts(?:_test)?$/.test(url.pathname.slice(1))) throw new Error('导入仅支持独立的 paimeng_ts 库');
 
 function parseArguments(argv: string[]) {
   const options = { snapshot: '', artifacts: '', covers: '', strict: false };
@@ -59,9 +59,10 @@ if (options.artifacts) {
   console.log(`产物迁移完成，复制 ${application.created.length} 项目标，缺失 ${plan.missing.length} 项`);
 } else console.log('未指定 --artifacts，本次仅导入数据库记录，产物与封面保持原字段');
 
-let connection: mysql.Connection | null = null;
+let connection: pg.Client | null = null;
 try {
-  connection = await mysql.createConnection(url.href);
+  connection = new pg.Client({ connectionString: url.href });
+  await connection.connect();
   const database = drizzle(connection);
   await database.transaction(async tx => {
     for (const row of snapshot.users) await tx.insert(users).values({ ...row, id: BigInt(row.id) });
@@ -69,10 +70,9 @@ try {
       const cover = coverByApp.get(row.id);
       await tx.insert(apps).values({ ...row, ...(cover ? { cover } : {}), id: BigInt(row.id), userId: BigInt(row.userId) });
     }
-    for (const row of snapshot.chatHistory) await tx.insert(histories).values({ ...row, id: BigInt(row.id), userId: BigInt(row.userId), appId: BigInt(row.appId) });
-    await reserveImportedSnowflakeIds(tx, [...snapshot.users, ...snapshot.apps, ...snapshot.chatHistory].map(row => BigInt(row.id)));
+    await reserveImportedSnowflakeIds(tx, [...snapshot.users, ...snapshot.apps].map(row => BigInt(row.id)));
   });
-  console.log(`副本导入完成，用户 ${snapshot.users.length}，应用 ${snapshot.apps.length}，历史 ${snapshot.chatHistory.length}`);
+  console.log(`副本导入完成，用户 ${snapshot.users.length}，应用 ${snapshot.apps.length}`);
 } catch (error) {
   if (application) { await rollbackLegacyArtifacts(application.created); console.warn(`数据库失败，已回滚本次新建的 ${application.created.length} 项目标`); }
   throw error;

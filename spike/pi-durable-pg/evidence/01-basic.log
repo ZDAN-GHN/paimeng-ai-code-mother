@@ -1,5 +1,0 @@
-[root conversation] 1
-[submission status] done
-[answer] "pangolin DONE"
-[entries] pi.user, pi.system, pi.assistant, pi.tool-result, pi.assistant
-[usage] {"spike/deepseek-v4.1-flash":{"input":1062,"output":51,"cacheRead":896,"cacheWrite":0,"reasoning":0,"totalTokens":2009,"cost":{"input":0.00015929999999999997,"output":0.0000306,"cacheRead":0.000002688,"cacheWrite":0,"total":0.000192588}}}

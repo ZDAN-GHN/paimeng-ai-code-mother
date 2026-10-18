@@ -23,7 +23,7 @@ function mediaTypeOf(row: AttachmentRow): ImageMediaType {
 
 const sanitizeOriginalName = (name: string) => name.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 256) || 'image';
 
-/** 校验并落盘一张图片，成功后写 ts_attachment 行。应用归属在解码前先校验，失败不留对象。 */
+/** 校验并落盘一张图片，成功后写 attachment 行。应用归属在解码前先校验，失败不留对象。 */
 export async function createImageAttachment(input: { userId: string; appId: string | null; originalName: string; data: Uint8Array; signal?: AbortSignal }): Promise<AttachmentRow> {
   if (input.appId !== null) await assertAppOwner(input.appId, input.userId);
   const image = await validateImageBytes(input.data, { signal: input.signal });

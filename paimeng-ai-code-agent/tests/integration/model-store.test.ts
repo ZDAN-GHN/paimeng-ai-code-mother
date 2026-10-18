@@ -97,7 +97,7 @@ async function resetDatabase() {
   await db()
     .insert(modelConfigState)
     .values({ id: modelConfigStateId, revision: 0n, refreshEpoch: 0n, updateTime: now() })
-    .onDuplicateKeyUpdate({ set: { revision: 0n, refreshEpoch: 0n } });
+    .onConflictDoUpdate({ target: modelConfigState.id, set: { revision: 0n, refreshEpoch: 0n } });
 }
 
 /** 完整配置无法由单次写入建立，必须先走显式初始化，之后的写入都以它为基础。 */

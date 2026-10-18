@@ -97,7 +97,7 @@ async function measure(page) {
       chat: style('.chat-section,.chat-panel'), preview: style('.preview-section,.preview-panel'),
       edit: style('#appEditPage,[class*="editPage"]'),
       editCards: document.querySelectorAll('#appEditPage .ant-card,[class*="editPage"] .ant-card').length,
-      admin: style('#userManagePage,#appManagePage,#chatManagePage,[class*="adminPage"]'),
+      admin: style('#userManagePage,#appManagePage,[class*="adminPage"]'),
     };
   });
 }
@@ -125,14 +125,13 @@ async function capture() {
       else if (path === 'app/get/vo' || path === 'app/admin/get/vo') data = app;
       else if (path === 'app/generation') data = { id: 'completed-fixture', appId: app.id, status: 'ready', error: null };
       else if (path === 'app/messages') data = uiMessages;
-      else if (path.startsWith('chatHistory/app/')) data = { records: histories, totalRow: 2, pageNumber: 1, pageSize: 10 };
-      else if (path.includes('list/page/vo')) data = { records: path.startsWith('user/') ? [creator] : path.startsWith('chatHistory/') ? histories : [app], totalRow: path.startsWith('chatHistory/') ? 2 : 1, pageNumber: 1, pageSize: 10 };
+      else if (path.includes('list/page/vo')) data = { records: path.startsWith('user/') ? [creator] : [app], totalRow: 1, pageNumber: 1, pageSize: 10 };
       else { code = 40900; status = 409; message = '页面对照禁止生成和业务写入：' + path; }
-      if (nonOwner && (path === 'app/messages' || path === 'app/generation' || path.startsWith('chatHistory/app/'))) { code = 40300; status = variant === 'legacy' ? 200 : 403; message = '无权查看该应用的对话历史'; data = null; }
+      if (nonOwner && (path === 'app/messages' || path === 'app/generation')) { code = 40300; status = variant === 'legacy' ? 200 : 403; message = '无权查看该应用的对话历史'; data = null; }
       return route.fulfill({ status, headers, json: { code, data, message } });
     });
     const page = await context.newPage();
-    for (const [name, path] of [['home', '/'], ['login', '/user/login'], ['register', '/user/register'], ['users', '/admin/userManage'], ['apps', '/admin/appManage'], ['history', '/admin/chatManage'], ['edit', '/app/edit/777'], ['chat', '/app/chat/777']]) {
+    for (const [name, path] of [['home', '/'], ['login', '/user/login'], ['register', '/user/register'], ['users', '/admin/userManage'], ['apps', '/admin/appManage'], ['edit', '/app/edit/777'], ['chat', '/app/chat/777']]) {
       await page.goto(origin + path);
       await page.locator('header').getByText(creator.userName, { exact: true }).first().waitFor();
       if (name === 'login' || name === 'register') await page.locator('input').first().waitFor();

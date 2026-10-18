@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Disposable Postgres for the product's pi-durable harness (conversation storage).
+# Disposable Postgres for the product database and the pi-durable harness storage.
 #
 #   npm run durable:pg -- start   # create + start, wait until ready
 #   npm run durable:pg -- stop    # stop (keeps the data volume)
@@ -34,7 +34,13 @@ start)
 	fi
 	for _ in $(seq 1 60); do
 		if docker exec "${NAME}" pg_isready -U spike -d durable >/dev/null 2>&1; then
-			echo "postgres ready on 127.0.0.1:${PORT}"
+			# 产品库（业务表 + pi-durable 存储）与它的测试库，建库本身是幂等的。
+			for db in paimeng_ts paimeng_ts_test; do
+				if ! docker exec "${NAME}" psql -U spike -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${db}'" | grep -q 1; then
+					docker exec "${NAME}" psql -U spike -d postgres -c "CREATE DATABASE ${db}" >/dev/null
+				fi
+			done
+			echo "postgres ready on 127.0.0.1:${PORT} (paimeng_ts, paimeng_ts_test)"
 			exit 0
 		fi
 		sleep 0.5

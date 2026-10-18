@@ -17,9 +17,15 @@ spike/pi-durable-m1/
   src/verify-browser.ts    Chromium 打开产品页面，真流式 + 刷新读回（4 条断言）
   src/verify-m2a.ts        产品路径两轮生成：流式/工具条目 + 第二次看得到第一次
   src/verify-m2a-reconnect.ts 产品路径断连重连
-  evidence*/                各次验收的运行输出、时间线、截图
-node_modules/              指向 ../pi-durable-pg/node_modules 的软链（verify 脚本自己用 playwright）
+  evidence-m3/             最近一次验收（四项能力 + 产品主流程）的运行输出、时间线、截图
+                            （M1/M2a/M2b 的旧证据已随整合第三步清理，在 backup/pre-legacy-delete-20261018）
+node_modules/             指向 ../pi-durable-pg/node_modules 的软链（verify 脚本自己用 playwright）
 ```
+
+**已停止维护**：这里只剩手工验收脚本，不再接新能力；依赖链是
+`spike/pi-durable-pg/node_modules → paimeng-ai-code-agent/node_modules`，缺了就在
+`spike/pi-durable-pg` 里按 package.json 自己 `npm install`。契约级回归在产品目录的
+`tests/integration/durable-m1/`，那才是需要长期维护的部分。
 
 ## 跑起来
 

@@ -1,22 +1,27 @@
 # 在独立目录运行 React 与 TypeScript 应用
 
-本目录包含 Next.js、React、TypeScript、Vercel AI SDK、MySQL 和 Drizzle 的独立应用。运行新应用无需启动旧 Java 后端或旧 Vue 平台。所有命令都在 `paimeng-ai-code-agent/` 内执行。
+本目录包含 Next.js、React、TypeScript、Vercel AI SDK、Postgres 和 Drizzle 的独立应用。运行新应用无需启动旧 Java 后端或旧 Vue 平台。所有命令都在 `paimeng-ai-code-agent/` 内执行。
+
+生成入口只有一个引擎：请求提交给常驻的 pi-durable harness 进程（单写进程 + attach，实现在 `src/server/durable/`），Next 只做鉴权与 SSE 转发，所以浏览器断连不会取消任务。一条命令起全套见下面的 `npm run dev:durable`。数据库是 Postgres：业务表与 harness 的会话存储同库（表名与列名见 `docs/plans/pi-durable-m4.md`）。
 
 ## 启动开发环境
 
 需要 Node.js 24.15 或更新的 24 版本、npm、Docker，以及可运行 Chromium 沙箱的 Linux 环境。Docker 守护进程必须已启动。
 
-1. 复制 `.env.example` 为 `.env`。本地默认使用 `MYSQL_ROOT_PASSWORD=root`，应用专用账号为 `paimeng_ts`，密码为 `root`。`DATABASE_URL` 已填写专用开发库地址，`REDIS_URL` 已填写无密码本地 Redis 地址。已有 `.env` 的真实模型配置保留。
+1. 复制 `.env.example` 为 `.env`。`DATABASE_URL` 已填写产品 Postgres 库（`postgres://spike:spike@127.0.0.1:55432/paimeng_ts`），`REDIS_URL` 已填写无密码本地 Redis 地址。`MYSQL_LEGACY_URL` 只给一次性业务行搬迁用，运行期不连接旧库。已有 `.env` 的真实模型配置保留。
 2. 执行 `npm ci`。
 3. 执行 `npm run assets:import`。此命令只读取旧平台的派蒙图片，写入新应用的 `public/`。
-4. 执行 `npm run infra:up`。固定命名的 MySQL 和 Redis 容器启动并等待健康检查。该命令读取 `.env`，不生成或改写凭据。
-5. 执行 `npm run db:migrate`。迁移完成后显示“独立 TS 数据库迁移完成”。重复执行会核对已有迁移的校验和。迁移包含 `006_model_registry.sql`（模型配置表与状态行）、`007_provider_api_format.sql`（提供商 API 格式、可空密钥引用与密文字段）、`008_provider_headers.sql`（提供商自定义请求头 JSON 列）与 `009_conversation_summary.sql`（每个应用的滚动摘要一行）；随后执行一次 `npm run db:init-models`，把现有 `.env` 的模型配置写入数据库（仅当表仍为空且版本为零；幂等，已有配置不会被覆盖）。
+4. 执行 `npm run infra:up`。固定命名的 Redis 容器启动并等待健康检查；产品 Postgres 由 `npm run durable:pg -- start` 提供（见第 10 步，也可以先起它再执行本步以下的数据库命令）。该命令读取 `.env`，不生成或改写凭据。
+5. 执行 `npm run durable:pg -- start` 起 Postgres（127.0.0.1:55432，自动建 `paimeng_ts` 与 `paimeng_ts_test`），再执行 `npm run db:migrate`。迁移完成后显示“产品 Postgres 库迁移完成”，只执行 `migrations/001_initial.sql`（业务表全套，含模型配置表与状态行）；重复执行会核对已有迁移的校验和。随后执行一次 `npm run db:init-models`，把现有 `.env` 的模型配置写入数据库（仅当表仍为空且版本为零；幂等，已有配置不会被覆盖）。从旧 MySQL 库升级时额外跑一次 `npm run db:import-mysql`（只搬业务行，幂等，见 `docs/plans/pi-durable-m4.md`）。
 6. 执行 `docker pull node:24-alpine`。Vue 生成工程使用该镜像进行隔离构建。
 7. 执行 `npx playwright install chromium`。发布封面截图和浏览器测试都需要 Chromium。若系统缺少浏览器依赖，按 Playwright 的报错安装系统依赖。
 8. 执行 `npm run dev:all` 同时启动管理端与预览进程，输出按 `[app]`、`[preview]` 前缀合并，按 Ctrl-C 一起停止；也可以在一个终端执行 `npm run preview`，在另一个终端执行 `npm run dev`。两个进程的端口分别取自 `APP_ORIGIN` 与 `PREVIEW_ORIGIN`，端口已被占用时 `dev:all` 会直接报错退出。
 9. 打开 `http://localhost:3000`，注册并登录。
+10. 要用真实模型跑生成，执行 `npm run dev:durable`：它复用已在跑的 Postgres（没有就起一次性实例 127.0.0.1:55432），再起 harness 与 Next dev（默认 3100）。浏览器打开 `http://localhost:3100/app/chat/<应用 ID>`。用完 `npm run dev:durable` 的 Ctrl-C 会一起收尾，`npm run durable:pg -- stop` 把自己起的容器停回原状。
 
-`.env.example` 默认使用真实模型。配置真实模型前，可以在本地 `.env` 中显式设置 `AI_MODE=fixture`，运行确定的验收样本。fixture 使用真实 SDK 工具循环，但不代表真实模型质量已验证。
+`DURABLE_*` 环境变量：`DURABLE_HARNESS_URL`（Next 侧 attach 地址，默认 `http://127.0.0.1:5599`）、`DURABLE_PG_URL`（harness 的会话存储，默认 `postgres://spike:spike@127.0.0.1:55432/durable`）、`DURABLE_HARNESS_PORT`、`DURABLE_MODEL_BASE_URL` / `DURABLE_MODEL_API_KEY` / `DURABLE_MODEL_ID`（harness 直连模型，`dev:durable` 会从 `~/.pi/agent/models.json` 派生并只注入子进程）、`DURABLE_FAUX_MODEL=1`（确定性桩模型）。
+
+`.env.example` 默认使用真实模型。配置真实模型前可以在本地 `.env` 里设 `AI_MODE=fixture`，让产品侧的模型解析走确定样本；harness 侧的确定性模型是 `DURABLE_FAUX_MODEL=1`（`tests/integration/durable-m1` 用它）。两者都不代表真实模型质量已验证。
 
 平台统一入口为 `http://localhost:3000`。普通页面使用 `/`、`/user/login`、`/user/register`、`/app/chat/{id}` 和 `/app/edit/{id}`。管理员页面使用同一入口下的 `/admin/userManage`、`/admin/appManage` 和 `/admin/chatManage`，登录角色决定是否显示管理菜单，服务端再次校验权限。
 
@@ -28,29 +33,29 @@
 
 ## 使用固定的本地数据库容器
 
-MySQL 容器固定为 `zslm-mysql`，宿主连接地址为 `127.0.0.1:3306`。本地管理账号为 `root`，密码为 `root`。应用继续使用专用账号 `paimeng_ts`，本地密码同样为 `root`，仅访问专用开发库与测试库。开发库为 `paimeng_ai_code_mother_ts`，集成测试库为 `paimeng_ai_code_mother_ts_test`，两个库位于同一个 MySQL 容器。MySQL 数据继续保存在 `runtime/mysql/`。
+产品库是 Postgres 16，由 `scripts/durable-pg.sh`（`npm run durable:pg -- start`）起容器 `zslm-pg-durable`，宿主地址 `127.0.0.1:55432`，数据目录 `runtime/durable-pg/pgdata/`（已 gitignore）。开发库为 `paimeng_ts`，集成测试库为 `paimeng_ts_test`，两个 database 在同一个容器里；账号 `spike`、密码 `spike` 是本地一次性凭据。表名与列名见 `docs/plans/pi-durable-m4.md`。
 
-已有 MySQL 数据目录初始化后，修改 `.env` 不会自动修改数据库内的账号密码。密码变更需要在此专用容器内同步账号后再重启应用，本次已完成同步并保留已有数据。
+旧 MySQL 容器 `zslm-mysql`（`runtime/mysql/`，库 `paimeng_ai_code_mother_ts`）**保留作归档**：本步把业务行搬到 Postgres，没有删除旧库。`compose.yaml` 里的 mysql 服务只在需要回看旧数据时启动。
 
 Redis 容器固定为 `zslm-redis`，宿主连接地址为 `127.0.0.1:6379`，使用逻辑库 0。按本地开发要求不设置密码，连接字符串为 `redis://127.0.0.1:6379/0`。Redis 镜像固定到已验证的官方镜像摘要。
 
 本地弱密码和无密码 Redis 只用于这两个回环端口的开发服务。容器内的 Redis 关闭 protected mode，以接受 Docker 转发连接；宿主端口仍只绑定 `127.0.0.1`。这些默认值不用于公网或生产环境。
 
-Redis 启用 AOF 持久化，数据存入固定命名卷 `paimeng-ts-refactor-redis-data`。两个容器仅发布到宿主回环地址，并设置 `unless-stopped` 重启策略。Docker 守护进程启动时会恢复未被手动停止的容器。MySQL 与 Redis 都使用默认宿主端口（3306 与 6379）。原先占用 6379 的旧项目容器 `paimeng-redis` 已不存在（2026-10-14 复核：`docker inspect` 报 no such object，`ss -ltnp` 显示 6379 无监听），因此 Redis 从临时的 6381 切回默认端口，数据卷保留。
+Redis 启用 AOF 持久化，数据存入固定命名卷 `paimeng-ts-refactor-redis-data`。容器仅发布到宿主回环地址，并设置 `unless-stopped` 重启策略。Docker 守护进程启动时会恢复未被手动停止的容器。Redis 使用默认宿主端口 6379，Postgres 用 55432 避开别的实例。原先占用 6379 的旧项目容器 `paimeng-redis` 已不存在（2026-10-14 复核：`docker inspect` 报 no such object，`ss -ltnp` 显示 6379 无监听），因此 Redis 从临时的 6381 切回默认端口，数据卷保留。
 
-重复执行 `npm run infra:up` 会复用固定容器与数据。执行 `npm run infra:status` 查看状态，执行 `npm run infra:stop` 停止两个容器但保留数据。重新开发时再次执行 `npm run infra:up`。删除 `runtime/mysql/` 或执行删除卷的 Docker 命令会丢失数据库数据，日常启动和停止不需要这些操作。
+重复执行 `npm run durable:pg -- start` 会复用固定容器与数据，执行 `npm run durable:pg -- stop` 停回原状，`npm run durable:pg -- purge` 才删容器与数据目录。`npm run infra:status` / `npm run infra:stop` 管的是 compose 里的 Redis（以及归档用的 mysql）。删除 `runtime/durable-pg/pgdata/` 或执行删除卷的 Docker 命令会丢失数据库数据，日常启动和停止不需要这些操作。
 
-执行 `npm run verify:infra`，检查宿主端口、MySQL root 登录、应用账号临时表读写，以及 Redis 无密码连接和键值读写。需要验证 Redis 重启持久化时，执行 `npm run verify:infra -- --restart-redis`。该命令只重启本项目 Redis，并在验证后删除自己创建的唯一测试键。
+执行 `npm run verify:infra`，检查宿主端口、Postgres 库账号临时表读写，以及 Redis 无密码连接和键值读写。需要验证 Redis 重启持久化时，执行 `npm run verify:infra -- --restart-redis`。该命令只重启本项目 Redis，并在验证后删除自己创建的唯一测试键。
 
-Redis 已作为本地开发服务提供连接。当前平台会话、消息和生成任务仍保存在 MySQL，未改为依赖 Redis。旧项目的数据库及缓存服务不受影响。
+Redis 已作为本地开发服务提供连接。平台会话、生成任务与对话转录都保存在 Postgres（转录作为 pi-durable 条目），未改为依赖 Redis。旧项目的数据库及缓存服务不受影响。
 
 ## 业务主键与升级
 
-用户、应用和文本聊天记录的新主键使用雪花 ID，保留原 MyBatis Flex 1.11.1 的起始时间与位布局。计算和数据库读写使用 `bigint`，HTTP 返回十进制字符串。三个业务主键取消自增，已有记录不重编号。例如原应用 `42` 继续使用 `runtime/code_output/html_42/`。内部消息排序列 `ts_message.sequence` 仍然自增。
+用户与应用的新主键使用雪花 ID，保留原 MyBatis Flex 1.11.1 的起始时间与位布局。计算和数据库读写使用 `bigint`，HTTP 返回十进制字符串。业务主键不接受数据库发号（Postgres 侧不是 identity / serial），已有记录不重编号。例如原应用 `42` 继续使用 `runtime/code_output/html_42/`。对话转录的排序由 pi-durable 的条目 id 决定。
 
-本地 TS 平台使用数据中心 0、机器 0，并通过同一 MySQL 中的 `ts_snowflake_state` 持久化发号。并发进程、模块热重载和重启共享已提交的发号下界。业务事务开始前先提交发号短事务；失败可以留下空号，不能复用已预留号码。雪花 ID 有时间顺序，不是随机 ID，也不替代接口归属鉴权。
+本地 TS 平台使用数据中心 0、机器 0，并通过同一 Postgres 库的 `id_sequence` 持久化发号。并发进程、模块热重载和重启共享已提交的发号下界。业务事务开始前先提交发号短事务；失败可以留下空号，不能复用已预留号码。雪花 ID 有时间顺序，不是随机 ID，也不替代接口归属鉴权。
 
-已有 TS 数据库升级时，先停止平台写入。执行 `npm run verify:id-migration -- prepare`、`npm run db:migrate`、`npm run verify:id-migration -- verify`，再恢复平台。验证脚本比较既有记录和应用 `42` 的源码摘要，不输出密码或会话令牌。首次空库直接执行 `npm run db:migrate`。已执行的迁移保持原校验和，新策略由 `003_snowflake_ids.sql` 提供。
+空库直接执行 `npm run db:migrate`。从旧 MySQL 产品库升级（本步实际路径）：备份旧库 → `npm run durable:pg -- start` → `npm run db:migrate` → `npm run db:import-mysql`，命令与回滚方式见 `docs/plans/pi-durable-m4.md` §4。已执行的迁移保持原校验和。
 
 执行 `npx vitest run tests/snowflake.test.ts tests/integration/snowflake-ids.test.ts`，核对位布局、序列耗尽、时钟回拨、三类主键、事务回滚、独立进程并发及导入。先执行 `npm run db:test:setup`，测试仅连接专用测试库，不调用模型。Drizzle 的 `.$defaultFn()` 是同步字段钩子，不能直接调用当前异步持久化发号器。
 
@@ -62,7 +67,7 @@ Redis 已作为本地开发服务提供连接。当前平台会话、消息和�
 
 ## 模型统一管理
 
-模型配置保存在 MySQL。表结构由 `migrations/006_model_registry.sql` 创建、`migrations/007_provider_api_format.sql` 补充提供商 API 格式与密钥字段、`migrations/008_provider_headers.sql` 新增自定义请求头列，`npm run db:migrate` 执行；迁移后执行一次 `npm run db:init-models`，把当前 `.env` 的 `AI_BASE_URL` / `AI_MODEL` / `AI_API_KEY` 写入数据库。初始化只在配置仍为初始空态时进行，已有配置不会被覆盖。表已迁移且为空时，解析会临时用环境变量构造两个别名以兼容升级；读取失败不等于表空，不会回退到环境变量；DB 初始化后 DB 是唯一来源。
+模型配置保存在产品 Postgres 库的 `model_provider` / `model_alias` / `model_config_state` 三张表，由 `migrations/001_initial.sql` 创建、`npm run db:migrate` 执行；迁移后执行一次 `npm run db:init-models`，把当前 `.env` 的 `AI_BASE_URL` / `AI_MODEL` / `AI_API_KEY` 写入数据库。初始化只在配置仍为初始空态时进行，已有配置不会被覆盖。表已迁移且为空时，解析会临时用环境变量构造两个别名以兼容升级；读取失败不等于表空，不会回退到环境变量；DB 初始化后 DB 是唯一来源。
 
 注册表支持两个业务别名：`codegen.default`（应用生成 Agent，需流式与工具调用）和 `route.classify`（生成类型分类，需结构化输出）。管理员在 `/admin/modelManage` 编辑提供商与别名；“保存”约 5 秒内对后续请求生效，“保存并立即生效”会在事务中递增共享刷新序号，让其他实例在下一次解析时跳过 TTL。在途生成任务继续使用开始时解析的绑定。
 
@@ -76,7 +81,7 @@ Redis 已作为本地开发服务提供连接。当前平台会话、消息和�
 
 生成的时长预算都在 `.env`：`GENERATION_TIMEOUT_MS`（毫秒，默认 `0`，表示不限制整次生成任务；旧版写死 10 分钟）；`MODEL_REPLY_TIMEOUT_MS`（毫秒，默认 `900000`）限制单次模型回复的时长，超时中止并记为「单次回复超时」；每个模型请求的失败重试次数由 `MODEL_RETRY_LIMIT`（默认 `5`，0-5）控制，请求阶段与流开始之后的失败共用这个上限。上游输出到达 token 上限（`finishReason = length`）不再判为失败：文件已经落盘就继续构建，模型可以在下一轮对话里根据构建结果补齐。
 
-长对话默认启用「滚动摘要 + 最近完整回合」。超预算时，较早的完整回合会被压缩成一段固定分节（当前目标 / 用户要求与约束 / 已完成内容 / 决策与理由 / 待办 / 失败与取消尝试 / 重要文件等）的摘要，作为历史消息（明确标注为低信任参考）发给模型，最近若干回合仍带完整原文。原始聊天记录和界面上的完整历史都不删减，只是不再全部塞进模型上下文。表结构由 `migrations/009_conversation_summary.sql` 创建，`npm run db:migrate` 执行。开关与预算都在 `.env`：`MEMORY_ENABLED`（默认 `true`，设为 `false` 回到旧的「最近 20 条消息」行为）、`MEMORY_CONTEXT_BUDGET_TOKENS`（默认 `24000`）、`MEMORY_RECENT_BUDGET_TOKENS`（默认 `12000`）、`MEMORY_SUMMARY_INPUT_TOKENS`（默认 `24000`）、`MEMORY_SUMMARY_OUTPUT_TOKENS`（默认 `2048`）、`MEMORY_CALL_TIMEOUT_MS`（默认 `60000`）、`MEMORY_MIN_NEW_TURNS`（默认 `4`）、`MEMORY_RETRY_INTERVAL_MS`（默认 `120000`）；token 数为粗估（约等于字符数除以 2，中英混排下偏差较大），只用于判断是否整理，不保证精确。摘要模型是可选别名 `memory.summarize`（在「模型管理 → 别名」里配置）；未配置时复用本次生成所用的模型，配置错误不会被误判为「未配置」。摘要调用失败、超时或返回空内容时，保留上一版摘要与覆盖位置，降级为「旧摘要 + 装得下的最近完整回合」，并按 `MEMORY_RETRY_INTERVAL_MS` 冷却后重试；整理失败不会中断本轮生成，也不会推进覆盖位置。整理期间界面会显示「正在整理历史上下文，请稍候…」，结束、失败或取消后自动消失。摘要是**有损**压缩：它可能丢掉细节，且本项目的摘要质量只在受控测试模型下验证过，未用真实模型评测过输出质量。
+长对话的上下文由 harness 进程自己管理：pi-durable 的会话转录按容量阈值压缩。平台没有自研的窗口/滚动摘要层——`MEMORY_*` 环境变量、`src/server/memory-*.ts` 与摘要别名 `memory.summarize` 已随整合第三步删除；`ts_app_summary` 表与 `migrations/009_conversation_summary.sql` 保留但不再读写，等换 Postgres 时一并清掉。原始聊天记录与界面上的完整历史都不删减（`ts_message` / `ts_chat_history` 继续写）。
 
 密钥有两种来源。引用环境变量时只存引用名（`apiKeyEnv`），默认允许 `AI_API_KEY`，其余通过 `MODEL_API_KEY_ENV_ALLOWLIST`（逗号分隔）加入；直接输入时明文不落库，服务端用 AES-256-GCM 加密后只存密文（`apiKeyCiphertext`，格式 `v1:<iv>:<tag>:<ciphertext>`），主密钥取自 `MODEL_SECRET_KEY`（64 位十六进制、32 字节 base64 或任意口令，scrypt 派生），未设置时自动生成 `runtime/model-secret.key`（权限 600）。管理接口只返回 `apiKeySource` 与当前实例是否已配置，绝不返回明文或密文；编辑态密钥留空表示保持已保存的值。该密钥文件丢失后已保存的密钥无法解密，需要在管理端重新输入。
 
@@ -92,13 +97,13 @@ Redis 已作为本地开发服务提供连接。当前平台会话、消息和�
 
 ## 运行完整测试
 
-1. 保持专用 MySQL 运行，执行 `npm run db:test:setup`。此命令只在上述 Compose 容器内创建独立测试库、授予专用用户权限，并执行测试库迁移。
+1. 执行 `npm run durable:pg -- start` 起 Postgres，再执行 `npm run db:test:setup`。此命令在自己的容器里创建 `paimeng_ts_test` 并执行测试库迁移。
 2. 执行 `npm run type-check`。
-3. 执行 `npm test`。完整测试需要 MySQL、Docker 镜像和 Chromium，不会因缺少依赖而跳过相关检查。
+3. 执行 `npm test`。完整测试需要 Postgres、Docker 镜像和 Chromium，不会因缺少依赖而跳过相关检查。durable 回归用例（`tests/integration/durable-m1`）需要同一个 Postgres；没有 Postgres 时这组用例会打印原因并 skip；用完 `npm run durable:pg -- stop`。
 4. 保持开发服务和预览服务运行，并将本地模型设为 fixture。执行 `npm run test:e2e`。浏览器场景只创建带唯一前缀的验收账号及应用。
 5. 执行 `npm run verify:boundary`，核对旧项目与已有删除状态。
 
-集成测试在数据库操作前统一解析 URL，只将专用开发库或测试库映射到 `paimeng_ai_code_mother_ts_test`。URL 可保留 `charset` 查询参数，其他查询选项拒绝，防止测试连接目标含糊。测试只清理自己创建的记录。浏览器测试使用开发库 `paimeng_ai_code_mother_ts`，保留验收样本。运行浏览器测试时一次只启动一个测试命令，避免报告目录被另一轮测试覆盖。
+集成测试在数据库操作前统一解析 URL，只将专用开发库或测试库映射到 `paimeng_ts_test`；URL 不允许查询选项，防止测试连接目标含糊。测试只清理自己创建的记录。浏览器测试使用开发库 `paimeng_ts`，保留验收样本。运行浏览器测试时一次只启动一个测试命令，避免报告目录被另一轮测试覆盖。
 
 浏览器截图写入 `runtime/evidence/`，HTML 报告写入 `playwright-report/`。这些运行文件已被忽略。只验证默认入口跳转、注册登录、会话 Cookie 隔离与来源拒绝时，执行 `npm run test:e2e -- tests/e2e/platform-origin.spec.ts`。这两项浏览器回归测试不调用模型，也不需要预览服务运行。
 
@@ -109,7 +114,7 @@ Redis 已作为本地开发服务提供连接。当前平台会话、消息和�
 以下过程使用专用本地验收数据，不进行生产部署。停止开发进程后再构建，避免开发服务与生产构建同时写入 `.next/`。
 
 1. 在开发或本地验收服务仍运行时，执行 `AI_MODE=fixture npm run verify:restart -- prepare`。脚本保存专用样本的会话、完整工具消息、生成状态及预览摘要。
-2. 停止本目录的开发服务。保留 MySQL 和预览服务。
+2. 停止本目录的开发服务。保留 Postgres 和预览服务。
 3. 执行 `ALLOW_TEST_FIXTURE=1 npm run build`。
 4. 执行 `AI_MODE=fixture ALLOW_TEST_FIXTURE=1 npm start`，保持该进程运行。
 5. 在另一个终端执行 `AI_MODE=fixture npm run verify:restart -- verify`。脚本核对保存的数据，下载源代码，并提交下一轮对话。
@@ -121,7 +126,11 @@ Redis 已作为本地开发服务提供连接。当前平台会话、消息和�
 
 ## 导入旧数据副本
 
-本项目只接受 `paimeng_ai_code_mother_ts` 或 `paimeng_ai_code_mother_ts_test` 数据库名。它不会自动连接旧数据库。
+本项目只接受 `paimeng_ts` 或 `paimeng_ts_test` 数据库名。它不会自动连接旧库（`npm run db:import-mysql` 需要显式给出 `MYSQL_LEGACY_URL`）。
+
+## 从旧 MySQL 库搬迁业务行（一次性）
+
+`npm run db:import-mysql` 把旧 MySQL 产品库的业务行搬进 Postgres：用户、应用、登录会话、附件、模型配置、限流与发号下界。按主键 upsert，可以重复执行。**对话数据不搬**（旧 `ts_message` / `chat_history` / `ts_app_summary` 放弃），`app.conversation_id` 一律留空，harness 在下次生成时重建会话。命令与回滚方式见 `docs/plans/pi-durable-m4.md`。
 
 1. 停止新平台写入，并冻结旧库的最终快照。从旧库导出经过审查的 JSON 副本，放入新应用 `runtime/import/snapshot.json`。格式为 `{users:[],apps:[],chatHistory:[]}`，字段与原表对应。
 2. 所有 ID 使用十进制字符串。日期使用 `YYYY-MM-DD HH:mm:ss`（可含毫秒）。可空字段明确使用 null。应用 `editTime` 原值会保留，旧快照未包含该字段时为 null。

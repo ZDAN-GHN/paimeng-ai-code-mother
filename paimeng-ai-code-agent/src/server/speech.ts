@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { isAllowedModelApiKeyEnv, type ModelProvider } from '@/shared/model-config';
 import { getConfig } from './config';
 import { BusinessError } from './http';
-import { isAliasNotConfigured } from './memory-model';
+import { isAliasNotConfigured } from './model';
 import type { AliasModel } from './models/adapters';
 import { modelRegistry } from './models/registry';
 import { decryptModelSecret } from './models/secrets';

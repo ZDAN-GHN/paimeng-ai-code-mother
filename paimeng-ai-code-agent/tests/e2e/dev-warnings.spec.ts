@@ -1,9 +1,8 @@
 import { test, expect, type ConsoleMessage, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
-import mysql from 'mysql2/promise';
 import { loadEnvFile } from 'node:process';
-import { testDatabaseUrl } from '../test-database-url';
 import { appOrigin } from './support/app-origin';
+import { grantAdmin, seedModelConfig, testConnection } from './support/model-config-fixtures';
 
 loadEnvFile('.env');
 
@@ -43,43 +42,6 @@ function expectClean(problems: string[]) {
   expect(problems, `dev 控制台出现告警/错误：\n${problems.join('\n')}`).toEqual([]);
 }
 
-async function testConnection(): Promise<mysql.Connection> {
-  const raw = process.env.DATABASE_URL;
-  if (!raw) throw new Error('dev 告警检查需要 .env 里的 DATABASE_URL');
-  return mysql.createConnection(new URL(testDatabaseUrl(raw)).href);
-}
-
-async function seedAdmin(connection: mysql.Connection, account: string) {
-  await connection.execute("UPDATE user SET userRole='admin' WHERE userAccount=?", [account]);
-  await connection.execute('DELETE FROM ts_model_alias');
-  await connection.execute('DELETE FROM ts_model_provider');
-  await connection.execute(
-    'INSERT INTO ts_model_provider (id, displayName, apiFormat, baseUrl, apiKeyEnv, options, enabled, createTime, updateTime) VALUES (?,?,?,?,?,?,?,NOW(3),NOW(3))',
-    ['env-default', '默认提供商', 'openai-chat', 'https://api.example.test/v1', 'AI_API_KEY', JSON.stringify({}), 1],
-  );
-  const aliasInsert =
-    'INSERT INTO ts_model_alias (alias, providerId, modelName, capabilities, settings, enabled, createTime, updateTime) VALUES (?,?,?,?,?,?,NOW(3),NOW(3))';
-  await connection.execute(aliasInsert, [
-    'codegen.default',
-    'env-default',
-    'test-codegen-model',
-    JSON.stringify({ streaming: true, toolCalling: true, structuredOutput: false }),
-    JSON.stringify({}),
-    1,
-  ]);
-  await connection.execute(aliasInsert, [
-    'route.classify',
-    'env-default',
-    'test-route-model',
-    JSON.stringify({ streaming: false, toolCalling: false, structuredOutput: true }),
-    JSON.stringify({}),
-    1,
-  ]);
-  await connection.execute(
-    "INSERT INTO ts_model_config_state (id, revision, refreshEpoch, updateTime) VALUES ('models', 1, 0, NOW(3)) ON DUPLICATE KEY UPDATE revision=1, refreshEpoch=0, updateTime=NOW(3)",
-  );
-}
-
 test('公开页面在 dev 模式下没有告警', async ({ page }) => {
   const problems = watchConsole(page);
   for (const path of ['/', '/user/login', '/user/register']) {
@@ -100,7 +62,8 @@ test('管理端与模型配置弹窗在 dev 模式下没有告警', async ({ pag
   expect(registered.ok()).toBe(true);
   const connection = await testConnection();
   try {
-    await seedAdmin(connection, account);
+    await grantAdmin(connection, account);
+    await seedModelConfig(connection);
   } finally {
     await connection.end();
   }
@@ -111,7 +74,7 @@ test('管理端与模型配置弹窗在 dev 模式下没有告警', async ({ pag
   await page.locator('form').getByRole('button', { name: /^登\s*录$/ }).click();
   await expect(page).toHaveURL('/');
 
-  for (const path of ['/admin/userManage', '/admin/appManage', '/admin/chatManage', '/admin/modelManage']) {
+  for (const path of ['/admin/userManage', '/admin/appManage', '/admin/modelManage']) {
     await page.goto(path);
     await expect(page.locator('body')).toBeVisible();
   }

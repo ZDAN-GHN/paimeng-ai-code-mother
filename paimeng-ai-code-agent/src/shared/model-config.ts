@@ -4,7 +4,7 @@ import { z } from 'zod';
 export const requiredModelAliases = ['codegen.default', 'route.classify'] as const;
 export type RequiredModelAlias = typeof requiredModelAliases[number];
 
-/** 第一版支持的 API 格式；值写入 ts_model_provider.apiFormat。 */
+/** 第一版支持的 API 格式；值写入 model_provider.api_format。 */
 export const providerApiFormats = ['openai-chat', 'openai-responses', 'anthropic-messages'] as const;
 export type ProviderApiFormat = typeof providerApiFormats[number];
 

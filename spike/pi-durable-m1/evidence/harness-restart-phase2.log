@@ -1,5 +1,0 @@
-[2026-10-17T17:53:38.231Z] pid=2278947 harness open conversation=1 workspace=/home/zdan/github/zdan/.pi-worktrees/pi-durable-migration/spike/pi-durable-m1/src/../runtime-out/m1/workspace storage=postgres
-[2026-10-17T17:53:38.236Z] pid=2278947 listening on http://127.0.0.1:5599
-[2026-10-17T17:53:42.420Z] pid=2278947 sse attach
-[2026-10-17T17:53:45.425Z] pid=2278947 sse client gone — aborting the view only
-[2026-10-17T17:53:45.489Z] pid=2278947 SIGTERM — closing

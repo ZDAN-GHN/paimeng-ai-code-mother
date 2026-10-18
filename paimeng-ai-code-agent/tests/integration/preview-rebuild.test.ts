@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { testDatabaseUrl } from '../test-database-url';
 import { db, getPool, now } from '@/server/db';
-import { users, apps, histories, messages, generations, leases, rateLimits } from '@/server/schema';
+import { users, apps, generations, leases, rateLimits } from '@/server/schema';
 import { nextSnowflakeId } from '@/server/snowflake';
 import { publicUser } from '@/server/auth';
 import { createApp, getApp, rebuildPreview } from '@/server/business';
@@ -33,7 +33,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   for (const app of created) {
-    for (const table of [leases, generations, messages, histories]) await db().delete(table).where(eq(table.appId, BigInt(app.id)));
+    for (const table of [leases, generations]) await db().delete(table).where(eq(table.appId, BigInt(app.id)));
     await db().delete(apps).where(eq(apps.id, BigInt(app.id)));
     await rm(workspace(app), { recursive: true, force: true });
   }

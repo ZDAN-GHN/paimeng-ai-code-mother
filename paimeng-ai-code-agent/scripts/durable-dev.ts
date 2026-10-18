@@ -35,7 +35,6 @@ const pgUrl = process.env.DURABLE_PG_URL ?? 'postgres://spike:spike@127.0.0.1:55
 const harnessPort = Number(process.env.DURABLE_HARNESS_PORT ?? 5599);
 const appPort = Number(process.env.DURABLE_APP_PORT ?? 3100);
 const appOrigin = process.env.DURABLE_APP_ORIGIN ?? `http://localhost:${appPort}`;
-const engine = process.env.DURABLE_ENGINE ?? 'harness';
 const harnessUrl = `http://127.0.0.1:${harnessPort}`;
 
 const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
@@ -159,7 +158,7 @@ if (await portOpen('127.0.0.1', appPort)) {
 
 await ensurePostgres();
 
-console.log(`管理端 http://localhost:${appPort}（APP_ORIGIN=${appOrigin}，生成引擎 ${engine}），harness ${harnessUrl}；输出前缀为 [harness] 与 [app]，按 Ctrl-C 一起停止`);
+console.log(`管理端 http://localhost:${appPort}（APP_ORIGIN=${appOrigin}），harness ${harnessUrl}；输出前缀为 [harness] 与 [app]，按 Ctrl-C 一起停止`);
 const harnessEnv: NodeJS.ProcessEnv = { ...process.env, ...modelEnv(), DURABLE_HARNESS_HOST: '127.0.0.1', DURABLE_HARNESS_PORT: String(harnessPort), DURABLE_PG_URL: pgUrl };
 start('harness', process.execPath, ['--import', 'tsx', '--conditions=react-server', join(root, 'src', 'server', 'durable', 'harness-server.ts')], { cwd: root, env: harnessEnv });
 
@@ -176,5 +175,5 @@ if (Date.now() >= deadline) await stop(1);
 
 start('app', join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'next.cmd' : 'next'), ['dev', '--webpack', '--hostname', '127.0.0.1', '--port', String(appPort)], {
   cwd: root,
-  env: { ...process.env, DURABLE_HARNESS_URL: harnessUrl, DURABLE_ENGINE: engine, APP_ORIGIN: appOrigin },
+  env: { ...process.env, DURABLE_HARNESS_URL: harnessUrl, APP_ORIGIN: appOrigin },
 });

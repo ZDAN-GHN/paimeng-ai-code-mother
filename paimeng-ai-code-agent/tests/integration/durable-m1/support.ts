@@ -14,7 +14,8 @@ import { join, resolve } from 'node:path';
 
 export const productRoot = process.cwd();
 const harnessEntry = resolve(productRoot, 'src', 'server', 'durable', 'harness-server.ts');
-export const postgresUrl = process.env.DURABLE_PG_URL ?? 'postgres://spike:spike@127.0.0.1:55432/durable';
+// The storage lives in the product's test database; the durable tables are its own (`durable_*`, `entries`, …).
+export const postgresUrl = process.env.DURABLE_PG_URL ?? 'postgres://spike:spike@127.0.0.1:55432/paimeng_ts_test';
 
 /** The harness runs on the product's tsx, which resolves the product's `@/` alias. */
 export function harnessAvailable(): boolean {

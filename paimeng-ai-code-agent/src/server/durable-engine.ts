@@ -11,9 +11,10 @@ import { classifyBuildFailure, formatBuildFeedback, noProgressMessage } from './
 import { getApp } from './business';
 import { getConfig } from './config';
 import { db } from './db';
-import { beginGenerationContext, finishGeneration, generationFor, heartbeat, restoreGeneration, saveUserMessage, setGeneration } from './generation-store';
+import { beginGeneration, finishGeneration, generationFor, heartbeat, restoreGeneration, setGeneration } from './generation-store';
 import { recordAssistantStep, recordBuildStep, type AccountToolCall, type EntryUsage, type GenerationStopReason, type ModelIdentity } from './generation-accounting';
 import { modelBindingFor } from './model';
+import { nextSnowflakeId } from './snowflake';
 import { BusinessError } from './http';
 import { clientIp } from './rate-limit';
 import { apps } from './schema';
@@ -26,10 +27,10 @@ import { webAccessInstructions } from './web-access/tools';
 /**
  * 生成入口的 harness 引擎（M2a，docs/plans/pi-durable-m2.md）。
  *
- * 与 legacy（agent.ts 的 ToolLoopAgent 循环）并列，由 `DURABLE_ENGINE=harness` 开启，两套共用
- * `app/chat/gen/code` 的请求体与前端 SSE 协议。做法：
+ * 生成入口唯一的引擎（`app/chat/gen/code`），请求体与前端 SSE 协议定义在 agent.ts。做法：
  *
- * 1. 用同一个 `beginGenerationContext` 落库这次生成与用户消息（任务态、限流、租约都不变）；
+ * 1. 用同一个 `beginGeneration` 落库这次生成（任务态、限流、租约都不变）；用户消息本体随 `/submit` 作为
+ *    转录条目（`app.user`）写进 harness 存储，产品库不再有自己的消息表；
  * 2. 把输入提交给常驻 harness 进程里这个应用的会话（`app.conversationId`，第一次生成时创建），
  *    **提交之后**才去观察，所以「浏览器断连 = 取消生成」在结构上不可能发生；
  * 3. 把 harness 的 agent 事件翻译成前端已有的 UI 消息流（文本增量、工具条目、`data-progress`）。
@@ -545,7 +546,9 @@ async function observeHarnessRun(options: {
         if (text) turn.seed(messageOfText(text));
       }
       const message = turn?.message(requestId);
-      await finishGeneration(requestId, status, error, message, stopReason);
+      const stored = message?.parts.length ? message : null;
+      if (stored) await appendDisplayEntry(conversationId, displayEntryKinds.assistant, stored);
+      await finishGeneration(requestId, status, error, stored?.id ?? null, stopReason);
       channel.push({ type: 'data-progress', data: { stage: status === 'ready' ? 'ready' : status, at: Date.now() }, transient: true } as UiChunk);
     } catch (problem) {
       console.error(`生成收尾失败（生成 ${requestId}）：`, problem);
@@ -823,13 +826,49 @@ function writtenPathsOf(toolName: string, input: unknown): string[] {
 /** 提交给 harness 的 content：产品提示词 + 本轮上传的图片字节（base64）。 */
 type SubmitContentBlock = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: ImageMediaType };
 
+/**
+ * 产品写进转录的两种展示条目。对话转录属于 harness 存储（`entries`），产品只用 `data` 通道放
+ * 前端要渲染的 UI 消息；模型上下文由 `model` 通道自己组，不读这里的 JSON。
+ */
+const displayEntryKinds = { user: 'app.user', assistant: 'app.assistant' } as const;
+
 /** 一次 harness 提交。入参里没有任何请求 socket 或 signal，断连影响不到它。 */
-async function submitHarness(conversationId: number, content: string | SubmitContentBlock[], requestId: string | undefined, whenBusy?: 'steer'): Promise<void> {
+async function submitHarness(conversationId: number, content: string | SubmitContentBlock[], requestId: string | undefined, options: { whenBusy?: 'steer'; entry?: { kind: string; data: UIMessage } } = {}): Promise<void> {
   await harnessJson('/submit', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ conversationId, content, requestId, whenBusy }),
+    body: JSON.stringify({ conversationId, content, requestId, whenBusy: options.whenBusy, entry: options.entry }),
   });
+}
+
+/** 落一条展示条目（助手回复的 UI 消息）。失败只告警：转录缺一条不该让整次生成失败。 */
+async function appendDisplayEntry(conversationId: number, kind: string, data: UIMessage): Promise<void> {
+  try {
+    await harnessJson('/entries', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ conversationId, kind, data }),
+    });
+  } catch (problem) {
+    console.warn(`写入对话转录失败（会话 ${conversationId}，${kind}）：`, problem);
+  }
+}
+
+/** harness `/messages` 返回的转录展示条目。 */
+const harnessMessagesSchema = z.object({
+  messages: z.array(z.object({ id: z.number(), kind: z.string(), data: z.object({ id: z.string(), role: z.enum(['user', 'assistant']), parts: z.array(z.unknown()) }) })),
+});
+
+/**
+ * 一个应用的对话历史（`app/messages`）。转录在 harness 存储里，所以这里经 `/messages` 读；
+ * 还没聊过（没有会话映射）时是空历史。
+ */
+export async function loadMessages(appId: string): Promise<UIMessage[]> {
+  const conversationId = await conversationIdOf(appId);
+  if (conversationId === undefined) return [];
+  const parsed = harnessMessagesSchema.safeParse(await harnessJson<unknown>(`/messages?conversationId=${conversationId}`));
+  if (!parsed.success) throw new Error('harness /messages 返回了预期之外的结构');
+  return parsed.data.messages.map(entry => entry.data as UIMessage);
 }
 
 /** 提交是异步落地的（admission 立即返回，运行随后启动），等 harness 报出这次会话的活跃运行再附加。 */async function waitForRunStart(conversationId: number, signal: AbortSignal): Promise<void> {
@@ -862,8 +901,7 @@ async function uploadAttachmentImages(app: AppInfo, user: User, images: readonly
 }
 
 /**
- * harness 引擎的生成入口。请求体与 `chatResponse` 完全一致，返回的也是同一种 UI 消息流响应
- * （`data-progress` / 文本增量 / 工具条目 / 用量块挂载方式都不变，前端不需要改）。
+ * 生成入口。返回 UI 消息流响应（`data-progress` / 文本增量 / 工具条目 / 用量块挂载方式不变，前端不需要改）。
  */
 export async function harnessChatResponse(req: Request, raw: unknown, user: User): Promise<Response> {
   const input = generationRequestSchema.parse(raw);
@@ -871,7 +909,8 @@ export async function harnessChatResponse(req: Request, raw: unknown, user: User
   const prompt = input.message.parts.filter(part => part.type === 'text').map(part => part.text).join('\n');
   validatePrompt(prompt);
   const attachmentParts = input.message.parts.filter(part => part.type === 'attachment');
-  // 附件 part 不在 SDK 的 UIMessage 联合类型里，但它要随 ts_message 保存供前端回显；这里在校验后的边界上显式放宽。
+  // 附件 part 不在 SDK 的 UIMessage 联合类型里，但它要作为转录条目（`app.user`）的 UI 载荷保存供前端回显；
+  // 这里在校验后的边界上显式放宽。
   const incoming = { ...input.message, id: `${input.requestId}-user` } as UIMessage;
   // 与 legacy 同源：生成模型绑定在任务开始时固定（解析失败报 503，此时还没有落库任务）。
   // 只取身份字段进记账行；模型调用仍由 harness 进程按其自己的 provider 配置完成。
@@ -892,7 +931,7 @@ export async function harnessChatResponse(req: Request, raw: unknown, user: User
   const instructions = harnessInstructions(app, attachmentImages.length > 0);
   const model: ModelIdentity = { alias: generation.alias, providerId: generation.providerId, modelName: generation.modelName };
   const stop = new AbortController();
-  await beginGenerationContext(app.id, input.requestId, user, incoming, clientIp(req.headers));
+  await beginGeneration(app.id, input.requestId, user, clientIp(req.headers));
   // 上传原图副本写进工作区，供用户明确要求当素材时引用（辅助能力，失败不影响生成）。
   await uploadAttachmentImages(app, user, attachmentImages);
   let conversationId: number;
@@ -900,14 +939,15 @@ export async function harnessChatResponse(req: Request, raw: unknown, user: User
     conversationId = await conversationFor(app);
     // 指令按当前轮次对齐（带图轮次多一句「图片已随消息提供」）；只提交，不观察。
     await configureHarnessInstructions(conversationId, instructions);
+    const submitOptions = { entry: { kind: displayEntryKinds.user, data: incoming } };
     try {
-      await submitHarness(conversationId, content, input.requestId);
+      await submitHarness(conversationId, content, input.requestId, submitOptions);
     } catch (problem) {
       // 映射指向的会话在 harness 里不存在（换过 Postgres、或会话数据被清过）：清掉映射重建一次。
       if (!(problem instanceof HarnessRequestError) || problem.status !== 404) throw problem;
       conversationId = await conversationFor(app, { fresh: true });
       await configureHarnessInstructions(conversationId, instructions);
-      await submitHarness(conversationId, content, input.requestId);
+      await submitHarness(conversationId, content, input.requestId, submitOptions);
     }
   } catch (problem) {
     const detail = problem instanceof Error ? problem.message.slice(0, 1000) : '提交给 harness 失败';
@@ -948,9 +988,10 @@ export async function harnessCancelGeneration(appId: string, user: User): Promis
 }
 
 /**
- * harness 引擎的中途插话：与 legacy 同一套产品语义（仅创建者、只在有活跃生成时适用、文本落库成一条
- * 普通 user 消息）。区别在落地方式：插话交给 pi-durable 的 `submit({ whenBusy: "steer" })`，排队进
- * `pi.inbox`，在**当前步骤跑完后**的下一个边界落入 transcript 并进入下一次模型调用。
+ * harness 引擎的中途插话：与 legacy 同一套产品语义（仅创建者、只在有活跃生成时适用、文本成为一条
+ * 普通 user 消息）。落地方式：插话交给 pi-durable 的 `submit({ whenBusy: "steer" })`，排队进
+ * `pi.inbox`，在**当前步骤跑完后**的下一个边界落入 transcript 并进入下一次模型调用；同一次提交带上
+ * `app.user` 展示条目，刷新后仍能看到自己插的话。
  */
 export async function harnessSteerGeneration(appId: string, user: User, text: string): Promise<boolean> {
   // 插话会写进对话历史并影响这次生成，属于写操作：只有应用创建者可以（同 app/chat/gen/code）。
@@ -960,7 +1001,7 @@ export async function harnessSteerGeneration(appId: string, user: User, text: st
   // 队列只对正在跑的那次生成有效：任务已结束或没有活跃生成时插话无处可去。
   const conversationId = active ? await conversationIdOf(appId) : undefined;
   if (!task || !active || conversationId === undefined) throw new BusinessError(409, 40900, '当前没有正在生成的步骤，插话不适用');
-  await submitHarness(conversationId, text, undefined, 'steer');
-  await saveUserMessage(appId, user, text, task.id);
+  const message: UIMessage = { id: String(await nextSnowflakeId()), role: 'user', parts: [{ type: 'text', text }] };
+  await submitHarness(conversationId, text, undefined, { whenBusy: 'steer', entry: { kind: displayEntryKinds.user, data: message } });
   return true;
 }
