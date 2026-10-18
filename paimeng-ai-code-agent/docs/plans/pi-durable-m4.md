@@ -44,7 +44,11 @@ harness 存储里，`GET app/messages` 经 harness 的 `/messages` 读回。`ts_
 | `ts_app_summary` | **删除** | 滚动摘要由 pi-durable 的 compaction 取代 |
 
 迁移文件也从 13 个 MySQL 增量脚本换成 **1 个 Postgres 初始脚本** `migrations/001_initial.sql`
-（空库一次建好全部表与索引）。列名统一 snake_case：Postgres 会把无引号标识符折叠成小写，
+（空库一次建好全部表与索引）。
+
+> 现状补充（2026-10-18）：每张表解决什么问题、哪几张容易被误判成冗余、删表要在别处补什么机制，
+> 见 [database-inventory.md](./database-inventory.md)；生成链路两套 provider 的现状与收敛方案见
+> [provider-convergence.md](./provider-convergence.md)。列名统一 snake_case：Postgres 会把无引号标识符折叠成小写，
 camelCase 列必须处处加双引号，一次改净比每个查询记得加引号更省心。
 
 ## 2. 转录搬到 harness：产品不再有消息表

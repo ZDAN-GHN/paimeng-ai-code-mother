@@ -1,4 +1,5 @@
 import 'server-only';
+import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage, type UIMessageStreamWriter } from 'ai';
@@ -14,7 +15,6 @@ import { db } from './db';
 import { adoptLease, beginGeneration, finishGeneration, generationFor, heartbeat, restoreGeneration, setGeneration, staleActiveGenerations } from './generation-store';
 import { recordAssistantStep, recordBuildStep, type AccountToolCall, type EntryUsage, type GenerationStopReason, type ModelIdentity } from './generation-accounting';
 import { modelBindingFor } from './model';
-import { nextSnowflakeId } from './snowflake';
 import { BusinessError } from './http';
 import { clientIp } from './rate-limit';
 import { apps } from './schema';
@@ -112,8 +112,9 @@ type HarnessEvent = z.infer<typeof harnessEventSchema>;
 type UiChunk = Parameters<UIMessageStreamWriter<UIMessage>['write']>[0];
 
 /** 助手消息 id 由请求 id 派生（Power 的消息 id 也是这个约定），前端靠它把用量块挂到回复上。
- *  它同时写进 `generation.message_id` 与转录条目（`app.assistant`）的 `data.id`。 */
-const assistantMessageId = (requestId: string) => `${requestId}-assistant`;
+ *  它同时写进 `generation.message_id` 与转录条目（`app.assistant`）的 `data.id`。
+ *  一次运行按插话边界分段后，第一段仍是 `<requestId>-assistant`，其后依次 `-assistant-2`、`-assistant-3`…。 */
+const assistantMessageId = (requestId: string, segment: number) => segment <= 1 ? `${requestId}-assistant` : `${requestId}-assistant-${segment}`;
 
 function harnessBase(): string {
   return getConfig().durable.harnessUrl;
@@ -171,6 +172,11 @@ function blocksText(content: unknown): string {
 /** 转录里的纯文本（附加太晚时的兜底）：把一段文字当作一个文本块。 */
 const messageOfText = (text: string) => ({ content: [{ type: 'text', text }] });
 
+/** 一条用户消息的文本；不是用户消息时返回 null（助手消息由 `textBlocksOf` 处理）。 */
+function userTextOf(message: unknown): string | null {
+  const parsed = z.object({ role: z.literal('user'), content: z.unknown() }).safeParse(message);
+  return parsed.success ? blocksText(parsed.data.content) : null;
+}
 /** 工具结果条目的文本与错误标记。 */
 function toolResultOf(entry: unknown): { text: string; isError: boolean } {
   const parsedEntry = z.object({ model: z.array(z.unknown()).optional() }).safeParse(entry);
@@ -392,7 +398,7 @@ class AssistantTurn {
   }
 
   /** 落库的助手消息：前端刷新后靠它渲染文本与工具条目（parts 由本类构造，不是外部数据）。 */
-  message(requestId: string): UIMessage {
+  message(id: string): UIMessage {
     this.closeText();
     const parts: AssistantPart[] = [...this.parts];
     for (const [toolCallId, slot] of this.tools) {
@@ -408,7 +414,60 @@ class AssistantTurn {
         ...(slot.isError ? { errorText: typeof slot.output === 'string' ? slot.output : '工具调用失败' } : {}),
       });
     }
-    return { id: assistantMessageId(requestId), role: 'assistant', parts } as unknown as UIMessage;
+    return { id, role: 'assistant', parts } as unknown as UIMessage;
+  }
+}
+
+/**
+ * 一次运行的助手回复分段：插话落入转录时封住当前段、另起一段，每段写一条 `app.assistant` 条目。
+ *
+ * 条目 id 按写入顺序派生（段 1 = `<requestId>-assistant`，其后 `-assistant-2`…），所以转录里的顺序
+ * 恒为 `app.user → app.assistant(段1) → app.user(插话) → app.assistant(段2)`，与 pi 的转录一致。
+ * 插话气泡也由这里写（不再随 `/submit` 一起提交）：它必须排在段 1 之后，而条目 id 的顺序就是顺序。
+ * `generation.message_id` 挂第一段的条目 id，一次生成因此只出现一个用量块。
+ */
+class AssistantSegments {
+  #turn: AssistantTurn;
+  /** 已落库的段数，同时用来派生下一段的条目 id。 */
+  #written = 0;
+  #firstEntryId: string | null = null;
+  /** 写入串行化：条目 id 的顺序就是转录顺序，交错写会打乱它。 */
+  #writes: Promise<void> = Promise.resolve();
+
+  constructor(private readonly channel: ChunkChannel, private readonly conversationId: number, private readonly requestId: string) {
+    this.#turn = new AssistantTurn(channel);
+  }
+
+  get turn(): AssistantTurn { return this.#turn; }
+
+  /** 第一段落库后的条目 id（用量块挂它）；一段都没落库时是 null。 */
+  get firstEntryId(): string | null { return this.#firstEntryId; }
+
+  /** 分段点：封住当前段（有内容才落条目），后续事件进新段。 */
+  seal(): void {
+    const sealed = this.#turn;
+    this.#turn = new AssistantTurn(this.channel);
+    const message = sealed.message(assistantMessageId(this.requestId, this.#written + 1));
+    if (!message.parts.length) return;
+    this.#written += 1;
+    this.#firstEntryId ??= message.id;
+    void this.#append(displayEntryKinds.assistant, message);
+  }
+
+  /** 追加一条展示条目（插话的 `app.user` 气泡），与分段共用同一条串行链。 */
+  append(kind: string, message: UIMessage): void {
+    void this.#append(kind, message);
+  }
+
+  /** 收尾：封住最后一段并等所有写入落地。 */
+  async settle(): Promise<void> {
+    this.seal();
+    await this.#writes;
+  }
+
+  #append(kind: string, message: UIMessage): Promise<void> {
+    this.#writes = this.#writes.then(() => appendDisplayEntry(this.conversationId, kind, message));
+    return this.#writes;
   }
 }
 
@@ -429,7 +488,8 @@ async function observeHarnessRun(options: {
   let status: 'ready' | 'failed' | 'cancelled' = 'failed';
   let error: string | null = null;
   let stopReason: GenerationStopReason = 'model-error';
-  let lastTurn: AssistantTurn | null = null;
+  // 助手回复的条目写入器：跨修复轮与插话分段连续，条目 id 的顺序就是转录顺序。
+  const segments = new AssistantSegments(channel, conversationId, requestId);
   // 构建尝试的记账序号：阶段构建（buildPreview）与最终验证/修复轮共用一串，与 legacy 同口径。
   let buildSteps = 0;
   // 租约心跳与取消/超时的唯一来源：任务行是权威，harness 里的运行只是执行者。
@@ -470,8 +530,7 @@ async function observeHarnessRun(options: {
     let snapshot: string | null = null;
     for (let round = 1; ; round += 1) {
       await waitForRunStart(conversationId, stop.signal);
-      const run = new RunTranslator(channel, requestId, model, round);
-      lastTurn = run.turn;
+      const run = new RunTranslator(channel, segments, requestId, model, round);
       let failureText: string | null = null;
       const response = await harnessFetch(`/agent-events?conversationId=${conversationId}`, {
         headers: { accept: 'application/x-ndjson' },
@@ -547,17 +606,15 @@ async function observeHarnessRun(options: {
     if (timeout) clearTimeout(timeout);
     // 落库与收尾都在断连之后照常发生：这一步不依赖任何 HTTP 流。
     try {
-      const turn = lastTurn;
       // 极端情况下（运行在附加之前就已结束）事件流是空的，退回读会话里最后一条助手条目的文本。
-      if (turn && !turn.parts.length && !turn.tools.size) {
+      if (!segments.turn.parts.length && !segments.turn.tools.size) {
         const state = await harnessState(conversationId).catch(() => null);
         const text = [...(state?.view.entries ?? [])].reverse().find(entry => entry.kind === 'pi.assistant')?.text ?? '';
-        if (text) turn.seed(messageOfText(text));
+        if (text) segments.turn.seed(messageOfText(text));
       }
-      const message = turn?.message(requestId);
-      const stored = message?.parts.length ? message : null;
-      if (stored) await appendDisplayEntry(conversationId, displayEntryKinds.assistant, stored);
-      await finishGeneration(requestId, status, error, stored?.id ?? null, stopReason);
+      // 取消 / 失败也要把已经产出的段落库：挂上零星半段总比丢掉整轮对话好。
+      await segments.settle();
+      await finishGeneration(requestId, status, error, segments.firstEntryId, stopReason);
       channel.push({ type: 'data-progress', data: { stage: status === 'ready' ? 'ready' : status, at: Date.now() }, transient: true } as UiChunk);
     } catch (problem) {
       console.error(`生成收尾失败（生成 ${requestId}）：`, problem);
@@ -641,7 +698,6 @@ type PendingModel = {
  * 要到下一个边界（下一条消息或运行结束）才落。
  */
 class RunTranslator {
-  readonly turn: AssistantTurn;
   #buildTimer: ReturnType<typeof setInterval> | null = null;
   #buildStage: (typeof buildStageNames)[number] | null = null;
   #buildStageStartedAt = 0;
@@ -652,23 +708,32 @@ class RunTranslator {
   #chain: Promise<void> = Promise.resolve();
   readonly #toolOutcomes = new Map<string, { ok: boolean; ms: number | null }>();
 
-  constructor(readonly channel: ChunkChannel, private readonly requestId: string, private readonly model: ModelIdentity, private readonly round: number) {
-    this.turn = new AssistantTurn(channel);
-  }
+  constructor(readonly channel: ChunkChannel, private readonly segments: AssistantSegments, private readonly requestId: string, private readonly model: ModelIdentity, private readonly round: number) {}
+
+  /** 当前这一段（插话落入转录时会换成新的一段）。 */
+  get turn(): AssistantTurn { return this.segments.turn; }
 
   handle(event: HarnessEvent) {
     switch (event.type) {
       case 'snapshot':
         this.turn.seed(event.generation?.message);
         break;
-      case 'message_start':
-        this.turn.seed(event.message);
+      case 'message_start': {
+        // 运行开始时那条用户条目在观察者附加之前就已落地，所以这里出现的用户消息只能是中途插话。
+        const text = userTextOf(event.message);
+        if (text !== null) this.#steerLanded(text);
+        // 工具结果与系统条目同样带 model 文本，但它们不是助手正文：`message_end` 只认助手条目，
+        // 这里也要一致，否则工具结果的文本会在工具卡片之外再当成助手文本流一遍。
+        else if (z.object({ role: z.literal('assistant') }).safeParse(event.message).success) this.turn.seed(event.message);
         break;
+      }
       case 'message_update':
         this.turn.applyChanges(event.changes ?? []);
         break;
       case 'message_end': {
         const message = entryAssistantMessage(event.entry);
+        // 非助手条目（插话的用户条目、工具结果）不是模型步骤：不分段也不记这一步的账。
+        if (!message) break;
         this.turn.reconcile(message);
         this.turn.closeText();
         this.#chain = this.#chain.then(() => this.#recordAssistant(message)).catch(() => undefined);
@@ -703,6 +768,16 @@ class RunTranslator {
     await this.#chain;
     await this.#flushPending();
     this.#stopBuildWatch();
+  }
+
+  /**
+   * 插话落入转录（pi 的分段点）：封住当前段、把它写成一条 `app.assistant` 条目，紧接着写插话自己的
+   * `app.user` 条目，最后另起一段继续累积。两次写入的顺序就是条目 id 的顺序，所以刷新后看到的是
+   * 「AI 回复块 1 / 插话 / AI 回复块 2」。
+   */
+  #steerLanded(text: string): void {
+    this.segments.seal();
+    this.segments.append(displayEntryKinds.user, { id: `steer-${randomUUID()}`, role: 'user', parts: [{ type: 'text', text }] });
   }
 
   #progress(data: unknown) {
@@ -1016,7 +1091,7 @@ export async function harnessChatResponse(req: Request, raw: unknown, user: User
   void observeHarnessRun({ conversationId, requestId: input.requestId, app, model, channel, stop });
 
   const stream = createUIMessageStream({
-    generateId: () => assistantMessageId(input.requestId),
+    generateId: () => assistantMessageId(input.requestId, 1),
     onError: () => (stop.signal.aborted ? '生成已取消' : '生成失败，请查看任务状态'),
     execute: async ({ writer }) => {
       for await (const chunk of channel.drain()) {
@@ -1047,8 +1122,10 @@ export async function harnessCancelGeneration(appId: string, user: User): Promis
 /**
  * harness 引擎的中途插话：与 legacy 同一套产品语义（仅创建者、只在有活跃生成时适用、文本成为一条
  * 普通 user 消息）。落地方式：插话交给 pi-durable 的 `submit({ whenBusy: "steer" })`，排队进
- * `pi.inbox`，在**当前步骤跑完后**的下一个边界落入 transcript 并进入下一次模型调用；同一次提交带上
- * `app.user` 展示条目，刷新后仍能看到自己插的话。
+ * `pi.inbox`，在**当前步骤跑完后**的下一个边界落入 transcript 并进入下一次模型调用。
+ *
+ * 插话气泡不随这次提交写：它要排在插话之前的助手回复段之后，而条目 id 的顺序就是转录顺序，所以由
+ * 观察线程在分段点把它写进转录（否则它会被提交时写入，排在整轮助手回复之前）。
  */
 export async function harnessSteerGeneration(appId: string, user: User, text: string): Promise<boolean> {
   // 插话会写进对话历史并影响这次生成，属于写操作：只有应用创建者可以（同 app/chat/gen/code）。
@@ -1058,7 +1135,6 @@ export async function harnessSteerGeneration(appId: string, user: User, text: st
   // 队列只对正在跑的那次生成有效：任务已结束或没有活跃生成时插话无处可去。
   const conversationId = active ? await conversationIdOf(appId) : undefined;
   if (!task || !active || conversationId === undefined) throw new BusinessError(409, 40900, '当前没有正在生成的步骤，插话不适用');
-  const message: UIMessage = { id: String(await nextSnowflakeId()), role: 'user', parts: [{ type: 'text', text }] };
-  await submitHarness(conversationId, text, undefined, { whenBusy: 'steer', entry: { kind: displayEntryKinds.user, data: message } });
+  await submitHarness(conversationId, text, undefined, { whenBusy: 'steer' });
   return true;
 }

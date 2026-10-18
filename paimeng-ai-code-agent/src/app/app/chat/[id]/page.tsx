@@ -3,8 +3,8 @@ import { use, useState, useEffect, useMemo, useRef, useCallback, type ComponentR
 import { useRouter } from 'next/navigation';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
-import { App, Button, Input, Alert, Tag, Space, Spin, Avatar, Tooltip } from 'antd';
-import { SendOutlined, DownloadOutlined, CloudUploadOutlined, EditOutlined, StopOutlined, InfoCircleOutlined, ExportOutlined, PictureOutlined, UserOutlined } from '@ant-design/icons';
+import { App, Button, Input, Alert, Tag, Space, Spin, Tooltip } from 'antd';
+import { SendOutlined, DownloadOutlined, CloudUploadOutlined, EditOutlined, StopOutlined, InfoCircleOutlined, ExportOutlined, PictureOutlined } from '@ant-design/icons';
 import { api } from '@/client/api';
 import { useAuth } from '@/components/providers';
 import { type AppInfo, type Generation, type GenerationAccount, isProjectCodeGenType } from '@/shared/contracts';
@@ -205,6 +205,12 @@ function Chat({ id }: { id: string }) {
     },
   });
   const generating = status === 'submitted' || status === 'streaming' || task?.status === 'generating' || task?.status === 'building';
+  /** 读回转录里的对话历史：进入页面与一次生成结束后共用（后者重排插话分段后的气泡顺序）。 */
+  const loadHistory = useCallback(async (): Promise<ChatMessage[]> => {
+    const history = await api<ChatMessage[]>('app/messages?appId=' + encodeURIComponent(id));
+    if (mounted.current) setMessages(history);
+    return history;
+  }, [id, setMessages]);
   /**
    * 任务终态统一收尾时间线与队列：终态可能来自终态进度事件，也可能只有轮询才能看到
    * （连接被切断、用户主动取消）。流还在跑时不收尾，避免上一轮的终态覆盖刚开始的新一轮。
@@ -219,7 +225,11 @@ function Chat({ id }: { id: string }) {
     setProgress(current => current.outcome === 'running' ? settleProgress(current, terminal) : current);
     if (terminal === 'cancelled') setQueuePaused(true);
     else setDrainArmed(true);
-  }, [task, status]);
+    // 插话把一次生成切成多段：流式期间客户端只有一条助手气泡（插话只能插在它前面），终态后重取一次
+    // 历史，才能按落库顺序重新渲染「段 1 / 插话 / 段 2」。队列还有消息时先让队列发出去（历史重取会
+    // 顶掉刚乐观追加的那条用户消息），下一次终态再对齐。
+    if (steered && queue.length === 0) void loadHistory().catch(() => undefined);
+  }, [task, status, steered, queue.length, loadHistory]);
   const taskStatus = task?.status;
   // 每次生成结束时取一次用量：一条助手回复对应一次生成，按消息 id 挂到气泡上；生成中不轮询明细。
   const assetUrl = useCallback((path: string) => '/api/app/asset?appId=' + encodeURIComponent(id) + '&path=' + encodeURIComponent(path), [id]);
@@ -258,11 +268,10 @@ function Chat({ id }: { id: string }) {
       setAppLoaded(true);
       try {
         const [history, generation] = await Promise.all([
-          api<ChatMessage[]>('app/messages?appId=' + encodeURIComponent(id)),
+          loadHistory(),
           api<Generation | null>('app/generation?appId=' + encodeURIComponent(id)),
         ]);
         if (!live) return;
-        setMessages(history);
         setTask(generation);
         setHistoryLoaded(true);
         if (!history.length) setInput(current => current || info.initPrompt);
@@ -546,10 +555,8 @@ function Chat({ id }: { id: string }) {
                       <MessageImages appId={id} attachments={messageAttachments(item)} />
                       {item.parts.map((part, index) => part.type === 'text' ? <div className="message-text" key={index}>{part.text}</div> : null)}
                     </div>
-                    <Avatar className="message-avatar" src={user?.userAvatar ?? undefined} icon={<UserOutlined />} />
                   </div>
                 : <div className="message-item message-ai" key={item.id}>
-                    <Avatar className="message-avatar" src="/paimeng.png" alt="AI 助手" />
                     <div className="message-bubble"><AssistantParts parts={item.parts} assetUrl={assetUrl} />{usage && <GenerationUsage usage={usage} />}</div>
                   </div>;
             })}

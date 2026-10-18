@@ -148,6 +148,10 @@ Ctrl-C 对整个子进程组先 SIGTERM、5 s 后 SIGKILL；数据库不属于�
 harness 只认 `DURABLE_MODEL_*` 环境变量（m3 §7.6 第 3 条的已知缺口）。部署时这是**两处独立的密钥管理**，
 管理端改密钥不会影响生成链路。
 
+> 这条缺口的现状证据（`generation_step` 里 `model_alias=codegen.default` 但 `provider_id=durable`）、
+> 三个后果（生成模型、`settings.reasoning`、密钥）与两条收敛方案（harness 读产品库 / 每轮下推绑定）
+> 见 [provider-convergence.md](./provider-convergence.md)。
+
 ## 2. 启动与健康
 
 ### 2.1 启动顺序（硬依赖）
