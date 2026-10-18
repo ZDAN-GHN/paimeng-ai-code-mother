@@ -8,7 +8,7 @@ const database = new URL(process.env.DATABASE_URL ?? '');
 assert.equal(database.protocol, 'postgres:');
 assert.equal(database.hostname, '127.0.0.1');
 assert.equal(database.port, '55432');
-assert.match(database.pathname, /^\/paimeng_ts(?:_test)?$/);
+assert.match(database.pathname, /^\/paimeng_app(?:_test)?$/);
 const connection = new pg.Client({ connectionString: database.href });
 await connection.connect();
 try {

@@ -110,6 +110,27 @@ describe('后端关键不变量（独立 Postgres 测试库）', () => {
     }
   });
 
+  it('全局生成并发达到上限时拒绝新应用，上限提高后恢复', async () => {
+    const otherId = await nextSnowflakeId();
+    await db().insert(apps).values({ id: otherId, initPrompt: '并发上限', codeGenType: 'html', userId: BigInt(actor.id), createTime: now(), updateTime: now() });
+    const otherApp = otherId.toString();
+    const previous = process.env.GENERATION_MAX_CONCURRENT;
+    process.env.GENERATION_MAX_CONCURRENT = '1';
+    try {
+      await beginGeneration(appId, randomUUID(), actor);
+      await clearRateLimit();
+      // 并发准入在限流之前：这个拒绝不消耗用户的限流额度，报文说的是并发而不是频率。
+      await expect(beginGeneration(otherApp, randomUUID(), actor)).rejects.toMatchObject({ status: 429, message: expect.stringContaining('并发') });
+      process.env.GENERATION_MAX_CONCURRENT = '2';
+      await expect(beginGeneration(otherApp, randomUUID(), actor)).resolves.toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.GENERATION_MAX_CONCURRENT;
+      else process.env.GENERATION_MAX_CONCURRENT = previous;
+      for (const table of [leases, generations]) await db().delete(table).where(eq(table.appId, BigInt(otherApp)));
+      await db().delete(apps).where(eq(apps.id, BigInt(otherId)));
+    }
+  });
+
   it('终止为 failed 的任务不能被后续 ready 覆盖', async () => {
     const id = randomUUID();
     await beginGeneration(appId, id, actor);

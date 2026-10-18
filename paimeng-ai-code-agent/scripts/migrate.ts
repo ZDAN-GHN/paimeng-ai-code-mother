@@ -2,7 +2,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import pg from 'pg';
 const url=new URL(process.env.DATABASE_URL??'');
-if(!/^paimeng_ts(?:_test)?$/.test(url.pathname.slice(1)))throw new Error('仅允许迁移独立的 paimeng_ts 库');
+if(!/^paimeng_app(?:_test)?$/.test(url.pathname.slice(1)))throw new Error('仅允许迁移独立的 paimeng_app 库');
 const client=new pg.Client({connectionString:url.href});
 await client.connect();
 try{

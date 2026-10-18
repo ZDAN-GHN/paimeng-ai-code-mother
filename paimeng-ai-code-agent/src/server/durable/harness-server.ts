@@ -35,9 +35,11 @@
  * SSE/NDJSON view of GET /events or GET /agent-events and nothing else. The
  * submit path and the durable task context never see a request socket.
  */
+import { execFile } from "node:child_process";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { resolve } from "node:path";
+import { promisify } from "node:util";
 import { Type } from "@earendil-works/pi-ai";
 import type { JsonValue } from "@earendil-works/chord";
 import { withAbortSignal } from "@earendil-works/chord/context";
@@ -82,6 +84,51 @@ function log(message: string) {
 /** Appends start/end markers so verification can see a tool survive (or not) a disconnect or a kill. */
 function recordToolEvent(event: string, name: string, detail: Record<string, unknown>) {
 	appendFileSync(toolLog, `${JSON.stringify({ event, name, at: Date.now(), pid: process.pid, ...detail })}\n`);
+}
+
+const execFileAsync = promisify(execFile);
+
+/** Docker's `CreatedAt` reads like `2026-10-18 09:05:00 +0000 UTC`. */
+function dockerCreatedAt(value: string): number | null {
+	const match = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) ([+-]\d{2})(\d{2})/.exec(value.trim());
+	if (!match) return null;
+	const at = Date.parse(`${match[1]}T${match[2]}${match[3]}:${match[4]}`);
+	return Number.isFinite(at) ? at : null;
+}
+
+/**
+ * `docker run --rm` only removes a container when it exits, so a SIGKILLed harness or Next leaves a
+ * running `paimeng-ts-build-*` container behind. Sweep those leftovers before `resume()` replays any
+ * build, and only containers created before this process started: a build another process legitimately
+ * started carries a later timestamp and is left alone (docs/plans/pi-durable-deployment.md §2.3).
+ */
+async function sweepOrphanBuildContainers() {
+	const startedAt = Date.now();
+	let listed: string;
+	try {
+		listed = (await execFileAsync("docker", ["ps", "-a", "--filter", "name=paimeng-ts-build-", "--format", "{{.ID}}|{{.CreatedAt}}"])).stdout;
+	} catch (error) {
+		log(`orphan build sweep skipped: ${String(error)}`);
+		return;
+	}
+	const orphans = listed
+		.split("\n")
+		.map((line) => line.trim())
+		.filter(Boolean)
+		.map((line) => line.split("|"))
+		.map(([id, createdAt]) => ({ id: id ?? "", createdAt: dockerCreatedAt(createdAt ?? "") }))
+		.filter((item) => item.id && item.createdAt !== null && item.createdAt < startedAt);
+	if (orphans.length === 0) {
+		log("orphan build sweep: no leftover paimeng-ts-build-* containers");
+		return;
+	}
+	try {
+		await execFileAsync("docker", ["rm", "-f", ...orphans.map((item) => item.id)]);
+	} catch (error) {
+		log(`orphan build removal failed: ${String(error)}`);
+		return;
+	}
+	log(`orphan build sweep: removed ${orphans.length} container(s): ${orphans.map((item) => item.id.slice(0, 12)).join(", ")}`);
 }
 
 function requireEnv(api: ToolExecutionApi): ExecutionEnv {
@@ -474,7 +521,8 @@ const { harness } = await openPgHarness({
 	],
 	settings: { stream: { timeoutMs: 300_000 } },
 });
-// Schedule work left behind by a killed process before serving traffic.
+// Sweep build containers a killed process left behind, then schedule the work it left behind.
+await sweepOrphanBuildContainers();
 harness.resume();
 const root = await harness.root(context, { agent: { model: modelRef(), cwd: rootWorkspace, thinkingLevel: "off" } });
 log(`harness open conversation=${root.id} workspace=${rootWorkspace} storage=postgres`);

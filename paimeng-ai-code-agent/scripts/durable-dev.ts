@@ -31,7 +31,7 @@ try {
 }
 
 const pgScript = resolve(root, 'scripts', 'durable-pg.sh');
-const pgUrl = process.env.DURABLE_PG_URL ?? 'postgres://spike:spike@127.0.0.1:55432/durable';
+const pgUrl = process.env.DURABLE_PG_URL ?? 'postgres://spike:spike@127.0.0.1:55432/paimeng_agent';
 const harnessPort = Number(process.env.DURABLE_HARNESS_PORT ?? 5599);
 const appPort = Number(process.env.DURABLE_APP_PORT ?? 3100);
 const appOrigin = process.env.DURABLE_APP_ORIGIN ?? `http://localhost:${appPort}`;

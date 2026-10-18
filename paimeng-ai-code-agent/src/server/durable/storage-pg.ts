@@ -53,9 +53,14 @@ import pg from "pg";
 // enough to be an exact JS number. The parser is set on this backend's own
 // clients rather than globally: the product's pool (src/server/db.ts) keeps
 // BIGINT in the string domain because its snowflake IDs exceed 2^53.
-/** The storage lives in the product's Postgres unless the caller points it elsewhere. */
+/**
+ * The storage lives in its own database on the same Postgres instance as the product
+ * (`DURABLE_PG_URL`). There is deliberately no `DATABASE_URL` fallback: the product and the
+ * storage are two databases, and falling back would silently mix the durable tables into the
+ * business database.
+ */
 function defaultPgUrl(): string {
-	return process.env.DURABLE_PG_URL ?? process.env.DATABASE_URL ?? "postgres://spike:spike@127.0.0.1:55432/paimeng_ts";
+	return process.env.DURABLE_PG_URL ?? "postgres://spike:spike@127.0.0.1:55432/paimeng_agent";
 }
 
 const bigintAsNumber = { getTypeParser: (oid: number, format?: "text" | "binary") => (oid === 20 ? (value: string) => Number(value) : pg.types.getTypeParser(oid, format)) };

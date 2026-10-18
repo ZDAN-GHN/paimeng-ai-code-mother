@@ -2,6 +2,7 @@ import 'server-only';
 import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { db, now, type Transaction } from './db';
 import { apps, generations, leases, users } from './schema';
+import { getConfig } from './config';
 import { BusinessError } from './http';
 import { enforceChatRateLimit } from './rate-limit';
 import { stopReasonFrom, type GenerationStopReason } from './generation-accounting';
@@ -74,6 +75,7 @@ export async function beginGeneration(appId: string, id: string, user: User, cli
     const [lease] = await tx.select().from(leases).where(eq(leases.appId, app.id)).limit(1);
     if (lease && lease.expiresAt > now()) throw new BusinessError(409, 40900, '应用已有正在运行的生成任务');
     if (lease) await recoverLease(tx, lease);
+    await admitGeneration(tx);
     await enforceChatRateLimit(tx, actor.id.toString(), clientAddress);
     await tx.insert(generations).values({ id, appId: app.id, userId: actor.id, status: 'generating', createTime: now(), updateTime: now() });
     await tx.insert(leases).values({ appId: app.id, generationId: id, expiresAt: expiry() });
@@ -82,6 +84,44 @@ export async function beginGeneration(appId: string, id: string, user: User, cli
     if (code === '23505') throw new BusinessError(409, 40900, '该请求或消息已经处理，请读取生成状态');
     throw error;
   });
+}
+
+/**
+ * 全局并发上限：租约行是「应用正在生成」的权威记录，未过期租约数就是同时在跑的生成数。
+ * 准入用一条事务级 advisory lock 串行化「计数 + 插入」，否则两个请求会同时看到 limit-1 而双双插入。
+ * 超限直接拒绝（429），不排队：排队要额外的队列进程和用户可见的等待态，而单应用已经有 409 等待语义。
+ */
+const admissionLockKey = 0x67656e61646d6974n;
+async function admitGeneration(tx: Transaction) {
+  const limit = getConfig().generationMaxConcurrent;
+  await tx.execute(sql`select pg_advisory_xact_lock(${admissionLockKey})`);
+  const [active] = await tx.select({ count: sql<number>`count(*)::int` }).from(leases).where(gte(leases.expiresAt, now()));
+  if (Number(active.count) >= limit) throw new BusinessError(429, 42900, `生成并发已达上限（${limit} 个），请稍后重试`);
+}
+
+/**
+ * 状态仍活跃、但租约已过期（或已不存在）的生成：Next 中途重启留下的孤儿，由接管对账处理
+ * （docs/plans/pi-durable-deployment.md §5.2）。传 appId 只查一个应用（状态读取路径）。
+ */
+export async function staleActiveGenerations(appId?: string): Promise<{ id: string; appId: string; conversationId: number | null }[]> {
+  const rows = await db()
+    .select({ id: generations.id, appId: generations.appId, conversationId: apps.conversationId })
+    .from(generations)
+    .innerJoin(apps, eq(apps.id, generations.appId))
+    .leftJoin(leases, eq(leases.generationId, generations.id))
+    .where(sql`${generations.status} in ('generating', 'building') and (${leases.expiresAt} is null or ${leases.expiresAt} <= ${now()})${appId === undefined ? sql`` : sql` and ${generations.appId} = ${BigInt(appId)}`}`);
+  return rows.map(row => ({ id: row.id, appId: String(row.appId), conversationId: row.conversationId }));
+}
+
+/**
+ * 接管一条已过期的租约：普通心跳不允许复活过期租约（旧执行者不能写进新任务），这里是唯一的例外，
+ * 只给接管路径用。条件更新兼当互斥：多个 Next 实例同时尝试接管时只有一个能续上（行锁序列化）。
+ */
+export async function adoptLease(id: string): Promise<boolean> {
+  const result = await db().update(leases).set({ expiresAt: expiry() }).where(and(eq(leases.generationId, id), lte(leases.expiresAt, now())));
+  if (!result.rowCount) return false;
+  const [task] = await db().select().from(generations).where(eq(generations.id, id));
+  return Boolean(task && activeStatuses.includes(task.status));
 }
 
 export async function setGeneration(id: string, status: GenerationStatus, error: string | null = null, stopReason: GenerationStopReason | null = null) {

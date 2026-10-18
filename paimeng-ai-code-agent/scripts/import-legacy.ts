@@ -9,7 +9,7 @@ import { getConfig } from '../src/server/config';
 import { planLegacyArtifacts, applyLegacyArtifactPlan, rollbackLegacyArtifacts } from '../src/server/legacy-artifacts';
 
 const url = new URL(process.env.DATABASE_URL ?? '');
-if (!/^paimeng_ts(?:_test)?$/.test(url.pathname.slice(1))) throw new Error('导入仅支持独立的 paimeng_ts 库');
+if (!/^paimeng_app(?:_test)?$/.test(url.pathname.slice(1))) throw new Error('导入仅支持独立的 paimeng_app 库');
 
 function parseArguments(argv: string[]) {
   const options = { snapshot: '', artifacts: '', covers: '', strict: false };

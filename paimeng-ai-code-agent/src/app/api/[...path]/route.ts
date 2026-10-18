@@ -2,9 +2,8 @@ import { z } from 'zod';
 import { guardRequest, body, success, failure, BusinessError, withHeartbeat } from '@/server/http';
 import { login, logout, register, requireUser, requireAdmin } from '@/server/auth';
 import * as business from '@/server/business';
-import { generationFor } from '@/server/generation-store';
 import { generationAccounts } from '@/server/generation-accounting';
-import { harnessCancelGeneration, harnessChatResponse, harnessSteerGeneration, loadMessages } from '@/server/durable-engine';
+import { generationStatus, harnessCancelGeneration, harnessChatResponse, harnessSteerGeneration, loadMessages } from '@/server/durable-engine';
 import { applyModelConfigNow, deleteModelAlias, deleteModelProvider, probeProviderModels, readModelAdminConfig, upsertModelAlias, upsertModelProvider } from '@/server/models/admin';
 import { uploadImages } from '@/server/image-upload';
 import { transcribeEnabled, transcribeSpeech } from '@/server/speech';
@@ -29,7 +28,7 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/get/vo')return success(await business.getApp(idSchema.parse(query.get('id'))));
    if(path==='app/admin/get/vo'){await requireAdmin(req);return success(await business.getApp(idSchema.parse(query.get('id'))));}
    if(path==='app/messages'){const user=await requireUser(req);const id=idSchema.parse(query.get('appId'));await business.getApp(id,user,true,true);return success(await loadMessages(id));}
-   if(path==='app/generation'){const user=await requireUser(req);const id=idSchema.parse(query.get('appId'));await business.getApp(id,user,true,true);return success(await generationFor(id));}
+   if(path==='app/generation'){const user=await requireUser(req);const id=idSchema.parse(query.get('appId'));await business.getApp(id,user,true,true);return success(await generationStatus(id));}
    if(path==='app/generation/accounts'){const user=await requireUser(req);const id=idSchema.parse(query.get('appId'));await business.getApp(id,user,true,true);const limit=z.coerce.number().int().min(1).max(20).default(10).parse(query.get('limit')??undefined);return success(await generationAccounts(id,limit));}
    if(path==='app/chat/transcribe'){await requireUser(req);return success({enabled:await transcribeEnabled()});}
    if(path==='app/asset'){const user=await requireUser(req);const id=idSchema.parse(query.get('appId'));const asset=await business.readAppAsset(id,z.string().min(1).max(512).parse(query.get('path')),user);return new Response(new Uint8Array(asset.bytes),{headers:{'content-type':asset.mime,'content-length':String(asset.bytes.length),'cache-control':'private, max-age=300','x-content-type-options':'nosniff'}});}

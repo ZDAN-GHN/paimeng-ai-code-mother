@@ -8,10 +8,10 @@ import { cancelGeneration, generationRequestSchema, uploadDirectory, uploadFileN
 import { readAttachmentBytes, readAttachmentOriginal } from './attachment-store';
 import { buildApp, sourceDigest, type BuildStageProgress } from './artifacts';
 import { classifyBuildFailure, formatBuildFeedback, noProgressMessage } from './build-feedback';
-import { getApp } from './business';
+import { appForAdoption, getApp } from './business';
 import { getConfig } from './config';
 import { db } from './db';
-import { beginGeneration, finishGeneration, generationFor, heartbeat, restoreGeneration, setGeneration } from './generation-store';
+import { adoptLease, beginGeneration, finishGeneration, generationFor, heartbeat, restoreGeneration, setGeneration, staleActiveGenerations } from './generation-store';
 import { recordAssistantStep, recordBuildStep, type AccountToolCall, type EntryUsage, type GenerationStopReason, type ModelIdentity } from './generation-accounting';
 import { modelBindingFor } from './model';
 import { nextSnowflakeId } from './snowflake';
@@ -880,6 +880,54 @@ export async function loadMessages(appId: string): Promise<UIMessage[]> {
     await delay(150);
   }
   throw new Error('harness 没有在 30 秒内开始这次生成');
+}
+
+/** 无客户端接管的观察线程：UI 块直接丢掉（不堆积），心跳、最终验证与收尾照常。 */
+class DetachedChannel extends ChunkChannel {
+  override push() {}
+}
+
+/**
+ * 接管一条重启前遗留的生成：续上过期租约，再重新 attach 观察线程（心跳 + 最终验证 + 收尾）。
+ * `adoptLease` 只对已过期的租约生效，所以同时读到的多个实例只有一个接管成功。
+ */
+async function adoptGeneration(row: { id: string; appId: string; conversationId: number | null }): Promise<void> {
+  const { id, appId, conversationId } = row;
+  if (conversationId === null) return;
+  if (!(await harnessState(conversationId)).view.live.busy) {
+    console.warn(`接管跳过：生成 ${id} 的租约已过期且会话 ${conversationId} 没有活跃运行，交给租约回收`);
+    return;
+  }
+  const app = await appForAdoption(appId);
+  if (!app) return;
+  if (!await adoptLease(id)) return;
+  const { generation } = await modelBindingFor(app.codeGenType, '', app.template);
+  const model: ModelIdentity = { alias: generation.alias, providerId: generation.providerId, modelName: generation.modelName };
+  void observeHarnessRun({ conversationId, requestId: id, app, model, channel: new DetachedChannel(), stop: new AbortController() });
+  console.warn(`接管重启前遗留的生成 ${id}（应用 ${appId}，会话 ${conversationId}）：等待运行结束后做最终验证`);
+}
+
+/**
+ * 接管重启前遗留的生成（docs/plans/pi-durable-deployment.md §5.2）。
+ *
+ * 中途重启会丢掉观察线程：租约 30 秒后过期，下一次状态读取把它回收成 failed/interrupted，而 harness
+ * 里的运行其实还在跑，于是「任务已失败」和「还在生成」分裂。启动时（`instrumentation.ts`）与每次状态
+ * 读取都对账：租约已过期但会话仍有活跃运行的，重新 attach；没有活跃运行的交给 sweepStaleLeases 回收。
+ */
+export async function adoptOrphanedGenerations(appId?: string): Promise<void> {
+  for (const row of await staleActiveGenerations(appId)) {
+    try {
+      await adoptGeneration(row);
+    } catch (problem) {
+      console.warn(`接管生成 ${row.id} 失败：`, problem);
+    }
+  }
+}
+
+/** `app/generation` 的状态读取：先对账重启遗留的生成，再走常规的状态与租约回收。 */
+export async function generationStatus(appId: string) {
+  await adoptOrphanedGenerations(appId);
+  return generationFor(appId);
 }
 
 /** 本轮附件解析出的图片（派生图字节，送模型用）。 */

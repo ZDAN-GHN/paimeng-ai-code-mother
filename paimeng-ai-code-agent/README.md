@@ -2,17 +2,17 @@
 
 本目录包含 Next.js、React、TypeScript、Vercel AI SDK、Postgres 和 Drizzle 的独立应用。运行新应用无需启动旧 Java 后端或旧 Vue 平台。所有命令都在 `paimeng-ai-code-agent/` 内执行。
 
-生成入口只有一个引擎：请求提交给常驻的 pi-durable harness 进程（单写进程 + attach，实现在 `src/server/durable/`），Next 只做鉴权与 SSE 转发，所以浏览器断连不会取消任务。一条命令起全套见下面的 `npm run dev:durable`。数据库是 Postgres：业务表与 harness 的会话存储同库（表名与列名见 `docs/plans/pi-durable-m4.md`）。
+生成入口只有一个引擎：请求提交给常驻的 pi-durable harness 进程（单写进程 + attach，实现在 `src/server/durable/`），Next 只做鉴权与 SSE 转发，所以浏览器断连不会取消任务。一条命令起全套见下面的 `npm run dev:durable`。数据库是 Postgres，**同实例两库**：`paimeng_app` 放业务表，`paimeng_agent` 放 harness 的会话存储（表名与列名见 `docs/plans/pi-durable-m4.md`，部署形态见 `docs/plans/pi-durable-deployment.md`）。
 
 ## 启动开发环境
 
 需要 Node.js 24.15 或更新的 24 版本、npm、Docker，以及可运行 Chromium 沙箱的 Linux 环境。Docker 守护进程必须已启动。
 
-1. 复制 `.env.example` 为 `.env`。`DATABASE_URL` 已填写产品 Postgres 库（`postgres://spike:spike@127.0.0.1:55432/paimeng_ts`），`REDIS_URL` 已填写无密码本地 Redis 地址。`MYSQL_LEGACY_URL` 只给一次性业务行搬迁用，运行期不连接旧库。已有 `.env` 的真实模型配置保留。
+1. 复制 `.env.example` 为 `.env`。`DATABASE_URL` 已填写产品 Postgres 库（`postgres://spike:spike@127.0.0.1:55432/paimeng_app`），`DURABLE_PG_URL` 是同实例的存储库（`…/paimeng_agent`），`REDIS_URL` 已填写无密码本地 Redis 地址。`MYSQL_LEGACY_URL` 只给一次性业务行搬迁用，运行期不连接旧库。已有 `.env` 的真实模型配置保留。
 2. 执行 `npm ci`。
 3. 执行 `npm run assets:import`。此命令只读取旧平台的派蒙图片，写入新应用的 `public/`。
 4. 执行 `npm run infra:up`。固定命名的 Redis 容器启动并等待健康检查；产品 Postgres 由 `npm run durable:pg -- start` 提供（见第 10 步，也可以先起它再执行本步以下的数据库命令）。该命令读取 `.env`，不生成或改写凭据。
-5. 执行 `npm run durable:pg -- start` 起 Postgres（127.0.0.1:55432，自动建 `paimeng_ts` 与 `paimeng_ts_test`），再执行 `npm run db:migrate`。迁移完成后显示“产品 Postgres 库迁移完成”，只执行 `migrations/001_initial.sql`（业务表全套，含模型配置表与状态行）；重复执行会核对已有迁移的校验和。随后执行一次 `npm run db:init-models`，把现有 `.env` 的模型配置写入数据库（仅当表仍为空且版本为零；幂等，已有配置不会被覆盖）。从旧 MySQL 库升级时额外跑一次 `npm run db:import-mysql`（只搬业务行，幂等，见 `docs/plans/pi-durable-m4.md`）。
+5. 执行 `npm run durable:pg -- start` 起 Postgres（固定服务 127.0.0.1:55432，容器名 `zslm-pg-paimeng`，自动建 `paimeng_app`、`paimeng_app_test`、`paimeng_agent`、`paimeng_agent_test` 四个 database），再执行 `npm run db:migrate`。迁移完成后显示“产品 Postgres 库迁移完成”，只执行 `migrations/001_initial.sql`（业务表全套，含模型配置表与状态行）；重复执行会核对已有迁移的校验和。随后执行一次 `npm run db:init-models`，把现有 `.env` 的模型配置写入数据库（仅当表仍为空且版本为零；幂等，已有配置不会被覆盖）。从旧 MySQL 库升级时额外跑一次 `npm run db:import-mysql`（只搬业务行，幂等，见 `docs/plans/pi-durable-m4.md`）。
 6. 执行 `docker pull node:24-alpine`。Vue 生成工程使用该镜像进行隔离构建。
 7. 执行 `npx playwright install chromium`。发布封面截图和浏览器测试都需要 Chromium。若系统缺少浏览器依赖，按 Playwright 的报错安装系统依赖。
 8. 执行 `npm run dev:all` 同时启动管理端与预览进程，输出按 `[app]`、`[preview]` 前缀合并，按 Ctrl-C 一起停止；也可以在一个终端执行 `npm run preview`，在另一个终端执行 `npm run dev`。两个进程的端口分别取自 `APP_ORIGIN` 与 `PREVIEW_ORIGIN`，端口已被占用时 `dev:all` 会直接报错退出。
@@ -33,7 +33,7 @@
 
 ## 使用固定的本地数据库容器
 
-产品库是 Postgres 16，由 `scripts/durable-pg.sh`（`npm run durable:pg -- start`）起容器 `zslm-pg-durable`，宿主地址 `127.0.0.1:55432`，数据目录 `runtime/durable-pg/pgdata/`（已 gitignore）。开发库为 `paimeng_ts`，集成测试库为 `paimeng_ts_test`，两个 database 在同一个容器里；账号 `spike`、密码 `spike` 是本地一次性凭据。表名与列名见 `docs/plans/pi-durable-m4.md`。
+产品库是 Postgres 16，由 `compose.yaml` 的 `postgres` 服务提供（`npm run durable:pg -- start|stop|status|psql|purge`），容器名 `zslm-pg-paimeng`，宿主地址 `127.0.0.1:55432`（避开别的 `zslm-postgres` 的 5432），数据目录 `runtime/durable-pg/pgdata/`（已 gitignore）。同一个实例里四个 database：开发库 `paimeng_app` 与存储库 `paimeng_agent`，集成测试库 `paimeng_app_test` 与 `paimeng_agent_test`；账号 `spike`、密码 `spike` 是本地一次性凭据。表名与列名见 `docs/plans/pi-durable-m4.md`，部署与并发/清扫说明见 `docs/plans/pi-durable-deployment.md`。
 
 旧 MySQL 容器 `zslm-mysql`（`runtime/mysql/`，库 `paimeng_ai_code_mother_ts`）**保留作归档**：本步把业务行搬到 Postgres，没有删除旧库。`compose.yaml` 里的 mysql 服务只在需要回看旧数据时启动。
 
@@ -97,13 +97,13 @@ Redis 已作为本地开发服务提供连接。平台会话、生成任务与�
 
 ## 运行完整测试
 
-1. 执行 `npm run durable:pg -- start` 起 Postgres，再执行 `npm run db:test:setup`。此命令在自己的容器里创建 `paimeng_ts_test` 并执行测试库迁移。
+1. 执行 `npm run durable:pg -- start` 起 Postgres，再执行 `npm run db:test:setup`。此命令确保同实例的 `paimeng_app_test` 与 `paimeng_agent_test` 存在，并在前者上执行测试库迁移。
 2. 执行 `npm run type-check`。
 3. 执行 `npm test`。完整测试需要 Postgres、Docker 镜像和 Chromium，不会因缺少依赖而跳过相关检查。durable 回归用例（`tests/integration/durable-m1`）需要同一个 Postgres；没有 Postgres 时这组用例会打印原因并 skip；用完 `npm run durable:pg -- stop`。
 4. 保持开发服务和预览服务运行，并将本地模型设为 fixture。执行 `npm run test:e2e`。浏览器场景只创建带唯一前缀的验收账号及应用。
 5. 执行 `npm run verify:boundary`，核对旧项目与已有删除状态。
 
-集成测试在数据库操作前统一解析 URL，只将专用开发库或测试库映射到 `paimeng_ts_test`；URL 不允许查询选项，防止测试连接目标含糊。测试只清理自己创建的记录。浏览器测试使用开发库 `paimeng_ts`，保留验收样本。运行浏览器测试时一次只启动一个测试命令，避免报告目录被另一轮测试覆盖。
+集成测试在数据库操作前统一解析 URL，只将专用开发库或测试库映射到 `paimeng_app_test`；URL 不允许查询选项，防止测试连接目标含糊。`tests/integration/durable-m1` 的 harness 存储用 `paimeng_agent_test`。测试只清理自己创建的记录。浏览器测试使用开发库 `paimeng_app`，保留验收样本。运行浏览器测试时一次只启动一个测试命令，避免报告目录被另一轮测试覆盖。
 
 浏览器截图写入 `runtime/evidence/`，HTML 报告写入 `playwright-report/`。这些运行文件已被忽略。只验证默认入口跳转、注册登录、会话 Cookie 隔离与来源拒绝时，执行 `npm run test:e2e -- tests/e2e/platform-origin.spec.ts`。这两项浏览器回归测试不调用模型，也不需要预览服务运行。
 
@@ -126,7 +126,7 @@ Redis 已作为本地开发服务提供连接。平台会话、生成任务与�
 
 ## 导入旧数据副本
 
-本项目只接受 `paimeng_ts` 或 `paimeng_ts_test` 数据库名。它不会自动连接旧库（`npm run db:import-mysql` 需要显式给出 `MYSQL_LEGACY_URL`）。
+本项目只接受 `paimeng_app` 或 `paimeng_app_test` 数据库名。它不会自动连接旧库（`npm run db:import-mysql` 需要显式给出 `MYSQL_LEGACY_URL`）。
 
 ## 从旧 MySQL 库搬迁业务行（一次性）
 

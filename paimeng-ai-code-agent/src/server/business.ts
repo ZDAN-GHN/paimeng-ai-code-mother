@@ -23,6 +23,11 @@ export async function getApp(id:string,user?:User,ownerOnly=false,allowAdmin=fal
  if(ownerOnly&&row.userId.toString()!==user?.id&&!(allowAdmin&&user?.userRole==='admin'))throw new BusinessError(403,40300,'无权限访问该应用');
  return appView(row);
 }
+/** 启动接管用：按 id 读应用，不做权限判断（调用方是服务端对账，不是用户请求）。 */
+export async function appForAdoption(id:string):Promise<AppInfo|null>{
+ const [row]=await db().select().from(apps).where(and(eq(apps.id,BigInt(id)),eq(apps.isDelete,0))).limit(1);
+ return row?appView(row):null;
+}
 async function appView(row:typeof apps.$inferSelect,connection:Pick<ReturnType<typeof db>,'select'>=db()):Promise<AppInfo>{
  const [creator]=await connection.select().from(users).where(and(eq(users.id,row.userId),eq(users.isDelete,0))).limit(1);
  // conversationId 是生成入口的内部映射（harness 引擎，见 docs/plans/pi-durable-m2.md），不属于前端契约：

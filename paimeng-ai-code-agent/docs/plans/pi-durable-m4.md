@@ -4,9 +4,15 @@
 基线 `main@d0c9797`（本步之前的提交是 `878f3c2`，备份分支 `backup/pre-m4-postgres`）。
 旧 MySQL 容器与库**保留作归档**，本步没有删除任何旧数据。
 
+> **库名已在同日的收尾提交中改过（以本节为准）**：业务库 `paimeng_ts` → **`paimeng_app`**，存储库 `durable` →
+> **`paimeng_agent`**，测试库 `paimeng_ts_test` → `paimeng_app_test`（另建 `paimeng_agent_test`）；
+> Postgres 从一次性容器 `zslm-pg-durable` 升为固定服务 **`zslm-pg-paimeng`**（端口仍 `127.0.0.1:55432`）。
+> 本文其余部分写的是改名前的现场记录（当时叫 `paimeng_ts` / `durable` / `zslm-pg-durable`），命令与 checklist
+> 已按新名更新；现状、并发上限、孤儿容器清扫与状态分裂修法见 [pi-durable-deployment.md](./pi-durable-deployment.md)。
+
 ## 0. 一句话结论
 
-产品库现在是 Postgres（`DATABASE_URL=postgres://…/paimeng_ts`），表名按业务域命名（去掉 `ts_` 前缀，
+产品库现在是 Postgres（`DATABASE_URL=postgres://…/paimeng_ts`，收尾后为 `…/paimeng_app`），表名按业务域命名（去掉 `ts_` 前缀，
 `user` → `app_user`），`mysql2` 与 `drizzle-orm/mysql2` 全部换成 `pg` 与 `drizzle-orm/node-postgres`。
 对话转录不再有产品自己的表：用户与助手气泡作为 pi-durable 条目（`app.user` / `app.assistant`）存在
 harness 存储里，`GET app/messages` 经 harness 的 `/messages` 读回。`ts_message`、`ts_chat_history`、
@@ -57,11 +63,11 @@ camelCase 列必须处处加双引号，一次改净比每个查询记得加引�
 | --- | --- |
 | `src/server/db.ts` | `pg.Pool` + `drizzle-orm/node-postgres`；`int8` 全局解析器保持字符串（雪花 ID 超过 2^53），`timestamp` 由 drizzle 保持字符串（与原 `dateStrings` 口径一致）。原先的 `pg.types.setTypeParser(20, Number)` **从全局挪到 pi-durable 存储自己的连接**：产品池与 harness 存储同进程，全局改会让产品 ID 丢精度 |
 | `src/server/schema.ts` | `mysql-core` → `pg-core`，按业务域重命名（§1），列名 snake_case |
-| `src/server/config.ts` | `DATABASE_URL` 必须 `postgres:`，库名白名单改成 `paimeng_ts` / `paimeng_ts_test` |
+| `src/server/config.ts` | `DATABASE_URL` 必须 `postgres:`，库名白名单改成 `paimeng_ts` / `paimeng_ts_test`（收尾后为 `paimeng_app` / `paimeng_app_test`） |
 | `src/server/generation-store.ts` | 只留任务态：`beginGeneration`（限流 + 行锁 + 任务与租约）/ `setGeneration` / `restoreGeneration` / `heartbeat` / `sweepStaleLeases` / `generationFor` / `finishGeneration` / `withAppWriter`。消息读写整段删除 |
 | 查询口径 | `onDuplicateKeyUpdate` → `onConflictDoUpdate`（模型配置），`affectedRows` → `rowCount`（租约/任务更新），重复键 `ER_DUP_ENTRY` → `23505`（注册、任务 UUID 冲突），限流的 `insert … on duplicate key update … if()` → `insert … on conflict do update set … case when` |
 | 租约 | 语义未变：仍是 `SELECT … FOR UPDATE`（drizzle 的 `.for('update')` 在 pg 上生成 `FOR UPDATE`），应用行 → 租约行 → 任务行的加锁顺序照旧；`withAppWriter` 的 `lockTask` 开关（默认一致性读，避免长构建把心跳 UPDATE 卡死）原样保留 |
-| `scripts/` | `migrate.ts`（pg，逐文件事务，`schema_migration` 记校验和）、`test-database.ts`（建 `paimeng_ts_test` 并迁移）、`admin.ts`、`verify-infra.ts`、`import-legacy.ts`（快照导入改写入 Postgres）、`durable-pg.sh`（start 时顺带建 `paimeng_ts` 与 `paimeng_ts_test`） |
+| `scripts/` | `migrate.ts`（pg，逐文件事务，`schema_migration` 记校验和）、`test-database.ts`（建测试库并迁移）、`admin.ts`、`verify-infra.ts`、`import-legacy.ts`（快照导入改写入 Postgres）、`durable-pg.sh`（start 时顺带建库；收尾后改为 compose 服务 `postgres` 并建四个 database） |
 | 删除 | `scripts/verify-id-migration.ts`（对照旧 MySQL 的快照校验，换库后无对象）、`002..013` 的 MySQL 增量迁移、`package.json` 的 `verify:id-migration` |
 | 依赖 | `mysql2` **只留给一次性搬迁脚本** `scripts/import-mysql-rows.ts`（产品运行期不再连接 MySQL）；运行期依赖是 `pg` |
 | E2E | `tests/e2e/model-manage.spec.ts` / `platform.spec.ts` / `dev-warnings.spec.ts` 改 `pg.Client`，SQL 改 snake_case 与 `$1` 占位，公共夹具抽到 `tests/e2e/support/model-config-fixtures.ts` |
@@ -73,13 +79,18 @@ camelCase 列必须处处加双引号，一次改净比每个查询记得加引�
 #    MySQL 旧库：docker exec zslm-mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -uroot \
 #      --single-transaction --routines --triggers --databases paimeng_ai_code_mother_ts' \
 #      > runtime/backup/mysql-paimeng_ai_code_mother_ts-<时间戳>.sql
-#    Postgres 新库：docker exec zslm-pg-durable sh -c 'PGPASSWORD=spike pg_dump -U spike -d paimeng_ts' \
-#      > runtime/backup/postgres-paimeng_ts-<时间戳>.sql
-#    本步实际产物：runtime/backup/mysql-paimeng_ai_code_mother_ts-20261018-161344.sql（16.8 MB）
-#                 runtime/backup/postgres-paimeng_ts-20261018-161344.sql（98 KB）
+#    Postgres 新库（同名两库各自备）：
+#      docker exec zslm-pg-paimeng sh -c 'PGPASSWORD=spike pg_dump -U spike -d paimeng_app' \
+#        > runtime/backup/postgres-paimeng_app-<时间戳>.sql
+#      docker exec zslm-pg-paimeng sh -c 'PGPASSWORD=spike pg_dump -U spike -d paimeng_agent' \
+#        > runtime/backup/postgres-paimeng_agent-<时间戳>.sql
+#    本步实际产物（改名前的名字）：runtime/backup/mysql-paimeng_ai_code_mother_ts-20261018-161344.sql（16.8 MB）
+#                                 runtime/backup/postgres-paimeng_ts-20261018-161344.sql（98 KB）
+#    MySQL 归档（收尾时补）：runtime/archive/mysql-paimeng_ai_code_mother_ts-20261018.sql.gz（4.3 MB）
 #    备份分支：backup/pre-m4-postgres（指向 878f3c2）
 
-npm run durable:pg -- start        # 一次性 Postgres 16（127.0.0.1:55432），自动建 paimeng_ts / paimeng_ts_test
+npm run durable:pg -- start        # 固定 Postgres 16 服务（zslm-pg-paimeng，127.0.0.1:55432），自动建
+                                   # paimeng_app / paimeng_app_test / paimeng_agent / paimeng_agent_test
 npm run db:migrate                 # 开发库建表（幂等，重复执行只核对校验和）
 npm run db:test:setup              # 测试库建库 + 建表（幂等）
 npm run db:import-mysql           # 一次性业务行搬迁（幂等，按主键 upsert；对话数据不搬）
@@ -92,7 +103,7 @@ npm run db:import-mysql           # 一次性业务行搬迁（幂等，按主�
 2. 数据库回到 MySQL：`.env` 的 `DATABASE_URL` 改回 `mysql://…`（旧库没被写过，仍是迁移前的内容）；
 3. `npm run infra:up` 起旧 MySQL（本步一直在跑，无需重建）；`npm run durable:pg -- stop` 停新 Postgres；
 4. `runtime/backup/postgres-paimeng_ts-*.sql` 只是新库的快照，回滚不需要它；
-   若新库被误删而想再看一眼迁移结果，用 `docker exec -i zslm-pg-durable psql -U spike -d paimeng_ts < 快照`。
+   若新库被误删而想再看一眼迁移结果，用 `docker exec -i zslm-pg-paimeng psql -U spike -d paimeng_app < 快照`。
 
 **为什么不需要 `pg_dump` 旧库**：旧库是 MySQL，用 `mysqldump`（上面第一条）；`pg_dump` 只对新 Postgres
 库有意义，两个都留了产物。
@@ -104,7 +115,7 @@ npm run db:import-mysql           # 一次性业务行搬迁（幂等，按主�
 | 类型检查 | `npx tsc --noEmit` | 干净（exit 0） |
 | 迁移幂等 | `npm run db:migrate` ×2、`npm run db:test:setup` | 第一次 `已执行 001_initial.sql`，第二次只打印「完成」不做改动 |
 | **业务行搬迁幂等** | `npm run db:import-mysql` ×2 | 两次输出一致：`app_user 120，app 112，user_session 152，attachment 6，model_provider 4，model_alias 2，model_config_state 1，rate_limit 14，id_sequence 1` |
-| 搬迁结果抽查 | `docker exec zslm-pg-durable psql -U spike -d paimeng_ts -c "select …"` | `app_user 120 / app 112 / model_alias 2 / attachment 6 / 有会话映射的 app 0 / id_sequence.last_id 469331532352323584`；`\dt` 13 张表（12 业务 + `schema_migration`），无 `ts_*` |
+| 搬迁结果抽查 | `docker exec zslm-pg-paimeng psql -U spike -d paimeng_app -c "select …"`（当时容器叫 `zslm-pg-durable`、库叫 `paimeng_ts`） | `app_user 120 / app 112 / model_alias 2 / attachment 6 / 有会话映射的 app 0 / id_sequence.last_id 469331532352323584`；`\dt` 13 张表（12 业务 + `schema_migration`），无 `ts_*` |
 | 集成测试（**受影响范围**） | `npx vitest run tests/integration` | **25 文件 124 用例全过**（67.7s，含 `durable-m1` 10 文件 18 用例、`route-auth`、`http`、`backend-invariants`、`snowflake-ids`、模型注册与多进程用例） |
 | 新增转录契约用例 | `npx vitest run tests/integration/durable-m1/messages.test.ts` | **2/2 过**：用户条目随 `/submit` 落地、`/entries` 追加 `app.assistant`、`/messages` 从旧到新读回、展示条目不进模型上下文、保留种类/非对象数据 400、未知会话 404 |
 | 模型与记账单元测试 | `npx vitest run tests/models tests/generation-accounting.test.ts tests/model-task-binding.test.ts tests/snowflake.test.ts tests/image-attachments.test.ts tests/heartbeat.test.ts tests/model-config.test.ts tests/model-routing.test.ts` | **21 文件 144 用例全过**（两者与上一条有重叠文件，合起来覆盖所有碰库的用例） |
@@ -141,13 +152,16 @@ Playwright E2E 套件（`npm run test:e2e:isolated`）仍未跑：它要独占�
 
 ## 6. 剩余待办
 
-1. **旧 MySQL 归档清理**：`zslm-mysql` 容器、`runtime/mysql/` 数据目录、`compose.yaml` 里的 `mysql` 服务与
-   `MYSQL_*` 变量都还在，作为归档保留。用户确认后：`docker compose stop mysql`（先不动数据），再决定是否删。
-   注意 `scripts/verify-infra.ts` 已经只查 Postgres 与 Redis，不再查 MySQL。
-2. **部署形态**：`scripts/durable-pg.sh` 起的是本机一次性容器（宿主机数据目录 `runtime/durable-pg/pgdata`）。
-   生产要把 Postgres 变成固定服务（`compose.yaml` 里与 Redis 同级），并明确「harness 单写进程 + attach」的
-   进程编排、重启策略、`kill -9` 后残留构建容器的回收。ArkTS 之外的 `DURABLE_PG_URL` 与 `DATABASE_URL`
-   现在是同一条连接串，部署时确认两者一致（不一致时 harness 会写到别的库）。
+1. **旧 MySQL 归档清理**（**收尾时已补归档，未删任何东西**）：容器 `zslm-mysql`、`runtime/mysql/` 数据目录、
+   `compose.yaml` 的 `mysql` 服务与 `MYSQL_*` 变量都保留；归档产物 `runtime/archive/mysql-paimeng_ai_code_mother_ts-20261018.sql.gz`
+   （4.3 MB，gzip 已校验，16 张表）。恢复方式见 [pi-durable-deployment.md](./pi-durable-deployment.md) §3.4。
+   用户确认后：`docker compose stop mysql`（先不动数据），再决定是否删；`scripts/verify-infra.ts` 已经只查 Postgres 与 Redis。
+2. **部署形态**（**收尾时已完成本机形态**）：Postgres 已升为固定服务 `zslm-pg-paimeng`
+   （`compose.yaml` 的 `postgres`，127.0.0.1:55432，与 Redis 同级）；`kill -9` 后残留的 `paimeng-ts-build-*` 容器
+   在 harness `resume()` 之前清扫；全局并发上限 `GENERATION_MAX_CONCURRENT`（默认 4）在提交入口执行；
+   Next 重启后的状态分裂由启动/状态读取时的接管对账修复。细节、证据与**仍未做的生产编排**（systemd 单元、
+   命名卷、非零 `GENERATION_TIMEOUT_MS`、Next 健康检查路由）见 [pi-durable-deployment.md](./pi-durable-deployment.md) §4/§7。
+   注意「同实例两库」：`DURABLE_PG_URL`（存储库）与 `DATABASE_URL`（业务库）**不再回退到同一条串**。
 3. **`spike/` 残留**：`spike/pi-durable-pg/pgdata/` 属主是容器用户，当前账号删不掉（需要 `sudo rm -rf`）；
    `spike/pi-durable-m1` 的手工验收脚本仍指向 3100 与 5599，未随本步改动（它们只走产品 HTTP 接口）。
 4. **全量测试重跑**：`npm test` 已补跑两次全绿（**58 文件 / 432 用例**，见 §5.1，取代 `m3.md` 里的 444 口径）；
@@ -156,13 +170,18 @@ Playwright E2E 套件（`npm run test:e2e:isolated`）仍未跑：它要独占�
 5. **冒烟脚本**：`scripts/verify-parity.mjs` 的对话管理入口与 `chatHistory` mock 已删，但它本身是手工对照脚本，
    未在本步运行。
 6. **旧数据保留期**：`ts_message` / `chat_history` / `ts_app_summary` 的行仍在 MySQL 里（**没删**）。
-   确认不再需要后，删容器前先保留 §4 的 `mysqldump` 产物。
+   确认不再需要后，删容器前先保留 §4 的 `mysqldump` 产物（已有一份 gzip 归档在 `runtime/archive/`）。
+
+7. **收尾（2026-10-18）已完成与未完成**：已完成库名改名（`paimeng_app` / `paimeng_agent`）、Postgres 固定服务、
+   孤儿构建容器清扫、全局并发上限、状态分裂接管、MySQL 归档，并补了 `noProgress` 与 `BUILD_REPAIR_ROUNDS=0`
+   两条路径的真实证据（见 deployment.md §7）；未完成的是 `spike/` 残留清理（§6.3，需 `sudo`）与生产编排，
+   以及本步未跑的全量 `npm test` 与 `npm run test:e2e:isolated`。
 
 ## 7. 复现
 
 ```bash
 cd paimeng-ai-code-agent
-npm run durable:pg -- start     # Postgres 16（自动建 paimeng_ts / paimeng_ts_test）
+npm run durable:pg -- start     # 固定 Postgres 16 服务（自动建四个 database）
 npm run db:migrate && npm run db:test:setup
 npm run db:import-mysql         # 需要旧 MySQL 在跑 + MYSQL_LEGACY_URL
 
