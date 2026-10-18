@@ -1,0 +1,2 @@
+[2026-10-18T05:03:46.950Z] pid=3231782 harness open conversation=1 workspace=/tmp/m2b-real/ws storage=postgres
+[2026-10-18T05:03:46.954Z] pid=3231782 listening on http://127.0.0.1:5603

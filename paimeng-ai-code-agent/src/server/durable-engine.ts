@@ -8,7 +8,8 @@ import { getApp } from './business';
 import { getConfig } from './config';
 import { db } from './db';
 import { beginGenerationContext, finishGeneration, generationFor, heartbeat } from './generation-store';
-import type { GenerationStopReason } from './generation-accounting';
+import { recordAssistantStep, type AccountToolCall, type EntryUsage, type GenerationStopReason, type ModelIdentity } from './generation-accounting';
+import { modelBindingFor } from './model';
 import { BusinessError } from './http';
 import { clientIp } from './rate-limit';
 import { apps } from './schema';
@@ -33,6 +34,10 @@ import { workspace } from './workspace';
  *
  * M2a 的工具是最小文件集（readFile / listFiles / writeFiles / modifyFile / deleteFile），
  * 构建与里程碑在 M2b。
+ *
+ * M2b：harness 也有 buildPreview。构件阶段与结果走工具的 `running details`，观察者把它们翻译成前端
+ * 已有的 `data-progress`（阶段进度、预览刷新），并在静默期每秒补一个 started 事件保活；模型步骤的
+ * 用量改读 pi-durable assistant 条目自带的 `usage`（data-model §5）。
  */
 
 const textBlockSchema = z.object({ type: z.literal('text'), text: z.string() });
@@ -61,6 +66,7 @@ const harnessEventSchema = z
     toolCallId: z.string().optional(),
     toolName: z.string().optional(),
     args: z.unknown().optional(),
+    details: z.unknown().optional(),
     entry: z.unknown().optional(),
     message: z.unknown().optional(),
     generation: z.object({ message: z.unknown().optional() }).optional(),
@@ -164,13 +170,13 @@ async function conversationFor(app: AppInfo): Promise<number> {
   const created = await harnessJson<{ conversationId: number }>('/conversations', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ workspace: workspace(app), instructions: harnessInstructions(app), title: app.id }),
+    body: JSON.stringify({ workspace: workspace(app), instructions: harnessInstructions(app), title: app.id, app: { id: app.id, codeGenType: app.codeGenType } }),
   });
   await db().update(apps).set({ conversationId: created.conversationId }).where(eq(apps.id, BigInt(app.id)));
   return created.conversationId;
 }
 
-/** harness 会话的常驻指令：同一份产品提示词，但没有 buildPreview 这个工具。 */
+/** harness 会话的常驻指令：同一份产品提示词（现在 harness 也有 buildPreview 工具）。 */
 function harnessInstructions(app: AppInfo): string {
   return generationInstructions({
     app,
@@ -178,7 +184,6 @@ function harnessInstructions(app: AppInfo): string {
     entry: app.template ? templateEntry(app.template) : null,
     webInstruction: '',
     hasImages: false,
-    previewTool: false,
   });
 }
 
@@ -220,7 +225,7 @@ class ChunkChannel {
   }
 }
 
-type ToolSlot = { toolName: string; input: unknown; output?: unknown; isError?: boolean };
+type ToolSlot = { toolName: string; input: unknown; output?: unknown; details?: unknown; isError?: boolean };
 type AssistantPart =
   | { type: 'text'; text: string }
   | { type: 'dynamic-tool'; toolName: string; toolCallId: string; state: 'input-available' | 'output-available' | 'output-error'; input: unknown; output?: unknown; errorText?: string };
@@ -333,9 +338,17 @@ class AssistantTurn {
       slot.output = text;
       slot.isError = isError;
     }
+    // 工具把结构化结果写在 `details` 里时，前端卡片直接用它（构建卡片需要对象，不是文本）。
+    const rendered = slot?.details ?? text;
     this.channel.push(isError
       ? { type: 'tool-output-error', toolCallId, errorText: text || '工具调用失败', dynamic: true }
-      : { type: 'tool-output-available', toolCallId, output: text, dynamic: true });
+      : { type: 'tool-output-available', toolCallId, output: rendered, dynamic: true });
+  }
+
+  /** 运行中的 `details`（pi-durable 的进度/结构化结果通道）：既进工具槽，也供构建进度使用。 */
+  toolDetails(toolCallId: string, details: unknown) {
+    const slot = this.tools.get(toolCallId);
+    if (slot) slot.details = details;
   }
 
   /** 落库的助手消息：前端刷新后靠它渲染文本与工具条目（parts 由本类构造，不是外部数据）。 */
@@ -344,13 +357,14 @@ class AssistantTurn {
     const parts: AssistantPart[] = [...this.parts];
     for (const [toolCallId, slot] of this.tools) {
       const settled = slot.output !== undefined || slot.isError !== undefined;
+      const output = slot.details ?? slot.output;
       parts.push({
         type: 'dynamic-tool',
         toolName: slot.toolName,
         toolCallId,
         state: settled ? (slot.isError ? 'output-error' : 'output-available') : 'input-available',
         input: slot.input,
-        ...(slot.output === undefined ? {} : { output: slot.output }),
+        ...(output === undefined ? {} : { output }),
         ...(slot.isError ? { errorText: typeof slot.output === 'string' ? slot.output : '工具调用失败' } : {}),
       });
     }
@@ -366,11 +380,13 @@ async function observeHarnessRun(options: {
   conversationId: number;
   requestId: string;
   appId: string;
+  model: ModelIdentity;
   channel: ChunkChannel;
   stop: AbortController;
 }): Promise<void> {
-  const { conversationId, requestId, appId, channel, stop } = options;
-  const turn = new AssistantTurn(channel);
+  const { conversationId, requestId, appId, model, channel, stop } = options;
+  const run = new RunTranslator(channel, requestId, model);
+  const turn = run.turn;
   const { generationTimeoutMs } = getConfig();
   let status: 'ready' | 'failed' | 'cancelled' = 'failed';
   let error: string | null = null;
@@ -392,7 +408,7 @@ async function observeHarnessRun(options: {
     });
     if (!response.body) throw new Error('harness /agent-events 没有返回响应体');
     for await (const event of readEvents(response.body)) {
-      handleEvent(event, turn, channel);
+      run.handle(event);
       if (event.type === 'task_failed' && typeof event.message === 'string') failureText = event.message;
       if (event.type === 'run_end') break;
     }
@@ -423,6 +439,8 @@ async function observeHarnessRun(options: {
     if (timeout) clearTimeout(timeout);
     // 落库与收尾都在断连之后照常发生：这一步不依赖任何 HTTP 流。
     try {
+      // 补写最后一条模型步骤的账目，再结束计时器。
+      await run.finalize();
       // 极端情况下（运行在附加之前就已结束）事件流是空的，退回读会话里最后一条助手条目的文本。
       if (!turn.parts.length && !turn.tools.size) {
         const state = await harnessState(conversationId).catch(() => null);
@@ -440,34 +458,210 @@ async function observeHarnessRun(options: {
   }
 }
 
-function handleEvent(event: HarnessEvent, turn: AssistantTurn, channel: ChunkChannel) {
-  switch (event.type) {
-    case 'snapshot':
-      turn.seed(event.generation?.message);
-      break;
-    case 'message_start':
-      turn.seed(event.message);
-      break;
-    case 'message_update':
-      turn.applyChanges(event.changes ?? []);
-      break;
-    case 'message_end':
-      turn.reconcile(entryAssistantMessage(event.entry));
-      turn.closeText();
-      break;
-    case 'tool_execution_start':
-      if (event.toolCallId && event.toolName) turn.toolStart(event.toolCallId, event.toolName, event.args);
-      break;
-    case 'tool_execution_end': {
-      if (!event.toolCallId || !event.toolName) break;
-      turn.toolEnd(event.toolCallId, event.toolName, event.entry);
-      // 文件工具的结果转成既有的 `data-progress` 文件事件，前端时间线的「文件」阶段照旧工作。
-      const paths = writtenPathsOf(event.toolName, turn.tools.get(event.toolCallId)?.input);
-      if (paths.length) channel.push({ type: 'data-progress', data: { stage: 'files', paths, at: Date.now() }, transient: true } as UiChunk);
-      break;
+const buildStageNames = ['source', 'install', 'typecheck', 'build'] as const;
+/** buildApp 的阶段开始/结束（harness 的 buildPreview 把每个阶段写进 running details）。 */
+const buildStageProgressSchema = z.object({
+  stage: z.enum(buildStageNames),
+  status: z.enum(['started', 'ok', 'failed']),
+  ms: z.number(),
+  at: z.number(),
+});
+/** 构建结果 details：只用来判定这次构建要不要刷新预览。 */
+const buildResultSchema = z.object({ status: z.enum(['ok', 'failed']) });
+
+/** 一段模型消息里的工具调用块（id 与名称），顺序与 provider 返回一致。 */
+function toolCallsOf(message: unknown): { id: string; name: string }[] {
+  const parsed = z.object({ content: z.array(z.unknown()).optional() }).safeParse(message);
+  if (!parsed.success) return [];
+  const calls: { id: string; name: string }[] = [];
+  for (const block of parsed.data.content ?? []) {
+    const call = z.object({ type: z.literal('toolCall'), id: z.string(), name: z.string() }).safeParse(block);
+    if (call.success) calls.push({ id: call.data.id, name: call.data.name });
+  }
+  return calls;
+}
+
+/** assistant 条目自带的身份与用量；缺字段按未知处理（token 记 NULL，不记 0）。 */
+const assistantUsageSchema = z.object({
+  provider: z.string().optional(),
+  model: z.string().optional(),
+  responseModel: z.string().optional(),
+  stopReason: z.string().optional(),
+  durationMs: z.number().optional(),
+  usage: z.object({ input: z.number(), output: z.number(), cacheRead: z.number(), cacheWrite: z.number(), reasoning: z.number().optional() }).optional(),
+});
+
+/** 模型自己的停止原因 → 前端词表（pi 的 `toolUse` 对应 SDK 的 `tool-calls`）。 */
+function finishReasonOf(stopReason: string | undefined): string | null {
+  if (!stopReason) return null;
+  return stopReason === 'toolUse' ? 'tool-calls' : stopReason;
+}
+
+type PendingModel = {
+  stepNumber: number;
+  model: { alias: string | null; providerId: string | null; modelName: string | null };
+  upstreamProvider: string | null;
+  upstreamModelId: string | null;
+  usage: EntryUsage | null;
+  finishReason: string | null;
+  durationMs: number | null;
+  toolCalls: { id: string; name: string }[];
+};
+
+/**
+ * 把一条 harness 运行的事件流翻译成前端协议（文本、工具、进度），顺带写 D2 记账。
+ *
+ * 状态都挂在这一次运行上：构建进度看门狗（阶段变化更新当前阶段，每秒补一个 started 事件保活）、
+ * 预览版本号、以及「上一条 assistant 条目」的用量。工具在模型消息之后才跑完，所以一条模型步骤的账目
+ * 要到下一个边界（下一条消息或运行结束）才落。
+ */
+class RunTranslator {
+  readonly turn: AssistantTurn;
+  #buildTimer: ReturnType<typeof setInterval> | null = null;
+  #buildStage: (typeof buildStageNames)[number] | null = null;
+  #buildStageStartedAt = 0;
+  #previewVersion = 0;
+  #stepNumber = 0;
+  #pending: PendingModel | null = null;
+  /** 记账串行化：`void` 出去的写不能交错，否则两条消息会互相覆盖 `#pending`。 */
+  #chain: Promise<void> = Promise.resolve();
+  readonly #toolOutcomes = new Map<string, { ok: boolean; ms: number | null }>();
+
+  constructor(readonly channel: ChunkChannel, private readonly requestId: string, private readonly model: ModelIdentity) {
+    this.turn = new AssistantTurn(channel);
+  }
+
+  handle(event: HarnessEvent) {
+    switch (event.type) {
+      case 'snapshot':
+        this.turn.seed(event.generation?.message);
+        break;
+      case 'message_start':
+        this.turn.seed(event.message);
+        break;
+      case 'message_update':
+        this.turn.applyChanges(event.changes ?? []);
+        break;
+      case 'message_end': {
+        const message = entryAssistantMessage(event.entry);
+        this.turn.reconcile(message);
+        this.turn.closeText();
+        this.#chain = this.#chain.then(() => this.#recordAssistant(message)).catch(() => undefined);
+        break;
+      }
+      case 'tool_execution_start':
+        if (event.toolCallId && event.toolName) {
+          this.turn.toolStart(event.toolCallId, event.toolName, event.args);
+          if (event.toolName === 'buildPreview') this.#startBuildWatch();
+        }
+        break;
+      case 'tool_execution_update':
+        if (event.toolCallId && event.details !== undefined) this.#toolDetails(event.toolCallId, event.details);
+        break;
+      case 'tool_execution_end': {
+        if (!event.toolCallId || !event.toolName) break;
+        this.turn.toolEnd(event.toolCallId, event.toolName, event.entry);
+        this.#toolOutcomes.set(event.toolCallId, { ok: !toolResultOf(event.entry).isError, ms: null });
+        // 文件工具的结果转成既有的 `data-progress` 文件事件，前端时间线的「文件」阶段照旧工作。
+        const paths = writtenPathsOf(event.toolName, this.turn.tools.get(event.toolCallId)?.input);
+        if (paths.length) this.#progress({ stage: 'files', paths, at: Date.now() });
+        if (event.toolName === 'buildPreview') this.#finishBuild(this.turn.tools.get(event.toolCallId)?.details);
+        break;
+      }
+      default:
+        break;
     }
-    default:
-      break;
+  }
+
+  /** 收尾：补写最后一条模型步骤的账目，并停掉构建保活。 */
+  async finalize(): Promise<void> {
+    await this.#chain;
+    await this.#flushPending();
+    this.#stopBuildWatch();
+  }
+
+  #progress(data: unknown) {
+    this.channel.push({ type: 'data-progress', data, transient: true } as UiChunk);
+  }
+
+  /** 运行中的 details：进工具槽（作为卡片输出），构建阶段变化另外转成 data-progress。 */
+  #toolDetails(toolCallId: string, details: unknown) {
+    this.turn.toolDetails(toolCallId, details);
+    const stage = buildStageProgressSchema.safeParse(details);
+    if (!stage.success) return;
+    this.#buildStage = stage.data.stage;
+    this.#buildStageStartedAt = Date.now();
+    this.#progress({ stage: stage.data.stage, status: stage.data.status, ms: stage.data.ms, at: stage.data.at });
+  }
+
+  /**
+   * 构建静默期保活：构建容器创建/销毁是一次链路状态变化，Firefox 会掐断无流量的 SSE
+   * （约束 #40/#41），而安装依赖十几秒没有任何字节。每 1s 补一个 started 事件，与 legacy 的
+   * `buildStageWatch` 一致（同时让时间线显示已用时长）。
+   */
+  #startBuildWatch() {
+    if (this.#buildTimer) return;
+    this.#buildStage = null;
+    this.#buildTimer = setInterval(() => {
+      if (!this.#buildStage) return;
+      this.#progress({ stage: this.#buildStage, status: 'started', ms: Date.now() - this.#buildStageStartedAt, at: Date.now() });
+    }, 1000);
+  }
+
+  #stopBuildWatch() {
+    if (this.#buildTimer) clearInterval(this.#buildTimer);
+    this.#buildTimer = null;
+    this.#buildStage = null;
+  }
+
+  /** 构建结束：成功就发一次预览事件（前端按版本号刷新预览），最后停掉保活。 */
+  #finishBuild(details: unknown) {
+    this.#stopBuildWatch();
+    const result = buildResultSchema.safeParse(details);
+    if (result.success && result.data.status === 'ok') this.#progress({ stage: 'preview', version: ++this.#previewVersion, at: Date.now() });
+  }
+
+  /** 一条 assistant 条目（一次 LLM 调用）：先给上一条落账，再记下这一条。 */
+  async #recordAssistant(message: unknown) {
+    await this.#flushPending();
+    const parsed = assistantUsageSchema.safeParse(message);
+    if (!parsed.success) return;
+    const { provider, model, responseModel, stopReason, durationMs, usage } = parsed.data;
+    this.#pending = {
+      stepNumber: this.#stepNumber++,
+      model: { alias: this.model.alias, providerId: provider ?? this.model.providerId ?? null, modelName: responseModel ?? model ?? this.model.modelName ?? null },
+      upstreamProvider: provider ?? null,
+      upstreamModelId: responseModel ?? model ?? null,
+      usage: usage ? { input: usage.input, output: usage.output, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite, reasoning: usage.reasoning ?? null } : null,
+      finishReason: finishReasonOf(stopReason),
+      durationMs: durationMs ?? null,
+      toolCalls: toolCallsOf(message),
+    };
+  }
+
+  /** 落账一条模型步骤：用量来自条目本身（data-model §5），工具成败来自这一轮的工具事件。 */
+  async #flushPending() {
+    const pending = this.#pending;
+    if (!pending) return;
+    this.#pending = null;
+    const calls: AccountToolCall[] = pending.toolCalls.map(call => {
+      const outcome = this.#toolOutcomes.get(call.id);
+      return { name: call.name, ok: outcome?.ok ?? true, ms: outcome?.ms ?? null };
+    });
+    const timed = calls.filter(call => call.ms !== null);
+    await recordAssistantStep({
+      generationId: this.requestId,
+      round: 1,
+      stepNumber: pending.stepNumber,
+      model: pending.model,
+      upstreamProvider: pending.upstreamProvider,
+      upstreamModelId: pending.upstreamModelId,
+      usage: pending.usage,
+      finishReason: pending.finishReason,
+      durationMs: pending.durationMs,
+      toolMs: timed.length ? timed.reduce((total, call) => total + (call.ms ?? 0), 0) : null,
+      toolCalls: calls,
+    });
   }
 }
 
@@ -537,6 +731,10 @@ export async function harnessChatResponse(req: Request, raw: unknown, user: User
     throw new BusinessError(400, 40000, 'harness 引擎（M2a）还不支持图片输入：请去掉图片，或把 DURABLE_ENGINE 切回 legacy');
   }
   const incoming = { ...input.message, id: `${input.requestId}-user` } as UIMessage;
+  // 与 legacy 同源：生成模型绑定在任务开始时固定（解析失败报 503，此时还没有落库任务）。
+  // 只取身份字段进记账行；模型调用仍由 harness 进程按其自己的 provider 配置完成。
+  const { generation } = await modelBindingFor(app.codeGenType, prompt, app.template);
+  const model: ModelIdentity = { alias: generation.alias, providerId: generation.providerId, modelName: generation.modelName };
   const stop = new AbortController();
   await beginGenerationContext(app.id, input.requestId, user, incoming, clientIp(req.headers));
   let conversationId: number;
@@ -555,7 +753,7 @@ export async function harnessChatResponse(req: Request, raw: unknown, user: User
   }
 
   const channel = new ChunkChannel();
-  void observeHarnessRun({ conversationId, requestId: input.requestId, appId: app.id, channel, stop });
+  void observeHarnessRun({ conversationId, requestId: input.requestId, appId: app.id, model, channel, stop });
 
   const stream = createUIMessageStream({
     generateId: () => assistantMessageId(input.requestId),

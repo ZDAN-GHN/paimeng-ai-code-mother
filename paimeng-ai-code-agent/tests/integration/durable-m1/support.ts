@@ -13,11 +13,21 @@ import { createServer, connect, type Socket } from 'node:net';
 import { join, resolve } from 'node:path';
 
 export const spikeDir = resolve(process.cwd(), '..', 'spike', 'pi-durable-m1');
+export const productRoot = process.cwd();
 export const postgresUrl = process.env.DURABLE_PG_URL ?? 'postgres://spike:spike@127.0.0.1:55432/durable';
 
 /** The spike checkout and its dependency links only exist in the migration worktree. */
 export function spikeAvailable(): boolean {
   return existsSync(join(spikeDir, 'src', 'server.ts')) && existsSync(join(spikeDir, 'node_modules', '@earendil-works'));
+}
+
+/**
+ * The harness can load the product's build implementation only under the product's tsx, from the
+ * product root (spike/pi-durable-m1/run.sh). Cases that build need that runner; the rest stay on
+ * plain node so they do not depend on a product checkout.
+ */
+export function productRunnerAvailable(): boolean {
+  return spikeAvailable() && existsSync(join(productRoot, 'node_modules', 'tsx'));
 }
 
 /** TCP probe so cases can skip cleanly when no Postgres is listening. */
@@ -61,7 +71,7 @@ const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 export type HarnessProcess = { child: ChildProcess; output: () => string };
 
 /** Spawn the harness on its own port and run directory; `reset` empties the schema before serving. */
-export function startHarness(options: { port: number; runDir: string; reset: boolean; waitMs: number; finalText: string; workspace?: string; tool?: string; args?: unknown }): HarnessProcess {
+export function startHarness(options: { port: number; runDir: string; reset: boolean; waitMs: number; finalText: string; workspace?: string; tool?: string; args?: unknown; buildRunner?: boolean; app?: { id: string; codeGenType: string } }): HarnessProcess {
   let output = '';
   const env = {
     ...process.env,
@@ -77,7 +87,13 @@ export function startHarness(options: { port: number; runDir: string; reset: boo
     ...(options.args === undefined ? {} : { SPIKE_FAUX_ARGS: JSON.stringify(options.args) }),
     ...(options.reset ? { M1_RESET: '1' } : {}),
   };
-  const child = spawn(process.execPath, ['--experimental-strip-types', 'src/server.ts'], { cwd: spikeDir, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  // The build runner keeps the product root as cwd so the product's `@/` alias and runtime root resolve.
+  const command = process.execPath;
+  const args = options.buildRunner
+    ? ['--import', 'tsx', '--conditions=react-server', join(spikeDir, 'src', 'server.ts')]
+    : ['--experimental-strip-types', 'src/server.ts'];
+  const cwd = options.buildRunner ? productRoot : spikeDir;
+  const child = spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString(); });
   child.stderr?.on('data', (chunk: Buffer) => { output += chunk.toString(); });
   return { child, output: () => output };
@@ -123,17 +139,18 @@ export async function submit(base: string, content: string, requestId: string): 
   if (response.status !== 202) throw new Error(`submit ${response.status}: ${await response.text()}`);
 }
 
-export async function getState(base: string): Promise<HarnessState> {
-  const response = await fetch(`${base}/state`, { headers: { accept: 'application/json' } });
+export async function getState(base: string, conversationId?: number): Promise<HarnessState> {
+  const query = conversationId === undefined ? '' : `?conversationId=${conversationId}`;
+  const response = await fetch(`${base}/state${query}`, { headers: { accept: 'application/json' } });
   if (!response.ok) throw new Error(`state ${response.status}`);
   return (await response.json()) as HarnessState;
 }
 
-export async function waitForState(base: string, done: (state: HarnessState) => boolean, timeoutMs: number, label: string): Promise<HarnessState> {
+export async function waitForState(base: string, done: (state: HarnessState) => boolean, timeoutMs: number, label: string, conversationId?: number): Promise<HarnessState> {
   const deadline = Date.now() + timeoutMs;
   let last: HarnessState | undefined;
   while (Date.now() < deadline) {
-    last = await getState(base);
+    last = await getState(base, conversationId);
     if (done(last)) return last;
     await delay(250);
   }

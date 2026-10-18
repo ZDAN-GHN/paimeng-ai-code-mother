@@ -1,0 +1,5 @@
+[2026-10-18T05:09:02.754Z] pid=3239482 storage reset (M1_RESET=1)
+[2026-10-18T05:09:02.834Z] pid=3239482 harness open conversation=1 workspace=/tmp/m2b-real/ws storage=postgres
+[2026-10-18T05:09:02.838Z] pid=3239482 listening on http://127.0.0.1:5603
+[2026-10-18T05:09:03.241Z] pid=3239482 conversation created id=7 workspace=/home/zdan/github/zdan/.pi-worktrees/pi-durable-migration/paimeng-ai-code-agent/runtime/code_output/react_project_901000000000000202 title=901000000000000202
+[2026-10-18T05:09:03.296Z] pid=3239482 submit admitted conversation=7 submission=14 requestId=m2b-crash3

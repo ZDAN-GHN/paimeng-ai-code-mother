@@ -5,10 +5,12 @@
   "version": "0.0.0",
   "description": "M1: resident pi-durable harness process + HTTP attach channel for the Next.js server",
   "scripts": {
-    "start": "../pi-durable-pg/run.sh src/server.ts",
+    "start": "./run.sh src/server.ts",
     "verify:disconnect": "../pi-durable-pg/run.sh src/verify-disconnect.ts",
     "verify:restart": "../pi-durable-pg/run.sh src/verify-restart.ts",
     "verify:browser": "../pi-durable-pg/run.sh src/verify-browser.ts",
+    "verify:m2a": "../pi-durable-pg/run.sh src/verify-m2a.ts",
+    "verify:m2a-reconnect": "../pi-durable-pg/run.sh src/verify-m2a-reconnect.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

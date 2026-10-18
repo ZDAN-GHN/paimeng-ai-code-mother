@@ -91,6 +91,46 @@ export async function recordModelStep<TOOLS extends ToolSet>(step: StepResult<TO
   });
 }
 
+/** pi-durable assistant 条目自带的用量（harness 引擎），字段名与 SDK 的 Usage 不同。 */
+export type EntryUsage = { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number | null };
+
+/**
+ * harness 引擎的一个模型步骤：一条 pi-durable assistant 条目。
+ *
+ * 用量来源是条目自带的 `usage`（data-model §5），不是 SDK 的 StepResult。
+ * `toolCalls` 由调用方在工具结束后补齐（`ms` 为 null 表示未采集到耗时）。
+ */
+export async function recordAssistantStep(input: {
+  generationId: string; round: number; stepNumber: number; model: ModelIdentity;
+  upstreamProvider: string | null; upstreamModelId: string | null;
+  usage: EntryUsage | null; finishReason: string | null; durationMs: number | null; toolMs: number | null;
+  toolCalls: AccountToolCall[];
+}): Promise<void> {
+  await insertStep({
+    generationId: input.generationId,
+    kind: 'model',
+    round: input.round,
+    stepNumber: input.stepNumber,
+    modelAlias: input.model.alias,
+    providerId: input.model.providerId,
+    modelName: input.model.modelName,
+    upstreamProvider: input.upstreamProvider,
+    upstreamModelId: input.upstreamModelId,
+    durationMs: input.durationMs === null ? null : Math.round(input.durationMs),
+    modelMs: input.durationMs === null ? null : Math.round(input.durationMs),
+    toolMs: input.toolMs === null ? null : Math.round(input.toolMs),
+    inputTokens: input.usage?.input ?? null,
+    outputTokens: input.usage?.output ?? null,
+    cacheReadTokens: input.usage?.cacheRead ?? null,
+    cacheWriteTokens: input.usage?.cacheWrite ?? null,
+    reasoningTokens: input.usage?.reasoning ?? null,
+    finishReason: input.finishReason,
+    status: 'ok',
+    toolCalls: input.toolCalls,
+    createTime: now(),
+  });
+}
+
 /** 一次服务端验证与构建。round 是触发它的模型轮次（首轮 = 1）。 */
 export async function recordBuildStep(input: { generationId: string; round: number; stepNumber: number; durationMs: number; outcome: BuildStepOutcome }): Promise<void> {
   const outcome = input.outcome;

@@ -1,0 +1,50 @@
+M2b 验收时间线（2026-10-18，真实 Docker 容器构建；模型用桩模型，只驱动工具调用）
+工作区：paimeng-ai-code-agent/runtime/code_output/react_project_901000000000000202（react-ts@1.0.0 模板）
+harness：spike/pi-durable-m1/src/server.ts，spike/pi-durable-m1/run.sh（产品 tsx，cwd = 产品根）
+Postgres：spike/pi-durable-pg/pg.sh（127.0.0.1:55432）
+
+原始文件：real-react-build-events.ndjson、harness-real-build.log、disconnect-partial-events.ndjson、
+harness-crash-before-kill.log、harness-crash-resume.log、state-after-crash-resume.json
+
+== A. 真实容器构建经 harness 跑通（12:55:14 → 12:55:x） ==
+一条 NDJSON 事件流（real-react-build-events.ndjson，就是产品观察者读的那条流）：
+  attached 1 / snapshot 1 / ping 11 / tool_execution_update 6 / message_start 2 / message_end 2 /
+  turn_start 1 / turn_end 2 / usage_changed 1 / submission 1 / run_end 1
+
+tool_execution_update 的 details（= 产品翻译成 data-progress 的来源，6 条）：
+  {"stage":"install","status":"ok","ms":8983}
+  {"stage":"typecheck","status":"started","ms":0}
+  {"stage":"typecheck","status":"ok","ms":2641}
+  {"stage":"build","status":"started","ms":0}
+  {"stage":"build","status":"ok","ms":1927}
+  {"status":"ok","ms":13815,"milestone":"real-react","stages":[source 3ms, install 8983ms, typecheck 2641ms, build 1927ms]}
+
+tool_execution_end 的条目（模型看到的结果）：
+  content: "预览已更新（real-react），用时 13815ms。"  isError: false  durationMs: 13823
+
+产物：runtime/code_output/react_project_901000000000000202/dist/{index.html, assets/}
+
+== B. 构建期间断开观察端（12:59:12 提交，12:59:19 掉线） ==
+12:59:13.923 harness: agent-events attach conversation=41
+12:59:19.451 客户端被 kill -9（掉线瞬间，构建正在跑）
+12:59:19 掉线后立刻读状态：
+  tasks = [{"kind":"pi.generation","state":"waiting","abortRequested":false},
+           {"kind":"pi.tool","state":"running","abortRequested":false}]
+  live  = {"tools":[{"name":"buildPreview","status":"running"}],"busy":true}
+harness 日志：agent-events client gone — aborting the view only
+构建照常跑完：pi.tool-result = "预览已更新（real-react），用时 11297ms。"
+dist/index.html 与 assets/ 落盘，任务最终 tasks=[] / submissions=[]，没有 cancelled。
+
+== C. 构建中途 kill -9 → 重启续跑（无重复副作用） ==
+第一次（13:03:36 提交，13:03:38 杀掉，容器 Up 1 second）：
+  重启后重放 buildPreview，但 app 映射只在进程内存里 → 工具结果
+  "<harness> [error] 会话 7 没有关联应用，拒绝构建 </harness>"（harness-resume-before-fix.log）
+  这是 M2b 引入的真实缺陷，已修（从会话的持久 cwd 还原 app）。
+
+修好后（13:09:03 提交，13:09:05 杀掉，容器 Up 1 second）：
+  13:09:14 重启（同一 storage，未 reset）
+  13:09:38 续跑结束：pi.tool-result = "预览已更新（real-react），用时 23186ms。"
+  产物：dist/{index.html, assets/}
+  源码：src/App.tsx 与杀进程前逐字节相同（diff 无输出）→ 没有重复写入
+  已知残留：被 kill 的那次容器 `paimeng-ts-build-cd5832d4…` 在重启后仍 Up（34s），
+  它是 `docker run --rm`，自己的命令跑完会自行移除；新一次的构建用的是另一个 stage 目录，互不干扰。

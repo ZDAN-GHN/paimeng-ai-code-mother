@@ -1,0 +1,40 @@
+{
+    "pid": 3239962,
+    "scheduling": "running",
+    "tasks": [],
+    "submissions": [],
+    "view": {
+        "entries": [
+            {
+                "id": 13,
+                "kind": "pi.user",
+                "text": "build"
+            },
+            {
+                "id": 16,
+                "kind": "pi.system",
+                "text": ""
+            },
+            {
+                "id": 17,
+                "kind": "pi.assistant",
+                "text": ""
+            },
+            {
+                "id": 19,
+                "kind": "pi.tool-result",
+                "text": "\u9884\u89c8\u5df2\u66f4\u65b0\uff08real-react\uff09\uff0c\u7528\u65f6 23186ms\u3002"
+            },
+            {
+                "id": 21,
+                "kind": "pi.assistant",
+                "text": "REAL_REACT_DONE"
+            }
+        ],
+        "live": {
+            "text": "",
+            "tools": [],
+            "busy": false
+        }
+    }
+}

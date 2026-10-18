@@ -58,15 +58,46 @@ M1_APP_ID=... M1_COOKIE=... npm run verify:browser       # 需要 harness + Next
 
 环境变量：`M1_PORT`（默认 5599）、`M1_BASE_URL`（默认 http://localhost:3100）、`M1_HARNESS_URL`（默认 http://127.0.0.1:5599）、
 `M1_APP_ID` / `M1_COOKIE`（attach 路由鉴权）、`DURABLE_PG_URL`、`M1_RESET=1`（只在第一次
-启动时清空 spike 库）、`M1_RUN_DIR` / `M1_WORKSPACE`。Next 侧：`DURABLE_HARNESS_URL`。
+启动时清空 spike 库）、`M1_RUN_DIR` / `M1_WORKSPACE`。Next 侧：`DURABLE_HARNESS_URL`、`DURABLE_ENGINE`。
+
+## M2a：产品生成入口接 harness
+
+`DURABLE_ENGINE=harness` 时，产品的 `app/chat/gen/code` 把生成提交到这个进程（`app.conversationId`
+指向的会话），再把 agent 事件翻译成既有前端协议（见 `docs/plans/pi-durable-m2.md`）。多出来的脚本：
+
+```bash
+npm run verify:m2a            # ① 一次生成跑通 + ② 第二次生成看得到第一次（浏览器 + 截图 + 时间线）
+npm run verify:m2a-reconnect  # ③ 断连后任务继续、重连读到完整结果
+```
+
+工具集就是产品那套（`readFile` / `writeFiles` / `modifyFile` / `deleteFile` / `listFiles`），
+框架自带的 `CodingTools` 不装（它的 `bash` 不在产品工具集里）。证据在 `evidence-m2a/`。
+
+## M2b：真实业务工具（buildPreview）
+
+harness 现在也跑产品的真实构建：`buildPreview` 直接调用产品的 `buildApp`（在真实 Docker 容器里装依赖 /
+类型检查 / 打包），阶段与结果写到工具的 `details`，产品观察者把它们翻成前端的 `data-progress`。
+
+- 每个工具都声明了 `replay`（崩溃后能不能重跑）：读与整文件写 safe，精确替换 / 删除 unsafe，
+  `buildPreview` safe。`GET /tools` 可读回，判断与理由见 `docs/plans/pi-durable-m2.md` §7.2。
+- 产品模块用 `@/` 别名，所以 harness 要用 `./run.sh`（产品 tsx + 产品根作 cwd）启动；
+  `../pi-durable-pg/run.sh` 仍用于不需要构建的 M1 脚本与用例。
+- 应用映射从会话持久化的 `pi.agent.cwd` 还原：进程重启后重放的 `buildPreview` 才能找到自己的应用。
+- 证据在 `evidence-m2b/`（`timeline-m2b.txt`）：真实容器构建、构建期间断开观察端、构建中途 kill -9 续跑。
 
 ## HTTP attach API（harness 进程）
 
 | 方法 | 路径 | 语义 |
 | --- | --- | --- |
-| POST | `/submit` | `{content, requestId}`，durable admission，202 即返回；不接任何请求 socket |
+| POST | `/conversations` | `{workspace, instructions?, title?, app?}` → 201 `{conversationId}`：建一条应用会话 |
+| POST | `/submit` | `{content, requestId, conversationId?}`，durable admission，202 即返回；不接任何请求 socket |
+| POST | `/abort` | `{conversationId?}`：中止该会话的活跃运行（取消用） |
 | GET | `/events` | SSE：`snapshot` + `revision`，每秒一个 `: ping` 保活 |
+| GET | `/agent-events` | NDJSON agent 事件（文本增量、工具进出、`tool_execution_update.details`、run_end），每秒一行 ping，随 run_end 结束 |
 | GET | `/state` | 只读投影（进程、任务、提交、转录、live），验证脚本用 |
+| GET | `/context` | 只读：会话的模型上下文（`messages` 的角色与文本） |
+| GET | `/conversations` | 只读：本进程开过的会话与各自的工作区 |
+| GET | `/tools` | 只读：工具清单与各自的 `replay` 声明 |
 | GET | `/health` | 存活 |
 
 **限界**：客户端断连只允许中止这一条 `watch`（`server.ts` 的 `viewer.abort()`）。提交路径与

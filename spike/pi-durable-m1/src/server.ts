@@ -11,14 +11,20 @@
  *   GET  /events                 SSE view of the structure (snapshot + revisions), stays open
  *   GET  /state                  read-only projection of one conversation
  *   GET  /context                the model context of one conversation (verification evidence)
+ *   GET  /tools                 the offered tools and their replay policy
  *   GET  /health                 liveness
  *
+ * M2b registers the product's real build tool. `buildPreview` calls the product's
+ * own `buildApp` (loaded on demand, so runners that never build need no product
+ * dependency) and reports each stage as running details. Every tool declares its
+ * `replay` policy: whether a crash-interrupted execution may rerun on recovery.
+ * Reading and full-content writing are safe; in-place edits and deletes are not.
+ *
  * The tools are the product's file set (readFile / writeFiles / modifyFile /
- * listFiles / deleteFile) so the product chat renders them without changes, plus
- * `m1_wait` for the M1 verification scripts. The framework's own CodingTools
- * (read / write / edit / bash) are deliberately not installed: `bash` is not part
- * of the product's tool set. Build and preview tools stay out of M2a on purpose
- * (see docs/plans/pi-durable-m2.md).
+ * listFiles / deleteFile) plus `buildPreview`, so the product chat renders them
+ * without changes, plus `m1_wait` for the M1 verification scripts. The framework's
+ * own CodingTools (read / write / edit / bash) are deliberately not installed:
+ * `bash` is not part of the product's tool set.
  *
  * Boundary that must survive the migration: a client disconnect may abort the
  * SSE/NDJSON view of GET /events or GET /agent-events and nothing else. The
@@ -74,6 +80,9 @@ const waitTool = defineTool({
 	name: "m1_wait",
 	description: "Sleep for the given number of milliseconds, then return. Use it when the user asks to wait.",
 	parameters: Type.Object({ ms: Type.Number() }),
+	// Deliberately keeps the default `unsafe`: this is the M1 fixture, and the kill -9 case pins
+	// "an interrupted tool is not rerun" on it (a safe declaration would replay the sleep on resume).
+	replay: "unsafe",
 	execute: async (args) => {
 		const ms = Math.max(0, Math.min(args.ms, 120_000));
 		recordToolEvent("start", "m1_wait", { ms });
@@ -87,6 +96,8 @@ const readFileTool = defineTool({
 	name: "readFile",
 	description: "读取当前应用的一个文本文件，返回完整内容。path 是相对工作区的路径。",
 	parameters: Type.Object({ path: Type.String() }),
+	// Safe: a pure read.
+	replay: "safe",
 	execute: async (args, api, toolContext) => {
 		const env = requireEnv(api);
 		const text = getOrThrow(await env.readTextFile(safeRelativePath(args.path), toolContext));
@@ -98,6 +109,8 @@ const writeFilesTool = defineTool({
 	name: "writeFiles",
 	description: "写入当前应用的文件（一次可写多个），必须提供完整内容。path 是相对工作区的路径。",
 	parameters: Type.Object({ files: Type.Array(Type.Object({ path: Type.String(), content: Type.String() }), { minItems: 1 }) }),
+	// Safe: full content is written, so rerunning the same call yields the same bytes (no double append).
+	replay: "safe",
 	execute: async (args, api, toolContext) => {
 		const env = requireEnv(api);
 		const written: string[] = [];
@@ -114,6 +127,9 @@ const modifyFileTool = defineTool({
 	name: "modifyFile",
 	description: "通过唯一精确匹配的 oldText → newText 修改一个文件；oldText 必须在文件里只出现一次。path 是相对工作区的路径。",
 	parameters: Type.Object({ path: Type.String(), oldText: Type.String(), newText: Type.String() }),
+	// Unsafe: a precise oldText -> newText edit is not idempotent. A rerun after a crash either double-applies
+	// or fails (the match is gone), so the call is abandoned on restart instead of replayed.
+	replay: "unsafe",
 	execute: async (args, api, toolContext) => {
 		const env = requireEnv(api);
 		const path = safeRelativePath(args.path);
@@ -130,6 +146,8 @@ const deleteFileTool = defineTool({
 	name: "deleteFile",
 	description: "删除当前应用的一个文件（不允许删除目录）。path 是相对工作区的路径。",
 	parameters: Type.Object({ path: Type.String() }),
+	// Unsafe: rerunning after the file is already gone throws, and the delete is not idempotent.
+	replay: "unsafe",
 	execute: async (args, api, toolContext) => {
 		const env = requireEnv(api);
 		const path = safeRelativePath(args.path);
@@ -144,6 +162,8 @@ const listFilesTool = defineTool({
 	name: "listFiles",
 	description: "递归列出当前应用的源文件（相对路径，目录带 / 结尾）。",
 	parameters: Type.Object({}),
+	// Safe: a pure read.
+	replay: "safe",
 	execute: async (_args, api, toolContext) => {
 		const env = requireEnv(api);
 		const found: string[] = [];
@@ -162,6 +182,112 @@ const listFilesTool = defineTool({
 		};
 		await walk("");
 		return { output: [{ type: "text", text: found.join("\n") }], details: { files: found } };
+	},
+});
+
+/**
+ * Per-conversation app identity, set when the product creates the conversation. The build tool needs
+ * the app id and type to locate the source tree and validate the project manifest.
+ */
+type AppRef = { id: string; codeGenType: string };
+const apps = new Map<number, AppRef>();
+
+/**
+ * App identity from a conversation's durable `cwd`, which the product sets to
+ * `<runtimeRoot>/code_output/<codeGenType>_<appId>` (workspace() in the product's workspace.ts).
+ *
+ * The in-memory map does not survive a process restart, and a crash-interrupted buildPreview is
+ * replayed on the next start: reading the app back from the durable cwd is what lets that replay
+ * find its app at all (without it, a resumed build refuses to run).
+ */
+function appRefFromWorkspace(cwd: string | undefined): AppRef | undefined {
+	const match = /(?:^|\/)(html|multi_file|vue_project|react_project)_([0-9]+)\/?$/.exec(cwd ?? "");
+	return match ? { id: match[2]!, codeGenType: match[1]! } : undefined;
+}
+
+type BuildStageName = "source" | "install" | "typecheck" | "build";
+
+/** The product's own build implementation, loaded on demand. */
+type ProductBuild = {
+	buildApp: (app: AppRef, signal: AbortSignal | undefined, onStage: (stage: BuildStageName, status: "started" | "ok" | "failed", ms: number) => void) => Promise<void>;
+	classifyBuildFailure: (error: unknown) => { repairable: boolean; stage: string };
+	formatBuildDiagnostic: (error: unknown) => string;
+};
+
+let productBuild: Promise<ProductBuild> | undefined;
+
+/**
+ * The product modules use the `@/` path alias, so they resolve only under the product's tsx with the
+ * product root as cwd (see run.sh). Loading them on demand keeps runners that never build - the M1
+ * scripts and the integration cases with the stub model - independent of that setup.
+ */
+function loadProductBuild(): Promise<ProductBuild> {
+	return (productBuild ??= Promise.all([
+		import(new URL("../../../paimeng-ai-code-agent/src/server/artifacts.ts", import.meta.url).href),
+		import(new URL("../../../paimeng-ai-code-agent/src/server/build-feedback.ts", import.meta.url).href),
+	]).then(([artifacts, feedback]) => ({
+		buildApp: (artifacts as { buildApp: ProductBuild["buildApp"] }).buildApp,
+		classifyBuildFailure: (feedback as { classifyBuildFailure: ProductBuild["classifyBuildFailure"] }).classifyBuildFailure,
+		formatBuildDiagnostic: (feedback as { formatBuildDiagnostic: ProductBuild["formatBuildDiagnostic"] }).formatBuildDiagnostic,
+	})));
+}
+
+/** What the product's chat card renders; the product observer forwards `details` as the tool output. */
+type BuildResult = {
+	status: "ok" | "failed";
+	milestone: string;
+	ms: number;
+	stages: { stage: BuildStageName; status: "ok" | "failed"; ms: number }[];
+	stage?: string;
+	repairable?: boolean;
+	diagnostic?: string;
+	note: string;
+};
+
+/**
+ * The product's milestone build. Each stage change is committed as running `details`; the product
+ * observer turns those into `data-progress` events and refreshes the preview on success.
+ */
+const buildPreviewTool = defineTool({
+	name: "buildPreview",
+	description: "提交一次阶段构建并刷新右侧预览：完成第一个可运行版本后调用一次，之后每完成一个明显功能再调用一次。失败时按返回的诊断修复后再次调用。这只刷新预览，不代表任务完成。",
+	parameters: Type.Object({ milestone: Type.String() }),
+	// Safe: building the same source yields the same artifact. Each call stages into a fresh directory
+	// and atomically replaces dist, so a replay after a crash leaves no duplicate or partial side effect.
+	replay: "safe",
+	execute: async (args, api, context) => {
+		const app = await appRefFor(api.conversationId);
+		if (!app) throw new Error(`会话 ${api.conversationId} 没有关联应用，拒绝构建`);
+		const build = await loadProductBuild();
+		const startedAt = Date.now();
+		const stages: BuildResult["stages"] = [];
+		const note = (stage: BuildStageName, status: "started" | "ok" | "failed", ms: number) => {
+			if (status !== "started") stages.push({ stage, status, ms });
+			// Fire-and-forget: a progress commit must never fail the build.
+			void api.details({ stage, status, ms, at: Date.now() }, context).catch(() => undefined);
+		};
+		try {
+			await build.buildApp({ id: app.id, codeGenType: app.codeGenType }, context.abortSignal, note);
+			const at = Date.now();
+			const result: BuildResult = { status: "ok", milestone: args.milestone, ms: at - startedAt, stages, note: "预览已更新为这次构建的产物。继续开发下一个功能，有明显增量时再调用一次。" };
+			await api.details(result, context);
+			return { output: [{ type: "text", text: `预览已更新（${args.milestone}），用时 ${at - startedAt}ms。` }], details: result };
+		} catch (problem) {
+			const verdict = build.classifyBuildFailure(problem);
+			const diagnostic = build.formatBuildDiagnostic(problem);
+			const result: BuildResult = {
+				status: "failed",
+				milestone: args.milestone,
+				ms: Date.now() - startedAt,
+				stages,
+				stage: verdict.stage,
+				repairable: verdict.repairable,
+				diagnostic,
+				note: "这次构建没有通过，右侧仍是上一次成功的预览。按诊断修改源码后再次调用 buildPreview；不要改 package.json、锁文件或模板文件。",
+			};
+			await api.details(result, context);
+			return { output: [{ type: "text", text: diagnostic }], details: result };
+		}
 	},
 });
 
@@ -216,14 +342,21 @@ if (process.env.M1_RESET === "1") {
 	await resetPostgresStorage();
 	log("storage reset (M1_RESET=1)");
 }
+/**
+ * The tool set the conversation uses. Every tool declares `replay`: whether a crash-interrupted
+ * execution may rerun on recovery. Reading and full-content writing are safe; in-place edits and
+ * deletes are not. `m1_wait` keeps the default deliberately (see its definition).
+ */
+const productTools = [readFileTool, writeFilesTool, modifyFileTool, deleteFileTool, listFilesTool, buildPreviewTool, waitTool];
+
 const { harness } = await openPgHarness({
-	// 工具集就是产品那套最小文件工具（readFile / writeFiles / modifyFile / deleteFile / listFiles）。
+	// 工具集就是产品那套最小文件工具（readFile / writeFiles / modifyFile / deleteFile / listFiles）加 buildPreview。
 	// 框架内置的 CodingTools 里有一个 `bash`（任意 shell），而产品明确不提供 shell，所以不装它。
 	codingTools: false,
 	extensions: [
 		defineExtension({
 			name: "m1.tools",
-			tools: [readFileTool, writeFilesTool, modifyFileTool, deleteFileTool, listFilesTool, waitTool],
+			tools: productTools,
 		}),
 	],
 	settings: { stream: { timeoutMs: 300_000 } },
@@ -242,8 +375,23 @@ async function conversationOf(id: ConversationId): Promise<Conversation | undefi
 	const cached = handles.get(id);
 	if (cached) return cached;
 	const found = await harness.conversation(id, context);
-	if (found) handles.set(id, found);
+	if (!found) return undefined;
+	handles.set(id, found);
+	// Restore the workspace and app mapping from the conversation's durable agent state: the maps above
+	// are process memory, and a resumed task (a replayed buildPreview) runs before any request arrives.
+	const cwd = (await found.agent(context)).cwd;
+	if (cwd) {
+		workspaces.set(id, cwd);
+		const ref = appRefFromWorkspace(cwd);
+		if (ref) apps.set(id, ref);
+	}
 	return found;
+}
+
+/** The app of a conversation, from the in-memory map or, after a restart, from durable state. */
+async function appRefFor(id: ConversationId): Promise<AppRef | undefined> {
+	if (!apps.has(id)) await conversationOf(id);
+	return apps.get(id);
 }
 
 /** Trusted decoding boundary: a request carries the id as a number or a numeric string. */
@@ -302,8 +450,14 @@ const server = createServer(async (request, response) => {
 			return;
 		}
 
+		if (request.method === "GET" && url.pathname === "/tools") {
+			// Read-only: which tools the conversation offers and their replay policy. Verification and cases use it.
+			sendJson(response, 200, { tools: productTools.map((tool) => ({ name: tool.name, replay: tool.replay ?? "unsafe" })) });
+			return;
+		}
+
 		if (request.method === "POST" && url.pathname === "/conversations") {
-			const body = JSON.parse((await readBody(request)) || "{}") as { workspace?: string; instructions?: string; title?: string };
+			const body = JSON.parse((await readBody(request)) || "{}") as { workspace?: string; instructions?: string; title?: string; app?: AppRef };
 			if (!body.workspace) {
 				sendJson(response, 400, { error: "workspace is required" });
 				return;
@@ -315,6 +469,12 @@ const server = createServer(async (request, response) => {
 			}, context);
 			handles.set(conversation.id, conversation);
 			workspaces.set(conversation.id, body.workspace);
+			if (body.app) apps.set(conversation.id, body.app);
+			// Backup for tools that run before any request: derive the app from the durable workspace too.
+			else {
+				const ref = appRefFromWorkspace(body.workspace);
+				if (ref) apps.set(conversation.id, ref);
+			}
 			log(`conversation created id=${conversation.id} workspace=${body.workspace}${body.title ? ` title=${body.title}` : ""}`);
 			sendJson(response, 201, { conversationId: conversation.id });
 			return;

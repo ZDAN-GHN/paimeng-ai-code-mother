@@ -143,7 +143,7 @@ if (await portOpen('127.0.0.1', appPort)) {
 await ensurePostgres();
 
 console.log(`管理端 http://localhost:${appPort}（APP_ORIGIN=${appOrigin}，生成引擎 ${engine}），harness ${harnessUrl}；输出前缀为 [harness] 与 [app]，按 Ctrl-C 一起停止`);
-start('harness', join(pgDir, 'run.sh'), ['src/server.ts'], {
+start('harness', join(spikeDir, 'run.sh'), [join(spikeDir, 'src', 'server.ts')], {
   cwd: spikeDir,
   env: { ...process.env, M1_HOST: '127.0.0.1', M1_PORT: String(harnessPort), DURABLE_PG_URL: pgUrl },
 });
