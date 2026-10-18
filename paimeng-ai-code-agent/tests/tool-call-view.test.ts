@@ -11,26 +11,41 @@ const callOf = (providerPart: unknown) => {
 
 describe('工具调用展示模型', () => {
   it('写入文件：状态、文件与行数；id 不进入展示模型', () => {
-    const call = toolCallOf(part('writeFiles', { files: [{ path: 'index.html', content: 'a\nb' }] }, { written: ['index.html'] }));
+    const call = toolCallOf(part('write', { path: 'index.html', content: 'a\nb' }, 'Successfully wrote to index.html'));
     expect(call?.status).toBe('done');
     expect(call?.view).toEqual({ kind: 'files-written', label: '写入文件', files: [{ path: 'index.html', content: 'a\nb' }] });
     expect(JSON.stringify(call)).not.toContain('call_00_secret');
   });
 
   it('流式中的半截参数退化成「进行中」的通用标题，不抛错', () => {
-    const call = toolCallOf(part('writeFiles', { files: [{ path: 'index.html' }] }, undefined, 'input-streaming'));
+    const call = toolCallOf(part('write', { path: 'index.html' }, undefined, 'input-streaming'));
     expect(call?.status).toBe('running');
     expect(call?.view.kind).toBe('unknown');
-    const partial = toolCallOf(part('modifyFile', { path: 'src/App.vue' }, undefined, 'input-streaming'));
+    const partial = toolCallOf(part('edit', { path: 'src/App.vue' }, undefined, 'input-streaming'));
     expect(partial?.view).toMatchObject({ kind: 'unknown', label: '修改文件', target: 'src/App.vue' });
   });
 
-  it('修改文件渲染成替换前后；读取与列出文件各自成模型', () => {
-    expect(toolCallOf(part('modifyFile', { path: 'a.vue', oldText: 'x', newText: 'y' }, { modified: 'a.vue' }))?.view)
-      .toEqual({ kind: 'file-modified', label: '修改文件', path: 'a.vue', oldText: 'x', newText: 'y' });
-    expect(toolCallOf(part('readFile', { path: 'AGENTS.md' }, '内容'))?.view).toEqual({ kind: 'file-read', label: '读取文件', path: 'AGENTS.md', content: '内容' });
+  it('修改文件渲染成替换前后（一次调用可以改多处）；读取与列出文件各自成模型', () => {
+    expect(toolCallOf(part('edit', { path: 'a.vue', edits: [{ oldText: 'x', newText: 'y' }] }, 'Successfully replaced 1 block(s) in a.vue.'))?.view)
+      .toEqual({ kind: 'file-modified', label: '修改文件', path: 'a.vue', edits: [{ oldText: 'x', newText: 'y' }] });
+    const multi = toolCallOf(part('edit', { path: 'a.vue', edits: [{ oldText: 'x', newText: 'y' }, { oldText: 'p', newText: 'q' }] }, 'Successfully replaced 2 block(s) in a.vue.'));
+    expect(multi?.view).toMatchObject({ kind: 'file-modified', path: 'a.vue', edits: [{ oldText: 'x' }, { oldText: 'p', newText: 'q' }] });
+    expect(toolCallOf(part('read', { path: 'AGENTS.md' }, '内容'))?.view).toEqual({ kind: 'file-read', label: '读取文件', path: 'AGENTS.md', content: '内容' });
+    const source = 'before\n<harness>literal file content</harness>\nafter';
+    expect(toolCallOf(part('read', { path: 'example.html' }, source))?.view).toMatchObject({ kind: 'file-read', content: source });
+    const blocked = toolCallOf(part('read', { path: '../outside.txt' }, '<harness>\n[error] Tool call blocked: 路径不允许包含 ..\n</harness>'));
+    expect(blocked?.view).toMatchObject({ kind: 'file-read', content: '<harness>\n[error] Tool call blocked: 路径不允许包含 ..\n</harness>' });
     expect(toolCallOf(part('listFiles', {}, ['index.html']))?.view).toEqual({ kind: 'files-listed', label: '列出文件', files: ['index.html'] });
-    expect(toolCallOf(part('deleteFile', { path: 'old.html' }, { deleted: 'old.html' }))?.view).toEqual({ kind: 'file-deleted', label: '删除文件', path: 'old.html' });
+    expect(toolCallOf(part('listFiles', {}, { files: ['src/App.tsx'] }))?.view).toEqual({ kind: 'files-listed', label: '列出文件', files: ['src/App.tsx'] });
+  });
+
+  it('动态工具 part（引擎流式与历史派生都是这种形状）同样解析出展示模型', () => {
+    const live = toolCallOf({ type: 'dynamic-tool', toolName: 'write', state: 'output-available', toolCallId: 'call_live', input: { path: 'index.html', content: '<h1>首页</h1>' }, output: 'Successfully wrote to index.html' });
+    expect(live?.view).toMatchObject({ kind: 'files-written', files: [{ path: 'index.html', content: '<h1>首页</h1>' }] });
+    const history = toolCallOf({ type: 'dynamic-tool', toolName: 'edit', state: 'output-available', toolCallId: 'call_history', input: { path: 'style.css', edits: [{ oldText: 'color: red', newText: 'color: blue' }] }, output: 'Successfully replaced 1 block(s) in style.css.' });
+    expect(history?.view).toMatchObject({ kind: 'file-modified', path: 'style.css', edits: [{ oldText: 'color: red', newText: 'color: blue' }] });
+    const failed = toolCallOf({ type: 'dynamic-tool', toolName: 'read', state: 'output-error', toolCallId: 'call_failed', input: { path: 'missing.txt' }, errorText: 'ENOENT: no such file' });
+    expect(failed).toMatchObject({ status: 'error', errorText: 'ENOENT: no such file' });
   });
 
   it('导入图片：保留 src 与许可信息（前端据此渲染缩略图与来源）', () => {
@@ -75,7 +90,7 @@ describe('工具调用展示模型', () => {
   });
 
   it('失败状态带错误文本；未知工具与非工具 part 的行为', () => {
-    const failed = toolCallOf({ type: 'tool-readFile', state: 'output-error', input: { path: 'a.html' }, errorText: '文件不存在' });
+    const failed = toolCallOf({ type: 'tool-read', state: 'output-error', input: { path: 'a.html' }, errorText: '文件不存在' });
     expect(failed).toMatchObject({ status: 'error', errorText: '文件不存在' });
     expect(toolCallOf(part('runShell', { command: 'ls' }))?.view).toMatchObject({ kind: 'unknown', name: 'runShell' });
     expect(toolCallOf({ type: 'text', text: '你好' })).toBeNull();

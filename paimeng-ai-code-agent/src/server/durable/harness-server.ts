@@ -23,13 +23,12 @@
  * `buildPreview` calls the product's own `buildApp` and reports each stage as
  * running details. Every tool declares its `replay` policy: whether a
  * crash-interrupted execution may rerun on recovery. Reading and full-content
- * writing are safe; in-place edits and deletes are not.
+ * writing are safe; in-place edits are not.
  *
- * The tools are the product's file set (readFile / writeFiles / modifyFile /
- * listFiles / deleteFile) plus `buildPreview`, so the product chat renders them
- * without changes, plus `m1_wait` for the manual verification scripts. The
- * framework's own CodingTools (read / write / edit / bash) are deliberately not
- * installed: `bash` is not part of the product's tool set.
+ * The file tools are the framework's `read` / `write` / `edit` from its
+ * coding-tools extension, next to the product's own `listFiles` and
+ * `buildPreview`, plus `m1_wait` for the manual verification scripts. `bash` is
+ * deliberately not installed: it is not part of the product's tool set.
  *
  * Boundary that must survive the migration: a client disconnect may abort the
  * SSE/NDJSON view of GET /events or GET /agent-events and nothing else. The
@@ -44,8 +43,9 @@ import { Type } from "@earendil-works/pi-ai";
 import type { JsonValue } from "@earendil-works/chord";
 import { withAbortSignal } from "@earendil-works/chord/context";
 import type { AgentEvent, Conversation, ConversationId, ConversationView, Cursor, EntryDraft, LiveState, ToolExecutionApi } from "@earendil-works/pi-durable";
-import { defineExtension, defineTool, watchEvents } from "@earendil-works/pi-durable";
+import { ToolTask, defineExtension, defineTool, hook, watchEvents } from "@earendil-works/pi-durable";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
+import { createCodingTools } from "@earendil-works/pi-durable/tools";
 import { getOrThrow, type ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { CodeGenType } from "@/shared/contracts";
 import { buildApp, type BuildStageProgress } from "../artifacts";
@@ -143,7 +143,9 @@ function safeRelativePath(path: string): string {
 	if (!cleaned || cleaned.startsWith("/") || /^[A-Za-z]:/.test(cleaned)) throw new Error("只允许工作区内的相对路径");
 	const parts = cleaned.split("/");
 	if (parts.some((part) => part === "..")) throw new Error("路径不允许包含 ..");
-	return parts.filter((part) => part !== "" && part !== ".").join("/");
+	const normalized = parts.filter((part) => part !== "" && part !== ".").join("/");
+	if (normalized.startsWith("@")) throw new Error("路径不允许以 @ 开头");
+	return normalized;
 }
 
 const waitTool = defineTool({
@@ -162,69 +164,23 @@ const waitTool = defineTool({
 	},
 });
 
-const readFileTool = defineTool({
-	name: "readFile",
-	description: "读取当前应用的一个文本文件，返回完整内容。path 是相对工作区的路径。",
-	parameters: Type.Object({ path: Type.String() }),
-	// Safe: a pure read.
-	replay: "safe",
-	execute: async (args, api, toolContext) => {
-		const env = requireEnv(api);
-		const text = getOrThrow(await env.readTextFile(safeRelativePath(args.path), toolContext));
-		return { output: [{ type: "text", text }] };
-	},
-});
+const fileToolNames = new Set(["read", "write", "edit"]);
 
-const writeFilesTool = defineTool({
-	name: "writeFiles",
-	description: "写入当前应用的文件（一次可写多个），必须提供完整内容。path 是相对工作区的路径。",
-	parameters: Type.Object({ files: Type.Array(Type.Object({ path: Type.String(), content: Type.String() }), { minItems: 1 }) }),
-	// Safe: full content is written, so rerunning the same call yields the same bytes (no double append).
-	replay: "safe",
-	execute: async (args, api, toolContext) => {
-		const env = requireEnv(api);
-		const written: string[] = [];
-		for (const file of args.files) {
-			const path = safeRelativePath(file.path);
-			getOrThrow(await env.writeFile(path, file.content, toolContext));
-			written.push(path);
-		}
-		return { output: [{ type: "text", text: `已写入 ${written.join("、")}` }], details: { written } };
-	},
-});
+/** read/write 可安全重放；edit 匹配的旧文本在首次执行后会消失，不能重放。 */
+const fileTools: ToolRegistration[] = createCodingTools()
+	.tools!.filter((tool) => fileToolNames.has(tool.name))
+	.map((tool) => {
+		const replay: "safe" | "unsafe" = tool.name === "edit" ? "unsafe" : "safe";
+		return { ...tool, replay };
+	});
 
-const modifyFileTool = defineTool({
-	name: "modifyFile",
-	description: "通过唯一精确匹配的 oldText → newText 修改一个文件；oldText 必须在文件里只出现一次。path 是相对工作区的路径。",
-	parameters: Type.Object({ path: Type.String(), oldText: Type.String(), newText: Type.String() }),
-	// Unsafe: a precise oldText -> newText edit is not idempotent. A rerun after a crash either double-applies
-	// or fails (the match is gone), so the call is abandoned on restart instead of replayed.
-	replay: "unsafe",
-	execute: async (args, api, toolContext) => {
-		const env = requireEnv(api);
-		const path = safeRelativePath(args.path);
-		const text = getOrThrow(await env.readTextFile(path, toolContext));
-		const first = text.indexOf(args.oldText);
-		if (first < 0) throw new Error(`没有找到要替换的内容（${path}）`);
-		if (text.indexOf(args.oldText, first + 1) >= 0) throw new Error(`要替换的内容在文件里出现多次（${path}）`);
-		getOrThrow(await env.writeFile(path, text.slice(0, first) + args.newText + text.slice(first + args.oldText.length), toolContext));
-		return { output: [{ type: "text", text: `已修改 ${path}` }], details: { modified: path } };
-	},
-});
-
-const deleteFileTool = defineTool({
-	name: "deleteFile",
-	description: "删除当前应用的一个文件（不允许删除目录）。path 是相对工作区的路径。",
-	parameters: Type.Object({ path: Type.String() }),
-	// Unsafe: rerunning after the file is already gone throws, and the delete is not idempotent.
-	replay: "unsafe",
-	execute: async (args, api, toolContext) => {
-		const env = requireEnv(api);
-		const path = safeRelativePath(args.path);
-		const info = getOrThrow(await env.fileInfo(path, toolContext));
-		if (info.kind !== "file") throw new Error("deleteFile 只能删除文件，不能删除目录");
-		getOrThrow(await env.remove(path, {}, toolContext));
-		return { output: [{ type: "text", text: `已删除 ${path}` }], details: { deleted: path } };
+/** 原生工具支持绝对路径，在执行前保留产品的工作区相对路径限制。 */
+const workspacePathHook = hook(ToolTask, {
+	beforeTool: (call) => {
+		if (!fileToolNames.has(call.name)) return undefined;
+		const path = call.arguments.path;
+		if (typeof path !== "string") return undefined;
+		return { arguments: { ...call.arguments, path: safeRelativePath(path) } };
 	},
 });
 
@@ -237,15 +193,17 @@ const listFilesTool = defineTool({
 	execute: async (_args, api, toolContext) => {
 		const env = requireEnv(api);
 		const found: string[] = [];
+		// The environment resolves a leading `/` as the filesystem root, so children stay relative.
 		const walk = async (directory: string) => {
 			if (found.length >= maxListedFiles) return;
 			for (const entry of getOrThrow(await env.listDir(directory, toolContext))) {
+				const path = directory === "" ? entry.name : `${directory}/${entry.name}`;
 				if (entry.kind === "directory") {
 					if (blockedDirectories.has(entry.name)) continue;
-					found.push(`${directory}/${entry.name}/`.replace(/^\//, ""));
-					await walk(`${directory}/${entry.name}`);
+					found.push(`${path}/`);
+					await walk(path);
 				} else if (entry.kind === "file") {
-					found.push(`${directory}/${entry.name}`.replace(/^\//, ""));
+					found.push(path);
 				}
 				if (found.length >= maxListedFiles) return;
 			}
@@ -335,7 +293,7 @@ const buildPreviewTool = defineTool({
 				stage: verdict.stage,
 				repairable: verdict.repairable,
 				diagnostic,
-				note: "这次构建没有通过，右侧仍是上一次成功的预览。按诊断修改源码后再次调用 buildPreview；不要改 package.json、锁文件或模板文件。",
+				note: "这次构建没有通过，右侧仍是上一次成功的预览。按诊断修改源码后再次调用 buildPreview；不要添加或改动既有依赖，只在诊断指出依赖声明或锁文件被误改时才把 package.json 与锁文件恢复成模板自带的内容。",
 			};
 			await api.details(result, context);
 			return { output: [{ type: "text", text: diagnostic }], details: result };
@@ -505,19 +463,20 @@ if (process.env.DURABLE_HARNESS_RESET === "1") {
 }
 /**
  * The tool set the conversation uses. Every tool declares `replay`: whether a crash-interrupted
- * execution may rerun on recovery. Reading and full-content writing are safe; in-place edits and
- * deletes are not. `m1_wait` keeps the default deliberately (see its definition).
+ * execution may rerun on recovery. Reading and full-content writing are safe; in-place edits are
+ * not. `m1_wait` keeps the default deliberately (see its definition).
  */
-const productTools = [readFileTool, writeFilesTool, modifyFileTool, deleteFileTool, listFilesTool, buildPreviewTool, waitTool, ...webToolsForConfig()];
+const productTools = [...fileTools, listFilesTool, buildPreviewTool, waitTool, ...webToolsForConfig()];
 
 const { harness } = await openPgHarness({
-	// 工具集就是产品那套最小文件工具（readFile / writeFiles / modifyFile / deleteFile / listFiles）加 buildPreview。
-	// 框架内置的 CodingTools 里有一个 `bash`（任意 shell），而产品明确不提供 shell，所以不装它。
+	// 文件工具取自框架的 coding-tools（read / write / edit），加上产品的 listFiles 与 buildPreview。
+	// 那个扩展里还有一个 `bash`（任意 shell），而产品明确不提供 shell，所以只取这三个，不整包安装。
 	codingTools: false,
 	extensions: [
 		defineExtension({
 			name: "m1.tools",
 			tools: productTools,
+			hooks: [workspacePathHook],
 		}),
 	],
 	settings: { stream: { timeoutMs: 300_000 } },

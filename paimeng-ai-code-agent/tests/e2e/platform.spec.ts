@@ -65,7 +65,7 @@ test('浏览器完成注册、登录、生成、编辑、预览、发布和下�
   const bubbleText = await page.locator('.message-ai .message-bubble').last().innerText();
   expect(bubbleText).not.toContain('toolCallId');
   expect(bubbleText).not.toContain('output-available');
-  expect(bubbleText).not.toContain('"files"');
+  expect(bubbleText).not.toContain('"content"');
   // 用量挂在对应的助手回复上（一条回复一个用量），展开后能看到逐步明细。
   const usage = page.locator('.message-ai .generation-usage');
   await expect(usage).toBeVisible();

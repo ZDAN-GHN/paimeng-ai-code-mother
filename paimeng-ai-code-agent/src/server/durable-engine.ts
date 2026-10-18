@@ -39,8 +39,7 @@ import { webAccessInstructions } from './web-access/tools';
  * 限界：HTTP 请求的 `AbortSignal` 只作用在观察这条 `fetch` 上（`controller`），绝不传进
  * `conversation.submit()`：断连只让转发停止，任务继续跑（对应 M1 的 D1–D5）。
  *
- * M2a 的工具是最小文件集（readFile / listFiles / writeFiles / modifyFile / deleteFile），
- * 构建与里程碑在 M2b。
+ * M2a 的工具是最小文件集（read / write / edit / listFiles），构建与里程碑在 M2b。
  *
  * M2b：harness 也有 buildPreview。构件阶段与结果走工具的 `running details`，观察者把它们翻译成前端
  * 已有的 `data-progress`（阶段进度、预览刷新），并在静默期每秒补一个 started 事件保活；模型步骤的
@@ -48,7 +47,7 @@ import { webAccessInstructions } from './web-access/tools';
  */
 
 const textBlockSchema = z.object({ type: z.literal('text'), text: z.string() });
-const contentSchema = z.union([z.string(), z.array(z.union([z.string(), textBlockSchema]))]);
+const contentSchema = z.union([z.string(), z.array(z.unknown())]);
 
 /**
  * harness agent 事件里本引擎用到的字段；其余字段忽略。
@@ -184,7 +183,12 @@ async function harnessState(conversationId: number): Promise<HarnessState> {
 function blocksText(content: unknown): string {
   const parsed = contentSchema.safeParse(content);
   if (!parsed.success) return '';
-  return typeof parsed.data === 'string' ? parsed.data : parsed.data.map(block => (typeof block === 'string' ? block : block.text)).join('');
+  if (typeof parsed.data === 'string') return parsed.data;
+  return parsed.data.flatMap(block => {
+    if (typeof block === 'string') return [block];
+    const text = textBlockSchema.safeParse(block);
+    return text.success ? [text.data.text] : [];
+  }).join('');
 }
 
 /** 转录里的纯文本（附加太晚时的兜底）：把一段文字当作一个文本块。 */
@@ -202,10 +206,15 @@ function toolResultMessageOf(entry: unknown): z.infer<typeof toolResultMessageSc
   return null;
 }
 
-/** 工具结果条目的文本与错误标记。 */
-function toolResultOf(entry: unknown): { text: string; isError: boolean } {
+/** 工具结果条目的文本、结构化 details 与错误标记。 */
+function toolResultOf(entry: unknown): { text: string; details: unknown; isError: boolean } {
   const message = toolResultMessageOf(entry);
-  return message ? { text: blocksText(message.content), isError: message.isError === true } : { text: '', isError: false };
+  return message ? { text: blocksText(message.content), details: message.details, isError: message.isError === true } : { text: '', details: undefined, isError: false };
+}
+
+/** 原生文件工具展示文本；产品工具保留供卡片使用的结构化结果。 */
+function toolOutputPayload(toolName: string, details: unknown, text: string) {
+  return toolName === 'read' || toolName === 'write' || toolName === 'edit' ? text : details ?? text;
 }
 
 /**
@@ -399,14 +408,14 @@ class AssistantTurn {
   }
 
   toolEnd(toolCallId: string, toolName: string, entry: unknown) {
-    const { text, isError } = toolResultOf(entry);
+    const { text, details, isError } = toolResultOf(entry);
     const slot = this.tools.get(toolCallId);
     if (slot) {
       slot.output = text;
       slot.isError = isError;
     }
-    // 工具把结构化结果写在 `details` 里时，前端卡片直接用它（构建卡片需要对象，不是文本）。
-    const rendered = slot?.details ?? text;
+    // 运行中的 details（pi-durable 的进度/结构化结果通道）：进工具槽，buildPreview 的卡片直接用它（构建结果需要对象）。
+    const rendered = toolOutputPayload(toolName, slot?.details ?? details, text);
     this.channel.push(isError
       ? { type: 'tool-output-error', toolCallId, errorText: text || '工具调用失败', dynamic: true }
       : { type: 'tool-output-available', toolCallId, output: rendered, dynamic: true });
@@ -849,11 +858,7 @@ function parseEvent(line: string): HarnessEvent | null {
 
 /** 写入类工具的参数里的路径，用于时间线；解析失败不报错（调用参数在流式过程中可能不完整）。 */
 function writtenPathsOf(toolName: string, input: unknown): string[] {
-  if (toolName === 'writeFiles') {
-    const parsed = z.object({ files: z.array(z.object({ path: z.string() })) }).safeParse(input);
-    return parsed.success ? parsed.data.files.map(file => file.path) : [];
-  }
-  if (toolName === 'modifyFile' || toolName === 'deleteFile') {
+  if (toolName === 'write' || toolName === 'edit') {
     const parsed = z.object({ path: z.string() }).safeParse(input);
     return parsed.success ? [parsed.data.path] : [];
   }
@@ -954,7 +959,7 @@ function transcriptMessages(entries: readonly TranscriptEntry[]): UIMessage[] {
       if (!result || !part) continue;
       const text = blocksText(result.content);
       part.state = result.isError === true ? 'output-error' : 'output-available';
-      part.output = result.details ?? text;
+      part.output = toolOutputPayload(part.toolName, result.details, text);
       if (result.isError === true) part.errorText = text || '工具调用失败';
     }
   }

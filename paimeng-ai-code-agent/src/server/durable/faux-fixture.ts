@@ -14,7 +14,7 @@
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type FauxResponseFactory, type Message, type ToolCall } from "@earendil-works/pi-ai";
 import { createModels, type MutableModels } from "@earendil-works/pi-ai/models";
 import type { CodeGenType } from "@/shared/contracts";
-import { fixtureFiles, fixtureReadSteps, fixtureReplyText, fixtureTypedSource } from "../fixture-content";
+import { fixtureReadSteps, fixtureReplyText, fixtureWriteSteps } from "../fixture-content";
 
 export const FAUX_FIXTURE_PROVIDER = "faux";
 export const FAUX_FIXTURE_MODEL_ID = "fixture-1";
@@ -69,18 +69,12 @@ function scriptedTurn(messages: readonly Message[]): ScriptedTurn {
 	if (type === undefined) return { tool: null };
 	const prompt = lastUser < 0 ? "" : messageText(messages[lastUser]);
 	const results = messages.slice(lastUser + 1).filter((message) => message.role === "toolResult").length;
-	if (TEMPLATED.test(instructions) && (type === "react_project" || type === "vue_project")) {
-		const reads = fixtureReadSteps(type);
-		const read = reads[results];
-		if (read) return { tool: read.tool, args: read.path === undefined ? {} : { path: read.path } };
-		if (results === reads.length) {
-			const typed = fixtureTypedSource(type, prompt);
-			return { tool: "writeFiles", args: { files: typed ? [typed] : fixtureFiles(type, prompt) } };
-		}
-		return { tool: null };
-	}
-	if (results === 0) return { tool: "writeFiles", args: { files: fixtureFiles(type, prompt) } };
-	return { tool: null };
+	const templated = TEMPLATED.test(instructions) && (type === "react_project" || type === "vue_project");
+	const reads = templated ? fixtureReadSteps(type) : [];
+	const read = reads[results];
+	if (read) return { tool: read.tool, args: read.path === undefined ? {} : { path: read.path } };
+	const file = fixtureWriteSteps(type, prompt, templated)[results - reads.length];
+	return file === undefined ? { tool: null } : { tool: "write", args: { path: file.path, content: file.content } };
 }
 
 export function fauxFixtureModels(): MutableModels {

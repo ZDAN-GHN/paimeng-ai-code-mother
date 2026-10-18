@@ -5,11 +5,7 @@ import { join, relative, isAbsolute } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { getConfig } from './config';
-import { validateProjectManifest } from './build-contract';
-import { looksBinary } from './binary';
-import { forbiddenStaticPath } from './project-shape';
-import { readTemplateIdentity, assertTemplateFileMutable, validateTemplateManifest } from './templates';
-import { idSchema, codeGenTypes, isProjectCodeGenType, type AppInfo } from '@/shared/contracts';
+import { idSchema, codeGenTypes, type AppInfo } from '@/shared/contracts';
 
 export type WorkspaceApp = Pick<AppInfo, 'id' | 'codeGenType'>;
 export const MAX_FILE_BYTES = 256 * 1024;
@@ -137,13 +133,6 @@ export async function readProjectFileBytes(app: WorkspaceApp, path: string): Pro
   } finally { await handle.close(); }
 }
 
-export async function readProjectFileAsText(app: WorkspaceApp, path: string): Promise<string> {
-  const bytes = await readProjectFileBytes(app, path);
-  if (looksBinary(bytes)) return `该文件是二进制资源（${bytes.byteLength} 字节），不能作为文本读取；请在页面里用 src 引用它的路径。`;
-  if (bytes.byteLength > MAX_FILE_BYTES) throw new Error('文件过大或不是普通文件');
-  return bytes.toString('utf8');
-}
-
 async function writeAtomically(app: WorkspaceApp, path: string, data: string | Buffer, encoding: 'utf8' | null) {
   const file = await resolveFile(app, path, true);
   const temp = join(file.slice(0, file.lastIndexOf('/')), `.paimeng-${randomUUID()}`);
@@ -165,15 +154,6 @@ export async function writeProjectFile(app: WorkspaceApp, path: string, content:
   if (isPlatformAssetFile(path)) throw new Error('该文件由平台维护，不能通过文本工具修改');
   const size = Buffer.byteLength(content);
   if (size > MAX_FILE_BYTES) throw new Error('文件内容超过限制');
-  const file = await resolveFile(app, path, true);
-  const reason = forbiddenStaticPath(app.codeGenType, path);
-  if (reason) throw new Error(reason);
-  const template = await readTemplateIdentity(workspace(app));
-  assertTemplateFileMutable(template, path);
-  if (isProjectCodeGenType(app.codeGenType) && path === 'package.json') {
-    if (template) validateTemplateManifest(template, content);
-    else validateProjectManifest(app.codeGenType, content);
-  }
   const snapshot = await inspectProject(app);
   const existing = snapshot.files.find(entry => entry.path === path);
   if (snapshot.files.length + (existing ? 0 : 1) > MAX_PROJECT_FILES || snapshot.bytes - (existing?.size ?? 0) + size > MAX_PROJECT_BYTES) throw new Error('工程超过文件数量或大小限制');
@@ -193,20 +173,4 @@ export async function writeProjectFileBytes(app: WorkspaceApp, path: string, dat
 export async function writePlatformAssetFile(app: WorkspaceApp, path: string, content: string) {
   if (!isPlatformAssetFile(path)) throw new Error('仅平台素材文件允许这样写入');
   await writeAtomically(app, path, content, 'utf8');
-}
-
-export async function modifyProjectFile(app: WorkspaceApp, path: string, oldText: string, newText: string) {
-  if (!oldText) throw new Error('旧内容不能为空');
-  if (isPlatformAssetFile(path)) throw new Error('该文件由平台维护，不能通过文本工具修改');
-  const content = await readProjectFile(app, path);
-  const first = content.indexOf(oldText);
-  if (first < 0 || content.indexOf(oldText, first + oldText.length) >= 0) throw new Error('旧内容必须唯一匹配');
-  await writeProjectFile(app, path, content.slice(0, first) + newText + content.slice(first + oldText.length));
-}
-
-export async function deleteProjectFile(app: WorkspaceApp, path: string) {
-  if (isPlatformAssetFile(path)) throw new Error('该文件由平台维护，不能通过文本工具修改');
-  const file = await resolveFile(app, path);
-  assertTemplateFileMutable(await readTemplateIdentity(workspace(app)), path, true);
-  await unlink(file);
 }

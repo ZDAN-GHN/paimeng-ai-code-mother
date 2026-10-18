@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { rm } from 'node:fs/promises';
 import { sourceDigest } from '@/server/artifacts';
-import { listProjectFiles, readProjectFile, readProjectFileAsText, readProjectFileBytes, workspace, writeProjectFile, deleteProjectFile, modifyProjectFile } from '@/server/workspace';
+import { listProjectFiles, readProjectFile, readProjectFileBytes, workspace, writeProjectFile } from '@/server/workspace';
 import { assetsDirectory, importImageCandidate, persistImport, prepareImport } from '@/server/web-access/import';
 import { sniffImageFormat } from '@/server/binary';
 import { candidateIdFor, isAllowedLicense, licenseUrlFor, openverseImages, searchImageCandidates, webImages, type ImageCandidate } from '@/server/web-access/images';
@@ -208,15 +208,6 @@ describe('图片落进工程', () => {
     await expect(importImageCandidate(htmlApp, candidateFor('https://img.test/budget.png'), { deps: { transport: small.transport, lookup }, importedBytes: 8 * 1024 * 1024 })).rejects.toMatchObject({ code: 'budget-exceeded' });
   });
 
-  it('文本工具读图片时给出明确说明，而不是把字节当正文', async () => {
-    const candidate = candidateFor('https://img.test/read-as-text.png');
-    const { transport } = makeTransport(() => reply(200, 'image/png', png));
-    const imported = await importImageCandidate(htmlApp, candidate, { deps: { transport, lookup }, importedBytes: 0 });
-    const text = await readProjectFileAsText(htmlApp, imported.path);
-    expect(text).toContain('二进制资源');
-    expect(text).toContain('src');
-  });
-
   it('内网图片地址在下载前被拒绝', async () => {
     const { calls, transport } = makeTransport(() => reply(200, 'image/png', png));
     await expect(importImageCandidate(htmlApp, candidateFor('http://169.254.169.254/latest/meta-data/'), { deps: { transport, lookup }, importedBytes: 0 })).rejects.toMatchObject({ code: 'blocked-url' });
@@ -240,11 +231,9 @@ describe('图片落进工程', () => {
 });
 
 describe('素材文件与构建指纹', () => {
-  it('平台清单与署名页不能被文本工具修改或删除', async () => {
+  it('平台清单与署名页不能被文本工具改写', async () => {
     await expect(writeProjectFile(htmlApp, 'assets/sources.json', '{}')).rejects.toThrow('平台维护');
     await expect(writeProjectFile(htmlApp, 'public/assets/credits.html', 'x')).rejects.toThrow('平台维护');
-    await expect(modifyProjectFile(htmlApp, 'assets/credits.html', 'a', 'b')).rejects.toThrow('平台维护');
-    await expect(deleteProjectFile(htmlApp, 'assets/sources.json')).rejects.toThrow('平台维护');
   });
 
   it('大于文本上限的图片参与指纹，且图片字节变化会改变指纹', async () => {

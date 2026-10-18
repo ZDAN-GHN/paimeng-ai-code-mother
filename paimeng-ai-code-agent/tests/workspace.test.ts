@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { join } from 'node:path';
 import { rm, symlink, readFile, writeFile } from 'node:fs/promises';
-import { ensureWorkspace, workspace, writeProjectFile, readProjectFile, listProjectFiles, modifyProjectFile, deleteProjectFile, safeRelativePath, MAX_FILE_BYTES, MAX_PROJECT_BYTES, MAX_PROJECT_FILES } from '@/server/workspace';
+import { ensureWorkspace, workspace, writeProjectFile, readProjectFile, listProjectFiles, safeRelativePath, MAX_FILE_BYTES, MAX_PROJECT_BYTES, MAX_PROJECT_FILES } from '@/server/workspace';
 const app = { id: String(Date.now()), codeGenType: 'html' as const };
 const byteQuota = { ...app, id: String(BigInt(app.id) + 1n) };
 const countQuota = { ...app, id: String(BigInt(app.id) + 2n) };
@@ -12,15 +12,12 @@ describe('真实工作目录与文件工具', () => {
   it('拒绝遍历、绝对路径、环境文件与构建目录', () => {
     for (const path of ['../secret', '/etc/passwd', 'x/../../secret', 'C:\\secret', 'x\\y', '.env', '.env.local', 'node_modules/x', 'dist/index.html', 'x\0y']) expect(() => safeRelativePath(path)).toThrow();
   });
-  it('读写与精确修改有真实文件结果', async () => {
+  it('写入与读取有真实文件结果', async () => {
     await writeProjectFile(app, 'src/index.html', '<h1>旧标题</h1>');
     expect(await readProjectFile(app, 'src/index.html')).toBe('<h1>旧标题</h1>');
-    await modifyProjectFile(app, 'src/index.html', '旧标题', '新标题');
+    await writeProjectFile(app, 'src/index.html', '<h1>新标题</h1>');
     expect(await readFile(join(workspace(app), 'src/index.html'), 'utf8')).toBe('<h1>新标题</h1>');
     expect(await listProjectFiles(app)).toEqual(['src/index.html']);
-    await expect(modifyProjectFile(app, 'src/index.html', '不存在', 'x')).rejects.toThrow();
-    await deleteProjectFile(app, 'src/index.html');
-    expect(await listProjectFiles(app)).toEqual([]);
   });
   it('拒绝文件与中间目录软链接，不能读取宿主文件', async () => {
     const root = await ensureWorkspace(app);

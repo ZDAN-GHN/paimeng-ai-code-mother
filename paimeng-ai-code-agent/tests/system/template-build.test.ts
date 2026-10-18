@@ -3,7 +3,7 @@ import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { initializeTemplate } from '@/server/template-workspace';
 import { resolveTemplate, readTemplateFile } from '@/server/templates';
-import { workspace, writeProjectFile } from '@/server/workspace';
+import { workspace, writeProjectFile, readProjectFile } from '@/server/workspace';
 import { buildApp, hasPreview } from '@/server/artifacts';
 const cases = [
   { id: 'vue-ts', type: 'vue_project' as const },
@@ -15,15 +15,29 @@ afterAll(async () => { for (const app of apps) await rm(workspace(app), { recurs
 describe.each(cases)('真实 $id 模板构建', item => {
   const template = resolveTemplate(item.id);
   const fresh = apps[cases.indexOf(item)];
-  it('未经 AI 修改的示例通过真实 Docker 类型检查与构建，篡改锁或类型错误不覆盖旧产物', async () => {
+  it('未经 AI 修改的示例通过真实 Docker 类型检查与构建，改锁、非法依赖或类型错误都不覆盖旧产物', async () => {
     await initializeTemplate(fresh, template);
     await buildApp(fresh);
     expect(await hasPreview(fresh)).toBe(true);
     const before = await readFile(join(workspace(fresh), 'dist/index.html'), 'utf8');
     expect(before).toContain('./assets/');
+
+    // 锁文件被改：构建拒绝，旧的 dist 原样保留。
     await writeFile(join(workspace(fresh), 'package-lock.json'), '{}');
     await expect(buildApp(fresh)).rejects.toThrow('模板依赖锁已改变');
+    expect(await readFile(join(workspace(fresh), 'dist/index.html'), 'utf8')).toBe(before);
+
+    // 写入非法依赖：工具放行，构建拒绝且不覆盖旧产物，恢复模板依赖后构建重新通过。
     await writeFile(join(workspace(fresh), 'package-lock.json'), await readTemplateFile(template, 'package-lock.json'));
+    const manifest = JSON.parse(await readProjectFile(fresh, 'package.json'));
+    manifest.dependencies.vite = 'https://evil.invalid/package.tgz';
+    await expect(writeProjectFile(fresh, 'package.json', JSON.stringify(manifest))).resolves.toBeUndefined();
+    await expect(buildApp(fresh)).rejects.toThrow('不允许的构建依赖');
+    expect(await readFile(join(workspace(fresh), 'dist/index.html'), 'utf8')).toBe(before);
+    await writeProjectFile(fresh, 'package.json', await readTemplateFile(template, 'package.json'));
+    await expect(buildApp(fresh)).resolves.toBeUndefined();
+
+    // 类型错误：构建拒绝，旧的 dist 原样保留。
     await writeProjectFile(fresh, 'src/type-error.ts', 'export const count: number = "这不是数字";');
     await expect(buildApp(fresh)).rejects.toThrow('not assignable to type');
     expect(await readFile(join(workspace(fresh), 'dist/index.html'), 'utf8')).toBe(before);

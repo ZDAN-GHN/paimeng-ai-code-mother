@@ -41,15 +41,9 @@ describe.skipIf(!harnessReady || !postgresReady)('durable M2b：harness 里的 b
       await waitHealthy(base, 60_000);
       const body = (await (await fetch(`${base}/tools`)).json()) as { tools: { name: string; replay: string }[] };
       const replay = Object.fromEntries(body.tools.map((tool) => [tool.name, tool.replay]));
-      expect(replay).toMatchObject({
-        readFile: 'safe',
-        listFiles: 'safe',
-        writeFiles: 'safe',
-        buildPreview: 'safe',
-        modifyFile: 'unsafe',
-        deleteFile: 'unsafe',
-        m1_wait: 'unsafe',
-      });
+      // 文件工具就是框架的 read / write / edit：读与整文件写可重跑，原位编辑不可；`bash` 不在产品工具集里。
+      expect(Object.keys(replay).sort()).toEqual(['buildPreview', 'edit', 'listFiles', 'm1_wait', 'read', 'write']);
+      expect(replay).toMatchObject({ read: 'safe', listFiles: 'safe', write: 'safe', buildPreview: 'safe', edit: 'unsafe', m1_wait: 'unsafe' });
 
       const created = await fetch(`${base}/conversations`, {
         method: 'POST',

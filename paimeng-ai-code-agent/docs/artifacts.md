@@ -2,11 +2,11 @@
 
 ## 文件工作目录
 
-文件工具由 `src/server/workspace.ts` 提供。应用目录固定为 `runtime/code_output/{codeGenType}_{appId}/`，类型限于 `html`、`multi_file`、`vue_project` 和 `react_project`。应用 ID 由服务端绑定，模型不能选择其他应用目录。
+生成模型的文件工具由 `src/server/durable/harness-server.ts` 注册，直接使用 `@earendil-works/pi-durable/tools` 的 `createCodingTools()` 中的 `read`、`write`、`edit`。`read` 支持 offset/limit，使用内置的 2000 行 / 50KB 双限截断；`write` 和 `edit` 使用内置文件写入队列。`write` 一次写一个 `{ path, content }`，`edit` 使用 `{ path, edits: [{ oldText, newText }] }`。`listFiles`、`buildPreview` 和四个联网工具继续由产品提供。
 
-源文件限制为单文件 256 KiB、总计 16 MiB、最多 256 个文件。写入前计算替换后的总大小及数量，超限时保留原文件。写入通过专用临时文件与重命名完成。
+应用目录固定为 `runtime/code_output/{codeGenType}_{appId}/`，类型限于 `html`、`multi_file`、`vue_project` 和 `react_project`。应用 ID 与工具 cwd 由服务端绑定；文件工具入口拒绝绝对路径和 `..`。未注册 `bash`：工具在宿主机应用工作区运行，开放 shell 等于允许以宿主用户身份执行任意命令。
 
-路径拒绝绝对路径、目录遍历、反斜杠、空字节、超过 20 层的目录，以及 `.env*`、`.paimeng-*`、`node_modules`、`dist`、`.git`、`.next`、`.nuxt`、`.cache`、`.npmrc`、`.yarnrc`、`.yarnrc.yml` 和 `.ssh`。工具拒绝符号链接及特殊文件。运行目录属于新应用，不共享旧项目的可写目录。
+`src/server/workspace.ts` 仍服务附件、源码导出和构建。它的写入辅助函数限制单文件 256 KiB、总计 16 MiB、最多 256 个文件，并使用临时文件与重命名；路径校验拒绝敏感文件、符号链接和特殊文件。这些辅助函数的限制不包装生成模型的原生工具，构建与导出仍通过它们检查源码。
 
 应用生成、源码工具、构建、下载、发布与删除使用数据库中的应用写入锁及任务租约。旧任务失去租约后不能继续写入。文件安全假设运行目录不被另一个具有宿主文件权限的进程恶意修改。它不是用于抵御已获得宿主账号权限的攻击者的隔离机制。
 
@@ -14,11 +14,11 @@
 
 HTML 与多文件类型没有构建步骤，源码目录直接静态托管。新建应用分别初始化 `html@1.0.0` 与 `multi-file@1.0.0`，包含可改写骨架和 `AGENTS.md`。骨架的 `index.html` 未改动时不显示预览，避免将初始化骨架当作已生成内容。
 
-静态类型禁止 package.json、依赖锁、构建工具配置、TypeScript 及 Vue/React 等框架源文件。`src/server/project-shape.ts` 定义路径规则，`writeProjectFile` 在工具层拒绝写入，`buildApp` 再扫描全部源码，拒绝遗留或绕过工具写入的工程脚手架并给出修复提示。普通 HTML/CSS/JS/MJS/JSON 与素材仍可使用；工具可删除遗留文件，模板的入口、说明及依赖锁保护仍然生效。
+写入时不再检查产品形状，`project-shape.ts` 及其工具层、源码扫描调用已删除。静态类型的 `buildApp` 检查 `index.html` 存在且包含有效 HTML，不因目录里有工程脚手架而拒绝。生成指令仍要求静态应用使用 HTML/CSS/JS；需要框架时应选择 React/Vue 模板。
 
 ## Vue 构建依赖
 
-`BUILD_DEPENDENCIES` 在 `src/server/artifacts.ts` 中固定允许依赖和版本。生成工程只能使用以下版本。
+`BUILD_DEPENDENCIES` 在 `src/server/build-contract.ts` 中固定允许依赖和版本。生成工程只能使用以下版本。
 
 - `vue` 使用 `3.5.17`。
 - `vite` 使用 `7.0.0`。
@@ -47,7 +47,7 @@ HTML 和多文件类型不执行容器构建。它们必须提供包含 HTML 标
 
 ## 构建与发布产物
 
-Vue 构建输出必须包含普通文件 `dist/index.html`。输出复制拒绝符号链接及敏感路径，限制单文件 20 MiB、总计 64 MiB、最多 1024 个文件。构建成功后通过临时目录替换当前 `dist/`，失败不替换已存在的成功产物。
+Vue 构建输出必须包含普通文件 `dist/index.html`。输出复制拒绝符号链接及敏感路径，限制单文件 20 MiB、总计 64 MiB、最多 1024 个文件。构建成功后通过临时目录替换当前 `dist/`，失败不替换已存在的成功产物。依赖版本核对与模板锁文件比较在 source 阶段执行；依赖声明或锁文件被误改时，以可修复源码诊断返回模型。`buildPreview` 将失败诊断作为工具结果交回当前轮，模型恢复模板内容后可再次构建；最终验证仍独立执行。
 
 首次发布生成 UUID，重复发布复用应用已有 `deployKey`，包括旧 Java 的六位字母数字发布键。先校验并复制到临时目录，再替换 `runtime/deploy/{deployKey}/`；替换失败恢复旧目录，原链接在发布成功后访问新版内容。最新生成失败或取消不隐藏仍有效的既有预览。Vue 每次发布都在应用写锁内执行受限构建，确保部署当前源码；构建失败则拒绝此次发布并保留旧产物。
 

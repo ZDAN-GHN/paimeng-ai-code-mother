@@ -23,15 +23,15 @@ export function generationInstructions({ app, template, entry, webInstruction, h
   entry: string | null;
   webInstruction: string;
   hasImages?: boolean;
-  /** 本轮工具集是否包含 buildPreview：harness 引擎（M2a）只有文件工具，false 时不提构建与预览。 */
+  /** 本轮工具集是否包含 buildPreview：false 时不提构建与预览。 */
   previewTool?: boolean;
 }): string {
   const project = isProjectCodeGenType(app.codeGenType);
   let opening = '';
   if (template) {
     opening = project
-      ? `当前工程已从 ${template.id}@${template.version} 模板初始化。先使用 listFiles，再 readFile 阅读 AGENTS.md、package.json、入口 ${entry} 及与需求相关的源码，然后在现有工程上实现用户需求。保留 TypeScript 入口 ${entry} 和 vite.config.ts，不要另起一套 JS 工程。模板依赖和锁文件固定，可用库见 package.json，不要增删依赖。平台在隔离容器中检查类型并构建静态产物。`
-      : `当前工程已从 ${template.id}@${template.version} 模板初始化，骨架可直接使用或改写。先使用 listFiles，再 readFile 阅读 AGENTS.md 与 index.html${app.codeGenType === 'multi_file' ? '、css/ 与 js/ 下的文件' : ''}，然后在现有文件上实现用户需求，保留 index.html 作为唯一入口，并优先复用骨架里的设计令牌与布局类。`;
+      ? `当前工程已从 ${template.id}@${template.version} 模板初始化。先使用 listFiles，再 read 阅读 AGENTS.md、package.json、入口 ${entry} 及与需求相关的源码，然后在现有工程上实现用户需求。保留 TypeScript 入口 ${entry} 和 vite.config.ts，不要另起一套 JS 工程。模板依赖和锁文件固定，可用库见 package.json，不要增删依赖。平台在隔离容器中检查类型并构建静态产物。`
+      : `当前工程已从 ${template.id}@${template.version} 模板初始化，骨架可直接使用或改写。先使用 listFiles，再 read 阅读 AGENTS.md 与 index.html${app.codeGenType === 'multi_file' ? '、css/ 与 js/ 下的文件' : ''}，然后在现有文件上实现用户需求，保留 index.html 作为唯一入口，并优先复用骨架里的设计令牌与布局类。`;
   } else if (!project) {
     opening = 'HTML 与多文件应用必须有 index.html，只写静态文件，不要引入构建工具。';
   }
@@ -40,7 +40,7 @@ export function generationInstructions({ app, template, entry, webInstruction, h
     ? project
       ? '构建前用户看不到任何页面，所以不要等全部写完才交付：完成第一个可运行的版本（入口页 + 主要数据与交互，且不再引用尚未创建的文件）后立刻调用一次 buildPreview，让用户先看到页面，之后每完成一个明显功能再调用一次。构建失败时先按返回的诊断修好再继续，不要把失败留到最后。'
       : '写完第一个完整页面后调用一次 buildPreview 校验并刷新预览，之后每完成一个明显功能再调用一次；失败先按诊断修好再继续。'
-    : '本轮只有文件工具（readFile / listFiles / writeFiles / modifyFile / deleteFile），没有构建与预览：把需求完整写成文件，工具返回错误时修正后重试。';
+    : '本轮只有文件工具（read / write / edit / listFiles），没有构建与预览：把需求完整写成文件，工具返回错误时修正后重试。';
   const preview = !previewTool
     ? project
       ? '构建与预览由平台在后续步骤负责（本轮没有构建工具），不要执行任何安装或构建命令。'

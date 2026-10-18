@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { mkdir, rm, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { buildApp, buildIsCurrent, deployApp, downloadApp, hasPreview, loadBuildState, saveBuildState, sourceDigest, workspace, deployedUrl } from '@/server/artifacts';
-import { writeProjectFile, deleteProjectFile, ensureWorkspace } from '@/server/workspace';
+import { writeProjectFile } from '@/server/workspace';
 import { fixtureFiles } from '@/server/fixture-content';
 import { getConfig } from '@/server/config';
 const html={id:String(Date.now()+1),codeGenType:'html' as const};const vue={id:String(Date.now()+2),codeGenType:'vue_project' as const};let published='';
@@ -10,7 +10,7 @@ afterAll(async()=>{await rm(workspace(html),{recursive:true,force:true});await r
 describe('真实产物与受限构建',()=>{
  it('HTML 必须存在并通过真实文件校验',async()=>{await expect(buildApp(html)).rejects.toThrow();await writeProjectFile(html,'index.html','<!doctype html><html><body><h1>产物验收</h1></body></html>');await expect(buildApp(html)).resolves.toBeUndefined();published=await deployApp(html);expect(await readFile(join(getConfig().runtimeRoot,'deploy',published,'index.html'),'utf8')).toContain('<h1>产物验收</h1>');expect(deployedUrl(published)).toContain('/deploy/');});
  it('下载包含真实源文件且具有 ZIP 文件头',async()=>{await writeProjectFile(html,'index.html','<!doctype html><html><body>独立下载验收</body></html>');const response=await downloadApp(html);const bytes=Buffer.from(await response.arrayBuffer());expect(bytes.subarray(0,2).toString()).toBe('PK');expect(bytes.toString()).toContain('index.html');expect(response.headers.get('content-disposition')).toContain(html.id);});
- it('文件工具和构建入口均拒绝外部依赖，错误提供允许版本供模型重试',async()=>{const content=JSON.stringify({dependencies:{vue:'https://evil.invalid/package.tgz'}});await expect(writeProjectFile(vue,'package.json',content)).rejects.toThrow('"vue":"3.5.17"');await ensureWorkspace(vue);await writeFile(join(workspace(vue),'package.json'),content);await expect(buildApp(vue)).rejects.toThrow('不允许的构建依赖');});
+ it('构建入口拒绝外部依赖，错误提供允许版本供模型重试',async()=>{const content=JSON.stringify({dependencies:{vue:'https://evil.invalid/package.tgz'}});await expect(writeProjectFile(vue,'package.json',content)).resolves.toBeUndefined();await expect(buildApp(vue)).rejects.toThrow('不允许的构建依赖');});
 
 });
 
@@ -32,7 +32,7 @@ describe('稳定发布地址与实际产物判定', () => {
     const second = await deployApp({ ...stable, deployKey: first });
     expect(second).toBe(first);
     expect(await readFile(join(getConfig().runtimeRoot, 'deploy', first, 'index.html'), 'utf8')).toContain('第二版发布');
-    await deleteProjectFile(stable, 'index.html');
+    await rm(join(workspace(stable), 'index.html'));
     await expect(deployApp({ ...stable, deployKey: first })).rejects.toThrow();
     expect(await readFile(join(getConfig().runtimeRoot, 'deploy', first, 'index.html'), 'utf8')).toContain('第二版发布');
   });
@@ -67,7 +67,7 @@ describe('源码没变时复用上次构建产物', () => {
     expect(second).not.toBe(first);
     await writeProjectFile(digest, 'src/extra.js', 'console.log("三")');
     expect(await sourceDigest(digest)).not.toBe(second);
-    await deleteProjectFile(digest, 'src/extra.js');
+    await rm(join(workspace(digest), 'src/extra.js'));
     expect(await sourceDigest(digest)).toBe(second);
   });
 

@@ -98,12 +98,12 @@ test('工具调用渲染成可读操作记录：没有原始 JSON、工具调用
   await page.route('**/api/app/chat/gen/code', async route => {
     const stream = createUIMessageStream({ execute: ({ writer }) => {
       writer.write({ type: 'start', messageId: 'tool-render-assistant' });
-      writer.write({ type: 'tool-input-start', toolCallId: 'call_00_hidden', toolName: 'writeFiles' });
-      writer.write({ type: 'tool-input-available', toolCallId: 'call_00_hidden', toolName: 'writeFiles', input: { files: [{ path: 'index.html', content: '<h1>首页</h1>\n<p>正文</p>' }] } });
-      writer.write({ type: 'tool-output-available', toolCallId: 'call_00_hidden', output: { written: ['index.html'] } });
-      writer.write({ type: 'tool-input-start', toolCallId: 'call_01_hidden', toolName: 'modifyFile' });
-      writer.write({ type: 'tool-input-available', toolCallId: 'call_01_hidden', toolName: 'modifyFile', input: { path: 'style.css', oldText: 'color: red', newText: 'color: blue' } });
-      writer.write({ type: 'tool-output-available', toolCallId: 'call_01_hidden', output: { modified: 'style.css' } });
+      writer.write({ type: 'tool-input-start', toolCallId: 'call_00_hidden', toolName: 'write' });
+      writer.write({ type: 'tool-input-available', toolCallId: 'call_00_hidden', toolName: 'write', input: { path: 'index.html', content: '<h1>首页</h1>\n<p>正文</p>' } });
+      writer.write({ type: 'tool-output-available', toolCallId: 'call_00_hidden', output: 'Successfully wrote to index.html' });
+      writer.write({ type: 'tool-input-start', toolCallId: 'call_01_hidden', toolName: 'edit' });
+      writer.write({ type: 'tool-input-available', toolCallId: 'call_01_hidden', toolName: 'edit', input: { path: 'style.css', edits: [{ oldText: 'color: red', newText: 'color: blue' }] } });
+      writer.write({ type: 'tool-output-available', toolCallId: 'call_01_hidden', output: 'Successfully replaced 1 block(s) in style.css.' });
       writer.write({ type: 'tool-input-start', toolCallId: 'call_02_hidden', toolName: 'importImage' });
       writer.write({ type: 'tool-input-available', toolCallId: 'call_02_hidden', toolName: 'importImage', input: { candidateId: 'img_1' } });
       writer.write({ type: 'tool-output-available', toolCallId: 'call_02_hidden', output: { status: 'ok', data: { path: 'assets/hero.jpg', src: 'assets/hero.jpg', bytes: 204800, format: 'jpeg', sourcePage: 'https://example.com/hero', license: 'CC0', licenseKnown: true } } });
@@ -151,7 +151,7 @@ test('工具调用渲染成可读操作记录：没有原始 JSON、工具调用
   await expect(bubble).not.toContainText('toolCallId');
   await expect(bubble).not.toContainText('call_00_hidden');
   await expect(bubble).not.toContainText('output-available');
-  await expect(bubble).not.toContainText('"files"');
+  await expect(bubble).not.toContainText('"edits"');
   await calls.nth(0).locator('.tool-call-header').click();
   await expect(calls.nth(0).locator('.tool-call-code')).toHaveCount(0);
   await expect(calls.nth(1).locator('.tool-call-diff')).toBeVisible();

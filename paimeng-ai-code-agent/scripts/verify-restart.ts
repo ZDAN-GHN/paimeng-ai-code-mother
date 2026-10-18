@@ -61,7 +61,7 @@ if (process.argv[2] === 'prepare') {
   const generation = await generate(appId, '重启持久化验证');
   const messages = await api<UIMessage[]>('app/messages?appId=' + appId);
   assert.equal(messages.length, 2);
-  assert.ok(messages[1].parts.some(part => part.type === 'tool-writeFiles' && part.state === 'output-available'));
+  assert.ok(messages[1].parts.some(part => part.type === 'dynamic-tool' && part.toolName === 'write' && part.state === 'output-available'));
   await zip(appId);
   const snapshot: Snapshot = { appId, userId, cookie, messages, generation, previewDigest: await preview(appId) };
   await mkdir(evidence, { recursive: true });

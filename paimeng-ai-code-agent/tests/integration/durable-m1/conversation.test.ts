@@ -43,7 +43,7 @@ describe.skipIf(!harnessReady || !postgresReady)('durable M2a：一个应用一�
     const base = baseUrl(port);
     const harness = startHarness({
       port, runDir, reset: true, waitMs: 0, finalText, workspace,
-      tool: 'readFile',
+      tool: 'read',
       args: { path: 'notes.txt' },
     });
     try {

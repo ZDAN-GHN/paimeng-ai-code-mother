@@ -3,8 +3,9 @@ import { readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { initializeTemplate, appTemplate } from '@/server/template-workspace';
 import { resolveTemplate, readTemplateFile, TEMPLATE_MARKER } from '@/server/templates';
-import { workspace, listProjectFiles, readProjectFile, writeProjectFile, deleteProjectFile } from '@/server/workspace';
-import { downloadApp } from '@/server/artifacts';
+import { workspace, listProjectFiles, readProjectFile, writeProjectFile } from '@/server/workspace';
+import { downloadApp, buildApp } from '@/server/artifacts';
+import { classifyBuildFailure } from '@/server/build-feedback';
 import type { ProjectCodeGenType } from '@/shared/contracts';
 
 const cases: { id: string; type: ProjectCodeGenType; entry: string; jsEntry: string; source: string; sample: string; removable: string }[] = [
@@ -40,19 +41,26 @@ describe.each(cases)('版本化 $id 工程模板', item => {
     await expect(initializeTemplate({ id: fresh.id, codeGenType: 'html' }, template)).rejects.toThrow('模板与应用类型不匹配');
   });
 
-  it('工具保护身份、锁文件与入口，同时允许修改业务源码和配置', async () => {
+  it('工具只保护模板身份，写入内容交给构建校验', async () => {
     await initializeTemplate(fresh, template);
     await expect(readProjectFile(fresh, TEMPLATE_MARKER)).rejects.toThrow('文件路径不允许访问');
     await expect(writeProjectFile(fresh, TEMPLATE_MARKER, '{}')).rejects.toThrow('文件路径不允许访问');
-    await expect(deleteProjectFile(fresh, TEMPLATE_MARKER)).rejects.toThrow();
-    await expect(writeProjectFile(fresh, 'package-lock.json', '{}')).rejects.toThrow('锁文件');
-    await expect(deleteProjectFile(fresh, 'package-lock.json')).rejects.toThrow('锁文件');
-    await expect(deleteProjectFile(fresh, item.entry)).rejects.toThrow('不能删除模板的入口');
-    await expect(writeProjectFile(fresh, item.jsEntry, 'export default {}')).rejects.toThrow('请修改已有入口');
-    await expect(writeProjectFile(fresh, 'vite.config.js', 'export default {}')).rejects.toThrow('vite.config.ts');
+    // 锁文件与依赖清单的写入不再由工具拒绝，交给构建按模板版本校验。
+    await expect(writeProjectFile(fresh, 'package-lock.json', '')).resolves.toBeUndefined();
+    const stages: string[] = [];
+    const lockError = await buildApp(fresh, undefined, (stage, status) => { stages.push(`${stage}:${status}`); }).catch((error: unknown) => error);
+    expect(lockError).toBeInstanceOf(Error);
+    expect((lockError as Error).message).toContain('模板依赖锁已改变');
+    // 锁可写，所以改锁是模型能修的源码问题，且失败发生在上报的 source 阶段内。
+    expect(classifyBuildFailure(lockError)).toMatchObject({ repairable: true, stage: 'source' });
+    expect(stages).toEqual(['source:started', 'source:failed']);
+    await expect(writeProjectFile(fresh, 'package-lock.json', await readTemplateFile(template, 'package-lock.json'))).resolves.toBeUndefined();
     const manifest = JSON.parse(await readProjectFile(fresh, 'package.json'));
     delete manifest.dependencies[item.removable];
-    await expect(writeProjectFile(fresh, 'package.json', JSON.stringify(manifest))).rejects.toThrow('保留全部依赖');
+    await expect(writeProjectFile(fresh, 'package.json', JSON.stringify(manifest))).resolves.toBeUndefined();
+    await expect(buildApp(fresh)).rejects.toThrow('保留全部依赖');
+    await expect(writeProjectFile(fresh, item.jsEntry, 'export default {}')).resolves.toBeUndefined();
+    await expect(writeProjectFile(fresh, 'vite.config.js', 'export default {}')).resolves.toBeUndefined();
     await expect(writeProjectFile(fresh, 'vite.config.ts', await readTemplateFile(template, 'vite.config.ts'))).resolves.toBeUndefined();
   });
 

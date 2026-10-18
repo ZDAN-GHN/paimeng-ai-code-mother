@@ -21,12 +21,12 @@ export function fixtureSourcePath(type: CodeGenType) {
 }
 
 /** Read-only prefix of a template turn: list the workspace, then read the guide and the entry. */
-export function fixtureReadSteps(type: CodeGenType): { tool: 'listFiles' | 'readFile'; path?: string }[] {
-  return [{ tool: 'listFiles' }, { tool: 'readFile', path: 'AGENTS.md' }, { tool: 'readFile', path: fixtureSourcePath(type) }];
+export function fixtureReadSteps(type: CodeGenType): { tool: 'listFiles' | 'read'; path?: string }[] {
+  return [{ tool: 'listFiles' }, { tool: 'read', path: 'AGENTS.md' }, { tool: 'read', path: fixtureSourcePath(type) }];
 }
 
 /** The template ships a TypeScript entry, so the rewritten source is typed. */
-export function fixtureTypedSource(type: CodeGenType, prompt: string): FixtureFile | undefined {
+function fixtureTypedSource(type: CodeGenType, prompt: string): FixtureFile | undefined {
   if (type !== 'react_project' && type !== 'vue_project') return undefined;
   const source = fixtureFiles(type, prompt).find(file => file.path === fixtureSourcePath(type));
   if (!source) return undefined;
@@ -34,6 +34,17 @@ export function fixtureTypedSource(type: CodeGenType, prompt: string): FixtureFi
     ? source.content.replace('useState(0)', 'useState<number>(0)')
     : source.content.replace('<script setup>', '<script setup lang="ts">');
   return { ...source, content };
+}
+
+/**
+ * The file writes a scripted run makes, in order. The `write` tool takes one file per call, so a
+ * multi-file run is several tool calls. A templated project only rewrites its typed entry: the
+ * template's package.json and lock file stay as they are (a rewritten manifest would break `npm ci`).
+ */
+export function fixtureWriteSteps(type: CodeGenType, prompt: string, templated: boolean): FixtureFile[] {
+  const project = type === 'react_project' || type === 'vue_project';
+  const typed = templated && project ? fixtureTypedSource(type, prompt) : undefined;
+  return typed ? [typed] : fixtureFiles(type, prompt);
 }
 
 export function fixtureFiles(type:CodeGenType,prompt:string):FixtureFile[]{

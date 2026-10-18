@@ -11,7 +11,6 @@ import { BusinessError } from './http';
 import { validateProjectManifest } from './build-contract';
 import { markBuildFailure, sourceFailure, type BuildStage } from './build-feedback';
 import { readTemplateFile, templateTypecheck, validateTemplateManifest } from './templates';
-import { findStaticScaffoldFiles } from './project-shape';
 import { appTemplate } from './template-workspace';
 import { workspace, ensureRuntime, ensureWorkspace, ensureSafeDirectory, listProjectFiles, readProjectFile, readProjectFileBytes, validateDeployKey, type WorkspaceApp } from './workspace';
 import { isProjectCodeGenType } from '@/shared/contracts';
@@ -152,8 +151,6 @@ export async function buildApp(app: WorkspaceApp, signal?: AbortSignal, onStage?
   const files = await listProjectFiles(app);
   if (!isProjectCodeGenType(app.codeGenType)) {
     await stageRun('source', async () => {
-      const forbidden = findStaticScaffoldFiles(app.codeGenType, files);
-      if (forbidden.length) throw sourceFailure(`生成结果与应用类型不符：${app.codeGenType} 应用不能包含 ${forbidden.slice(0, 3).map(file => file.path).join('、')}。原生静态页面不经过构建，请删除这些文件改回 index.html，或新建应用时选择 Vue/React 模板。`);
       if (!files.includes('index.html')) throw sourceFailure('生成结果缺少 index.html');
       const index = await readProjectFile(app, 'index.html');
       if (!/<html[\s>]/i.test(index)) throw sourceFailure('生成结果缺少有效 HTML 页面');
@@ -162,15 +159,17 @@ export async function buildApp(app: WorkspaceApp, signal?: AbortSignal, onStage?
   }
   const template = await appTemplate(app);
   const projectCodeGenType = app.codeGenType;
+  const lockedManifest = template ? await readTemplateFile(template, 'package.json') : null;
+  const lock = template ? await readTemplateFile(template, 'package-lock.json') : null;
   const dependencies = await stageRun('source', async () => {
     try {
       const manifest = await readProjectFile(app, 'package.json');
-      return template ? validateTemplateManifest(template, manifest) : validateProjectManifest(projectCodeGenType, manifest);
+      const dependencies = template ? validateTemplateManifest(template, manifest) : validateProjectManifest(projectCodeGenType, manifest);
+      // 锁文件可由工具写入，改动它就是模型能修的源码问题，所以按 source 阶段交回修复。
+      if (lock && await readProjectFile(app, 'package-lock.json') !== lock) throw new Error('模板依赖锁已改变，请恢复对应模板版本的 package-lock.json');
+      return dependencies;
     } catch (error) { throw sourceFailure(error); }
   });
-  const lockedManifest = template ? await readTemplateFile(template, 'package.json') : null;
-  const lock = template ? await readTemplateFile(template, 'package-lock.json') : null;
-  if (lock && await readProjectFile(app, 'package-lock.json') !== lock) throw markBuildFailure(new Error('模板依赖锁已改变，请恢复对应模板版本的 package-lock.json'), { stage: 'template' });
   // 生成阶段已经构建过一次、之后源码没动过：直接复用那份产物，不再进容器。
   const digest = await sourceDigest(app);
   if (await buildIsCurrent(app, digest)) return;

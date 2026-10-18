@@ -55,7 +55,7 @@ function messageOf(error: unknown) {
   return (error instanceof Error ? error.message : String(error)).slice(0, summaryChars);
 }
 
-/** 容器内路径（--workdir /work）归一化成工程相对路径，模型才能用 readFile 的路径直接对上。 */
+/** 容器内路径（--workdir /work）归一化成工程相对路径，模型才能用 read 的路径直接对上。 */
 function normalizeContainerPaths(text: string) {
   return text.split('/work/').join('');
 }
@@ -75,7 +75,7 @@ export function formatBuildFeedback(error: unknown, attempt: number, maxAttempts
     `验证未通过（第 ${attempt} 次修复，共 ${maxAttempts} 次）。阶段：${stageLabels[failure?.stage ?? 'unknown']}。`,
     `错误摘要：${messageOf(error)}`,
     detail ? `最近构建输出（保留换行；过长时省略中间）：\n${detail}` : '',
-    '请只修改导致该错误的源码：不要重新生成整个工程，不要修改 package.json 依赖、锁文件或模板文件，也不要改应用类型。改完直接结束回复，平台会自动重新验证。',
+    '请只修改导致该错误的源码：不要重新生成整个工程，不要改应用类型，也不要添加或改动既有依赖；只有当诊断指出依赖声明或锁文件被误改时，才把 package.json 与锁文件恢复成模板自带的内容。改完直接结束回复，平台会自动重新验证。',
   ].filter(line => line).join('\n');
 }
 

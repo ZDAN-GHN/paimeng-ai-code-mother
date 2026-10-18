@@ -14,10 +14,11 @@ import { formatDuration } from '@/components/chat/generation-usage';
  * 解析失败就退化成「进行中」的标题，不影响其它 part。
  */
 
-const fileSchema = z.object({ path: z.string(), content: z.string() });
-const writeInput = z.object({ files: z.array(fileSchema) });
-const modifyInput = z.object({ path: z.string(), oldText: z.string(), newText: z.string() });
+const writeInput = z.object({ path: z.string(), content: z.string() });
+const editBlock = z.object({ oldText: z.string(), newText: z.string() });
+const editInput = z.object({ path: z.string(), edits: z.array(editBlock).min(1) });
 const pathInput = z.object({ path: z.string() });
+const listedFiles = z.union([z.array(z.string()), z.object({ files: z.array(z.string()) }).transform(value => value.files)]);
 const queryInput = z.object({ query: z.string() });
 const urlInput = z.object({ url: z.string() });
 const webOutput = z.object({ status: z.enum(['ok', 'empty', 'error']), data: z.unknown().optional(), message: z.string().optional() });
@@ -48,10 +49,9 @@ export type ToolCallStatus = 'running' | 'done' | 'error';
 
 export type ToolCallView =
   | { kind: 'files-written'; label: string; files: { path: string; content: string }[] }
-  | { kind: 'file-modified'; label: string; path: string; oldText: string; newText: string }
+  | { kind: 'file-modified'; label: string; path: string; edits: { oldText: string; newText: string }[] }
   | { kind: 'file-read'; label: string; path: string; content: string | null }
   | { kind: 'files-listed'; label: string; files: string[] }
-  | { kind: 'file-deleted'; label: string; path: string }
   | { kind: 'preview-built'; label: string; milestone: string; ok: boolean; ms: number | null; stages: { stage: string; status: 'ok' | 'failed'; ms: number }[]; stage: string | null; diagnostic: string | null }
   | { kind: 'images-imported'; label: string; images: z.infer<typeof importedImage>[] }
   | { kind: 'images-searched'; label: string; query: string | null; candidates: z.infer<typeof candidateSchema>[] }
@@ -70,7 +70,7 @@ export function toolCallFailed(call: ToolCall) {
 }
 
 const labels: Record<string, string> = {
-  listFiles: '列出文件', readFile: '读取文件', writeFiles: '写入文件', modifyFile: '修改文件', deleteFile: '删除文件', buildPreview: '阶段构建',
+  listFiles: '列出文件', read: '读取文件', write: '写入文件', edit: '修改文件', buildPreview: '阶段构建',
   webSearch: '联网搜索', readWebPage: '读取网页', searchImages: '检索图片', importImage: '导入图片',
 };
 const labelOf = (name: string) => labels[name] ?? name;
@@ -103,29 +103,24 @@ export function toolCallOf(part: unknown): ToolCall | null {
   const target = isRecord(input) ? firstText(input.path, input.query, input.url) : null;
   const fallback: ToolCall = { view: { kind: 'unknown', label, name, target }, status, errorText };
 
-  if (name === 'writeFiles') {
+  if (name === 'write') {
     const parsed = writeInput.safeParse(input);
     if (!parsed.success) return fallback;
-    return { view: { kind: 'files-written', label, files: parsed.data.files }, status, errorText };
+    return { view: { kind: 'files-written', label, files: [parsed.data] }, status, errorText };
   }
-  if (name === 'modifyFile') {
-    const parsed = modifyInput.safeParse(input);
+  if (name === 'edit') {
+    const parsed = editInput.safeParse(input);
     if (!parsed.success) return fallback;
-    return { view: { kind: 'file-modified', label, path: parsed.data.path, oldText: parsed.data.oldText, newText: parsed.data.newText }, status, errorText };
+    return { view: { kind: 'file-modified', label, path: parsed.data.path, edits: parsed.data.edits }, status, errorText };
   }
-  if (name === 'readFile') {
+  if (name === 'read') {
     const parsed = pathInput.safeParse(input);
     if (!parsed.success) return fallback;
     return { view: { kind: 'file-read', label, path: parsed.data.path, content: typeof output === 'string' ? output : null }, status, errorText };
   }
   if (name === 'listFiles') {
-    const files = Array.isArray(output) ? output.filter((entry): entry is string => typeof entry === 'string') : [];
-    return { view: { kind: 'files-listed', label, files }, status, errorText };
-  }
-  if (name === 'deleteFile') {
-    const parsed = pathInput.safeParse(input);
-    if (!parsed.success) return fallback;
-    return { view: { kind: 'file-deleted', label, path: parsed.data.path }, status, errorText };
+    const files = listedFiles.safeParse(output);
+    return { view: { kind: 'files-listed', label, files: files.success ? files.data : [] }, status, errorText };
   }
   if (name === 'buildPreview') {
     const requested = buildPreviewInput.safeParse(input);
@@ -168,7 +163,7 @@ export function toolCallOf(part: unknown): ToolCall | null {
   return fallback;
 }
 
-const iconOf = (view: ToolCallView) => view.kind === 'preview-built' ? <BuildOutlined /> : view.kind === 'files-written' || view.kind === 'file-modified' || view.kind === 'file-deleted' ? <FileTextOutlined />
+const iconOf = (view: ToolCallView) => view.kind === 'preview-built' ? <BuildOutlined /> : view.kind === 'files-written' || view.kind === 'file-modified' ? <FileTextOutlined />
   : view.kind === 'file-read' || view.kind === 'files-listed' ? <FolderOpenOutlined />
   : view.kind === 'images-imported' || view.kind === 'images-searched' ? <PictureOutlined />
   : <SearchOutlined />;
@@ -179,7 +174,6 @@ function titleOf(view: ToolCallView) {
   if (view.kind === 'file-modified') return `${view.label} ${view.path}`;
   if (view.kind === 'file-read') return `${view.label} ${view.path}`;
   if (view.kind === 'files-listed') return `${view.label}${view.files.length ? ` ${view.files.length} 个文件` : ''}`;
-  if (view.kind === 'file-deleted') return `${view.label} ${view.path}`;
   if (view.kind === 'images-imported') return `${view.label} ${view.images[0]?.src ?? ''}`;
   if (view.kind === 'images-searched') return `${view.label}${view.query ? ` “${view.query}”` : ''}${view.candidates.length ? ` · ${view.candidates.length} 个候选` : ''}`;
   if (view.kind === 'web-searched') return `${view.label}${view.query ? ` “${view.query}”` : ''}${view.results.length ? ` · ${view.results.length} 条结果` : ''}`;
@@ -197,7 +191,10 @@ function summaryOf(call: ToolCall) {
   if (view.kind === 'files-written') return view.files.length > 1 ? view.files.map(file => file.path).join('、') : `${lines(view.files[0]?.content ?? '')} 行`;
   if (view.kind === 'file-read' && view.content !== null) return `${lines(view.content)} 行`;
   if (view.kind === 'images-imported') return [view.images[0]?.format, typeof view.images[0]?.bytes === 'number' ? formatBytes(view.images[0].bytes) : null].filter(Boolean).join(' · ');
-  if (view.kind === 'file-modified') return `${lines(view.oldText)} 行 → ${lines(view.newText)} 行`;
+  if (view.kind === 'file-modified') {
+    const first = view.edits[0];
+    return view.edits.length > 1 || first === undefined ? `${view.edits.length} 处替换` : `${lines(first.oldText)} 行 → ${lines(first.newText)} 行`;
+  }
   return '';
 }
 
@@ -210,11 +207,14 @@ function Code({ content, language }: { content: string; language?: string }) {
   return <pre className="tool-call-code" data-language={language}>{content}</pre>;
 }
 
+/** 一次编辑调用的改动：每处替换一个对比块（原生 edit 一次可以给多处 edits）。 */
 function ModifiedBody({ view }: { view: Extract<ToolCallView, { kind: 'file-modified' }> }) {
-  return <div className="tool-call-diff">
-    {view.oldText.split('\n').map((line, index) => <div className="tool-call-diff-line tool-call-diff-removed" key={'old' + index}>{line || ' '}</div>)}
-    {view.newText.split('\n').map((line, index) => <div className="tool-call-diff-line tool-call-diff-added" key={'new' + index}>{line || ' '}</div>)}
-  </div>;
+  return <>{view.edits.map((edit, index) => <div className="tool-call-file" key={index}>
+    <div className="tool-call-diff">
+      {edit.oldText.split('\n').map((line, lineIndex) => <div className="tool-call-diff-line tool-call-diff-removed" key={'old' + lineIndex}>{line || ' '}</div>)}
+      {edit.newText.split('\n').map((line, lineIndex) => <div className="tool-call-diff-line tool-call-diff-added" key={'new' + lineIndex}>{line || ' '}</div>)}
+    </div>
+  </div>)}</>;
 }
 
 function ImportedImages({ images, assetUrl }: { images: z.infer<typeof importedImage>[]; assetUrl: (path: string) => string }) {
@@ -256,7 +256,6 @@ export function ToolCall({ call, assetUrl }: { call: ToolCall; assetUrl: (path: 
       {view.kind === 'file-modified' && <ModifiedBody view={view} />}
       {view.kind === 'file-read' && (view.content === null ? <p className="tool-call-meta">未读到内容</p> : <Code content={view.content} language={view.path.slice(view.path.lastIndexOf('.') + 1)} />)}
       {view.kind === 'files-listed' && <ul className="tool-call-list">{view.files.map(file => <li key={file}><span className="tool-call-path">{file}</span></li>)}</ul>}
-      {view.kind === 'file-deleted' && <p className="tool-call-meta">已删除 {view.path}</p>}
       {view.kind === 'preview-built' && <div className="tool-call-file">
         {view.stages.length > 0 && <ul className="tool-call-list">{view.stages.map(stage => <li key={stage.stage}>
           <span className="tool-call-path">{buildStageLabels[stage.stage as keyof typeof buildStageLabels] ?? stage.stage}</span>

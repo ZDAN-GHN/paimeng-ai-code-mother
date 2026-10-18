@@ -94,15 +94,3 @@ export function validateTemplateManifest(template: TemplateIdentity, content: st
   }
   return dependencies;
 }
-
-export function assertTemplateFileMutable(template: TemplateInfo | null, path: string, deleting = false) {
-  if (!template) return;
-  if (path === 'package-lock.json') throw new Error('依赖锁文件由模板版本管理，请修改应用源码');
-  const entry = definition(template).entry;
-  const project = template.codeGenType === 'vue_project' || template.codeGenType === 'react_project';
-  const jsEntry = entry.endsWith('.tsx') ? entry.replace(/\.tsx$/, '.jsx') : entry.replace(/\.ts$/, '.js');
-  if (project && (['vite.config.js', 'vite.config.mjs', 'vite.config.cjs', 'vite.config.mts', 'vite.config.cts'].includes(path) || path === jsEntry)) throw new Error(`此模板使用 vite.config.ts 和 ${entry}，请修改已有入口`);
-  // 工程模板保护清单、锁文件与入口；静态模板只保护入口与说明，误生成的脚手架要能删掉以便修复。
-  const protectedDeletes = project ? ['package.json', 'index.html', 'vite.config.ts', 'tsconfig.json', 'AGENTS.md', entry] : ['index.html', 'AGENTS.md'];
-  if (deleting && protectedDeletes.includes(path)) throw new Error('不能删除模板的入口或开发说明，请修改文件内容');
-}
