@@ -39,6 +39,17 @@ describe.skipIf(!harnessReady || !postgresReady)('durable M2b：harness 里的 b
     });
     try {
       await waitHealthy(base, 60_000);
+      const body = (await (await fetch(`${base}/tools`)).json()) as { tools: { name: string; replay: string }[] };
+      const replay = Object.fromEntries(body.tools.map((tool) => [tool.name, tool.replay]));
+      expect(replay).toMatchObject({
+        readFile: 'safe',
+        listFiles: 'safe',
+        writeFiles: 'safe',
+        buildPreview: 'safe',
+        modifyFile: 'unsafe',
+        deleteFile: 'unsafe',
+        m1_wait: 'unsafe',
+      });
 
       const created = await fetch(`${base}/conversations`, {
         method: 'POST',

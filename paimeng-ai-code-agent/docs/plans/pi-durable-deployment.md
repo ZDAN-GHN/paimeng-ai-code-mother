@@ -76,7 +76,7 @@ Postgres（本机容器 zslm-postgres，127.0.0.1:5432，paimeng_app + paimeng_a
   ↑                                    ↑
 harness（127.0.0.1:5599）  ← attach ←  Next dev（127.0.0.1:3100, DURABLE_APP_PORT）
 ```
-`npm run dev:durable`（`scripts/durable-dev.ts`）= 端口探测 → Postgres 不在监听就直接报错退出（不再自己起数据库）
+`npm run dev`（`scripts/durable-dev.ts`）= 端口探测 → Postgres 不在监听就直接报错退出（不再自己起数据库）
 → 起 harness（从 `~/.pi/agent/models.json` 的 `oc-go` 派生 `DURABLE_MODEL_*`，并固定注入
 `DURABLE_PG_URL=…/paimeng_agent`，都只进子进程）→ 轮询 `/health` 最多 30 s → 起 `next dev --webpack --port 3100`
 （`APP_ORIGIN=http://localhost:3100`）。
@@ -121,7 +121,7 @@ Ctrl-C 对整个子进程组先 SIGTERM、5 s 后 SIGKILL；数据库不属于�
 | `DURABLE_HARNESS_RUN_DIR` | `<cwd>/runtime/durable` | 工具日志 `tools.jsonl` 与默认 workspace 的父目录 |
 | `DURABLE_HARNESS_WORKSPACE` | `${runDir}/workspace` | 根会话工作区 |
 | `DURABLE_HARNESS_RESET` | 未设 | `=1` 时启动前 DROP 全部 durable 表。**只给测试/一次性环境**，生产设了就是清空所有对话 |
-| `DURABLE_PG_URL` | `…/paimeng_agent` | 存储连接串。**没有 `DATABASE_URL` 回退**（`storage-pg.ts` 的 `defaultPgUrl()` 只认它，否则会把存储表混进业务库）；`dev:durable` 也会把自己解析到的串注入子进程（`durable-dev.ts`）。部署时必须显式写死，并且所有 harness 指向同一条串（单写者互斥是库级锁） |
+| `DURABLE_PG_URL` | `…/paimeng_agent` | 存储连接串。**没有 `DATABASE_URL` 回退**（`storage-pg.ts` 的 `defaultPgUrl()` 只认它，否则会把存储表混进业务库）；`dev` 也会把自己解析到的串注入子进程（`durable-dev.ts`）。部署时必须显式写死，并且所有 harness 指向同一条串（单写者互斥是库级锁） |
 | `DURABLE_MODEL_BASE_URL` / `_API_KEY` / `_ID` | 无 | harness 直连模型（OpenAI 兼容）。`durable-dev.ts` 从 `~/.pi/agent/models.json` 派生，只在子进程注入 |
 | `DURABLE_FAUX_MODEL` | 未设 | `=1` 用确定性桩模型 |
 | 产品 env | — | harness 启动时 `webToolsForConfig()` → `getConfig()`（`harness-server.ts:338`），所以 **`DATABASE_URL`、`APP_ORIGIN`、`PREVIEW_ORIGIN`、`BUILD_*`、`WEB_ACCESS_*` 也必须在 harness 的环境里合法** |
@@ -142,7 +142,7 @@ Ctrl-C 对整个子进程组先 SIGTERM、5 s 后 SIGKILL；数据库不属于�
 | `GENERATION_MAX_CONCURRENT` | `4` | 全局（跨应用）同时在跑的生成数上限，1-64；超限在提交入口直接 429 拒绝，不排队。见 §5.4 |
 | `MODEL_REPLY_TIMEOUT_MS` / `MODEL_RETRY_LIMIT` | `900000` / `5` | |
 
-**只有 `dev:durable` 读的**：`DURABLE_APP_PORT`（3100）、`DURABLE_APP_ORIGIN`。
+**只有 `dev` 读的**：`DURABLE_APP_PORT`（3000）、`DURABLE_APP_ORIGIN`。
 
 **需要显式决定的重复来源**：模型凭据现在有两份。产品库里的 `model_provider` 给 Next 的路由分类/语音用，
 harness 只认 `DURABLE_MODEL_*` 环境变量（m3 §7.6 第 3 条的已知缺口）。部署时这是**两处独立的密钥管理**，
@@ -335,10 +335,10 @@ done
 
 | # | 事项 | 做什么 | 怎么验 | 谁决定 |
 | --- | --- | --- | --- | --- |
-| 1 | **Postgres 变本机实例上的库** | （原本的方案是把它提升为 compose 服务；**2026-10-18 用户改主意**：直接用本机已有的容器 `zslm-postgres`，四个库搬过去，见 §3.5。已完成） | `npm run durable:pg` 打印 5432 上四个库的版本与大小；`npm run db:migrate`；`npm run dev:durable` 直接复用（不再自己起数据库） | 用户（2026-10-18 已拍定：用本机 `zslm-postgres`，不用自建服务） |
+| 1 | **Postgres 变本机实例上的库** | （原本的方案是把它提升为 compose 服务；**2026-10-18 用户改主意**：直接用本机已有的容器 `zslm-postgres`，四个库搬过去，见 §3.5。已完成） | `npm run durable:pg` 打印 5432 上四个库的版本与大小；`npm run db:migrate`；`npm run dev` 直接复用（不再自己起数据库） | 用户（2026-10-18 已拍定：用本机 `zslm-postgres`，不用自建服务） |
 | 2 | **旧 MySQL 清理** | §3.4 的三步 | 每步后 `docker ps -a \| grep zslm-mysql`、`grep -rn "MYSQL_LEGACY_URL\|mysql2\|zslm-mysql" src scripts tests package.json compose.yaml .env.example` 无残留、`npx tsc --noEmit` 干净、受影响用例（`tests/integration/*` 里碰库的那批）过一次 | **用户**（删数据，不可逆） |
 | 3 | **`spike/` 残留** | ① `sudo rm -rf spike/pi-durable-pg/pgdata`（属主 uid 999，普通账号删不掉，m3 §7.3 已记录失败）；② `docker rm -f zslm-pg-durable-spike`（已 Exited 3 小时）；③ `spike/pi-durable-pg/node_modules` 是软链，随目录一起删 | `ls -ld spike/pi-durable-pg/pgdata` 不存在；`docker ps -a` 无 spike 容器；`npm run verify:m3` 仍能跑（它只走产品 HTTP 接口） | 用户（`sudo` 与删目录） |
-| 4 | **`noProgress` 结束路径验证** | 用种子破坏 + 桩模型：把 React 工程 `src/App.tsx` 种上类型错误（同 m3 §5.3）→ `DURABLE_FAUX_MODEL=1 npm run dev:durable` → 提交一次生成。桩模型不改文件，于是：第 1 轮构建失败 → 进修复轮（`snapshot` 从 null 变成第一轮的指纹）→ 修复轮模型仍不改文件 → 第 2 轮构建失败且指纹未变 → 走 `durable-engine.ts:513-521` 的 `noProgressMessage` 结束 | 生成行 `generation.status='failed'`、`stop_reason='verification-failed'`，错误文案是 `noProgressMessage` 的前缀；`generation_step` 里有 2 条 build 行（round 1、2）而不是 3 条；流里出现一次 `data-build repairing` 后不再出现 | 用户（是否要现在补这条证据） |
+| 4 | **`noProgress` 结束路径验证** | 用种子破坏 + 桩模型：把 React 工程 `src/App.tsx` 种上类型错误（同 m3 §5.3）→ `DURABLE_FAUX_MODEL=1 npm run dev` → 提交一次生成。桩模型不改文件，于是：第 1 轮构建失败 → 进修复轮（`snapshot` 从 null 变成第一轮的指纹）→ 修复轮模型仍不改文件 → 第 2 轮构建失败且指纹未变 → 走 `durable-engine.ts:513-521` 的 `noProgressMessage` 结束 | 生成行 `generation.status='failed'`、`stop_reason='verification-failed'`，错误文案是 `noProgressMessage` 的前缀；`generation_step` 里有 2 条 build 行（round 1、2）而不是 3 条；流里出现一次 `data-build repairing` 后不再出现 | 用户（是否要现在补这条证据） |
 | 5 | **`BUILD_REPAIR_ROUNDS=0` 关闭路径验证** | 同一个种子破坏工程，`.env` 设 `BUILD_REPAIR_ROUNDS=0` 后**重启 harness 与 Next**（`.env` 只在启动时读，约束 #9），再提交一次生成（桩模型即可） | 第一次构建失败即结束：`stop_reason='verification-failed'`、`generation_step` 只有 1 条 build 行、流里**没有** `data-build repairing` | 用户 |
 | 6 | **`data-seal` 名字核实** | **已核实，无对象**：全 worktree（含 `archive/`、`spike/`、`docs/`）与 `node_modules/@earendil-works/**` 搜 `data-seal` 只在 `docs/plans/pi-durable-m3.md:196-197` 的自述里出现，没有第二处命中。插话在界面上的位置由 `GET app/messages` 的顺序 + 前端本地插入决定 | 复核命令：`grep -rn "data-seal" .`（排除自身文档）无输出 | 结论已闭合；若用户指的是别的机制，需给出新线索 |
 | 7 | **存储库落点拍板** | 在 §1.1「存储落点」的「同库 / 两库」之间选一个：同库则把 `.env.example` 的 `DURABLE_PG_URL` 显式等于 `DATABASE_URL` 并让 `durable-dev.ts` 默认值与 `storage-pg.ts` 一致；两库则把 `DURABLE_PG_URL` 写成独立条目、备份脚本备两个库、`DURABLE_HARNESS_RESET` 只对存储库生效 | 选定后 `.env`/`.env.example` 一致；`psql -d <存储库> -c '\dt'` 只看到该形态应有的表；`npm run db:migrate` 与 harness `open()` 都成功 | **用户**（影响备份与权限面，且现状与文档不符） |
@@ -439,7 +439,7 @@ docker exec zslm-postgres psql -U postgres -d postgres -tAc "select datname from
 docker ps -a --format '{{.Names}}\t{{.Status}}'    # 现场：zslm-mysql / zslm-postgres / zslm-redis / paimeng-ts-build-*
 npm run db:migrate && npm run verify:infra         # 迁移幂等 + 基础设施就绪
 npm run durable:harness                            # 手工起 harness（需自己给 DURABLE_MODEL_*）
-npm run dev:durable                                # 一条命令起 harness + Next(3100)
+npm run dev                                # 一条命令起 harness + Next(3000)
 ```
 
 ## 7. 收尾证据（2026-10-18，本机、真实进程与真实容器）

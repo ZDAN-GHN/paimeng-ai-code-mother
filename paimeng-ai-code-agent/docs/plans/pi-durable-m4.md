@@ -130,7 +130,7 @@ npm run db:import-mysql           # 一次性业务行搬迁（幂等，按主�
 | 新增转录契约用例 | `npx vitest run tests/integration/durable-m1/messages.test.ts` | **2/2 过**：用户条目随 `/submit` 落地、`/entries` 追加 `app.assistant`、`/messages` 从旧到新读回、展示条目不进模型上下文、保留种类/非对象数据 400、未知会话 404 |
 | 模型与记账单元测试 | `npx vitest run tests/models tests/generation-accounting.test.ts tests/model-task-binding.test.ts tests/snowflake.test.ts tests/image-attachments.test.ts tests/heartbeat.test.ts tests/model-config.test.ts tests/model-routing.test.ts` | **21 文件 144 用例全过**（两者与上一条有重叠文件，合起来覆盖所有碰库的用例） |
 | 静态门禁 | `npm run check:ui` / `npm run check:e2e` | 23 个 tsx / 13 个 spec 通过 |
-| **真实端到端（产品主流程）** | `npm run dev:durable` + `spike/pi-durable-m1` 的 `npm run verify:m2b-build` | **8/8 PASS**：真实模型 `deepseek-v4.1-flash`、新产品库 Postgres、真实容器构建 **13623ms**（`预览已更新（初版），用时 13623ms`）、浏览器 18 个不同长度的流式气泡、15 条工具条目、四个构建阶段全 `ok`（源码校验/安装依赖/类型检查/打包构建）、预览刷新 `pv=1`、**刷新后文本与工具条目读回成功**（走新的 `/messages` 路径） |
+| **真实端到端（产品主流程）** | `npm run dev` + `spike/pi-durable-m1` 的 `npm run verify:m2b-build` | **8/8 PASS**：真实模型 `deepseek-v4.1-flash`、新产品库 Postgres、真实容器构建 **13623ms**（`预览已更新（初版），用时 13623ms`）、浏览器 18 个不同长度的流式气泡、15 条工具条目、四个构建阶段全 `ok`（源码校验/安装依赖/类型检查/打包构建）、预览刷新 `pv=1`、**刷新后文本与工具条目读回成功**（走新的 `/messages` 路径） |
 | **真实端到端（四项能力）** | 同上的 `npm run verify:m3` | **13/13 PASS**：插话 S1–S5（运行中受理、进模型上下文、位置在第一次回复之后、`app.user` 条目 + 刷新读回 3 条消息）、图片 I1–I3（`ready/completed`、模型上下文 `images:1`、工作区副本 `assets/uploads/20232269-m3-red.png`）、修复轮 R1–R3、联网 W1–W2 |
 | **记账可查** | `GET /api/app/generation/accounts?appId=469340641873100800&limit=1`（产品接口，读新库 `generation` / `generation_step`） | 返回 `generationId=2800c810…`、`messageId=2800c810…-assistant`、`status=ready`、`stopReason=completed`、`model={alias:codegen.default,providerId:durable,modelName:deepseek-v4.1-flash}`、`totals.model={steps:13,inputTokens:9669,outputTokens:2744,cacheReadTokens:62592,reasoningTokens:276}`、逐步骤明细（13 行，含 `toolCalls`） |
 | 浏览器层用量块 | m2b 脚本的 B1/B2 断言（页面 `.generation-usage`） | 通过：`messageId` 能挂到对应助手回复，刷新后仍在 |
@@ -174,7 +174,7 @@ Playwright E2E 套件（`npm run test:e2e:isolated`）仍未跑：它要独占�
    命名卷、非零 `GENERATION_TIMEOUT_MS`、Next 健康检查路由）见 [pi-durable-deployment.md](./pi-durable-deployment.md) §4/§7。
    注意「同实例两库」：`DURABLE_PG_URL`（存储库）与 `DATABASE_URL`（业务库）**不再回退到同一条串**。
 3. **`spike/` 残留**：`spike/pi-durable-pg/pgdata/` 属主是容器用户，当前账号删不掉（需要 `sudo rm -rf`）；
-   `spike/pi-durable-m1` 的手工验收脚本仍指向 3100 与 5599，未随本步改动（它们只走产品 HTTP 接口）。
+   `spike/pi-durable-m1` 的手工验收脚本仍指向 3000 与 5599，未随本步改动（它们只走产品 HTTP 接口）。
 4. **全量测试重跑**：`npm test` 已补跑两次全绿（**58 文件 / 432 用例**，见 §5.1，取代 `m3.md` 里的 444 口径）；
    `npm run test:e2e:isolated` 仍未跑（E2E 三个 spec 已按 Postgres 改好，但没在隔离生产构建里跑过）；
    `scripts/verify-restart.ts` 的快照流程（`prepare` / `verify`）也没在新库上跑过。
@@ -200,7 +200,7 @@ npm run db:import-mysql         # 需要旧 MySQL 在跑 + MYSQL_LEGACY_URL
 npx tsc --noEmit
 npx vitest run tests/integration     # 需要 Postgres；durable-m1 组没有 Postgres 时会打印原因并 skip
 
-npm run dev:durable                  # harness + Next(3100)，要求本机 Postgres 已在跑
+npm run dev                  # harness + Next(3000)，要求本机 Postgres 已在跑
 cd ../spike/pi-durable-m1 && npm run verify:m2b-build   # 真实模型 + 真实容器构建 + 浏览器
 npm run verify:m3                                       # 四项能力（插话 / 图片 / 修复轮 / 联网）
 
@@ -244,7 +244,7 @@ npm run durable:pg -- status         # 看四个库是否就绪（容器不由�
 **未验证 / 已知取舍**
 
 1. `npm run test:e2e:isolated` 未跑（主 agent 串行跑）；`tests/e2e/platform.spec.ts` 里「一次生成一个用量块」的真实生成断言依赖这里刚改的 id 口径。
-2. 服务端改动需要用户**重启 `dev:durable`** 才生效：常驻 harness 进程不热加载，产品侧（Next）热更新后 /messages 与 harness 会短暂错位。
+2. 服务端改动需要用户**重启 `dev`** 才生效：常驻 harness 进程不热加载，产品侧（Next）热更新后 /messages 与 harness 会短暂错位。
 3. 一次生成的助手气泡数 = 模型消息数（上面的真实运行是 6 条），刷新后能看到多气泡；流式期间客户端仍只有一条气泡。要不要合并相邻 `pi.assistant` 属于产品口径，需要时再定。
 4. 流式期间插话仍是「乐观插到最后一条助手气泡之前」，终态不再重取历史（按本步结论删除）；刷新后按转录顺序正确。
 5. `models.json` 取自本机的 `oc-go` provider；产物写在测试库对应的 `runtime/code_output/html_<id>`，脚本已清理。

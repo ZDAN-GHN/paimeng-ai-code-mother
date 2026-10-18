@@ -2,7 +2,7 @@
 
 本目录包含 Next.js、React、TypeScript、Vercel AI SDK、Postgres 和 Drizzle 的独立应用。运行新应用无需启动旧 Java 后端或旧 Vue 平台。所有命令都在 `paimeng-ai-code-agent/` 内执行。
 
-生成入口只有一个引擎：请求提交给常驻的 pi-durable harness 进程（单写进程 + attach，实现在 `src/server/durable/`），Next 只做鉴权与 SSE 转发，所以浏览器断连不会取消任务。一条命令起全套见下面的 `npm run dev:durable`。数据库是 Postgres，**同实例两库**：`paimeng_app` 放业务表，`paimeng_agent` 放 harness 的会话存储（表名与列名见 `docs/plans/pi-durable-m4.md`，部署形态见 `docs/plans/pi-durable-deployment.md`）。
+生成入口只有一个引擎：请求提交给常驻的 pi-durable harness 进程（单写进程 + attach，实现在 `src/server/durable/`），Next 只做鉴权与 SSE 转发，所以浏览器断连不会取消任务。一条命令起全套见下面的 `npm run dev`。数据库是 Postgres，**同实例两库**：`paimeng_app` 放业务表，`paimeng_agent` 放 harness 的会话存储（表名与列名见 `docs/plans/pi-durable-m4.md`，部署形态见 `docs/plans/pi-durable-deployment.md`）。
 
 ## 启动开发环境
 
@@ -15,11 +15,11 @@
 5. 执行 `npm run durable:pg` 确保 Postgres 就绪（连接本机自己的 Postgres 容器 `zslm-postgres`，127.0.0.1:5432，建好 `paimeng_app`、`paimeng_app_test`、`paimeng_agent`、`paimeng_agent_test` 四个 database，再打印 server_version 与各库大小），再执行 `npm run db:migrate`。迁移完成后显示“产品 Postgres 库迁移完成”，只执行 `migrations/001_initial.sql`（业务表全套，含模型配置表与状态行）；重复执行会核对已有迁移的校验和。随后执行一次 `npm run db:init-models`，把现有 `.env` 的模型配置写入数据库（仅当表仍为空且版本为零；幂等，已有配置不会被覆盖）。从旧 MySQL 库升级时额外跑一次 `npm run db:import-mysql`（只搬业务行，幂等，见 `docs/plans/pi-durable-m4.md`）。
 6. 执行 `docker pull node:24-alpine`。Vue 生成工程使用该镜像进行隔离构建。
 7. 执行 `npx playwright install chromium`。发布封面截图和浏览器测试都需要 Chromium。若系统缺少浏览器依赖，按 Playwright 的报错安装系统依赖。
-8. 执行 `npm run dev:all` 同时启动管理端与预览进程，输出按 `[app]`、`[preview]` 前缀合并，按 Ctrl-C 一起停止；也可以在一个终端执行 `npm run preview`，在另一个终端执行 `npm run dev`。两个进程的端口分别取自 `APP_ORIGIN` 与 `PREVIEW_ORIGIN`，端口已被占用时 `dev:all` 会直接报错退出。
+8. 执行 `npm run dev` 启动全套开发进程：harness（5599）、预览（3001）与管理端（3000），输出按 `[harness]`、`[preview]`、`[app]` 前缀合并，Ctrl-C 一起停止。它要求本机 Postgres 容器已在跑（不在跑就直接报错，不会自己起数据库）。也可以分开跑：`npm run durable:harness`、`npm run preview`、`npm run dev:web`（只起 Next）。
 9. 打开 `http://localhost:3000`，注册并登录。
-10. 要用真实模型跑生成，执行 `npm run dev:durable`：它要求本机 Postgres 容器已经在跑（127.0.0.1:5432，不在跑就直接报错，不会自己起数据库），再起 harness 与 Next dev（默认 3100）。浏览器打开 `http://localhost:3100/app/chat/<应用 ID>`。Ctrl-C 会一起收尾 harness 与 Next；数据库不属于本脚本，不会被停。
+10. 浏览器打开 `http://localhost:3000` 登录后进入应用，生成由第 8 步起的 harness 执行；`http://localhost:3000/app/chat/<应用 ID>` 是对话页。Ctrl-C 会一起收尾 harness、预览与 Next；数据库不属于该脚本，不会被停。
 
-`DURABLE_*` 环境变量：`DURABLE_HARNESS_URL`（Next 侧 attach 地址，默认 `http://127.0.0.1:5599`）、`DURABLE_PG_URL`（harness 的会话存储，默认 `postgres://postgres:postgres@127.0.0.1:5432/paimeng_agent`）、`DURABLE_HARNESS_PORT`、`DURABLE_MODEL_BASE_URL` / `DURABLE_MODEL_API_KEY` / `DURABLE_MODEL_ID`（harness 直连模型，`dev:durable` 会从 `~/.pi/agent/models.json` 派生并只注入子进程）、`DURABLE_FAUX_MODEL=1`（确定性桩模型）。
+`DURABLE_*` 环境变量：`DURABLE_HARNESS_URL`（Next 侧 attach 地址，默认 `http://127.0.0.1:5599`）、`DURABLE_PG_URL`（harness 的会话存储，默认 `postgres://postgres:postgres@127.0.0.1:5432/paimeng_agent`）、`DURABLE_HARNESS_PORT`、`DURABLE_MODEL_BASE_URL` / `DURABLE_MODEL_API_KEY` / `DURABLE_MODEL_ID`（harness 直连模型，`npm run dev` 会从 `~/.pi/agent/models.json` 派生并只注入子进程）、`DURABLE_FAUX_MODEL=1`（确定性桩模型）。
 
 `.env.example` 默认使用真实模型。配置真实模型前可以在本地 `.env` 里设 `AI_MODE=fixture`，让产品侧的模型解析走确定样本；harness 侧的确定性模型是 `DURABLE_FAUX_MODEL=1`（`tests/integration/durable-m1` 用它）。两者都不代表真实模型质量已验证。
 

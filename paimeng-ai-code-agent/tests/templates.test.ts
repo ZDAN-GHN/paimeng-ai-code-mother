@@ -41,6 +41,7 @@ describe.each(cases)('版本化 $id 工程模板', item => {
   });
 
   it('工具保护身份、锁文件与入口，同时允许修改业务源码和配置', async () => {
+    await initializeTemplate(fresh, template);
     await expect(readProjectFile(fresh, TEMPLATE_MARKER)).rejects.toThrow('文件路径不允许访问');
     await expect(writeProjectFile(fresh, TEMPLATE_MARKER, '{}')).rejects.toThrow('文件路径不允许访问');
     await expect(deleteProjectFile(fresh, TEMPLATE_MARKER)).rejects.toThrow();
@@ -56,6 +57,7 @@ describe.each(cases)('版本化 $id 工程模板', item => {
   });
 
   it('损坏或软链接的模板身份会报错，不悄悄退回旧构建', async () => {
+    await initializeTemplate(fresh, template);
     await initializeTemplate(damaged, template);
     const marker = join(workspace(damaged), TEMPLATE_MARKER);
     await writeFile(marker, JSON.stringify({ id: item.id, version: '9.0.0' }));
@@ -66,6 +68,7 @@ describe.each(cases)('版本化 $id 工程模板', item => {
   });
 
   it('下载的是可独立运行的模板工程，包含锁文件和说明，不包含内部身份', async () => {
+    await initializeTemplate(fresh, template);
     const response = await downloadApp(fresh);
     const bytes = Buffer.from(await response.arrayBuffer());
     expect(bytes.subarray(0, 2).toString()).toBe('PK');

@@ -212,7 +212,7 @@ Postgres（业务库 paimeng_app + 存储库 paimeng_agent，同实例两库）
 | `scripts/durable-dev.ts` | — | 一条命令起全套：探端口 → 按需起 Postgres → 起 harness（从 `~/.pi/agent/models.json` 派生 `DURABLE_MODEL_*`）→ 轮询 `/health` → 起 Next | 讲本地怎么复现 |
 | `tests/integration/durable-m1/*` | 11 文件 | 契约级回归：断连、重启、replay 策略、插话、附件、构建工具、路由鉴权、联网 | 每条对应一个你能讲的故事 |
 
-命令：`npm run durable:harness`、`npm run durable:pg`、`npm run dev:durable`。
+命令：`npm run durable:harness`、`npm run durable:pg`、`npm run dev`。
 
 ---
 

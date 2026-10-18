@@ -44,7 +44,7 @@
 | `src/server/generation-instructions.ts` | 加 `previewTool?: boolean`（默认 true = 原样）。harness 只有文件工具，false 时不提 `buildPreview`，也不再写「本轮没有构建工具」以外的构建命令 |
 | `src/server/config.ts` | 新增 `DURABLE_ENGINE`（`legacy`/`harness`，默认 `legacy`）与 `DURABLE_HARNESS_URL`（默认 `http://127.0.0.1:5599`），暴露成 `getConfig().durable` |
 | `.env.example` | 补上这两个变量的说明与默认值 |
-| `scripts/durable-dev.ts` | 给 Next 子进程显式设 `DURABLE_ENGINE`（默认 harness）与 `APP_ORIGIN=http://localhost:<appPort>`：产品的写接口（`guardRequest`）要求来源等于 `APP_ORIGIN`，而 Next 在 3100 上 |
+| `scripts/durable-dev.ts` | 给 Next 子进程显式设 `DURABLE_ENGINE`（默认 harness）与 `APP_ORIGIN=http://localhost:<appPort>`：产品的写接口（`guardRequest`）要求来源等于 `APP_ORIGIN`，而 Next 在 3000 上 |
 
 ### 1.3 harness 进程（spike）
 
@@ -95,8 +95,8 @@ DURABLE_HARNESS_URL=http://127.0.0.1:5599
 ```
 
 两套引擎共用 `app/chat/gen/code` 的请求体（`generationRequestSchema`）与前端 SSE 协议，切换只影响
-「生成由谁执行」。`npm run dev:durable` 起 Postgres（已在跑就复用）+ harness + Next（3100，
-默认 `DURABLE_ENGINE=harness`、`APP_ORIGIN=http://localhost:3100`）。
+「生成由谁执行」。`npm run dev` 起 Postgres（已在跑就复用）+ harness + Next（3000，
+默认 `DURABLE_ENGINE=harness`、`APP_ORIGIN=http://localhost:3000`）。
 
 ## 3. 验收证据（真实运行）
 
@@ -104,7 +104,7 @@ DURABLE_HARNESS_URL=http://127.0.0.1:5599
 HTTP 调用，`run.sh` 从 `~/.pi/agent/models.json` 派生密钥）、Next 16 dev `localhost:3100`、真实 Chromium。
 原始输出与截图在 `spike/pi-durable-m1/evidence-m2a/`（`timeline-m2a.txt`、`timeline-reconnect.txt`、
 `m2a-round{1,2}-{streaming,final}.png`、`reconnect-final.png`、`round{1,2}-model-context.json`、`stack.log`）。
-回放：`npm run dev:durable` → `cd spike/pi-durable-m1` → `npm run verify:m2a` / `npm run verify:m2a-reconnect`。
+回放：`npm run dev` → `cd spike/pi-durable-m1` → `npm run verify:m2a` / `npm run verify:m2a-reconnect`。
 
 ### 3.1 ① 一次真实生成经 harness 跑通（浏览器）
 
@@ -242,7 +242,7 @@ npm run check:ui / npm run check:e2e            # 通过（没改 tsx 与 e2e）
 
 ```bash
 cd paimeng-ai-code-agent
-npm run dev:durable          # Postgres（复用/启动）+ harness + Next（3100，DURABLE_ENGINE=harness）
+npm run dev          # Postgres（复用/启动）+ harness + Next（3000，DURABLE_ENGINE=harness）
 # 浏览器用创建者身份登录后打开 /app/chat/<应用 ID>，新应用会自动把初始需求发出去（产品的既有行为）
 
 cd ../spike/pi-durable-m1
@@ -350,7 +350,7 @@ npx vitest run tests/integration/durable-m1       # 6 文件 11 用例全过（�
 
 ### 7.8 剩余待办（给整合阶段）
 
-1. **产品路径的真实模型 + 浏览器验收**（本轮唯一没跑的一条）：`npm run dev:durable` 起全栈，
+1. **产品路径的真实模型 + 浏览器验收**（本轮唯一没跑的一条）：`npm run dev` 起全栈，
    真实模型建一个 **react_project** 应用 → 浏览器看流式 / 工具条目 / 构建阶段进度 / 里程碑预览刷新并截图；
    然后在构建阶段关掉整个浏览器（Firefox 优先）验证任务继续；最后在构建中途 `kill -9` harness 验证续跑。
    可直接照抄 `spike/pi-durable-m1/src/verify-m2a.ts` / `verify-m2a-reconnect.ts` 的结构，改提示词为

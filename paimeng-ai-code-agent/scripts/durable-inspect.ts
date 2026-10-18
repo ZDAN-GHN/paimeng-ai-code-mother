@@ -63,7 +63,7 @@ try {
   }
 } catch (problem) {
   console.error(`连不上 harness（${base}）：${problem instanceof Error ? problem.message : String(problem)}`);
-  console.error('先起 harness：npm run durable:harness（或 npm run dev:durable）');
+  console.error('先起 harness：npm run durable:harness（或 npm run dev）');
   process.exit(1);
 }
 }

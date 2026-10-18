@@ -204,7 +204,7 @@ describe('buildAliasModels', () => {
     expect(result.toolCalls).toHaveLength(1);
     expect(result.toolCalls[0]?.toolName).toBe('lookup');
     expect(result.toolCalls[0]?.input).toEqual({ query: 'abc' });
-    expect(captured.at(-1)?.body.tool_choice ?? 'auto').toBeTruthy();
+    expect(captured.at(-1)?.body.tools).toMatchObject([{ type: 'function', function: { name: 'lookup' } }]);
   });
 
   it('流式解析分片工具调用参数，并执行工具拿到结果', async () => {

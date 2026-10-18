@@ -36,7 +36,7 @@ React 生成 8/8（真实模型 + 真实容器构建 11.7s + 浏览器流式与�
 | `spike/pi-durable-pg/src/faux-model.ts` | `src/server/durable/faux-model.ts` | 桩模型（回归用例用）。环境变量 `SPIKE_FAUX_*→DURABLE_FAUX_*` |
 | `spike/pi-durable-m1/src/server.ts` | `src/server/durable/harness-server.ts` | 常驻进程 + attach HTTP API。改为静态 import 产品的 `artifacts`/`build-feedback`（原来是按需动态 import），环境变量 `M1_*→DURABLE_HARNESS_*`、`SPIKE_*→DURABLE_MODEL_*`；`/submit` 遇到不存在的 `conversationId` 现在返回 404（原来静默回退 root 会话） |
 | `spike/pi-durable-pg/pg.sh` | `scripts/durable-pg.sh` | 一次性 Postgres 16。容器名 `zslm-pg-durable`，数据目录 `runtime/durable-pg/pgdata`（gitignore），端口仍 55432；`npm run durable:pg -- start|stop|purge|status|psql` |
-| `scripts/durable-m1-dev.ts` | `scripts/durable-dev.ts` | 一条命令起 Postgres + harness + Next（3100）。改为起产品 harness（产品 tsx+产品根 cwd），从 `~/.pi/agent/models.json` 派生 `DURABLE_MODEL_*` 只注入子进程；`npm run dev:durable` |
+| `scripts/durable-m1-dev.ts` | `scripts/durable-dev.ts` | 一条命令起 Postgres + harness + Next（3100）。改为起产品 harness（产品 tsx+产品根 cwd），从 `~/.pi/agent/models.json` 派生 `DURABLE_MODEL_*` 只注入子进程；`npm run dev` |
 | `src/app/api/durable-m1/[...path]/route.ts` | `src/app/api/durable/[...path]/route.ts` | attach 代理保留（鉴权、`req.signal` 只到 `/events` 的限界都在）。手工脚本改走 `/api/durable/*` |
 
 ### 1.2 删除
@@ -56,8 +56,8 @@ React 生成 8/8（真实模型 + 真实容器构建 11.7s + 浏览器流式与�
 `@earendil-works/chord@1.3.0`、`pg@8.23.1`；devDep 加 `@types/pg@8.23.1`。
 spike 的 `package.json` 仍是实验/手工脚本的依赖，不再承担产品职责。
 
-新增脚本：`dev:durable`、`durable:harness`（`node --import tsx --conditions=react-server
-src/server/durable/harness-server.ts`）、`durable:pg`。删掉了 `dev:durable-m1`。
+新增脚本：`dev`、`durable:harness`（`node --import tsx --conditions=react-server
+src/server/durable/harness-server.ts`）、`durable:pg`。删掉了 `dev:durable-m1`（该名后来并入 `npm run dev`）。
 
 ### 1.4 配置与产品代码改动
 
@@ -74,7 +74,7 @@ src/server/durable/harness-server.ts`）、`durable:pg`。删掉了 `dev:durable
 
 ```bash
 cd paimeng-ai-code-agent
-npm run dev:durable     # Postgres（在跑就复用）+ harness（5599）+ Next dev（3100，DURABLE_ENGINE=harness）
+npm run dev     # Postgres（在跑就复用）+ harness（5599）+ Next dev（3100，DURABLE_ENGINE=harness）
 # 浏览器登录后打开 http://localhost:3100/app/chat/<应用 ID>
 
 npm run durable:pg -- stop   # 用完停回原状（只停自己起的那个容器）
@@ -93,8 +93,8 @@ npm run durable:pg -- stop   # 用完停回原状（只停自己起的那个容�
 | harness 冒烟（桩模型） | `DURABLE_FAUX_MODEL=1 … node --import tsx --conditions=react-server src/server/durable/harness-server.ts` | 启动、监听 5599、SIGTERM 干净退出 |
 | durable 回归 | `npx vitest run tests/integration/durable-m1` | 6 文件 11 用例全过（21s，含真实 Postgres）；第二步之后 9 文件 16 用例 |
 | 静态检查 | `npm run check:ui` / `npm run check:e2e` | 通过 |
-| **四项能力真实验收** | `npm run dev:durable` + `spike/pi-durable-m1` 的 `npm run verify:m3` | **13/13 PASS**（真实模型、真实上传、真实容器构建），见 §5 |
-| **真实生成（产品主流程）** | `npm run dev:durable` + `spike/pi-durable-m1` 的 `npm run verify:m2b-build` | **8/8 PASS**：真实模型 `oc-go/deepseek-v4.1-flash`、真实容器构建（安装依赖/类型检查/打包 11.7s）、浏览器看到流式增量（13 个不同长度）、工具条目、四个构建阶段全部 `ok`、预览刷新（`pv=1`）、刷新后读回文本与工具条目 |
+| **四项能力真实验收** | `npm run dev` + `spike/pi-durable-m1` 的 `npm run verify:m3` | **13/13 PASS**（真实模型、真实上传、真实容器构建），见 §5 |
+| **真实生成（产品主流程）** | `npm run dev` + `spike/pi-durable-m1` 的 `npm run verify:m2b-build` | **8/8 PASS**：真实模型 `oc-go/deepseek-v4.1-flash`、真实容器构建（安装依赖/类型检查/打包 11.7s）、浏览器看到流式增量（13 个不同长度）、工具条目、四个构建阶段全部 `ok`、预览刷新（`pv=1`）、刷新后读回文本与工具条目 |
 
 原始输出与截图：`spike/pi-durable-m1/evidence-m3/timeline-m3.txt`（最后一次 8/8）、`m3-streaming.png`、`m3-final.png`、`m3-reloaded.png`。
 
@@ -111,7 +111,7 @@ npm run durable:pg -- start
 npx vitest run tests/integration/durable-m1
 
 # 一次真实生成（真实模型 + 真实 Postgres + 真实容器构建 + 浏览器）
-npm run dev:durable
+npm run dev
 cd ../spike/pi-durable-m1
 npm run verify:m3                # 四项能力（插话 / 图片 / 修复轮 / 联网工具注册），13 项断言
 npm run verify:m2b-build         # React 应用：构建阶段进度 + 真实容器构建 + 预览刷新 + 刷新读回
@@ -157,7 +157,7 @@ npm run verify:m2a               # 产品路径两轮生成：流式 + 工具条
    `durableModels()`。
 2. **前端历史**：`app/messages` 仍读 `ts_message`（harness 引擎也写它，所以刷新读回正常）；
    data-model 计划是改读 pi 条目。
-3. **进程编排/部署**：`dev:durable` 只覆盖本机开发；生产形态、重启策略、`kill -9` 后残留构建容器的清理
+3. **进程编排/部署**：`dev` 只覆盖本机开发；生产形态、重启策略、`kill -9` 后残留构建容器的清理
    （容器是 `--rm`，但 harness 被 kill 时来不及回收）还没定。
 4. **手工脚本**：`spike/pi-durable-m1` 的 M1/M2a 脚本已指向产品 harness；M2b 的产品路径真实构建
    验收脚本 `verify:m2b-build` 见 §3；四项能力验收脚本 `verify:m3` 见 §5。
@@ -391,14 +391,14 @@ tests/tool-transcript.test.ts       # 同上
 | durable 回归 | `npx vitest run tests/integration/durable-m1` | 9 文件 16/16（需 `npm run durable:pg -- start`） |
 | 静态门禁 | `npm run check:ui` / `npm run check:e2e` | 通过（24 个 tsx / 13 个 spec） |
 | 残留检查 | 见 §7.4 的两条 grep | 无源码引用残留 |
-| **真实端到端**（真实模型 + 真实 Postgres + 真实容器构建 + 浏览器） | `npm run dev:durable` + `spike/pi-durable-m1` 的 `verify:m3` / `verify:m2b-build` | **13/13 + 8/8 PASS**（删除之后重跑，见下） |
+| **真实端到端**（真实模型 + 真实 Postgres + 真实容器构建 + 浏览器） | `npm run dev` + `spike/pi-durable-m1` 的 `verify:m3` / `verify:m2b-build` | **13/13 + 8/8 PASS**（删除之后重跑，见下） |
 
 删除前先确认过「红的是该删的，不是删错了」：在 HEAD（`878f3c2`，未删除任何东西）上单跑
 `tests/integration/http.test.ts` 与 `tests/integration/rate-limit-http.test.ts`，它们是**既有红**
 （整合第二步把默认引擎切成 harness 后，这两组用例驱动的还是 legacy 循环，路由分流让 HTTP 路径返回 500）。
 所以删除后重跑全量是「58 文件 444 用例全过」，没有把真回归掩盖掉；其中能保住产品行为的断言已按 §7.1 改写。
 
-**真实端到端已在删除之后重跑**（2026-10-18 15:33–15:37，`npm run dev:durable` 起的真实链路）：
+**真实端到端已在删除之后重跑**（2026-10-18 15:33–15:37，`npm run dev` 起的真实链路）：
 
 - `verify:m3`（`spike/pi-durable-m1`）**13/13 PASS**：真实模型 `oc-go/deepseek-v4.1-flash`、真实 Postgres、
   真实上传（`app/attachment/upload`）。四项能力各自的断言全过——插话 S1–S5（运行中受理、进入模型上下文、
@@ -413,7 +413,7 @@ tests/tool-transcript.test.ts       # 同上
 `m3-streaming.png`、`m3-final.png`、`m3-reloaded.png`、`results-m3-features.json`，都是本步这次运行的）。
 
 ```bash
-cd paimeng-ai-code-agent && npm run dev:durable      # Postgres + harness + Next dev(3100)
+cd paimeng-ai-code-agent && npm run dev      # Postgres + harness + Next dev(3100)
 cd ../spike/pi-durable-m1 && npm run verify:m3       # 四项能力 13 项断言
 npm run verify:m2b-build                             # 产品主流程 8 项断言（真实容器构建 + 预览刷新）
 ```
@@ -473,4 +473,4 @@ npm run verify:m2b-build                             # 产品主流程 8 项断�
   属 §4.3-6 那一类，留作待办（接法：`observeHarnessRun` 的 catch 用 `stopReasonOf` 归一化 abort 原因）。
 
 其它与本步相关、不属于换库的待办：§7.6 的第 3、4、7、8、9 条；`tests/e2e` 里 `chat-*` 用例当前只拦接口不调真实模型，
-若要覆盖「浏览器里真实生成一次」需要 `dev:durable` 常驻在 E2E 环境里；`spike/pi-durable-pg/pgdata` 的权限残留（§7.3）。
+若要覆盖「浏览器里真实生成一次」需要 `dev` 常驻在 E2E 环境里；`spike/pi-durable-pg/pgdata` 的权限残留（§7.3）。

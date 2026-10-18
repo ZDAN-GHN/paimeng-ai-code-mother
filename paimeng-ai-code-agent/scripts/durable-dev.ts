@@ -3,7 +3,7 @@
  * the resident harness process, the preview server, and the Next.js dev server
  * that attaches to the harness. Ctrl-C stops them all.
  *
- *   npm run dev:durable
+ *   npm run dev
  *
  * The harness talks to a real OpenAI-compatible endpoint derived from
  * ~/.pi/agent/models.json (the `oc-go` provider). Set DURABLE_FAUX_MODEL=1 to
@@ -31,7 +31,7 @@ try {
 
 const pgUrl = process.env.DURABLE_PG_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/paimeng_agent';
 const harnessPort = Number(process.env.DURABLE_HARNESS_PORT ?? 5599);
-const appPort = Number(process.env.DURABLE_APP_PORT ?? 3100);
+const appPort = Number(process.env.DURABLE_APP_PORT ?? 3000);
 const appOrigin = process.env.DURABLE_APP_ORIGIN ?? `http://localhost:${appPort}`;
 const harnessUrl = `http://127.0.0.1:${harnessPort}`;
 // 预览服务器既服务生成产物的 iframe，也服务应用封面（/covers/<key>.png）：不起它，首页封面与预览都是空的。

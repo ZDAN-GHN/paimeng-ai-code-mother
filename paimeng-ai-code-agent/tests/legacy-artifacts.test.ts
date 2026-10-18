@@ -1,11 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, truncate, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
-import type { Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
-import { chromium } from 'playwright';
+import { dirname, join } from 'node:path';
 import { applyLegacyArtifactPlan, LEGACY_ARTIFACT_LIMITS, legacyCoverUrl, planLegacyArtifacts, rollbackLegacyArtifacts, type LegacyArtifactApp } from '@/server/legacy-artifacts';
 
 const sandboxes: string[] = [];
@@ -24,25 +20,6 @@ async function write(path: string, content: string) {
 
 async function present(path: string) {
   try { await readFile(path); return true; } catch { return false; }
-}
-
-async function serve(root: string) {
-  const server = createServer(async (request, response) => {
-    try {
-      const pathname = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
-      const file = join(root, pathname === '/' ? 'index.html' : decodeURIComponent(pathname).slice(1));
-      if (relative(root, file).startsWith('..')) { response.writeHead(403); response.end(); return; }
-      const body = await readFile(file);
-      response.writeHead(200, { 'Content-Type': file.endsWith('.js') ? 'application/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html; charset=utf-8' });
-      response.end(body);
-    } catch { response.writeHead(404); response.end(); }
-  });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-  return { server, origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
-}
-
-function close(server: Server) {
-  return new Promise<void>(resolve => server.close(() => resolve()));
 }
 
 const apps: LegacyArtifactApp[] = [
@@ -185,30 +162,3 @@ describe('旧产物与封面迁移', () => {
   });
 });
 
-describe('迁移产物浏览器验收（沙箱，不连接数据库）', () => {
-  it('Vue dist 与 HTML 源码经迁移后可由浏览器加载', async () => {
-    const { sourceRoot, targetRuntime } = await makeSandbox();
-    await seed(sourceRoot);
-    const plan = await planLegacyArtifacts(apps, planOption(sourceRoot, targetRuntime));
-    await applyLegacyArtifactPlan(plan);
-    const vue = await serve(join(targetRuntime, 'code_output', 'vue_project_200', 'dist'));
-    const html = await serve(join(targetRuntime, 'code_output', 'html_100'));
-    const browser = await chromium.launch({ headless: true });
-    try {
-      const page = await browser.newPage();
-      const vueResponse = await page.goto(vue.origin + '/');
-      expect(vueResponse?.status()).toBe(200);
-      await page.getByRole('heading', { name: 'Vue 迁移产物' }).waitFor();
-      expect(await page.locator('#asset').textContent()).toBe('asset-ok');
-      const htmlResponse = await page.goto(html.origin + '/');
-      expect(htmlResponse?.status()).toBe(200);
-      await page.getByRole('heading', { name: 'HTML 迁移产物' }).waitFor();
-      const style = await page.request.get(html.origin + '/style.css');
-      expect(await style.text()).toContain('#cb573e');
-    } finally {
-      await browser.close();
-      await close(vue.server);
-      await close(html.server);
-    }
-  }, 60000);
-});

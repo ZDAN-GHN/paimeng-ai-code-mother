@@ -12,9 +12,7 @@
     "infra:status": "docker compose --env-file .env -f compose.yaml ps",
     "infra:stop": "docker compose --env-file .env -f compose.yaml stop",
     "verify:infra": "tsx --env-file=.env scripts/verify-infra.ts",
-    "dev": "next dev --hostname 127.0.0.1 --port 3000",
-    "dev:all": "tsx scripts/dev.ts",
-    "dev:durable": "tsx scripts/durable-dev.ts",
+    "dev": "tsx scripts/durable-dev.ts",
     "durable:harness": "node --import tsx --conditions=react-server src/server/durable/harness-server.ts",
     "durable:pg": "tsx --env-file=.env scripts/durable-pg.ts",
     "build": "next build --webpack",
@@ -41,7 +39,8 @@
     "durable:inspect": "tsx --env-file=.env scripts/durable-inspect.ts",
     "hooks:install": "git config core.hooksPath paimeng-ai-code-agent/scripts/hooks && echo \"hooks 已启用：pre-commit=check:fast, pre-push=type-check\"",
     "test:system": "vitest run --project system",
-    "test:all": "vitest run"
+    "test:all": "vitest run",
+    "dev:web": "next dev --hostname 127.0.0.1 --port 3000"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.78",

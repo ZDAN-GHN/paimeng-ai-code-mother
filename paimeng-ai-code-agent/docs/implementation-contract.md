@@ -41,7 +41,7 @@ JSON 成功响应为 `{code:0,data,message:"ok"}`。失败返回业务错误码�
 
 ## Agent 消息与任务
 
-POST `/api/app/chat/gen/code` 接收 `{appId,message:UIMessage,requestId:UUID}`。只接受一条用户文本消息，拒绝客户端伪造的系统消息及历史字段。服务端锁定应用后读取权威历史，工具目录绑定当前应用。生成不在 Next 进程里执行：请求提交给常驻的 pi-durable harness 进程（唯一写者，`DURABLE_HARNESS_URL`，默认 `http://127.0.0.1:5599`），Next 只做 attach 客户端与 SSE 转发，所以浏览器断连只停止转发，harness 里的任务照常跑完（`npm run dev:durable` 一条命令起 Postgres + harness + Next）。一个应用对应 harness 里恰好一条会话（`app.conversationId`）；映射指向不存在的会话时清掉重建。
+POST `/api/app/chat/gen/code` 接收 `{appId,message:UIMessage,requestId:UUID}`。只接受一条用户文本消息，拒绝客户端伪造的系统消息及历史字段。服务端锁定应用后读取权威历史，工具目录绑定当前应用。生成不在 Next 进程里执行：请求提交给常驻的 pi-durable harness 进程（唯一写者，`DURABLE_HARNESS_URL`，默认 `http://127.0.0.1:5599`），Next 只做 attach 客户端与 SSE 转发，所以浏览器断连只停止转发，harness 里的任务照常跑完（`npm run dev` 一条命令起 Postgres + harness + Next）。一个应用对应 harness 里恰好一条会话（`app.conversationId`）；映射指向不存在的会话时清掉重建。
 
 - GET `/api/app/messages?appId=` 返回完整 `UIMessage[]`，包括工具输入、输出、状态及文本。
 - GET `/api/app/generation?appId=` 返回当前 `Generation` 或 null。

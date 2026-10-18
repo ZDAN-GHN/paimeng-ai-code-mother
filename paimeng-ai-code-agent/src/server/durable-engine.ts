@@ -126,7 +126,7 @@ async function harnessFetch(path: string, init?: RequestInit): Promise<Response>
     // 常驻 harness 没起来时 fetch 只会报一句 "fetch failed"，用户看到的是 500「服务处理失败」。
     // 生成全部在 harness 里跑，这里把连接失败翻成可操作的消息。
     if (init?.signal?.aborted) throw error;
-    throw new BusinessError(503, 50300, `生成服务未启动或不可达（${harnessBase()}）：请先运行 npm run durable:harness，或用 npm run dev:durable 一次启动全套`);
+    throw new BusinessError(503, 50300, `生成服务未启动或不可达（${harnessBase()}）：请先运行 npm run durable:harness，或用 npm run dev 一次启动全套`);
   }
   if (!response.ok) throw new HarnessRequestError(response.status, `harness ${path} 返回 ${response.status}：${(await response.text()).slice(0, 300)}`);
   return response;
@@ -156,7 +156,7 @@ function ensureHarnessProtocol(): Promise<void> {
   protocolChecked ??= (async () => {
     const health = (await (await harnessFetch('/health')).json()) as { protocol?: number };
     if (health.protocol !== harnessProtocol) {
-      throw new BusinessError(503, 50301, `harness 版本不匹配（运行中的 harness 协议 ${health.protocol ?? '未知'}，服务端需要 ${harnessProtocol}）：常驻 harness 不热加载，请重启 npm run dev:durable`);
+      throw new BusinessError(503, 50301, `harness 版本不匹配（运行中的 harness 协议 ${health.protocol ?? '未知'}，服务端需要 ${harnessProtocol}）：常驻 harness 不热加载，请重启 npm run dev`);
     }
   })().catch((error: unknown) => {
     protocolChecked = undefined;

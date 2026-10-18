@@ -51,7 +51,7 @@ npm run durable:inspect -- --conversations          # 列出 harness 已打开�
 | harness 事件 → 前端协议、记账、落库 | `src/server/durable-engine.ts` |
 | attach 路由（仅创建者鉴权） | `src/app/api/durable/[...path]/route.ts` |
 | Postgres 存储（pi-durable 的 Storage 实现） | `src/server/durable/storage-pg.ts` |
-| 一条命令起全套 / 数据库 | `npm run dev:durable`、`npm run durable:pg` |
+| 一条命令起全套 / 数据库 | `npm run dev`、`npm run durable:pg` |
 | 设计记录与待办 | `docs/plans/pi-durable-{m1,m2,m3,m4,deployment,data-model}.md` |
 
 git 钩子：`pre-commit` 跑 `check:fast`，`pre-push` 跑 `type-check`；紧急时用 `git commit --no-verify` 绕过。

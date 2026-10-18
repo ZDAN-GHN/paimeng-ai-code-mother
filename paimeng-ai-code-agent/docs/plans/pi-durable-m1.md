@@ -214,7 +214,7 @@ M1 的四项目标（常驻进程、attach 通道、前端最小链路、三条�
 8. **前端只做最小展示**：每次 revision 用全量快照覆盖状态（EventSource 自动重连会重发 snapshot，所以安全），
    没有 lastEventId / 增量合并；没有断线提示之外的错误处理。
    → 从 `src/app/durable-m1/page.tsx` 起步，接口换成产品聊天页需要的形态。
-9. ~~**进程编排没做**~~ **已做**：`npm run dev:durable`（`scripts/durable-dev.ts`）一条命令起
+9. ~~**进程编排没做**~~ **已做**：`npm run dev`（`scripts/durable-dev.ts`）一条命令起
    Postgres（已在跑就复用）+ harness + Next dev，退出时收掉自己起的进程，只停自己启动的 Postgres。见 §6。
 10. **`127.0.0.1` 访问会被 next.config 重定向到 `APP_ORIGIN`**（本机是 `http://localhost:3000`），
     这次靠脚本改用 `localhost:3100` 绕开，没有改配置。
@@ -248,7 +248,7 @@ M1 的四项目标（常驻进程、attach 通道、前端最小链路、三条�
 ## 6. 复现
 
 ```bash
-npm run dev:durable        # Postgres（复用/启动）+ harness + Next dev（3100），Ctrl-C 一起收尾
+npm run dev        # Postgres（复用/启动）+ harness + Next dev（3100），Ctrl-C 一起收尾
 # 浏览器用创建者身份登录，打开 http://localhost:3100/durable-m1?appId=<应用 ID>
 ```
 
