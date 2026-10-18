@@ -1,5 +1,5 @@
 /**
- * 转录读取契约（docs/plans/pi-durable-m4.md）：产品库不再有自己的消息表，转录由 harness 的条目承载。
+ * 转录读取契约（docs/plans/archive/pi-durable-m4.md）：产品库不再有自己的消息表，转录由 harness 的条目承载。
  *
  * 这里用桩模型（不联网、不 Docker）钉住三个接口行为：
  *

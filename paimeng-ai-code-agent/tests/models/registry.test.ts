@@ -546,7 +546,7 @@ describe('故障回退与不可掩盖的错误', () => {
     await expect(registry.resolveBinding('codegen.extra')).rejects.toMatchObject({ status: 503, code: 50300 });
   });
 
-  it('modelFor 使用的 resolveModel 返回冻结的 LanguageModel', async () => {
+  it('公共入口 resolveModel 返回冻结的 LanguageModel', async () => {
     const { store } = fakeStore(snapshot('1', '0', 'model-a'));
     const registry = createModelRegistry({ store, clock: controlledClock().clock });
 

@@ -1,13 +1,15 @@
 # Pi Durable 迁移 · M2a：把生成入口接到 harness（含 M2b）
 
+> 归档：记录当时的设计、迁移与验收。当前行为见[部署说明](../pi-durable-deployment.md)与[模型配置](../provider-convergence.md)。
+
 > 历史文档：本文记录当时的状态。其中提到的 `src/server/memory-*.ts`、自研滚动摘要与 `spike/` 实验目录已随整合第三步删除，去向与判据见 [pi-durable-m3.md](./pi-durable-m3.md) §7。
 
 状态：M2a **已跑通**（2026-10-18）；M2b（真实业务工具接进 harness）代码与 harness 层验收已跑通，
 产品路径的真实模型验收待跑，见 §7。分支 `feat/pi-durable-migration`，基线 `main@d0c9797`
 （M1 提交 `4edbdd0`/`1554dcc`/`345d60a`，M2a 提交 `d8acf2d`）。
-设计输入是 `docs/plans/pi-durable-data-model.md`；M1 的链路与证据见 `docs/plans/pi-durable-m1.md`。
+设计输入是 `docs/plans/archive/pi-durable-data-model.md`；M1 的链路与证据见 `docs/plans/archive/pi-durable-m1.md`。
 
-> 整合后文件位置与默认引擎见 `docs/plans/pi-durable-m3.md`；本文件保留当时的原始记录。
+> 整合后文件位置与默认引擎见 `docs/plans/archive/pi-durable-m3.md`；本文件保留当时的原始记录。
 
 ## 0. 一句话结论
 

@@ -63,7 +63,7 @@
 
 B01 已恢复匿名首页空作品网格与分页，未部署卡片不额外显示编辑。B02 账号前端恢复仅必填，保留校验后的 redirect 导航便利。B03 模型上下文恢复包含当前请求最多 20 条 UI 消息；页面仍加载完整权威历史后按十条展开，这是保留的实现差异。对话记忆（滚动摘要 + 最近完整回合）上线后，默认路径不再是固定 20 条窗口（`MEMORY_ENABLED=true`），旧的 20 条窗口只在关闭该开关时生效；页面行为不变。B04 恢复合法排序列与历史排序参数，保留显式白名单。B05 仍使用本地 covers 并在返回前等待截图尝试，不声称 COS 等价。B06 仍在事务中清理文本历史及新版完整消息，保留事务方式。
 
-旧产物迁移已新增 `scripts/import-legacy.ts --artifacts <legacy-root> --covers <dir> --strict` 能力，搬迁与快照关联的 code_output、code_deploy 和 covers。实现拒绝路径穿越、符号链接、敏感文件、预算超限及覆盖冲突，文件暂存替换与数据库事务失败时回滚新文件。相关临时 fixture 测试通过；没有执行真实旧快照导入。详见 [迁移说明](migration-contracts.md)。
+旧产物迁移已新增 `scripts/import-legacy.ts --artifacts <legacy-root> --covers <dir> --strict` 能力，搬迁与快照关联的 code_output、code_deploy 和 covers。实现拒绝路径穿越、符号链接、敏感文件、预算超限及覆盖冲突，文件暂存替换与数据库事务失败时回滚新文件。相关临时 fixture 测试通过；没有执行真实旧快照导入。详见 [迁移说明](./migration-contracts.md)。
 
 当前已观察的检查：
 

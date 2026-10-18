@@ -26,7 +26,7 @@ import { workspace, writeProjectFileBytes } from './workspace';
 import { webAccessInstructions } from './web-access/tools';
 
 /**
- * 生成入口的 harness 引擎（M2a，docs/plans/pi-durable-m2.md）。
+ * 生成入口的 harness 引擎（M2a，docs/plans/archive/pi-durable-m2.md）。
  *
  * 生成入口唯一的引擎（`app/chat/gen/code`），请求体与前端 SSE 协议定义在 agent.ts。做法：
  *
@@ -252,7 +252,7 @@ function toolOutputPayload(toolName: string, details: unknown, text: string) {
 }
 
 /**
- * 应用 → harness 会话映射（docs/plans/pi-durable-data-model.md §4）：一个应用恰好一条会话，
+ * 应用 → harness 会话映射（docs/plans/archive/pi-durable-data-model.md §4）：一个应用恰好一条会话，
  * 第一次为该应用生成时创建并写回 `app.conversationId`。同一应用的后续生成复用这条会话，
  * 模型因此能看到上一次的工具结果与文件内容，而不是每轮从零探索。
  *

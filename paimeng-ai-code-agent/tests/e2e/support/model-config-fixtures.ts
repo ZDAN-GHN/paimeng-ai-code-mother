@@ -1,6 +1,6 @@
 /**
  * 浏览器用例共用的小型数据库夹具：连测试库、给账号管理员权限、铺一份确定的模型配置。
- * 列名按 Postgres 产品的 snake_case（docs/plans/pi-durable-m4.md）；测试库由 `npm run db:test:setup` 建好。
+ * 列名按 Postgres 产品的 snake_case（docs/plans/archive/pi-durable-m4.md）；测试库由 `npm run db:test:setup` 建好。
  */
 import pg from 'pg';
 import { testDatabaseUrl } from '../../test-database-url';

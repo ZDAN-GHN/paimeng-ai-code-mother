@@ -30,7 +30,7 @@ export async function appForAdoption(id:string):Promise<AppInfo|null>{
 }
 async function appView(row:typeof apps.$inferSelect,connection:Pick<ReturnType<typeof db>,'select'>=db()):Promise<AppInfo>{
  const [creator]=await connection.select().from(users).where(and(eq(users.id,row.userId),eq(users.isDelete,0))).limit(1);
- // conversationId 是生成入口的内部映射（harness 引擎，见 docs/plans/pi-durable-m2.md），不属于前端契约：
+ // conversationId 是生成入口的内部映射（harness 引擎，见 docs/plans/archive/pi-durable-m2.md），不属于前端契约：
  // 不进响应，"一个应用一条会话"的读取都在 src/server/durable-engine.ts 里。
  const {conversationId:_conversationId,...rest}=row;
  const app:AppInfo={...rest,id:String(row.id),userId:String(row.userId),codeGenType:z.enum(codeGenTypes).parse(row.codeGenType),user:creator?publicUser(creator):undefined};

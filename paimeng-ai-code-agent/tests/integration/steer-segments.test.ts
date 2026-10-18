@@ -177,7 +177,7 @@ async function waitForClientChunk(response: Response, marker: string, timeoutMs:
       if (buffer.includes(marker)) return;
     }
   } finally {
-    // 停止读取只是「浏览器断开」，与生成无关（docs/plans/pi-durable-m1.md 的 D1–D5）。
+    // 停止读取只是「浏览器断开」，与生成无关（docs/plans/archive/pi-durable-m1.md 的 D1–D5）。
     void reader.cancel().catch(() => undefined);
   }
   throw new Error(`事件流里没有出现 ${marker}`);

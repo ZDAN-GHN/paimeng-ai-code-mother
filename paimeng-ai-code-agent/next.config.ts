@@ -22,7 +22,7 @@ const config: NextConfig = {
     'next-server': ['runtime/**/*', '.env', '.env.*'],
   },
   turbopack: { root: process.cwd() },
-  serverExternalPackages: ['mysql2', 'archiver', 'playwright'],
+  serverExternalPackages: ['archiver', 'playwright'],
   experimental: { cpus: 2 },
 };
 export default config;

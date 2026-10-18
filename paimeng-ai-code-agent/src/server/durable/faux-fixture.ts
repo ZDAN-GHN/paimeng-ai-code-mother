@@ -1,15 +1,7 @@
 /**
- * Deterministic fixture model for the resident harness.
- *
- * Generation runs in the harness process, which picks its model from `DURABLE_*`
- * rather than from `AI_MODE=fixture` (`src/server/model.ts` only supplies the
- * accounting identity). This script replays the same content the in-process
- * fixture does — `fixture-content.ts` holds the single copy — so the isolated
- * browser run and `verify:restart` keep asserting the same files and reply.
- *
- * Enabled with `DURABLE_FAUX_FIXTURE=1`, and refused in production unless
- * `ALLOW_TEST_FIXTURE=1`, matching the `AI_MODE=fixture` guard in `config.ts`.
- * Takes precedence over `DURABLE_FAUX_MODEL` (`faux-model.ts`).
+ * Deterministic generation model for the resident harness, using fixture-content.ts.
+ * Enabled only by DURABLE_FAUX_FIXTURE=1; production also requires ALLOW_TEST_FIXTURE=1.
+ * Takes precedence over DURABLE_FAUX_MODEL.
  */
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type FauxResponseFactory, type Message, type ToolCall } from "@earendil-works/pi-ai";
 import { createModels, type MutableModels } from "@earendil-works/pi-ai/models";
@@ -54,8 +46,7 @@ function messageText(message: Message): string {
 type ScriptedTurn = { tool: string; args: ToolCall["arguments"] } | { tool: null };
 
 /**
- * The same turn script as `fixture-model.ts`, driven by the tool results already in
- * this request instead of a per-instance counter, so one model instance can serve
+ * The turn script is driven by the tool results already in this request, so one model instance can serve
  * every run of the process. The app type and the template flag come from the
  * resident instructions; the user's text is the page title.
  */

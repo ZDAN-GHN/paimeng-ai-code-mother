@@ -1,12 +1,10 @@
 import 'server-only';
 import { generateText, Output } from 'ai';
-import type { LanguageModel } from 'ai';
 import { z } from 'zod';
 import { getConfig } from './config';
 import { BusinessError } from './http';
 import { codeGenTypes, type CodeGenType } from '@/shared/contracts';
 import { modelRegistry } from './models/registry';
-import type { TemplateIdentity } from '@/shared/templates';
 
 /** 模型别名未配置或未启用时的固定 503 文案；registry.resolveBinding 就抛它。 */
 export function aliasNotConfiguredMessage(alias: string): string {
@@ -18,43 +16,19 @@ export function isAliasNotConfigured(error: unknown, alias: string): boolean {
  return error instanceof BusinessError && error.status === 503 && error.code === 50300 && error.message === aliasNotConfiguredMessage(alias);
 }
 
-/** 解析后的模型绑定标识：用于记账与图片输入能力校验。 */
-export type ModelBindingSource = {
- model: LanguageModel;
- alias: string;
- providerId: string | null;
- modelName: string | null;
-};
-
 /** 路由是部署可配置项：失败要告诉用户改哪个别名，并且不能把密钥或整段上游报文原样抛给前端。 */
 function routingFailureDetail(error: unknown) {
  const raw = error instanceof Error ? error.message : String(error);
  return raw.replace(/\s+/g, ' ').replace(/(sk-|Bearer\s+)[A-Za-z0-9._-]{6,}/gi, '$1***').slice(0, 300) || '未知错误';
 }
 
-/** 只解析生成模型，并返回实际绑定标识与图片输入能力用于记账与校验。 */
-export async function modelBindingFor(type:CodeGenType,prompt:string,template?:TemplateIdentity|null):Promise<{model:LanguageModel;generation:ModelBindingSource;imageInput:boolean}>{
- if (getConfig().aiMode === 'fixture') {
-  const { fixtureModel } = await import('./fixture-model');
-  const model = fixtureModel(type, prompt, template);
-  return { model, generation: { model, alias: 'codegen.default', providerId: null, modelName: null }, imageInput: true };
- }
- const binding = await modelRegistry().resolveBinding('codegen.default');
- return { model: binding.model, generation: { model: binding.model, alias: binding.alias, providerId: binding.providerId, modelName: binding.modelName }, imageInput: binding.capabilities.imageInput };
-}
-
-/** 只解析生成模型：需要绑定标识时用 modelBindingFor。 */
-export async function modelFor(type:CodeGenType,prompt:string,template?:TemplateIdentity|null){
- return (await modelBindingFor(type, prompt, template)).model;
-}
-
 export async function routeCodeGenType(prompt: string): Promise<CodeGenType> {
  if (getConfig().aiMode === 'fixture') {
-  // Deterministic routing is confined to the explicitly configured test model.
+  // 测试只固定类型分类；生成夹具由 harness 的 DURABLE_FAUX_* 控制。
   if (/react/i.test(prompt)) return 'react_project';
   return /商城|管理|登录|购物|评论|vue|复杂交互/i.test(prompt) ? 'vue_project' : /多页面|多个页面|多文件|分离.*css/i.test(prompt) ? 'multi_file' : 'html';
  }
- const model = (await modelRegistry().resolveBinding('route.classify')).model;
+ const model = await modelRegistry().resolveModel('route.classify');
  try {
   const result = await generateText({
    model,

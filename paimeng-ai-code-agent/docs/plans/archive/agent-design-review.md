@@ -1,5 +1,7 @@
 # Agent 设计评估与拓展建议
 
+> 归档：记录当时的设计、迁移与验收。当前行为见[部署说明](../pi-durable-deployment.md)与[模型配置](../provider-convergence.md)。
+
 > 历史文档：本文记录当时的状态。其中提到的 `src/server/memory-*.ts`、自研滚动摘要与 `spike/` 实验目录已随整合第三步删除，去向与判据见 [pi-durable-m3.md](./pi-durable-m3.md) §7。
 
 核对日期：2026-10-15。范围：当前 TypeScript 应用的生成 Agent、工具、历史上下文、任务生命周期及相关测试。
@@ -12,12 +14,12 @@
 
 | 方面 | 当前实际能力 | 证据与边界 |
 | --- | --- | --- |
-| 模型与工具循环 | `ToolLoopAgent`，最多 30 步；工具结果回到后续模型请求，工具参数错误可以被模型修正 | [agent.ts](../../src/server/agent.ts)、[SDK 工具循环测试](../../tests/agent-loop.test.ts)、[生成持久化集成测试](../../tests/integration/agent-persistence.test.ts) |
-| 写权限与任务一致性 | 应用行锁、租约、心跳、请求去重、终态保护；取消后仍等旧任务退出再释放租约 | [generation-store.ts](../../src/server/generation-store.ts)、[并发与恢复测试](../../tests/integration/generation-store.test.ts) |
+| 模型与工具循环 | `ToolLoopAgent`，最多 30 步；工具结果回到后续模型请求，工具参数错误可以被模型修正 | [agent.ts](../../../src/server/agent.ts)、[SDK 工具循环测试](../../tests/agent-loop.test.ts)、[生成持久化集成测试](../../tests/integration/agent-persistence.test.ts) |
+| 写权限与任务一致性 | 应用行锁、租约、心跳、请求去重、终态保护；取消后仍等旧任务退出再释放租约 | [generation-store.ts](../../../src/server/generation-store.ts)、[并发与恢复测试](../../../tests/integration/generation-store.test.ts) |
 | 历史上下文 | 滚动摘要、近期完整回合、预算估算、摘要失败时的有界降级；原始消息保留 | [memory-context.ts](../../src/server/memory-context.ts)、[memory-window.ts](../../src/server/memory-window.ts) |
-| 文件与构建约束 | 路径/符号链接检查、文件与工程配额、单文件原子替换、模板依赖保护、隔离构建 | [workspace.ts](../../src/server/workspace.ts)、[artifacts.ts](../../src/server/artifacts.ts) |
-| 产物验收 | 静态应用检查入口/文件形态；框架工程执行真实构建，使用模板时执行类型检查；检查产物入口 | [artifacts.ts](../../src/server/artifacts.ts)、[Vue 真实构建集成测试](../../tests/integration/agent-vue-build.test.ts) |
-| 集成与浏览器测试 | 已有请求到 `ready` 的集成测试、真实 Docker 构建、构建中断连测试、Vue 页面点击交互 E2E | [持久化测试](../../tests/integration/agent-persistence.test.ts)、[断连构建测试](../../tests/integration/generation-disconnect-build.test.ts)、[Vue E2E](../../tests/e2e/vue-generation.spec.ts) |
+| 文件与构建约束 | 路径/符号链接检查、文件与工程配额、单文件原子替换、模板依赖保护、隔离构建 | [workspace.ts](../../../src/server/workspace.ts)、[artifacts.ts](../../../src/server/artifacts.ts) |
+| 产物验收 | 静态应用检查入口/文件形态；框架工程执行真实构建，使用模板时执行类型检查；检查产物入口 | [artifacts.ts](../../../src/server/artifacts.ts)、[Vue 真实构建集成测试](../../tests/integration/agent-vue-build.test.ts) |
+| 集成与浏览器测试 | 已有请求到 `ready` 的集成测试、真实 Docker 构建、构建中断连测试、Vue 页面点击交互 E2E | [持久化测试](../../tests/integration/agent-persistence.test.ts)、[断连构建测试](../../tests/integration/generation-disconnect-build.test.ts)、[Vue E2E](../../../tests/e2e/vue-generation.spec.ts) |
 
 需要修正此前的说法：
 
@@ -69,7 +71,7 @@ P1 表示建议近期优先，P2 表示在基础测量和可靠性完善后推�
 
 ### D2：缺少完整记账与结构化诊断
 
-现状：`ts_generation` 保存任务状态、错误和时间；UIMessage 保存工具过程；最新摘要行保存部分 usage。缺少按任务关联的生成模型用量、步骤/工具耗时、实际模型绑定、重试和明确停止原因。见 [schema.ts](../../src/server/schema.ts)、[agent.ts](../../src/server/agent.ts)。
+现状：`ts_generation` 保存任务状态、错误和时间；UIMessage 保存工具过程；最新摘要行保存部分 usage。缺少按任务关联的生成模型用量、步骤/工具耗时、实际模型绑定、重试和明确停止原因。见 [schema.ts](../../../src/server/schema.ts)、[agent.ts](../../../src/server/agent.ts)。
 
 实现状态与详细设计见 §9。
 
@@ -79,7 +81,7 @@ P1 表示建议近期优先，P2 表示在基础测量和可靠性完善后推�
 
 ### D3：运行中上下文缺少总预算
 
-现状：`buildModelMessages` 在 `agent.stream` 前执行一次。随后本次生成内部累积的模型输出、工具输入和结果由 SDK 继续携带，没有应用层的每步预算检查。`readFile` 只接收路径，没有分页参数；文本可以整份返回到 256 KiB。`writeFiles` 的完整源码输入同样会占上下文，不能只限制工具结果。见 [agent.ts](../../src/server/agent.ts)、[workspace.ts](../../src/server/workspace.ts)。
+现状：`buildModelMessages` 在 `agent.stream` 前执行一次。随后本次生成内部累积的模型输出、工具输入和结果由 SDK 继续携带，没有应用层的每步预算检查。`readFile` 只接收路径，没有分页参数；文本可以整份返回到 256 KiB。`writeFiles` 的完整源码输入同样会占上下文，不能只限制工具结果。见 [agent.ts](../../../src/server/agent.ts)、[workspace.ts](../../../src/server/workspace.ts)。
 
 建议分两层：先给文件读取增加分页/片段读取与明确的省略标记，再在步骤边界核算当前请求的总输入。限额同时考虑行数、字节和预估 token，避免超长单行绕过行数限制。预算应保留本轮目标、约束及 tool call/result 对应关系，并为输出预留空间。
 
@@ -87,7 +89,7 @@ P1 表示建议近期优先，P2 表示在基础测量和可靠性完善后推�
 
 ### D4：构建验收与模型修复脱节
 
-现状：文件工具自身的参数/依赖错误能回到模型纠正；模型结束后 `buildApp` 抛出的类型、打包或入口错误直接结束整次任务。两条路径需要区分。见 [agent.ts](../../src/server/agent.ts)、[artifacts.ts](../../src/server/artifacts.ts)。
+现状：文件工具自身的参数/依赖错误能回到模型纠正；模型结束后 `buildApp` 抛出的类型、打包或入口错误直接结束整次任务。两条路径需要区分。见 [agent.ts](../../../src/server/agent.ts)、[artifacts.ts](../../../src/server/artifacts.ts)。
 
 建议：把必要的验证结果以有界诊断返回模型，允许少量修复尝试，采用服务端拥有的外层修复循环。完整设计见 [§8](#8-d4-详细设计构建失败后的模型修复闭环)。
 
@@ -105,7 +107,7 @@ P1 表示建议近期优先，P2 表示在基础测量和可靠性完善后推�
 
 现状：`changed` 在文件写/改/删成功返回后设为真，它不等于有效源码差异，也不证明需求完成。没有写文件会被统一判为失败。最终回复为 `length` 时允许继续构建，这是已有回归测试覆盖的行为。步数到限与其他结束原因缺少面向用户和评估的细分类。
 
-预算方面已有 30 步、步骤计时、可配置阶段时限和构建超时。默认 `GENERATION_TIMEOUT_MS=0`，阶段时限开启时会在转入构建后重置；它不是覆盖整次任务的绝对截止时间。一步可能包含多个工具调用，步数也不代表总 token/费用。见 [config.ts](../../src/server/config.ts)、[预算测试](../../tests/generation-budget.test.ts)、[生成持久化测试](../../tests/integration/agent-persistence.test.ts)。
+预算方面已有 30 步、步骤计时、可配置阶段时限和构建超时。默认 `GENERATION_TIMEOUT_MS=0`，阶段时限开启时会在转入构建后重置；它不是覆盖整次任务的绝对截止时间。一步可能包含多个工具调用，步数也不代表总 token/费用。见 [config.ts](../../../src/server/config.ts)、[预算测试](../../../tests/generation-budget.test.ts)、[生成持久化测试](../../tests/integration/agent-persistence.test.ts)。
 
 建议：分开记录模型停止原因、应用停止原因与验收结果，例如正常结束、输出截断、步数耗尽、超时、取消、失去写权和验证失败。保留“回复截断但产物完整仍可成功”的行为，用独立验收判定结果。是否支持“需求已经满足而无需修改”的成功回应，由产品语义决定；不应为了通过 `changed` 而制造无用写入。
 
@@ -121,7 +123,7 @@ P1 表示建议近期优先，P2 表示在基础测量和可靠性完善后推�
 | R2 | 步骤记录与文件副作用不构成原子 checkpoint | 工具可能已经写入文件，但进程在对应步骤消息落库前退出。租约回收会标记失败，没有安全重放协议 | 真正实施续跑前，定义意图、已完成效果、未知结果和工具幂等规则；避免盲目重放修改/删除/素材导入 |
 | R3 | 构建期间持有较长数据库事务 | `buildApp` 运行在 `write()` → `withAppWriter()` 内，事务持有应用行锁并占用连接；租约行默认不加长锁以避免阻塞心跳 | 小规模个人项目先测量构建并发、连接占用和锁等待；出现实际瓶颈后，再设计事务外构建与提交时写权校验 |
 
-证据：[workspace.ts](../../src/server/workspace.ts)、[agent.ts](../../src/server/agent.ts)、[generation-store.ts](../../src/server/generation-store.ts)、[artifacts.ts](../../src/server/artifacts.ts)。
+证据：[workspace.ts](../../../src/server/workspace.ts)、[agent.ts](../../../src/server/agent.ts)、[generation-store.ts](../../../src/server/generation-store.ts)、[artifacts.ts](../../../src/server/artifacts.ts)。
 
 ## 5. 可选拓展与适用条件
 

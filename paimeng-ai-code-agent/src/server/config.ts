@@ -25,8 +25,9 @@ const environment = z.object({
   GENERATION_TIMEOUT_MS:z.preprocess(blankAsUnset, z.coerce.number().int().min(0, 'GENERATION_TIMEOUT_MS 不能为负数').max(86400000, 'GENERATION_TIMEOUT_MS 不能超过 86400000').default(0)),
   // 全局同时在跑的生成数上限（跨应用）。超过即拒绝，不排队：单应用已有 409 等待语义，排队需要额外的队列进程与用户可见的排队状态。
   GENERATION_MAX_CONCURRENT:z.preprocess(blankAsUnset, z.coerce.number().int().min(1, 'GENERATION_MAX_CONCURRENT 必须不小于 1').max(64, 'GENERATION_MAX_CONCURRENT 不能超过 64').default(4)),
+  // 旧 SDK 生成参数，仅保留环境兼容校验；不控制 pi-durable。
   MODEL_REPLY_TIMEOUT_MS:z.preprocess(blankAsUnset, z.coerce.number().int().min(1000, 'MODEL_REPLY_TIMEOUT_MS 必须不小于 1000').max(86400000, 'MODEL_REPLY_TIMEOUT_MS 不能超过 86400000').default(900000)),
-  // 模型调用重试上限，同时管两个阶段：请求阶段（连不上、429、5xx）与流开始之后的 provider 错误。
+  // 同上：harness 不从这个旧字段配置重试。
   MODEL_RETRY_LIMIT:z.preprocess(blankAsUnset, z.coerce.number().int().min(0, 'MODEL_RETRY_LIMIT 不能为负数').max(5, 'MODEL_RETRY_LIMIT 不能超过 5').default(5)),
   CHAT_RATE_LIMIT_TYPE:z.preprocess(value => { const text = blankAsUnset(value); return typeof text === 'string' ? text.trim().toUpperCase() : text; }, z.enum(['API','USER','IP']).default('USER')),
   CHAT_RATE_LIMIT_RATE:z.preprocess(blankAsUnset, z.coerce.number().int().min(1, 'CHAT_RATE_LIMIT_RATE 必须是不小于 1 的整数').max(1000, 'CHAT_RATE_LIMIT_RATE 不能超过 1000').default(1)),
@@ -39,7 +40,7 @@ const environment = z.object({
   WEB_ACCESS_JINA_FALLBACK:z.preprocess(booleanFlag, z.enum(['true','false','1','0']).default('false').transform(value => value === 'true' || value === '1')),
   WEB_ACCESS_ALLOW_NETWORKS:z.string().default(''),
   WEB_ACCESS_PROXY:z.preprocess(blankAsUnset, z.string().max(200).default('')),
-  // 生成入口只有一个引擎：把生成提交给常驻 pi-durable harness 进程（docs/plans/pi-durable-m3.md）。
+  // 生成入口只有一个引擎：把生成提交给常驻 pi-durable harness 进程（docs/plans/archive/pi-durable-m3.md）。
   DURABLE_HARNESS_URL:z.preprocess(blankAsUnset, z.url().default('http://127.0.0.1:5599')),
 });
 export function getConfig() {

@@ -1,7 +1,7 @@
 # 数据库表职责清单（两个库 + 归档库）
 
 状态：**现状说明**（文件工具迁移与 Redis 限流之后）。只描述「哪张表解决什么问题、谁在读写、删掉要在别处补什么」，
-不是迁移计划。表名/列名的搬迁历史见 [pi-durable-m4.md](./pi-durable-m4.md)，部署形态见
+不是迁移计划。表名/列名的搬迁历史见 [pi-durable-m4.md](./archive/pi-durable-m4.md)，部署形态见
 [pi-durable-deployment.md](./pi-durable-deployment.md)。模型配置三张表的现状与收敛方向见
 [provider-convergence.md](./provider-convergence.md)。
 
@@ -18,7 +18,7 @@
 | 产品库 `paimeng_app` | `zslm-postgres` `127.0.0.1:5432` | 12 | Next 写业务数据；harness 只读模型域（产品池与存储池分离） | 账号、应用、登录态、附件元数据、生成状态与账目、模型配置、发号下界、迁移台账 |
 | Redis | `zslm-redis` `127.0.0.1:6379`，开发 DB0 / 测试 DB15 | 无业务表 | 生成准入 Lua 脚本 | 固定窗口计数与窗口 id；TTL 到期重置，不保存任务、登录态或对话 |
 | harness 存储库 `paimeng_agent` | 同一 Postgres 实例 | 9 | 只有 harness 进程（`src/server/durable/storage-pg.ts`，单写者互斥是库级锁） | 会话、转录条目、任务、输入提交、文档与文档版本、记录号、元数据、schema 版本 |
-| 归档库 `paimeng_ai_code_mother_ts` | `zslm-mysql` `127.0.0.1:3306`（旧 MySQL 容器，只作归档保留） | 16 | 无（运行期不连接；`scripts/import-mysql-rows.ts` 一次性读） | 搬迁前的旧业务行；`ts_message` / `chat_history` / `ts_app_summary` 已无去向 |
+| 归档库 `paimeng_ai_code_mother_ts` | `zslm-mysql` `127.0.0.1:3306`（旧 MySQL 容器，只作归档保留） | 16 | 无（一次性导入程序已退役，运行期不连接） | 搬迁前的旧业务行；`ts_message` / `chat_history` / `ts_app_summary` 已无去向 |
 
 **对话不存在产品库里**：用户、助手和工具结果是 harness 的 `entries`（种类 `app.user` / `pi.assistant` / `pi.tool-result`），
 `GET app/messages` 经 harness `/messages` 读回（m4 §2）。这是最容易被误判成「消息表不见了/重复了」的地方。
@@ -95,17 +95,17 @@ docker exec -i zslm-postgres psql -U postgres -d paimeng_agent -c "select relnam
 
 | 旧表 | 现状 |
 | --- | --- |
-| `app_user` / `app` / `ts_session` / `ts_snowflake_state` / `ts_rate_limit` / `ts_attachment` / `ts_model_provider` / `ts_model_alias` / `ts_model_config_state` / `ts_generation` / `ts_generation_step` / `ts_generation_lease` / `ts_schema_migration` | 已搬迁到 Postgres 的对应表（映射见 m4 §1），旧行只作对照 |
+| `app_user` / `app` / `ts_session` / `ts_snowflake_state` / `ts_rate_limit` / `ts_attachment` / `ts_model_provider` / `ts_model_alias` / `ts_model_config_state` / `ts_generation` / `ts_generation_step` / `ts_generation_lease` / `ts_schema_migration` | 业务行已搬迁（映射见 m4 §1）；频率窗口现由 Redis 维护，旧行仅保留归档 |
 | `ts_message` / `chat_history` | **放弃**：转录由 harness `entries` 承载 |
 | `ts_app_summary` | **放弃**：滚动摘要由 pi-durable 的 compaction 取代 |
 
-删库前先确认 `runtime/archive/mysql-paimeng_ai_code_mother_ts-20261018.sql.gz` 可用（m4 §7 第 6 条）。
+旧 MySQL 库与容器继续保留归档，备份记录见 m4 §7。
 
 ## 5. 若把「减表」当需求
 
 | 目标 | 可行做法 | 代价 |
 | --- | --- | --- |
-| 少一个库 | 删归档 MySQL（保留 dump） | 失去回看旧数据的能力 |
+| 归档 MySQL | 保留现有库、容器与 dump | 不作为当前运行依赖 |
 | 少一张表 | `rate_limit` → Redis（已完成） | 通过原子窗口 token 和拒绝退还处理两种存储的边界 |
 | 少一张表 | `id_sequence` → Postgres 序列 | 丢掉旧库位布局兼容与已提交下界语义 |
 | 少一张表 | 删 `generation` / `generation_step` / `generation_lease` | 应用状态机、取消与接管、用量块、修复率统计全部要重建 |

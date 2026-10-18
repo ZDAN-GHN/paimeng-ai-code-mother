@@ -5,7 +5,7 @@ import { getConfig } from './config';
 import * as schema from './schema';
 
 /**
- * 产品库连接池（Postgres，见 docs/plans/pi-durable-m4.md）。
+ * 产品库连接池（Postgres，见 docs/plans/archive/pi-durable-m4.md）。
  *
  * int8（20）必须留在字符串域：业务主键是雪花 ID，超过 2^53，转成 JS number 会丢精度。
  * drizzle 给每条查询带自己的 types，只对时间列特判，int8 会回落到这个全局解析器。

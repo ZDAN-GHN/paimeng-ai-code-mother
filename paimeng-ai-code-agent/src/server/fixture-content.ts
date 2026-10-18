@@ -1,13 +1,4 @@
-/**
- * The files and reply a controllable test model produces, as plain data.
- *
- * Two scripted models share it: the in-process fixture (`src/server/fixture-model.ts`)
- * and the resident harness fixture (`src/server/durable/faux-fixture.ts`). The browser
- * E2E asserts these exact strings, so this module is the only place they live.
- *
- * Deliberately free of `ai/test`: the harness process (plain Node, no React server
- * condition) imports this module directly.
- */
+/** Shared deterministic pages for harness fixtures and build regressions. */
 import type { CodeGenType } from '@/shared/contracts';
 
 export type FixtureFile = { path: string; content: string };

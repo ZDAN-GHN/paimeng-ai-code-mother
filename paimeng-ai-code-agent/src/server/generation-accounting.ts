@@ -5,7 +5,7 @@ import { generationSteps, generations } from './schema';
 import type { BuildVerdict } from './build-feedback';
 
 /**
- * 生成任务统一记账（docs/plans/agent-design-review.md D2）。
+ * 生成任务统一记账（docs/plans/archive/agent-design-review.md D2）。
  *
  * 每个模型步骤、每次构建尝试各写一行 generation_step；任务级停止原因写在 generation.stop_reason。写入全部是尽力而为：记账失败只告警，不影响生成与状态转移。
  * 上游没有返回的用量记为 NULL（未知），不记成 0；读取端用 usageUnknown 区分「已知的零」和「未知」。

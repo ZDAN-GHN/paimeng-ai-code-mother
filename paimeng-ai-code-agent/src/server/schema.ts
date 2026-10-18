@@ -1,7 +1,7 @@
 import { bigint, bigserial, char, index, integer, jsonb, pgTable, smallint, text, timestamp, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
 
 /**
- * 产品库是 Postgres（docs/plans/pi-durable-m4.md）：表名按业务域命名，列名 snake_case。
+ * 产品库是 Postgres（docs/plans/archive/pi-durable-m4.md）：表名按业务域命名，列名 snake_case。
  * 对话转录不在这里——它由常驻 harness 写进 pi-durable 的存储表（`entries` 等）。
  */
 const times = { createTime: timestamp('create_time', { mode: 'string' }).notNull(), updateTime: timestamp('update_time', { mode: 'string' }).notNull() };
@@ -13,7 +13,7 @@ export const generations = pgTable('generation', { id: varchar('id', { length: 3
 // 生成任务的逐步记账（D2）：kind 为 model / summary / build。token 为 NULL 表示上游未返回用量。
 export const generationSteps = pgTable('generation_step', { id: bigserial('id', { mode: 'bigint' }).primaryKey(), generationId: varchar('generation_id', { length: 36 }).notNull().references(() => generations.id, { onDelete: 'cascade' }), kind: varchar('kind', { length: 16 }).notNull(), round: integer('round').notNull(), stepNumber: integer('step_number').notNull(), modelAlias: varchar('model_alias', { length: 64 }), providerId: varchar('provider_id', { length: 64 }), modelName: varchar('model_name', { length: 256 }), upstreamProvider: varchar('upstream_provider', { length: 64 }), upstreamModelId: varchar('upstream_model_id', { length: 256 }), durationMs: integer('duration_ms'), modelMs: integer('model_ms'), toolMs: integer('tool_ms'), inputTokens: integer('input_tokens'), outputTokens: integer('output_tokens'), cacheReadTokens: integer('cache_read_tokens'), cacheWriteTokens: integer('cache_write_tokens'), reasoningTokens: integer('reasoning_tokens'), finishReason: varchar('finish_reason', { length: 32 }), status: varchar('status', { length: 16 }).notNull(), stage: varchar('stage', { length: 32 }), repairable: integer('repairable'), toolCalls: jsonb('tool_calls').$type<{ name: string; ok: boolean; ms: number | null }[]>(), detail: text('detail'), createTime: timestamp('create_time', { mode: 'string', precision: 3 }).notNull() }, t => [index('idx_generation_step_generation').on(t.generationId)]);
 // 单应用单活跃生成（30 秒租约 + 5 秒心跳）。pi-durable 的会话 busy 只管它自己的运行，产品的取消/超时
-// 仍以这张表为权威，所以它跟着产品库留下（docs/plans/pi-durable-m4.md §2）。
+// 仍以这张表为权威，所以它跟着产品库留下（docs/plans/archive/pi-durable-m4.md §2）。
 export const leases = pgTable('generation_lease', { appId: bigint('app_id', { mode: 'bigint' }).primaryKey(), generationId: varchar('generation_id', { length: 36 }).notNull(), expiresAt: timestamp('expires_at', { mode: 'string', precision: 3 }).notNull() });
 // 用户随消息上传的图片：objectKey 为规范化原图，previewKey 为送模型前最长边 ≤ maxEdge 的派生图。
 export const attachments = pgTable('attachment', { id: varchar('id', { length: 36 }).primaryKey(), ownerUserId: bigint('owner_user_id', { mode: 'bigint' }).notNull(), appId: bigint('app_id', { mode: 'bigint' }), originalName: varchar('original_name', { length: 256 }).notNull(), mediaType: varchar('media_type', { length: 32 }).notNull(), bytes: integer('bytes').notNull(), width: integer('width').notNull(), height: integer('height').notNull(), hash: char('hash', { length: 64 }).notNull(), objectKey: varchar('object_key', { length: 512 }).notNull(), previewKey: varchar('preview_key', { length: 512 }).notNull(), createTime: timestamp('create_time', { mode: 'string', precision: 3 }).notNull(), updateTime: timestamp('update_time', { mode: 'string', precision: 3 }).notNull() }, t => [index('idx_attachment_owner').on(t.ownerUserId), index('idx_attachment_app').on(t.appId)]);

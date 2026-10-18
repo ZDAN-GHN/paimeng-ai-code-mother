@@ -2,17 +2,17 @@
 
 本目录包含 Next.js、React、TypeScript、Vercel AI SDK、Postgres 和 Drizzle 的独立应用。运行新应用无需启动旧 Java 后端或旧 Vue 平台。所有命令都在 `paimeng-ai-code-agent/` 内执行。
 
-生成入口只有一个引擎：请求提交给常驻的 pi-durable harness 进程（单写进程 + attach，实现在 `src/server/durable/`），Next 只做鉴权与 SSE 转发，所以浏览器断连不会取消任务。一条命令起全套见下面的 `npm run dev`。数据库是 Postgres，**同实例两库**：`paimeng_app` 放业务表，`paimeng_agent` 放 harness 的会话存储（表名与列名见 `docs/plans/pi-durable-m4.md`，部署形态见 `docs/plans/pi-durable-deployment.md`）。
+生成入口只有一个引擎：请求提交给常驻的 pi-durable harness 进程（单写进程 + attach，实现在 `src/server/durable/`），Next 只做鉴权与 SSE 转发，所以浏览器断连不会取消任务。一条命令起全套见下面的 `npm run dev`。数据库是 Postgres，**同实例两库**：`paimeng_app` 放业务表，`paimeng_agent` 放 harness 的会话存储（表名与列名见 `docs/plans/archive/pi-durable-m4.md`，部署形态见 `docs/plans/pi-durable-deployment.md`）。
 
 ## 启动开发环境
 
 需要 Node.js 24.15 或更新的 24 版本、npm、Docker，以及可运行 Chromium 沙箱的 Linux 环境。Docker 守护进程必须已启动。
 
-1. 复制 `.env.example` 为 `.env`。`DATABASE_URL` 已填写产品 Postgres 库（`postgres://postgres:postgres@127.0.0.1:5432/paimeng_app`），`DURABLE_PG_URL` 是同实例的存储库（`…/paimeng_agent`），`REDIS_URL` 已填写无密码本地 Redis 地址。`MYSQL_LEGACY_URL` 只给一次性业务行搬迁用，运行期不连接旧库。已有 `.env` 的真实模型配置保留。
+1. 复制 `.env.example` 为 `.env`。`DATABASE_URL` 已填写产品 Postgres 库（`postgres://postgres:postgres@127.0.0.1:5432/paimeng_app`），`DURABLE_PG_URL` 是同实例的存储库（`…/paimeng_agent`），`REDIS_URL` 已填写无密码本地 Redis 地址。旧 MySQL 数据与容器仅保留归档。已有 `.env` 的真实模型配置保留。
 2. 执行 `npm ci`。
-3. 执行 `npm run assets:import`。此命令只读取旧平台的派蒙图片，写入新应用的 `public/`。
+3. 品牌图片已保存在 `public/paimeng.png`，正常启动不需要再次导入。一次性迁移工具见 [scripts/README.md](scripts/README.md)。
 4. 执行 `npm run infra:up`。固定命名的 Redis 容器启动并等待健康检查；产品 Postgres 不在这个 compose 里，由本机自己的容器提供（见第 5 步）。该命令读取 `.env`，不生成或改写凭据。
-5. 执行 `npm run durable:pg` 确保 Postgres 就绪（连接本机自己的 Postgres 容器 `zslm-postgres`，127.0.0.1:5432，建好 `paimeng_app`、`paimeng_app_test`、`paimeng_agent`、`paimeng_agent_test` 四个 database，再打印 server_version 与各库大小），再执行 `npm run db:migrate`。迁移完成后显示“产品 Postgres 库迁移完成”，依次执行尚未应用的 SQL 迁移；`001_initial.sql` 建业务表，`002_drop_rate_limit.sql` 删除已迁往 Redis 的限流表。重复执行会核对已有迁移的校验和。随后执行一次 `npm run db:init-models`，把现有 `.env` 的模型配置写入数据库（仅当表仍为空且版本为零；幂等，已有配置不会被覆盖）。从旧 MySQL 库升级时额外跑一次 `npm run db:import-mysql`（只搬业务行，幂等，见 `docs/plans/pi-durable-m4.md`）。
+5. 执行 `npm run durable:pg` 确保 Postgres 就绪（连接本机自己的 Postgres 容器 `zslm-postgres`，127.0.0.1:5432，建好 `paimeng_app`、`paimeng_app_test`、`paimeng_agent`、`paimeng_agent_test` 四个 database，再打印 server_version 与各库大小），再执行 `npm run db:migrate`。迁移完成后显示“产品 Postgres 库迁移完成”，依次执行尚未应用的 SQL 迁移；`001_initial.sql` 建业务表，`002_drop_rate_limit.sql` 删除已迁往 Redis 的限流表。重复执行会核对已有迁移的校验和。随后执行一次 `npm run db:init-models`，把现有 `.env` 的模型配置写入数据库（仅当表仍为空且版本为零；幂等，已有配置不会被覆盖）。旧 MySQL 的一次性搬迁已经完成，历史操作记录见 `docs/plans/archive/pi-durable-m4.md`。
 6. 执行 `docker pull node:24-alpine`。Vue 生成工程使用该镜像进行隔离构建。
 7. 执行 `npx playwright install chromium`。发布封面截图和浏览器测试都需要 Chromium。若系统缺少浏览器依赖，按 Playwright 的报错安装系统依赖。
 8. 执行 `npm run dev` 启动全套开发进程：harness（5599）、预览（3001）与管理端（3000），输出按 `[harness]`、`[preview]`、`[app]` 前缀合并，Ctrl-C 一起停止。它要求本机 Postgres 容器已在跑（不在跑就直接报错，不会自己起数据库）。也可以分开跑：`npm run durable:harness`、`npm run preview`、`npm run dev:web`（只起 Next）。
@@ -21,7 +21,7 @@
 
 `DURABLE_HARNESS_URL` 是 Next 的 attach 地址（默认 `http://127.0.0.1:5599`），`DURABLE_PG_URL` 是 harness 存储库，`DURABLE_HARNESS_PORT` 配置监听端口。生成模型默认每轮从产品库解析 `codegen.default`，管理端修改后无需重启。只有本地/测试需要显式覆盖时，才同时设置 `DURABLE_MODEL_BASE_URL` / `DURABLE_MODEL_API_KEY` / `DURABLE_MODEL_ID`；缺项会报错。`npm run dev` 不再从其他工具的模型配置派生凭据。
 
-确定性生成夹具运行在 harness：`DURABLE_FAUX_MODEL=1` 用于可控等待/工具行为，`DURABLE_FAUX_FIXTURE=1` 用于完整文件生成。`AI_MODE=fixture` 只控制产品侧的测试行为，不能单独开启 harness 夹具。生产环境必须额外显式设置 `ALLOW_TEST_FIXTURE=1` 才允许夹具，隔离 E2E 启动器会自动设置这些测试变量。
+确定性生成夹具运行在 harness：`DURABLE_FAUX_MODEL=1` 用于可控等待/工具行为，`DURABLE_FAUX_FIXTURE=1` 用于完整文件生成。`AI_MODE=fixture` 只固定产品侧的类型分类，不创建 SDK 生成模型；Next 生成入口只接收 harness 的公开身份与能力，不能单独开启 harness 夹具。生产环境必须额外显式设置 `ALLOW_TEST_FIXTURE=1` 才允许夹具，隔离 E2E 启动器会自动设置这些测试变量。
 
 平台统一入口为 `http://localhost:3000`。普通页面使用 `/`、`/user/login`、`/user/register`、`/app/chat/{id}` 和 `/app/edit/{id}`。管理员页面使用同一入口下的 `/admin/userManage`、`/admin/appManage` 和 `/admin/chatManage`，登录角色决定是否显示管理菜单，服务端再次校验权限。
 
@@ -33,7 +33,7 @@
 
 ## 使用本机自己的数据库容器
 
-产品库是 Postgres 16，落在**本机自己的容器**里（`zslm-postgres`，宿主地址 `127.0.0.1:5432`，命名卷 `zslm-postgres-data`）。此容器不归本仓库管：`compose.yaml` 里没有 postgres 服务，`npm run durable:pg` 只**连接 + 建库 + 健康检查**，不会起、停或清空任何容器；它需要容器已经在跑。同一个实例里四个 database：开发库 `paimeng_app` 与存储库 `paimeng_agent`，集成测试库 `paimeng_app_test` 与 `paimeng_agent_test`；连接串在 `.env`，账号与口令取容器自身的配置。表名与列名见 `docs/plans/pi-durable-m4.md`，部署与并发/清扫说明见 `docs/plans/pi-durable-deployment.md`。
+产品库是 Postgres 16，落在**本机自己的容器**里（`zslm-postgres`，宿主地址 `127.0.0.1:5432`，命名卷 `zslm-postgres-data`）。此容器不归本仓库管：`compose.yaml` 里没有 postgres 服务，`npm run durable:pg` 只**连接 + 建库 + 健康检查**，不会起、停或清空任何容器；它需要容器已经在跑。同一个实例里四个 database：开发库 `paimeng_app` 与存储库 `paimeng_agent`，集成测试库 `paimeng_app_test` 与 `paimeng_agent_test`；连接串在 `.env`，账号与口令取容器自身的配置。表名与列名见 `docs/plans/archive/pi-durable-m4.md`，部署与并发/清扫说明见 `docs/plans/pi-durable-deployment.md`。
 
 这是产品库搬家的终点：数据原先在临时容器 `zslm-pg-paimeng`（127.0.0.1:55432，数据目录 `runtime/durable-pg/pgdata/`，已 gitignore），2026-10-18 四个库（schema + 数据）整体迁到 `zslm-postgres` 后该容器已删除，`runtime/durable-pg/pgdata/` 作为当时的备份目录保留，确认新库无误后可以自行删掉。
 
@@ -57,7 +57,7 @@ Redis 承担生成频率限流；登录会话、生成任务与对话转录仍�
 
 本地 TS 平台使用数据中心 0、机器 0，并通过同一 Postgres 库的 `id_sequence` 持久化发号。并发进程、模块热重载和重启共享已提交的发号下界。业务事务开始前先提交发号短事务；失败可以留下空号，不能复用已预留号码。雪花 ID 有时间顺序，不是随机 ID，也不替代接口归属鉴权。
 
-空库直接执行 `npm run db:migrate`。从旧 MySQL 产品库升级（本步实际路径）：备份旧库 → `npm run durable:pg` → `npm run db:migrate` → `npm run db:import-mysql`，命令与回滚方式见 `docs/plans/pi-durable-m4.md` §4。已执行的迁移保持原校验和。
+空库直接执行 `npm run db:migrate`。旧 MySQL 产品库的迁移已完成，一次性导入入口和驱动已退役；操作历史见 `docs/plans/archive/pi-durable-m4.md` §4。旧库和容器仍保留归档，已执行的迁移保持原校验和。
 
 执行 `npx vitest run tests/snowflake.test.ts tests/integration/snowflake-ids.test.ts`，核对位布局、序列耗尽、时钟回拨、三类主键、事务回滚、独立进程并发及导入。先执行 `npm run db:test:setup`，测试仅连接专用测试库，不调用模型。Drizzle 的 `.$defaultFn()` 是同步字段钩子，不能直接调用当前异步持久化发号器。
 
@@ -81,7 +81,7 @@ Redis 承担生成频率限流；登录会话、生成任务与对话转录仍�
 
 提供商弹窗的「测试连接」与别名弹窗的「获取模型」都会请求上游 `GET {baseUrl}/models`（`openai-chat` / `openai-responses` 用 `Authorization: Bearer`，`anthropic-messages` 用 `x-api-key` + `anthropic-version`），每次点击都会重新请求上游（带 `cache-control: no-cache`，不使用缓存）、10 秒超时、不跟随重定向、错误信息不回显密钥与自定义请求头的值；「获取模型」的结果只填充当前对话框的候选列表（最多 1000 条，命中上限时界面会提示可能被截断），不落库。密钥来源为“直接输入”且表单留空时，探测沿用数据库里已保存的密文。「获取模型」失败的原因会显示在别名的「上游模型名」下方。
 
-生成的时长预算都在 `.env`：`GENERATION_TIMEOUT_MS`（毫秒，默认 `0`，表示不限制整次生成任务；旧版写死 10 分钟）；`MODEL_REPLY_TIMEOUT_MS`（毫秒，默认 `900000`）限制单次模型回复的时长，超时中止并记为「单次回复超时」；每个模型请求的失败重试次数由 `MODEL_RETRY_LIMIT`（默认 `5`，0-5）控制，请求阶段与流开始之后的失败共用这个上限。上游输出到达 token 上限（`finishReason = length`）不再判为失败：文件已经落盘就继续构建，模型可以在下一轮对话里根据构建结果补齐。
+`GENERATION_TIMEOUT_MS`（毫秒，默认 `0`）控制产品任务的墙钟预算，`BUILD_TIMEOUT_MS` 控制容器命令预算。harness 当前流请求期限为 `settings.stream.timeoutMs=300000`（`harness-server.ts`）；旧 SDK 生成参数 `MODEL_REPLY_TIMEOUT_MS` / `MODEL_RETRY_LIMIT` 不驱动 pi-durable。上游到达输出上限后，已经写入的文件仍会进入最终验证。
 
 长对话上下文由 harness 的 pi-durable compaction 管理。用户消息、模型消息和工具结果保存在 harness 转录中，`GET app/messages` 直接从转录派生页面历史；产品库不保留另一份消息表或滚动摘要表。
 
@@ -139,16 +139,12 @@ Redis 承担生成频率限流；登录会话、生成任务与对话转录仍�
 
 ## 导入旧数据副本
 
-本项目只接受 `paimeng_app` 或 `paimeng_app_test` 数据库名。它不会自动连接旧库（`npm run db:import-mysql` 需要显式给出 `MYSQL_LEGACY_URL`）。
+本项目只接受 `paimeng_app` 或 `paimeng_app_test` 数据库名。以下 `db:import` 保留供手工导入审查过的 JSON 副本，不属于正常启动或日常测试入口；适用条件见 [scripts/README.md](scripts/README.md)。旧 MySQL 业务行导入程序已退役，不再连接 MySQL；原迁移与回滚记录保存在 `docs/plans/archive/pi-durable-m4.md`。
 
-## 从旧 MySQL 库搬迁业务行（一次性）
-
-`npm run db:import-mysql` 把旧 MySQL 产品库的业务行搬进 Postgres：用户、应用、登录会话、附件、模型配置、限流与发号下界。按主键 upsert，可以重复执行。**对话数据不搬**（旧 `ts_message` / `chat_history` / `ts_app_summary` 放弃），`app.conversation_id` 一律留空，harness 在下次生成时重建会话。命令与回滚方式见 `docs/plans/pi-durable-m4.md`。
-
-1. 停止新平台写入，并冻结旧库的最终快照。从旧库导出经过审查的 JSON 副本，放入新应用 `runtime/import/snapshot.json`。格式为 `{users:[],apps:[],chatHistory:[]}`，字段与原表对应。
+1. 停止新平台写入，并冻结旧库的最终快照。从旧库导出经过审查的 JSON 副本，放入新应用 `runtime/import/snapshot.json`。格式为 `{users:[],apps:[]}`，字段与原表对应。
 2. 所有 ID 使用十进制字符串。日期使用 `YYYY-MM-DD HH:mm:ss`（可含毫秒）。可空字段明确使用 null。应用 `editTime` 原值会保留，旧快照未包含该字段时为 null。
 3. 执行 `npm run db:import -- runtime/import/snapshot.json`。引用、日期、ID、账号冲突或字段无效时，导入整体失败，不覆盖目标记录。原 ID 与本节点发号下界同事务提交，成功后再恢复平台写入。
-4. 如需同时迁移旧文件，执行 `npm run db:import -- runtime/import/snapshot.json --artifacts <旧项目根目录> --covers <已导出的封面目录>`。脚本只读旧目录，迁移快照关联的 `code_output`、`code_deploy` 和 `{deployKey}.png` 封面，拒绝覆盖新平台已有目标。加 `--strict` 可在文件缺失时中止。详细约定与文件/数据库回滚边界见 [迁移说明](docs/migration-contracts.md)。旧封面需预先导出到本地，脚本不请求 COS。
+4. 如需同时迁移旧文件，执行 `npm run db:import -- runtime/import/snapshot.json --artifacts <旧项目根目录> --covers <已导出的封面目录>`。脚本只读旧目录，迁移快照关联的 `code_output`、`code_deploy` 和 `{deployKey}.png` 封面，拒绝覆盖新平台已有目标。加 `--strict` 可在文件缺失时中止。详细约定与文件/数据库回滚边界见 [迁移说明](./docs/migration-contracts.md)。旧封面需预先导出到本地，脚本不请求 COS。
 
 有效旧产物无需补造 ready 任务即可预览。重复部署复用原发布密钥；Vue 每次部署会先构建当前源码，构建失败时保留旧预览并拒绝这次部署。
 
@@ -166,6 +162,6 @@ Redis 承担生成频率限流；登录会话、生成任务与对话转录仍�
 
 ## 查阅实现与限制
 
-[接口与模块契约](docs/implementation-contract.md) 描述权限、消息及任务状态。[迁移差异](docs/migration-contracts.md) 说明原路径和有意变更。[产物与隔离限制](docs/artifacts.md) 记录构建依赖、预览与本地封面行为。[决策与验收记录](docs/migrations/ts-unified/decisions.tsv) 保存实施证据。
+[接口与模块契约](./docs/implementation-contract.md) 描述权限、消息及任务状态。[迁移差异](./docs/migration-contracts.md) 说明原路径和有意变更。[产物与隔离限制](./docs/artifacts.md) 记录构建依赖、预览与本地封面行为。[决策与验收记录](./docs/migrations/ts-unified/decisions.tsv) 保存实施证据。
 
 支持 HTML、多文件、Vue 和 React 静态前端生成。模板构建、预览、下载、发布及本地封面均由产品服务负责；封面保存在 `runtime/covers/`。旧 Java/Vue 代码与 MySQL 容器保留归档，运行新平台无需启动旧应用。

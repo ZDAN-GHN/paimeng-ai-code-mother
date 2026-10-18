@@ -3,7 +3,6 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ToolLoopAgent, isStepCount, streamText, tool } from 'ai';
 import { z } from 'zod';
-import { modelFor } from '@/server/model';
 import { createModelRegistry, modelRegistry, type ModelRegistryStore } from '@/server/models/registry';
 import type { ModelAlias, ModelConfigSnapshot, ModelProvider } from '@/shared/model-config';
 
@@ -114,14 +113,14 @@ afterEach(() => {
   if (savedEnv.mode === undefined) delete process.env.AI_MODE; else process.env.AI_MODE = savedEnv.mode;
 });
 
-describe('任务进行中的模型绑定冻结', () => {
+describe('AI SDK 注册表模型实例的绑定冻结', () => {
   it('循环中改写并应用新绑定后，当前任务全部请求仍用旧密钥/模型/设置，下一个任务用新绑定，工具只执行一次', async () => {
     process.env.AI_API_KEY = 'secret-a';
     const { state, store } = mutableStore(snapshotOf(baseUrl, '1', '0', 'model-a', { temperature: 0.1 }));
     const registry = createModelRegistry({ store, clock: () => Date.now() });
     vi.mocked(modelRegistry).mockReturnValue(registry);
 
-    const model = await modelFor('html', '生成一个展示页');
+    const model = await modelRegistry().resolveModel('codegen.default');
     let installedAfterEdit: string | undefined;
     const applyEdit = tool({
       description: '写入文件并应用模型配置改动',
@@ -150,7 +149,7 @@ describe('任务进行中的模型绑定冻结', () => {
       expect(request.body.temperature).toBe(0.1);
     }
 
-    const next = await modelFor('html', '再生成一页');
+    const next = await modelRegistry().resolveModel('codegen.default');
     await streamText({ model: next, prompt: '再生成一页' }).consumeStream();
 
     expect(captured).toHaveLength(3);

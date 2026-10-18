@@ -1,12 +1,14 @@
 # Pi Durable 迁移 · M1：单写进程 + attach 骨架
 
+> 归档：记录当时的设计、迁移与验收。当前行为见[部署说明](../pi-durable-deployment.md)与[模型配置](../provider-convergence.md)。
+
 > 历史文档：本文记录当时的状态。其中提到的 `src/server/memory-*.ts`、自研滚动摘要与 `spike/` 实验目录已随整合第三步删除，去向与判据见 [pi-durable-m3.md](./pi-durable-m3.md) §7。
 
 状态：**已跑通**（2026-10-18）。
 
-> 整合后文件位置与命令见 `docs/plans/pi-durable-m3.md`；本文件保留当时的原始记录（harness 进程与
+> 整合后文件位置与命令见 `docs/plans/archive/pi-durable-m3.md`；本文件保留当时的原始记录（harness 进程与
 > storage 现在在 `src/server/durable/`，临时页面 `/durable-m1` 已删）。分支 `feat/pi-durable-migration`，基线 `main@d0c9797`。
-设计输入是 `docs/plans/pi-durable-data-model.md`（数据模型与删除清单），本文件只讲 M1 的链路与证据。
+设计输入是 `docs/plans/archive/pi-durable-data-model.md`（数据模型与删除清单），本文件只讲 M1 的链路与证据。
 
 ## 0. 一句话结论
 

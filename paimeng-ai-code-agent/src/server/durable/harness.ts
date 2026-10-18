@@ -16,8 +16,7 @@
  *
  * `DURABLE_FAUX_MODEL=1` swaps the network model for the deterministic stub in
  * `faux-model.ts`; `DURABLE_FAUX_FIXTURE=1` swaps it for the scripted fixture in
- * `faux-fixture.ts` (same behaviour as the product's in-process fixture). Regression
- * tests use both and never need credentials.
+ * `faux-fixture.ts`. Regression tests use both and never need credentials.
  */
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateText } from 'ai';
-import { modelFor, routeCodeGenType } from '@/server/model';
+import { routeCodeGenType } from '@/server/model';
 import { createModelRegistry, modelRegistry } from '@/server/models/registry';
 import { BusinessError } from '@/server/http';
 import type { ModelAlias, ModelConfigSnapshot, ModelProvider } from '@/shared/model-config';
@@ -123,10 +123,10 @@ describe('应用类型路由（F01）', () => {
     expect(failure?.message).not.toContain('sk-abcdef1234567890');
   });
 
-  it('provider 模式生成解析 codegen.default，与路由别名相互独立', async () => {
+  it('注册表解析 codegen.default，与类型分类的 route.classify 相互独立', async () => {
     process.env.AI_MODE = 'provider';
     vi.mocked(modelRegistry).mockReturnValue(configuredRegistry('codegen-model', 'route-model'));
-    const model = await modelFor('html', '生成一个页面');
+    const model = await modelRegistry().resolveModel('codegen.default');
     await generateText({ model, prompt: '生成一个页面' });
 
     expect(captured).toHaveLength(1);

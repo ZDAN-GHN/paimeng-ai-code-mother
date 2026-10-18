@@ -31,7 +31,7 @@ npm run test:e2e:isolated # 隔离的完整 E2E（生产构建）
 | 端口被占用时不要用 `pkill -f`/`pgrep -f` 清理：模式串会匹配到你自己的命令行并把当前 shell 杀掉（exit 143）。用 `ss -ltnp` 取 PID，或 `[n]ext` 这类括号技巧。 | `scripts/test-e2e.ts` 的端口报错文案（会告诉你怎么换端口） |
 | 产品改动在 `paimeng-ai-code-agent/`，测试 CI 入口在 `.github/workflows/tests.yml`；旧代码与开发库只读：旧 Java（`archive/paimeng-ai-code-backend/`，含其下的 `paimeng-ai-code-mother-microservice/` 微服务骨架）与旧 Vue（`archive/paimeng-ai-code-mother-frontend/`）都只归档不动。 | 人工复核 + `git status`；`npm run verify:boundary` 对整树取 sha256（改动后哈希会变，不要为了让哈希通过而改它） |
 | 生成文件用 pi-durable 的 read/write/edit；写入不校验产品形状。工程依赖与锁文件在构建时校验，类型检查和 Vite 构建通过后才替换预览。 | `src/server/durable/harness-server.ts`；`src/server/artifacts.ts`；`tests/system/template-build.test.ts` |
-| 日常测试不启动数据库、Docker 或浏览器；有这些依赖的用例放 `tests/integration/` 或 `tests/system/`。 | `npm test` 的 `tests/unit-boundaries.ts` 直接拦截；CI 执行同一命令；完整检查 `npm run test:all` |
+| 日常测试不启动数据库、Redis、Docker 或浏览器；有这些依赖的用例放 `tests/integration/` 或 `tests/system/`。 | `npm test` 的 `tests/unit-boundaries.ts` 直接拦截；CI 执行同一命令；完整检查 `npm run test:all` |
 | 类型检查用 `npm run type-check`（= `next typegen && tsc --noEmit`），不要用裸 `npx tsc --noEmit`：它会报 `.next/types/*` 的过期生成类型（删过页面之后尤其明显），把 4 条假错误当成源码问题（2026-10-18 返工三次）。 | `package.json` 的 `type-check`；`pre-push` 钩子 |
 
 ## 命令与落点（省掉重复摸索）
@@ -52,6 +52,7 @@ npm run durable:inspect -- --conversations          # 列出 harness 已打开�
 | attach 路由（仅创建者鉴权） | `src/app/api/durable/[...path]/route.ts` |
 | Postgres 存储（pi-durable 的 Storage 实现） | `src/server/durable/storage-pg.ts` |
 | 一条命令起全套 / 数据库 | `npm run dev`、`npm run durable:pg` |
-| 设计记录与待办 | `docs/plans/pi-durable-{m1,m2,m3,m4,deployment,data-model}.md` |
+| 当前运行与模型配置 | `docs/plans/pi-durable-deployment.md`、`docs/plans/provider-convergence.md` |
+| 历史设计与迁移过程 | `docs/plans/archive/README.md` |
 
 git 钩子：`pre-commit` 跑 `check:fast`，`pre-push` 跑 `type-check`；紧急时用 `git commit --no-verify` 绕过。

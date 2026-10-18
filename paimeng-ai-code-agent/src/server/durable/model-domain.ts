@@ -126,7 +126,7 @@ export type GenerationModelBinding = {
 
 /**
  * 产品库没有价格与上下文预算字段，沿用 harness 原有的常量：换模型后成本与上下文预算不准，
- * 但只影响展示与压缩阈值，不影响调用正确性与记账口径（docs/plans/provider-convergence.md §8.4）。
+ * 但只影响展示与压缩阈值，不影响调用正确性与记账口径（docs/plans/provider-convergence.md）。
  */
 const generationModelCost = { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 };
 const generationModelContextWindow = 1_000_000;
