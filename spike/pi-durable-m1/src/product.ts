@@ -73,8 +73,8 @@ export async function signIn(): Promise<string> {
 	return cookie;
 }
 
-export async function createApp(cookie: string, initPrompt: string): Promise<string> {
-	const appId = await api<string>("app/add", { method: "POST", body: { initPrompt, codeGenType: "html" }, cookie });
+export async function createApp(cookie: string, initPrompt: string, codeGenType = "html"): Promise<string> {
+	const appId = await api<string>("app/add", { method: "POST", body: { initPrompt, codeGenType }, cookie });
 	log(`创建应用 appId=${appId}`);
 	return appId;
 }
@@ -111,9 +111,9 @@ export async function waitSettled(cookie: string, appId: string, timeoutMs: numb
 }
 
 /** harness 侧：这个应用的会话（按工作区目录反查），以及会话当前的模型上下文。 */
-export async function conversationFor(appId: string): Promise<number> {
+export async function conversationFor(appId: string, codeGenType = "html"): Promise<number> {
 	const body = (await (await fetch(`${harnessUrl}/conversations`)).json()) as { conversations: { conversationId: number; workspace: string }[] };
-	const found = body.conversations.find((entry) => entry.workspace.endsWith(`html_${appId}`));
+	const found = body.conversations.find((entry) => entry.workspace.endsWith(`${codeGenType}_${appId}`));
 	if (!found) throw new Error(`harness 里没有 appId=${appId} 的会话：${JSON.stringify(body.conversations)}`);
 	return found.conversationId;
 }

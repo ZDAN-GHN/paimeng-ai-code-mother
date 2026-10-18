@@ -4,11 +4,11 @@
  * with a scripted one: the first request for a run calls one tool, and once a
  * tool result exists it answers with a fixed marker. No credentials, no HTTP.
  *
- * Enabled with SPIKE_FAUX_MODEL=1. Knobs:
- *   SPIKE_FAUX_TOOL     tool the scripted turn calls (default m1_wait)
- *   SPIKE_FAUX_WAIT_MS  its `ms` argument (default 3000)
- *   SPIKE_FAUX_ARGS     JSON arguments for that call, replacing `{ms}` (default unset)
- *   SPIKE_FAUX_FINAL    final answer text (default M1_STUB_FINAL)
+ * Enabled with DURABLE_FAUX_MODEL=1. Knobs:
+ *   DURABLE_FAUX_TOOL     tool the scripted turn calls (default m1_wait)
+ *   DURABLE_FAUX_WAIT_MS  its `ms` argument (default 3000)
+ *   DURABLE_FAUX_ARGS     JSON arguments for that call, replacing `{ms}` (default unset)
+ *   DURABLE_FAUX_FINAL    final answer text (default M1_STUB_FINAL)
  */
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxResponseStep, type ToolCall } from "@earendil-works/pi-ai";
 import { createModels, type MutableModels } from "@earendil-works/pi-ai/models";
@@ -19,7 +19,7 @@ export const FAUX_MODEL_ID = "faux-1";
 const FAUX_STEPS = 6;
 
 export function fauxModelEnabled(): boolean {
-	return process.env.SPIKE_FAUX_MODEL === "1";
+	return process.env.DURABLE_FAUX_MODEL === "1";
 }
 
 export function fauxModelRef() {
@@ -27,10 +27,10 @@ export function fauxModelRef() {
 }
 
 export function fauxModels(): MutableModels {
-	const toolName = process.env.SPIKE_FAUX_TOOL ?? "m1_wait";
-	const waitMs = Number(process.env.SPIKE_FAUX_WAIT_MS ?? 3_000);
-	const finalText = process.env.SPIKE_FAUX_FINAL ?? "M1_STUB_FINAL";
-	const rawArgs = process.env.SPIKE_FAUX_ARGS;
+	const toolName = process.env.DURABLE_FAUX_TOOL ?? "m1_wait";
+	const waitMs = Number(process.env.DURABLE_FAUX_WAIT_MS ?? 3_000);
+	const finalText = process.env.DURABLE_FAUX_FINAL ?? "M1_STUB_FINAL";
+	const rawArgs = process.env.DURABLE_FAUX_ARGS;
 	const args: ToolCall["arguments"] = rawArgs ? (JSON.parse(rawArgs) as ToolCall["arguments"]) : { ms: waitMs };
 	const faux = fauxProvider({ provider: FAUX_PROVIDER, models: [{ id: FAUX_MODEL_ID, contextWindow: 200_000, maxTokens: 8_192 }] });
 	const step: FauxResponseStep = (context) =>

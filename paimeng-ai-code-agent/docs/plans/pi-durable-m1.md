@@ -1,6 +1,9 @@
 # Pi Durable 迁移 · M1：单写进程 + attach 骨架
 
-状态：**已跑通**（2026-10-18）。分支 `feat/pi-durable-migration`，基线 `main@d0c9797`。
+状态：**已跑通**（2026-10-18）。
+
+> 整合后文件位置与命令见 `docs/plans/pi-durable-m3.md`；本文件保留当时的原始记录（harness 进程与
+> storage 现在在 `src/server/durable/`，临时页面 `/durable-m1` 已删）。分支 `feat/pi-durable-migration`，基线 `main@d0c9797`。
 设计输入是 `docs/plans/pi-durable-data-model.md`（数据模型与删除清单），本文件只讲 M1 的链路与证据。
 
 ## 0. 一句话结论
@@ -32,7 +35,7 @@ Postgres（127.0.0.1:55432，pg_advisory_lock 保证单写者）
 | --- | --- |
 | `spike/pi-durable-m1/src/server.ts` | 常驻进程：Postgres storage、最小工具集（read / write / edit / m1_wait）、HTTP attach API |
 | `spike/pi-durable-m1/src/verify-{disconnect,restart,browser}.ts` | 三条验收脚本，全部经 Next.js 的 attach 通道 |
-| `paimeng-ai-code-agent/src/app/api/durable-m1/[...path]/route.ts` | Next 侧的 attach 代理；`request.signal` 只作用 `/events` |
+| `paimeng-ai-code-agent/src/app/api/durable/[...path]/route.ts` | Next 侧的 attach 代理；`request.signal` 只作用 `/events` |
 | `paimeng-ai-code-agent/src/app/durable-m1/page.tsx` | 最小前端：提交、订阅 SSE、渲染转录与 live partial、刷新从存储读回 |
 
 复用了 spike 的 `pg-storage.ts`（Postgres backend，25/25 一致性套件）、`harness.ts`、`pg.sh`、`run.sh`，
@@ -131,7 +134,7 @@ VERDICT: 4/4 assertions passed — PASS
 用例自己 spawn harness 进程、走真实 HTTP 与真实 Postgres：
 
 ```bash
-cd spike/pi-durable-pg && ./pg.sh start   # 需要 Postgres（55432）
+npm run durable:pg -- start                # 需要 Postgres（55432）
 cd ../../paimeng-ai-code-agent
 npx vitest run tests/integration/durable-m1
 ```
@@ -174,7 +177,7 @@ npx vitest run tests/integration/durable-m1
 
 ## 4. 与产品代码的关系
 
-- 产品代码只新增了两个文件（`src/app/api/durable-m1/[...path]/route.ts`、`src/app/durable-m1/page.tsx`），
+- 产品代码只新增了两个文件（`src/app/api/durable/[...path]/route.ts`、`src/app/durable-m1/page.tsx`），
   **没有改动现有生成链路**：`agent.ts` 仍是老的（含 `req.signal` 接进 AbortController、`prepareStep`
   插话、memory-*、`generation-store` 租约）。M1 是并列的一条链路，不是替换。
 - attach 路由没有鉴权、只绑本地；页面是验证页，不进导航。
@@ -209,7 +212,7 @@ M1 的四项目标（常驻进程、attach 通道、前端最小链路、三条�
 8. **前端只做最小展示**：每次 revision 用全量快照覆盖状态（EventSource 自动重连会重发 snapshot，所以安全），
    没有 lastEventId / 增量合并；没有断线提示之外的错误处理。
    → 从 `src/app/durable-m1/page.tsx` 起步，接口换成产品聊天页需要的形态。
-9. ~~**进程编排没做**~~ **已做**：`npm run dev:durable-m1`（`scripts/durable-m1-dev.ts`）一条命令起
+9. ~~**进程编排没做**~~ **已做**：`npm run dev:durable`（`scripts/durable-dev.ts`）一条命令起
    Postgres（已在跑就复用）+ harness + Next dev，退出时收掉自己起的进程，只停自己启动的 Postgres。见 §6。
 10. **`127.0.0.1` 访问会被 next.config 重定向到 `APP_ORIGIN`**（本机是 `http://localhost:3000`），
     这次靠脚本改用 `localhost:3100` 绕开，没有改配置。
@@ -243,10 +246,10 @@ M1 的四项目标（常驻进程、attach 通道、前端最小链路、三条�
 ## 6. 复现
 
 ```bash
-npm run dev:durable-m1        # Postgres（复用/启动）+ harness + Next dev（3100），Ctrl-C 一起收尾
+npm run dev:durable        # Postgres（复用/启动）+ harness + Next dev（3100），Ctrl-C 一起收尾
 # 浏览器用创建者身份登录，打开 http://localhost:3100/durable-m1?appId=<应用 ID>
 ```
 
 手动跑真实模型验收见 `spike/pi-durable-m1/README.md`（需要 `M1_APP_ID` 与 `M1_COOKIE`）。回归测试见 §2.4：
-`spike/pi-durable-pg/pg.sh start` → `npx vitest run tests/integration/durable-m1`。原始输出、时间线、
+`npm run durable:pg -- start` → `npx vitest run tests/integration/durable-m1`。原始输出、时间线、
 截图在 `spike/pi-durable-m1/evidence/`。

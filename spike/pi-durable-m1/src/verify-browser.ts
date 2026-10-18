@@ -11,7 +11,7 @@ import { chromium } from "playwright";
 import { log, waitForState } from "./client.ts";
 
 const here = new URL(".", import.meta.url).pathname;
-const runDir = process.env.M1_RUN_DIR ?? `${here}../runtime-out/m1`;
+const runDir = process.env.DURABLE_HARNESS_RUN_DIR ?? process.env.M1_RUN_DIR ?? `${here}../runtime-out/m1`;
 mkdirSync(runDir, { recursive: true });
 const timelinePath = `${runDir}/timeline-browser.txt`;
 appendFileSync(timelinePath, `\n=== browser run ${new Date().toISOString()} ===\n`);

@@ -1,5 +1,5 @@
 /**
- * The M1 attach route must sit at the same permission level as
+ * The attach route must sit at the same permission level as
  * `app/chat/gen/code` and `app/chat/steer`: a logged-in user who created the app,
  * and nobody else (admins included).
  *
@@ -12,7 +12,7 @@ import { loadEnvFile } from 'node:process';
 import { eq, like } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { testDatabaseUrl } from '../../test-database-url';
-import { GET, POST } from '@/app/api/durable-m1/[...path]/route';
+import { GET, POST } from '@/app/api/durable/[...path]/route';
 import { login, publicUser, register } from '@/server/auth';
 import { createApp } from '@/server/business';
 import { db, getPool } from '@/server/db';
@@ -43,7 +43,7 @@ async function waitForRecord(key: string): Promise<UpstreamRecord> {
 }
 
 function request(path: string, init: { method: string; body?: unknown; session?: string; signal?: AbortSignal }): Request {
-  return new Request(`http://localhost:3000/api/durable-m1/${path}`, {
+  return new Request(`http://localhost:3000/api/durable/${path}`, {
     method: init.method,
     headers: { 'content-type': 'application/json', ...(init.session ? { cookie: init.session } : {}) },
     body: init.body === undefined ? undefined : JSON.stringify(init.body),

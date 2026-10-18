@@ -1,12 +1,18 @@
 /**
- * Shared wiring for the Postgres-storage experiments. Identical to the original
- * SQLite spike harness except that the storage is the Postgres backend.
+ * Wiring for the product's resident pi-durable harness: Postgres storage, the
+ * OpenAI-compatible provider, and the tool registry.
+ *
+ * The harness process is the only writer of conversation storage, so nothing
+ * else in the product opens `storage-pg.ts`.
  *
  * Env (never logged, never written to disk):
- *   SPIKE_BASE_URL  OpenAI-compatible endpoint
- *   SPIKE_API_KEY   api key
- *   SPIKE_MODEL     model id
- *   DURABLE_PG_URL  Postgres connection string (defaults to the local spike instance)
+ *   DURABLE_MODEL_BASE_URL  OpenAI-compatible endpoint
+ *   DURABLE_MODEL_API_KEY   api key
+ *   DURABLE_MODEL_ID        model id
+ *   DURABLE_PG_URL          Postgres connection string (defaults to the local dev instance)
+ *
+ * `DURABLE_FAUX_MODEL=1` swaps the network model for the deterministic stub in
+ * `faux-model.ts`; regression tests use it and never need credentials.
  */
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -17,26 +23,28 @@ import type { AssistantMessage, Message, Model } from "@earendil-works/pi-ai";
 import { createRegistry, Harness, type Extension, type HarnessOptions, type JsonObject } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
-import { fauxModelEnabled, fauxModelRef, fauxModels } from "./faux-model.ts";
-import { PostgresStorage } from "./pg-storage.ts";
+import { fauxModelEnabled, fauxModelRef, fauxModels } from "./faux-model";
+import { PostgresStorage } from "./storage-pg";
 
 export const context: Context = BACKGROUND_CONTEXT;
 
-/** The endpoint our stack actually talks to. Throws early if unset. */
-export function spikeConfig(): { baseUrl: string; apiKey: string; modelId: string } {
-	const baseUrl = process.env.SPIKE_BASE_URL;
-	const apiKey = process.env.SPIKE_API_KEY;
-	const modelId = process.env.SPIKE_MODEL;
-	if (!baseUrl || !apiKey || !modelId) throw new Error("set SPIKE_BASE_URL, SPIKE_API_KEY and SPIKE_MODEL");
+const PROVIDER_ID = "durable";
+
+/** The endpoint the harness talks to. Throws early if unset. */
+export function modelConfig(): { baseUrl: string; apiKey: string; modelId: string } {
+	const baseUrl = process.env.DURABLE_MODEL_BASE_URL;
+	const apiKey = process.env.DURABLE_MODEL_API_KEY;
+	const modelId = process.env.DURABLE_MODEL_ID;
+	if (!baseUrl || !apiKey || !modelId) throw new Error("set DURABLE_MODEL_BASE_URL, DURABLE_MODEL_API_KEY and DURABLE_MODEL_ID");
 	return { baseUrl, apiKey, modelId };
 }
 
-function spikeModel(baseUrl: string, modelId: string, contextWindow = 1_000_000): Model<"openai-completions"> {
+function durableModel(baseUrl: string, modelId: string, contextWindow = 1_000_000): Model<"openai-completions"> {
 	return {
 		id: modelId,
 		name: modelId,
 		api: "openai-completions",
-		provider: "spike",
+		provider: PROVIDER_ID,
 		baseUrl,
 		reasoning: true,
 		thinkingLevelMap: { off: null, minimal: "low", low: "low", medium: null, high: "high", xhigh: null, max: "max" },
@@ -55,23 +63,23 @@ function spikeModel(baseUrl: string, modelId: string, contextWindow = 1_000_000)
 	};
 }
 
-export function spikeModels(contextWindow = 1_000_000): MutableModels {
+export function durableModels(contextWindow = 1_000_000): MutableModels {
 	if (fauxModelEnabled()) return fauxModels();
-	const { baseUrl, apiKey, modelId } = spikeConfig();
+	const { baseUrl, apiKey, modelId } = modelConfig();
 	const provider = createProvider<"openai-completions">({
-		id: "spike",
-		name: "Spike (our OpenAI-compatible endpoint)",
+		id: PROVIDER_ID,
+		name: "Durable (product model endpoint)",
 		baseUrl,
 		auth: {
 			apiKey: {
-				name: "Spike API key",
+				name: "Durable model API key",
 				resolve: async ({ signal }) => {
 					signal.throwIfAborted();
-					return { auth: { apiKey }, source: "SPIKE_API_KEY" };
+					return { auth: { apiKey }, source: "DURABLE_MODEL_API_KEY" };
 				},
 			},
 		},
-		models: [spikeModel(baseUrl, modelId, contextWindow)],
+		models: [durableModel(baseUrl, modelId, contextWindow)],
 		api: withOpenCodeSessionHeader(openAICompletionsApi()),
 	});
 	const models = createModels();
@@ -81,10 +89,10 @@ export function spikeModels(contextWindow = 1_000_000): MutableModels {
 
 export function modelRef(modelId?: string) {
 	if (fauxModelEnabled()) return fauxModelRef();
-	return { provider: "spike", modelId: modelId ?? spikeConfig().modelId };
+	return { provider: PROVIDER_ID, modelId: modelId ?? modelConfig().modelId };
 }
 
-export function spikeRegistry(options: { codingTools?: boolean; extensions?: readonly Extension[] } = {}) {
+export function createHarnessRegistry(options: { codingTools?: boolean; extensions?: readonly Extension[] } = {}) {
 	const registry = createRegistry();
 	if (options.codingTools ?? true) registry.install(CodingTools);
 	for (const extension of options.extensions ?? []) registry.install(extension);
@@ -93,7 +101,7 @@ export function spikeRegistry(options: { codingTools?: boolean; extensions?: rea
 
 export function buildHarnessOptions(
 	models: MutableModels,
-	registry: ReturnType<typeof spikeRegistry>,
+	registry: ReturnType<typeof createHarnessRegistry>,
 	settings?: HarnessOptions["settings"],
 ): HarnessOptions {
 	return {
@@ -113,8 +121,8 @@ export async function openPgHarness(options: {
 	extensions?: readonly Extension[];
 } = {}) {
 	const storage = await PostgresStorage.open();
-	const models = spikeModels(options.contextWindow);
-	const registry = spikeRegistry({ codingTools: options.codingTools, extensions: options.extensions });
+	const models = durableModels(options.contextWindow);
+	const registry = createHarnessRegistry({ codingTools: options.codingTools, extensions: options.extensions });
 	const harness = await Harness.open(storage, buildHarnessOptions(models, registry, options.settings), context);
 	return { harness, storage, models, registry };
 }

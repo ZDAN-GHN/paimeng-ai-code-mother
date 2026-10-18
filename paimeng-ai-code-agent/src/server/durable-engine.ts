@@ -116,8 +116,15 @@ const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
 async function harnessFetch(path: string, init?: RequestInit): Promise<Response> {
   const response = await fetch(`${harnessBase()}${path}`, init);
-  if (!response.ok) throw new Error(`harness ${path} 返回 ${response.status}：${(await response.text()).slice(0, 300)}`);
+  if (!response.ok) throw new HarnessRequestError(response.status, `harness ${path} 返回 ${response.status}：${(await response.text()).slice(0, 300)}`);
   return response;
+}
+
+/** harness HTTP 失败；404 单独可辨，用来发现「应用映射指向了一条不存在的会话」。 */
+class HarnessRequestError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+  }
 }
 
 async function harnessJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -164,9 +171,9 @@ function toolResultOf(entry: unknown): { text: string; isError: boolean } {
  * 第一次为该应用生成时创建并写回 `app.conversationId`。同一应用的后续生成复用这条会话，
  * 模型因此能看到上一次的工具结果与文件内容，而不是每轮从零探索。
  */
-async function conversationFor(app: AppInfo): Promise<number> {
+async function conversationFor(app: AppInfo, options: { fresh?: boolean } = {}): Promise<number> {
   const [row] = await db().select({ conversationId: apps.conversationId }).from(apps).where(eq(apps.id, BigInt(app.id))).limit(1);
-  if (row?.conversationId) return row.conversationId;
+  if (row?.conversationId && !options.fresh) return row.conversationId;
   const created = await harnessJson<{ conversationId: number }>('/conversations', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -707,8 +714,16 @@ function writtenPathsOf(toolName: string, input: unknown): string[] {
   return [];
 }
 
-/** 提交是异步落地的（admission 立即返回，运行随后启动），等 harness 报出这次会话的活跃运行再附加。 */
-async function waitForRunStart(conversationId: number, signal: AbortSignal): Promise<void> {
+/** 一次 harness 提交。入参里没有任何请求 socket 或 signal，断连影响不到它。 */
+async function submitHarness(conversationId: number, content: string, requestId: string): Promise<void> {
+  await harnessJson('/submit', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ conversationId, content, requestId }),
+  });
+}
+
+/** 提交是异步落地的（admission 立即返回，运行随后启动），等 harness 报出这次会话的活跃运行再附加。 */async function waitForRunStart(conversationId: number, signal: AbortSignal): Promise<void> {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     signal.throwIfAborted();
@@ -741,11 +756,14 @@ export async function harnessChatResponse(req: Request, raw: unknown, user: User
   try {
     conversationId = await conversationFor(app);
     // 只提交，不观察：这一步的入参里没有任何请求 socket 或 signal。
-    await harnessJson('/submit', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ conversationId, content: prompt, requestId: input.requestId }),
-    });
+    try {
+      await submitHarness(conversationId, prompt, input.requestId);
+    } catch (problem) {
+      // 映射指向的会话在 harness 里不存在（换过 Postgres、或会话数据被清过）：清掉映射重建一次。
+      if (!(problem instanceof HarnessRequestError) || problem.status !== 404) throw problem;
+      conversationId = await conversationFor(app, { fresh: true });
+      await submitHarness(conversationId, prompt, input.requestId);
+    }
   } catch (problem) {
     const detail = problem instanceof Error ? problem.message.slice(0, 1000) : '提交给 harness 失败';
     await finishGeneration(input.requestId, 'failed', detail, undefined, 'initialization-failed').catch(() => undefined);

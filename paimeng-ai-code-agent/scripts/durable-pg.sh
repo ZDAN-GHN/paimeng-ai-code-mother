@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# Disposable Postgres for the pi-durable Postgres-storage spike.
+# Disposable Postgres for the product's pi-durable harness (conversation storage).
 #
-#   ./pg.sh start   # create + start, wait until ready
-#   ./pg.sh stop    # stop (keeps the data volume)
-#   ./pg.sh purge   # remove container and data volume
-#   ./pg.sh status
-#   ./pg.sh psql
+#   npm run durable:pg -- start   # create + start, wait until ready
+#   npm run durable:pg -- stop    # stop (keeps the data volume)
+#   npm run durable:pg -- purge   # remove container and data volume
+#   npm run durable:pg -- status
+#   npm run durable:pg -- psql
 #
-# The data directory lives under this project (pgdata/), the port is 55432 to
-# stay clear of the repo's own 3306/3307/5432 services. Credentials are throwaway
-# and only used inside this spike.
+# The data directory lives under `runtime/durable-pg/pgdata` (gitignored), the port is
+# 55432 to stay clear of the repo's own 3306/3307/5432 services. Credentials are
+# throwaway and only used on this machine.
 set -euo pipefail
 
-NAME="zslm-pg-durable-spike"
+NAME="zslm-pg-durable"
 # Docker Hub is unreachable from this host; reuse the Postgres 16 image already present.
 IMAGE="pgvector/pgvector:pg16"
 PORT="55432"
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DATA_DIR="${here}/pgdata"
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DATA_DIR="${repo}/runtime/durable-pg/pgdata"
 export PGPASSWORD="spike"
 
 case "${1:-}" in

@@ -1,8 +1,11 @@
 /**
  * The resident pi-durable process: the only writer of conversation storage.
  *
- * M1 wired the attach skeleton (submit / events / state / health) over a single
- * root conversation. M2a adds what the product generation entry needs:
+ * Run it with the product's tsx from the product root:
+ *
+ *   npm run durable:harness
+ *
+ * The attach surface:
  *
  *   POST /conversations          create one ownerless conversation for an app
  *   POST /submit                 admit one user input into a conversation (default: root)
@@ -11,20 +14,19 @@
  *   GET  /events                 SSE view of the structure (snapshot + revisions), stays open
  *   GET  /state                  read-only projection of one conversation
  *   GET  /context                the model context of one conversation (verification evidence)
- *   GET  /tools                 the offered tools and their replay policy
+ *   GET  /tools                  the offered tools and their replay policy
  *   GET  /health                 liveness
  *
- * M2b registers the product's real build tool. `buildPreview` calls the product's
- * own `buildApp` (loaded on demand, so runners that never build need no product
- * dependency) and reports each stage as running details. Every tool declares its
- * `replay` policy: whether a crash-interrupted execution may rerun on recovery.
- * Reading and full-content writing are safe; in-place edits and deletes are not.
+ * `buildPreview` calls the product's own `buildApp` and reports each stage as
+ * running details. Every tool declares its `replay` policy: whether a
+ * crash-interrupted execution may rerun on recovery. Reading and full-content
+ * writing are safe; in-place edits and deletes are not.
  *
  * The tools are the product's file set (readFile / writeFiles / modifyFile /
  * listFiles / deleteFile) plus `buildPreview`, so the product chat renders them
- * without changes, plus `m1_wait` for the M1 verification scripts. The framework's
- * own CodingTools (read / write / edit / bash) are deliberately not installed:
- * `bash` is not part of the product's tool set.
+ * without changes, plus `m1_wait` for the manual verification scripts. The
+ * framework's own CodingTools (read / write / edit / bash) are deliberately not
+ * installed: `bash` is not part of the product's tool set.
  *
  * Boundary that must survive the migration: a client disconnect may abort the
  * SSE/NDJSON view of GET /events or GET /agent-events and nothing else. The
@@ -32,20 +34,23 @@
  */
 import { appendFileSync, mkdirSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { resolve } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { withAbortSignal } from "@earendil-works/chord/context";
 import type { AgentEvent, Conversation, ConversationId, ConversationView, LiveState, ToolExecutionApi } from "@earendil-works/pi-durable";
 import { defineExtension, defineTool, watchEvents } from "@earendil-works/pi-durable";
 import { getOrThrow, type ExecutionEnv } from "@earendil-works/pi-durable/env";
-import { context, entryText, modelRef, openPgHarness } from "../../pi-durable-pg/src/harness.ts";
-import { resetPostgresStorage } from "../../pi-durable-pg/src/pg-storage.ts";
+import type { CodeGenType } from "@/shared/contracts";
+import { buildApp, type BuildStageProgress } from "../artifacts";
+import { classifyBuildFailure, formatBuildDiagnostic } from "../build-feedback";
+import { context, entryText, modelRef, openPgHarness } from "./harness";
+import { resetPostgresStorage } from "./storage-pg";
 
-const here = new URL(".", import.meta.url).pathname;
-const runDir = process.env.M1_RUN_DIR ?? `${here}../runtime-out/m1`;
-const rootWorkspace = process.env.M1_WORKSPACE ?? `${runDir}/workspace`;
+const runDir = process.env.DURABLE_HARNESS_RUN_DIR ?? resolve(process.cwd(), "runtime", "durable");
+const rootWorkspace = process.env.DURABLE_HARNESS_WORKSPACE ?? `${runDir}/workspace`;
 const toolLog = `${runDir}/tools.jsonl`;
-const port = Number(process.env.M1_PORT ?? 5599);
-const host = process.env.M1_HOST ?? "127.0.0.1";
+const port = Number(process.env.DURABLE_HARNESS_PORT ?? 5599);
+const host = process.env.DURABLE_HARNESS_HOST ?? "127.0.0.1";
 const maxBodyBytes = 100_000;
 /** Directories the file tools never walk into; they belong to the platform, not the app source. */
 const blockedDirectories = new Set(["node_modules", "dist", ".git", ".next", ".nuxt"]);
@@ -80,7 +85,7 @@ const waitTool = defineTool({
 	name: "m1_wait",
 	description: "Sleep for the given number of milliseconds, then return. Use it when the user asks to wait.",
 	parameters: Type.Object({ ms: Type.Number() }),
-	// Deliberately keeps the default `unsafe`: this is the M1 fixture, and the kill -9 case pins
+	// Deliberately keeps the default `unsafe`: the kill -9 regression case pins
 	// "an interrupted tool is not rerun" on it (a safe declaration would replay the sleep on resume).
 	replay: "unsafe",
 	execute: async (args) => {
@@ -189,7 +194,7 @@ const listFilesTool = defineTool({
  * Per-conversation app identity, set when the product creates the conversation. The build tool needs
  * the app id and type to locate the source tree and validate the project manifest.
  */
-type AppRef = { id: string; codeGenType: string };
+type AppRef = { id: string; codeGenType: CodeGenType };
 const apps = new Map<number, AppRef>();
 
 /**
@@ -202,35 +207,13 @@ const apps = new Map<number, AppRef>();
  */
 function appRefFromWorkspace(cwd: string | undefined): AppRef | undefined {
 	const match = /(?:^|\/)(html|multi_file|vue_project|react_project)_([0-9]+)\/?$/.exec(cwd ?? "");
-	return match ? { id: match[2]!, codeGenType: match[1]! } : undefined;
+	if (!match) return undefined;
+	const codeGenType = match[1];
+	if (codeGenType !== "html" && codeGenType !== "multi_file" && codeGenType !== "vue_project" && codeGenType !== "react_project") return undefined;
+	return { id: match[2]!, codeGenType };
 }
 
 type BuildStageName = "source" | "install" | "typecheck" | "build";
-
-/** The product's own build implementation, loaded on demand. */
-type ProductBuild = {
-	buildApp: (app: AppRef, signal: AbortSignal | undefined, onStage: (stage: BuildStageName, status: "started" | "ok" | "failed", ms: number) => void) => Promise<void>;
-	classifyBuildFailure: (error: unknown) => { repairable: boolean; stage: string };
-	formatBuildDiagnostic: (error: unknown) => string;
-};
-
-let productBuild: Promise<ProductBuild> | undefined;
-
-/**
- * The product modules use the `@/` path alias, so they resolve only under the product's tsx with the
- * product root as cwd (see run.sh). Loading them on demand keeps runners that never build - the M1
- * scripts and the integration cases with the stub model - independent of that setup.
- */
-function loadProductBuild(): Promise<ProductBuild> {
-	return (productBuild ??= Promise.all([
-		import(new URL("../../../paimeng-ai-code-agent/src/server/artifacts.ts", import.meta.url).href),
-		import(new URL("../../../paimeng-ai-code-agent/src/server/build-feedback.ts", import.meta.url).href),
-	]).then(([artifacts, feedback]) => ({
-		buildApp: (artifacts as { buildApp: ProductBuild["buildApp"] }).buildApp,
-		classifyBuildFailure: (feedback as { classifyBuildFailure: ProductBuild["classifyBuildFailure"] }).classifyBuildFailure,
-		formatBuildDiagnostic: (feedback as { formatBuildDiagnostic: ProductBuild["formatBuildDiagnostic"] }).formatBuildDiagnostic,
-	})));
-}
 
 /** What the product's chat card renders; the product observer forwards `details` as the tool output. */
 type BuildResult = {
@@ -258,23 +241,27 @@ const buildPreviewTool = defineTool({
 	execute: async (args, api, context) => {
 		const app = await appRefFor(api.conversationId);
 		if (!app) throw new Error(`会话 ${api.conversationId} 没有关联应用，拒绝构建`);
-		const build = await loadProductBuild();
 		const startedAt = Date.now();
 		const stages: BuildResult["stages"] = [];
-		const note = (stage: BuildStageName, status: "started" | "ok" | "failed", ms: number) => {
+		// Progress commits are chained: two concurrent commits can land out of order, and a late
+		// `source: started` after `source: ok` leaves the timeline stuck on that stage (the product
+		// observer re-emits the current stage every second while a build runs).
+		let progress: Promise<unknown> = Promise.resolve();
+		const note: BuildStageProgress = (stage, status, ms) => {
 			if (status !== "started") stages.push({ stage, status, ms });
-			// Fire-and-forget: a progress commit must never fail the build.
-			void api.details({ stage, status, ms, at: Date.now() }, context).catch(() => undefined);
+			progress = progress.then(() => api.details({ stage, status, ms, at: Date.now() }, context)).catch(() => undefined);
 		};
 		try {
-			await build.buildApp({ id: app.id, codeGenType: app.codeGenType }, context.abortSignal, note);
+			await buildApp({ id: app.id, codeGenType: app.codeGenType }, context.abortSignal, note);
+			await progress;
 			const at = Date.now();
 			const result: BuildResult = { status: "ok", milestone: args.milestone, ms: at - startedAt, stages, note: "预览已更新为这次构建的产物。继续开发下一个功能，有明显增量时再调用一次。" };
 			await api.details(result, context);
 			return { output: [{ type: "text", text: `预览已更新（${args.milestone}），用时 ${at - startedAt}ms。` }], details: result };
 		} catch (problem) {
-			const verdict = build.classifyBuildFailure(problem);
-			const diagnostic = build.formatBuildDiagnostic(problem);
+			await progress;
+			const verdict = classifyBuildFailure(problem);
+			const diagnostic = formatBuildDiagnostic(problem);
 			const result: BuildResult = {
 				status: "failed",
 				milestone: args.milestone,
@@ -297,7 +284,7 @@ type ProjectedView = {
 	live: { text: string; tools: { name: string; status: string }[]; busy: boolean };
 };
 
-/** The live document is the framework's `LiveState`; the spike helper only types a subset. */
+/** The live document is the framework's `LiveState`; the harness helper only types a subset. */
 function liveState(view: ConversationView): LiveState | undefined {
 	return view.docs["pi.live"] as unknown as LiveState | undefined;
 }
@@ -337,10 +324,10 @@ function readBody(request: IncomingMessage): Promise<string> {
 }
 
 /** Background context is the harness's ambient scope; request sockets never enter it. */
-// M1_RESET=1 starts from an empty schema; the pg spike database is disposable and local.
-if (process.env.M1_RESET === "1") {
+// DURABLE_HARNESS_RESET=1 starts from an empty schema; the dev database is disposable and local.
+if (process.env.DURABLE_HARNESS_RESET === "1") {
 	await resetPostgresStorage();
-	log("storage reset (M1_RESET=1)");
+	log("storage reset (DURABLE_HARNESS_RESET=1)");
 }
 /**
  * The tool set the conversation uses. Every tool declares `replay`: whether a crash-interrupted
@@ -470,7 +457,7 @@ const server = createServer(async (request, response) => {
 			handles.set(conversation.id, conversation);
 			workspaces.set(conversation.id, body.workspace);
 			if (body.app) apps.set(conversation.id, body.app);
-			// Backup for tools that run before any request: derive the app from the durable workspace too.
+			// Fallback for tools that run before any request: derive the app from the durable workspace too.
 			else {
 				const ref = appRefFromWorkspace(body.workspace);
 				if (ref) apps.set(conversation.id, ref);
@@ -487,7 +474,14 @@ const server = createServer(async (request, response) => {
 				sendJson(response, 400, { error: "content is required" });
 				return;
 			}
-			const conversation = (await conversationOf(conversationIdFrom(body.conversationId) ?? root.id)) ?? root;
+			// A missing id falls back to the root conversation (manual scripts); an id that points at no
+			// conversation is a stale app mapping and must not silently run in the root.
+			const requestedId = conversationIdFrom(body.conversationId);
+			const conversation = requestedId === undefined ? root : await conversationOf(requestedId);
+			if (!conversation) {
+				sendJson(response, 404, { error: "conversation not found" });
+				return;
+			}
 			// Admission only. No request socket, timer, or viewer scope reaches this call.
 			const submission = await conversation.submit({ type: "input", content, requestId: body.requestId }, context);
 			log(`submit admitted conversation=${conversation.id} submission=${submission.id} requestId=${body.requestId ?? "-"}`);

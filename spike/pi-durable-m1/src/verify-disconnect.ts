@@ -7,14 +7,14 @@
  * `m1_wait` is executing, then proves the run finished on its own and that a
  * reconnect reads the complete transcript from storage.
  *
- * Preconditions: Postgres up (`../pi-durable-pg/pg.sh start`), the harness
+ * Preconditions: Postgres up (`npm run durable:pg -- start` in the product), the harness
  * process up (`npm start`), the Next.js dev server up on M1_BASE_URL.
  */
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { answers, attachSse, getState, log, readSse, sleep, submit, waitForState } from "./client.ts";
 
 const here = new URL(".", import.meta.url).pathname;
-const runDir = process.env.M1_RUN_DIR ?? `${here}../runtime-out/m1`;
+const runDir = process.env.DURABLE_HARNESS_RUN_DIR ?? process.env.M1_RUN_DIR ?? `${here}../runtime-out/m1`;
 const timelinePath = `${runDir}/timeline-disconnect.txt`;
 mkdirSync(runDir, { recursive: true });
 appendFileSync(timelinePath, `\n=== disconnect run ${new Date().toISOString()} ===\n`);

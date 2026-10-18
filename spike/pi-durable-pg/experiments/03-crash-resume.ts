@@ -16,8 +16,8 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, type Conversation, type Harness } from "@earendil-works/pi-durable";
-import { assistantText, context, liveView, modelRef, openPgHarness } from "../src/harness.ts";
-import { resetPostgresStorage } from "../src/pg-storage.ts";
+import { assistantText, context, liveView, modelRef, openPgHarness } from "../../../paimeng-ai-code-agent/src/server/durable/harness.ts";
+import { resetPostgresStorage } from "../../../paimeng-ai-code-agent/src/server/durable/storage-pg.ts";
 
 const here = new URL(".", import.meta.url).pathname;
 const runDir = `${here}../runtime-out/03`;

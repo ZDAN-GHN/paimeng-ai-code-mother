@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# Runs one spike script under the *product's* tsx from the product root.
+# Runs one harness/verification script under the *product's* tsx from the product root.
 #
-# M2b: the harness process loads the product's build implementation on demand
-# (`buildPreview`). That module uses the `@/` path alias and imports `server-only`,
-# so it resolves only when tsx runs with the product root as cwd and with the
-# `react-server` condition. Runners that never build do not need this wrapper.
+# The product harness imports product modules that use the `@/` path alias and
+# `server-only`, so it resolves only when tsx runs with the product root as cwd
+# and with the `react-server` condition.
 #
-#   ./run.sh src/server.ts        # cwd is the product root, script path is absolute
+#   ./run.sh ../../paimeng-ai-code-agent/src/server/durable/harness-server.ts
 #
-# SPIKE_* env is derived from the machine's pi model config exactly as
-# pi-durable-pg/run.sh does; override SPIKE_BASE_URL / SPIKE_API_KEY / SPIKE_MODEL
+# DURABLE_MODEL_* env is derived from the machine's pi model config exactly as
+# pi-durable-pg/run.sh does; override DURABLE_MODEL_BASE_URL / DURABLE_MODEL_API_KEY / DURABLE_MODEL_ID
 # or DURABLE_PG_URL in the caller's environment to point elsewhere.
 set -euo pipefail
 
@@ -21,9 +20,9 @@ read_oc_go() {
 	node -e "process.stdout.write(String(require(process.argv[1]).providers['oc-go'][process.argv[2]] ?? ''))" "$MODELS_JSON" "$1"
 }
 
-export SPIKE_BASE_URL="${SPIKE_BASE_URL:-$(read_oc_go baseUrl)}"
-export SPIKE_API_KEY="${SPIKE_API_KEY:-$(read_oc_go apiKey)}"
-export SPIKE_MODEL="${SPIKE_MODEL:-deepseek-v4.1-flash}"
+export DURABLE_MODEL_BASE_URL="${DURABLE_MODEL_BASE_URL:-$(read_oc_go baseUrl)}"
+export DURABLE_MODEL_API_KEY="${DURABLE_MODEL_API_KEY:-$(read_oc_go apiKey)}"
+export DURABLE_MODEL_ID="${DURABLE_MODEL_ID:-deepseek-v4.1-flash}"
 
 # The script path is relative to this spike, not to the product root we cd into.
 script="$1"

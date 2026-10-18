@@ -3,14 +3,15 @@
   "private": true,
   "type": "module",
   "version": "0.0.0",
-  "description": "M1: resident pi-durable harness process + HTTP attach channel for the Next.js server",
+  "description": "Manual verification scripts for the product pi-durable harness (the process itself lives in paimeng-ai-code-agent/src/server/durable/)",
   "scripts": {
-    "start": "./run.sh src/server.ts",
+    "start": "../pi-durable-pg/run.sh ../../../paimeng-ai-code-agent/src/server/durable/harness-server.ts",
     "verify:disconnect": "../pi-durable-pg/run.sh src/verify-disconnect.ts",
     "verify:restart": "../pi-durable-pg/run.sh src/verify-restart.ts",
     "verify:browser": "../pi-durable-pg/run.sh src/verify-browser.ts",
     "verify:m2a": "../pi-durable-pg/run.sh src/verify-m2a.ts",
     "verify:m2a-reconnect": "../pi-durable-pg/run.sh src/verify-m2a-reconnect.ts",
+    "verify:m2b-build": "../pi-durable-pg/run.sh src/verify-m2b-build.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

@@ -12,15 +12,15 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { answers, baseUrl, freePort, kill9, postgresReachable, postgresUrl, readSse, readToolEvents, spikeAvailable, startHarness, stopHarness, submit, waitForState, waitHealthy } from './support';
+import { answers, baseUrl, freePort, kill9, postgresReachable, postgresUrl, readSse, readToolEvents, harnessAvailable, startHarness, stopHarness, submit, waitForState, waitHealthy } from './support';
 
-const spikeReady = spikeAvailable();
-const postgresReady = spikeReady && (await postgresReachable(postgresUrl));
+const harnessReady = harnessAvailable();
+const postgresReady = harnessReady && (await postgresReachable(postgresUrl));
 // process.stderr keeps the skip reason visible: vitest drops console output from a file with no run tests.
-if (!spikeReady) process.stderr.write('[durable-m1] 跳过：找不到 spike/pi-durable-m1 或它的 node_modules，先跑 spike/pi-durable-m1/setup.sh\n');
-else if (!postgresReady) process.stderr.write(`[durable-m1] 跳过：Postgres 不可达（${postgresUrl}），先跑 spike/pi-durable-pg/pg.sh start\n`);
+if (!harnessReady) process.stderr.write('[durable-m1] 跳过：找不到产品 harness 入口或 tsx，先装依赖（npm install）\n');
+else if (!postgresReady) process.stderr.write(`[durable-m1] 跳过：Postgres 不可达（${postgresUrl}），先跑 npm run durable:pg -- start\n`);
 
-describe.skipIf(!spikeReady || !postgresReady)('durable M1：kill -9 后从 checkpoint 续跑', () => {
+describe.skipIf(!harnessReady || !postgresReady)('durable M1：kill -9 后从 checkpoint 续跑', () => {
   it('被中断的工具不重跑，重启后同一 storage 跑完', async () => {
     const port = await freePort();
     const runDir = mkdtempSync(join(tmpdir(), 'durable-m1-restart-'));

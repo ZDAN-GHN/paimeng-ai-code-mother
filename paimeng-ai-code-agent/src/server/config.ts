@@ -45,9 +45,9 @@ const environment = z.object({
   WEB_ACCESS_JINA_FALLBACK:z.preprocess(booleanFlag, z.enum(['true','false','1','0']).default('false').transform(value => value === 'true' || value === '1')),
   WEB_ACCESS_ALLOW_NETWORKS:z.string().default(''),
   WEB_ACCESS_PROXY:z.preprocess(blankAsUnset, z.string().max(200).default('')),
-  // 生成入口的引擎：legacy 是现有 AI SDK 循环，harness 把生成提交给常驻 pi-durable 进程
-  // （docs/plans/pi-durable-m2.md）。两套并存期间用这个开关切换，M2c 删掉 legacy。
-  DURABLE_ENGINE:z.enum(['legacy','harness']).default('legacy'),
+  // 生成入口的引擎：harness 把生成提交给常驻 pi-durable 进程（默认，docs/plans/pi-durable-m3.md）；
+  // legacy 是过渡期保留的旧 AI SDK 循环（图片输入、中途插话、构建修复轮还没迁完）。
+  DURABLE_ENGINE:z.enum(['legacy','harness']).default('harness'),
   DURABLE_HARNESS_URL:z.preprocess(blankAsUnset, z.url().default('http://127.0.0.1:5599')),
 });
 export function getConfig() {

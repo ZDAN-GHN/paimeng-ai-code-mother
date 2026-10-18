@@ -23,8 +23,8 @@ import { connect } from "node:net";
 import { Type } from "@earendil-works/pi-ai";
 import { withAbortSignal } from "@earendil-works/chord/context";
 import { defineExtension, defineTool, type Conversation, type ConversationView, type Submission, type SubmissionRecord } from "@earendil-works/pi-durable";
-import { assistantText, context, modelRef, openPgHarness } from "../src/harness.ts";
-import { resetPostgresStorage } from "../src/pg-storage.ts";
+import { assistantText, context, modelRef, openPgHarness } from "../../../paimeng-ai-code-agent/src/server/durable/harness.ts";
+import { resetPostgresStorage } from "../../../paimeng-ai-code-agent/src/server/durable/storage-pg.ts";
 
 const startedAt = Date.now();
 const here = new URL(".", import.meta.url).pathname;

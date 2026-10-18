@@ -5,21 +5,21 @@
  * 读取与整文件写入可以重跑（幂等），精确替换与删除不可以（重跑会二次生效或报错），
  * buildPreview 可以重跑（同源码同产物、原子替换 dist）。改错会让这条用例失败。
  *
- * 只需 spike 与 Postgres；没有时 skip。
+ * 只需产品 harness 与 Postgres；没有时 skip。
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { baseUrl, freePort, postgresReachable, postgresUrl, spikeAvailable, startHarness, stopHarness, waitHealthy } from './support';
+import { baseUrl, freePort, postgresReachable, postgresUrl, harnessAvailable, startHarness, stopHarness, waitHealthy } from './support';
 
-const spikeReady = spikeAvailable();
-const postgresReady = spikeReady && (await postgresReachable(postgresUrl));
+const harnessReady = harnessAvailable();
+const postgresReady = harnessReady && (await postgresReachable(postgresUrl));
 // process.stderr keeps the skip reason visible: vitest drops console output from a file with no run tests.
-if (!spikeReady) process.stderr.write('[durable-m1] 跳过：找不到 spike/pi-durable-m1 或它的 node_modules，先跑 spike/pi-durable-m1/setup.sh\n');
-else if (!postgresReady) process.stderr.write(`[durable-m1] 跳过：Postgres 不可达（${postgresUrl}），先跑 spike/pi-durable-pg/pg.sh start\n`);
+if (!harnessReady) process.stderr.write('[durable-m1] 跳过：找不到产品 harness 入口或 tsx，先装依赖（npm install）\n');
+else if (!postgresReady) process.stderr.write(`[durable-m1] 跳过：Postgres 不可达（${postgresUrl}），先跑 npm run durable:pg -- start\n`);
 
-describe.skipIf(!spikeReady || !postgresReady)('durable M2b：工具级 replay 语义', () => {
+describe.skipIf(!harnessReady || !postgresReady)('durable M2b：工具级 replay 语义', () => {
   it('声明每个工具崩溃后能否安全重跑', async () => {
     const port = await freePort();
     const runDir = mkdtempSync(join(tmpdir(), 'durable-m2b-replay-'));

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Dependency resolution for M1. The harness reuses the pg spike's node_modules,
-# but this package imports modules itself (playwright for verify-browser), so it
-# needs its own node_modules directory. Real directory + symlinks, nothing here
+# Dependency resolution for the manual verification scripts. The product harness
+# resolves its own node_modules from the product tree; these scripts import
+# playwright themselves, so this package needs its own node_modules directory. Real directory + symlinks, nothing here
 # is committed (see .git/info/exclude).
 set -euo pipefail
 

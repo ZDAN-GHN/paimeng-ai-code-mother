@@ -1,6 +1,6 @@
 /**
  * Minimal HTTP client shared by the M1 verification scripts. Every call goes
- * through the Next.js server (`/api/durable-m1/*`), which is the attach client;
+ * through the Next.js server (`/api/durable/*`), which is the attach client;
  * nothing here talks to the harness process directly except reading its log.
  *
  * The attach route is owner-only (same permission level as `app/chat/gen/code`),
@@ -52,7 +52,7 @@ export function answers(state: StateBody): string[] {
 
 export async function submit(content: string, requestId: string): Promise<Response> {
 	// Deliberately no AbortSignal: this is the durable admission, not a view.
-	return fetch(`${baseUrl}/api/durable-m1/submit`, {
+	return fetch(`${baseUrl}/api/durable/submit`, {
 		method: "POST",
 		headers: { "content-type": "application/json", ...authHeaders() },
 		body: JSON.stringify({ appId, content, requestId }),
@@ -60,7 +60,7 @@ export async function submit(content: string, requestId: string): Promise<Respon
 }
 
 export async function getState(): Promise<StateBody> {
-	const response = await fetch(`${baseUrl}/api/durable-m1/state?${authQuery()}`, { headers: { accept: "application/json", ...authHeaders() } });
+	const response = await fetch(`${baseUrl}/api/durable/state?${authQuery()}`, { headers: { accept: "application/json", ...authHeaders() } });
 	if (!response.ok) throw new Error(`state ${response.status}`);
 	return (await response.json()) as StateBody;
 }
@@ -87,7 +87,7 @@ export async function waitForState(done: (state: StateBody) => boolean, timeoutM
  * the socket read.
  */
 export function attachSse(timeoutMs: number): { socket: Socket; text: () => string; firstByte: Promise<number> } {
-	const url = new URL(`${baseUrl}/api/durable-m1/events?${authQuery()}`);
+	const url = new URL(`${baseUrl}/api/durable/events?${authQuery()}`);
 	const socket = connect(Number(url.port || 80), url.hostname);
 	let text = "";
 	let resolveFirst: (at: number) => void = () => undefined;
@@ -109,7 +109,7 @@ export function attachSse(timeoutMs: number): { socket: Socket; text: () => stri
 export function readSse(timeoutMs: number): Promise<string> {
 	return new Promise((resolve, reject) => {
 		let text = "";
-		const request = get(`${baseUrl}/api/durable-m1/events?${authQuery()}`, { headers: { accept: "text/event-stream", ...authHeaders() } }, (response) => {
+		const request = get(`${baseUrl}/api/durable/events?${authQuery()}`, { headers: { accept: "text/event-stream", ...authHeaders() } }, (response) => {
 			response.on("data", (chunk) => (text += chunk.toString("utf8")));
 			response.on("error", () => undefined);
 			setTimeout(() => {

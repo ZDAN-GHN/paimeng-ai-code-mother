@@ -7,8 +7,8 @@
  * 4096-token output margin.
  */
 import { AssistantEntry, CompactionEntry, type EntryId } from "@earendil-works/pi-durable";
-import { assistantText, context, entryText, liveView, modelRef, openPgHarness } from "../src/harness.ts";
-import { resetPostgresStorage } from "../src/pg-storage.ts";
+import { assistantText, context, entryText, liveView, modelRef, openPgHarness } from "../../../paimeng-ai-code-agent/src/server/durable/harness.ts";
+import { resetPostgresStorage } from "../../../paimeng-ai-code-agent/src/server/durable/storage-pg.ts";
 
 await resetPostgresStorage();
 const { harness } = await openPgHarness({

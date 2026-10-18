@@ -15,18 +15,18 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { baseUrl, freePort, postgresReachable, postgresUrl, productRoot, productRunnerAvailable, startHarness, stopHarness, waitHealthy, waitForState, getState } from './support';
+import { baseUrl, freePort, postgresReachable, postgresUrl, productRoot, harnessAvailable, startHarness, stopHarness, waitHealthy, waitForState, getState } from './support';
 
-const runnerReady = productRunnerAvailable();
-const postgresReady = runnerReady && (await postgresReachable(postgresUrl));
+const harnessReady = harnessAvailable();
+const postgresReady = harnessReady && (await postgresReachable(postgresUrl));
 // process.stderr keeps the skip reason visible: vitest drops console output from a file with no run tests.
-if (!runnerReady) process.stderr.write('[durable-m1] 跳过 buildPreview：找不到产品 tsx 或 spike，先跑 spike/pi-durable-m1/setup.sh\n');
-else if (!postgresReady) process.stderr.write(`[durable-m1] 跳过 buildPreview：Postgres 不可达（${postgresUrl}），先跑 spike/pi-durable-pg/pg.sh start\n`);
+if (!harnessReady) process.stderr.write('[durable-m1] 跳过 buildPreview：找不到产品 harness 入口或 tsx，先装依赖（npm install）\n');
+else if (!postgresReady) process.stderr.write(`[durable-m1] 跳过 buildPreview：Postgres 不可达（${postgresUrl}），先跑 npm run durable:pg -- start\n`);
 
 const appId = '901000000000000201';
 const workspace = join(productRoot, 'runtime', 'code_output', `html_${appId}`);
 
-describe.skipIf(!runnerReady || !postgresReady)('durable M2b：harness 里的 buildPreview', () => {
+describe.skipIf(!harnessReady || !postgresReady)('durable M2b：harness 里的 buildPreview', () => {
   it('构建属于本会话的应用并把成功结果写回转录', async () => {
     mkdirSync(workspace, { recursive: true });
     writeFileSync(join(workspace, 'index.html'), '<!doctype html><html><body>m2b build</body></html>');
@@ -34,7 +34,7 @@ describe.skipIf(!runnerReady || !postgresReady)('durable M2b：harness 里的 bu
     const runDir = mkdtempSync(join(tmpdir(), 'durable-m2b-build-'));
     const base = baseUrl(port);
     const harness = startHarness({
-      port, runDir, reset: true, waitMs: 0, finalText: 'M2B_BUILD_DONE', workspace, buildRunner: true,
+      port, runDir, reset: true, waitMs: 0, finalText: 'M2B_BUILD_DONE', workspace,
       tool: 'buildPreview', args: { milestone: 'm2b-smoke' },
     });
     try {
@@ -73,7 +73,7 @@ describe.skipIf(!runnerReady || !postgresReady)('durable M2b：harness 里的 bu
     const base = baseUrl(port);
     const noAppWorkspace = join(runDir, 'workspace');
     const harness = startHarness({
-      port, runDir, reset: true, waitMs: 0, finalText: 'M2B_NOAPP_DONE', workspace: noAppWorkspace, buildRunner: true,
+      port, runDir, reset: true, waitMs: 0, finalText: 'M2B_NOAPP_DONE', workspace: noAppWorkspace,
       tool: 'buildPreview', args: { milestone: 'no-app' },
     });
     try {

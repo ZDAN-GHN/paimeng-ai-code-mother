@@ -10,16 +10,17 @@ export const dynamic = 'force-dynamic';
 const harnessUrl = () => (process.env.DURABLE_HARNESS_URL ?? 'http://127.0.0.1:5599').replace(/\/$/, '');
 
 /**
- * M1 attach client：Next.js 服务端作为常驻 harness 进程的客户端，自己不开 storage。
+ * Attach proxy to the resident pi-durable harness: the Next.js server is a client and never
+ * opens conversation storage itself. This is the read/debug surface (state / context / events);
+ * the product generation entry talks to the harness from `src/server/durable-engine.ts`.
  *
  * 必须保留的限界：浏览器断连只允许影响这条 SSE 视图（只有 /events 把 req.signal 传给上游），
  * 绝不能传进 POST /submit 或任务 context —— 否则「断开连接 = 取消生成」的老 bug 会回来
  * （旧实现见 src/server/agent.ts 把 req.signal 接进生成 AbortController）。
  *
  * 鉴权与 app/chat/gen/code、app/chat/steer 同级：必须先登录（401），且 body/query 里的 appId
- * 必须是当前用户创建的应用（403，管理员不走后门，getApp(appId, user, true)）。
- * M1 里 appId 只作授权主体，harness 仍是单会话；「一个应用一条 conversation」的映射属于 M2
- * （docs/plans/pi-durable-data-model.md §4）。
+ * 必须是当前用户创建的应用（403，管理员不走后门，getApp(appId, user, true)）。appId 只作授权主体，
+ * 会话路由由 harness 侧的 `app.conversationId` 决定。
  */
 async function requireOwner(request: Request, rawAppId: unknown): Promise<void> {
   const user = await requireUser(request);

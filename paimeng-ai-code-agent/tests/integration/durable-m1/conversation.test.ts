@@ -16,13 +16,13 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { baseUrl, freePort, postgresReachable, postgresUrl, spikeAvailable, startHarness, stopHarness, waitHealthy, waitForState } from './support';
+import { baseUrl, freePort, postgresReachable, postgresUrl, harnessAvailable, startHarness, stopHarness, waitHealthy, waitForState } from './support';
 
-const spikeReady = spikeAvailable();
-const postgresReady = spikeReady && (await postgresReachable(postgresUrl));
+const harnessReady = harnessAvailable();
+const postgresReady = harnessReady && (await postgresReachable(postgresUrl));
 // process.stderr keeps the skip reason visible: vitest drops console output from a file with no run tests.
-if (!spikeReady) process.stderr.write('[durable-m1] 跳过：找不到 spike/pi-durable-m1 或它的 node_modules，先跑 spike/pi-durable-m1/setup.sh\n');
-else if (!postgresReady) process.stderr.write(`[durable-m1] 跳过：Postgres 不可达（${postgresUrl}），先跑 spike/pi-durable-pg/pg.sh start\n`);
+if (!harnessReady) process.stderr.write('[durable-m1] 跳过：找不到产品 harness 入口或 tsx，先装依赖（npm install）\n');
+else if (!postgresReady) process.stderr.write(`[durable-m1] 跳过：Postgres 不可达（${postgresUrl}），先跑 npm run durable:pg -- start\n`);
 
 type ConversationEntry = { conversationId: number; workspace: string };
 type ModelContext = { entries: number; messages: { role: string; text: string }[] };
@@ -31,7 +31,7 @@ type StateBody = { view: { entries: { id: number; kind: string; text: string }[]
 const marker = 'M2A_CONVERSATION_MARK';
 const finalText = 'M2A_CONVERSATION_DONE';
 
-describe.skipIf(!spikeReady || !postgresReady)('durable M2a：一个应用一条会话', () => {
+describe.skipIf(!harnessReady || !postgresReady)('durable M2a：一个应用一条会话', () => {
   it('按会话隔离提交，且第二次提交的模型输入里有第一次的工具结果', async () => {
     const port = await freePort();
     const runDir = mkdtempSync(join(tmpdir(), 'durable-m2a-conversation-'));

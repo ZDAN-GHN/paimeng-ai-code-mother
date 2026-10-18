@@ -7,16 +7,19 @@
  * kills the process while `m1_wait` is executing, then relaunches it and waits
  * for the transcript to settle.
  *
- * Preconditions: Postgres up (`../pi-durable-pg/pg.sh start`), the Next.js dev
- * server up on M1_BASE_URL, no harness running on M1_HARNESS_URL.
+ * Preconditions: Postgres up (`npm run durable:pg -- start` in the product), the
+ * Next.js dev server up on M1_BASE_URL, no harness running on M1_HARNESS_URL.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { answers, getState, log, readSse, sleep, submit, waitForState } from "./client.ts";
 
 const here = new URL(".", import.meta.url).pathname;
 const m1Dir = `${here}..`;
-const runDir = process.env.M1_RUN_DIR ?? `${here}../runtime-out/m1`;
+/** The harness process lives in the product; this script only spawns and kills it. */
+const productRoot = resolve(m1Dir, "../../paimeng-ai-code-agent");
+const runDir = process.env.DURABLE_HARNESS_RUN_DIR ?? process.env.M1_RUN_DIR ?? `${here}../runtime-out/m1`;
 const harnessUrl = (process.env.M1_HARNESS_URL ?? "http://127.0.0.1:5599").replace(/\/$/, "");
 const timelinePath = `${runDir}/timeline-restart.txt`;
 mkdirSync(runDir, { recursive: true });
@@ -43,11 +46,11 @@ async function alive(): Promise<boolean> {
 
 function launch(phase: string): ChildProcess {
 	const fd = openSync(`${runDir}/harness-${phase}.log`, "a");
-	// M1_RESET applies to the first process only; resetting again would delete the run under test.
-	const env = { ...process.env };
-	if (phase !== "phase1") delete env.M1_RESET;
-	const child = spawn(process.execPath, ["--experimental-strip-types", "src/server.ts"], {
-		cwd: m1Dir,
+	// DURABLE_HARNESS_RESET applies to the first process only; resetting again would delete the run under test.
+	const env = { ...process.env, DURABLE_HARNESS_RUN_DIR: runDir };
+	if (phase !== "phase1") delete env.DURABLE_HARNESS_RESET;
+	const child = spawn(process.execPath, ["--import", "tsx", "--conditions=react-server", resolve(productRoot, "src/server/durable/harness-server.ts")], {
+		cwd: productRoot,
 		env,
 		stdio: ["ignore", fd, fd],
 	});

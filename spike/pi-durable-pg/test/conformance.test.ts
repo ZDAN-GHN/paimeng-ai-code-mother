@@ -7,7 +7,7 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { registerStorageConformance } from "@earendil-works/pi-durable/testing";
 import { describe, expect, it } from "vitest";
-import { PostgresStorage, resetPostgresStorage } from "../src/pg-storage.ts";
+import { PostgresStorage, resetPostgresStorage } from "../../../paimeng-ai-code-agent/src/server/durable/storage-pg.ts";
 
 const context = BACKGROUND_CONTEXT;
 
