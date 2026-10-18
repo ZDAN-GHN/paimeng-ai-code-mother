@@ -10,12 +10,12 @@
  *   POST /conversations          create one ownerless conversation for an app
  *   POST /configure              set a conversation's resident instructions for the current turn
  *   POST /submit                 admit one user input into a conversation (default: root), optionally as a display entry
- *   POST /entries                append one display-only entry (the product's assistant bubble)
+ *   POST /entries                append one display-only entry (no model message, visible to the product's UI only)
  *   POST /abort                  abort a conversation's live run
  *   GET  /agent-events           NDJSON of agent events for one conversation, ends with the run
  *   GET  /events                 SSE view of the structure (snapshot + revisions), stays open
  *   GET  /state                  read-only projection of one conversation
- *   GET  /messages               every display entry (`app.*` kinds with data) of one conversation, oldest first
+ *   GET  /messages               every transcript entry of one conversation (id, kind, model, data), oldest first
  *   GET  /context                the model context of one conversation (verification evidence)
  *   GET  /tools                  the offered tools and their replay policy
  *   GET  /health                 liveness
@@ -49,6 +49,7 @@ import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { getOrThrow, type ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { CodeGenType } from "@/shared/contracts";
 import { buildApp, type BuildStageProgress } from "../artifacts";
+import { harnessProtocol } from "./protocol";
 import { classifyBuildFailure, formatBuildDiagnostic } from "../build-feedback";
 import { getConfig } from "../config";
 import {
@@ -584,15 +585,13 @@ function parseDisplayEntry(kind: unknown, data: unknown): EntryDraft {
 	return { kind: displayKind(kind), data: displayData(data) };
 }
 
-/** Every display entry of one conversation, oldest first: the product's chat bubbles live here. */
-async function displayEntries(conversation: Conversation): Promise<{ id: number; kind: string; data: JsonValue }[]> {
-	const entries: { id: number; kind: string; data: JsonValue }[] = [];
+/** Every transcript entry of one conversation, oldest first: id, kind, and the model/UI payloads. */
+async function transcriptEntries(conversation: Conversation) {
+	const entries: { id: number; kind: string; model?: readonly unknown[]; data?: unknown }[] = [];
 	let cursor: Cursor | undefined;
 	for (;;) {
 		const page = await conversation.entries({ order: "ascending" }, 200, cursor, context);
-		for (const entry of page.items) {
-			if (entry.kind.startsWith("app.") && entry.data !== undefined) entries.push({ id: entry.id, kind: entry.kind, data: entry.data });
-		}
+		for (const entry of page.items) entries.push({ id: entry.id, kind: entry.kind, ...(entry.model === undefined ? {} : { model: entry.model }), ...(entry.data === undefined ? {} : { data: entry.data }) });
 		if (!page.next) return entries;
 		cursor = page.next;
 	}
@@ -651,7 +650,7 @@ const server = createServer(async (request, response) => {
 	const url = new URL(request.url ?? "/", `http://${host}`);
 	try {
 		if (request.method === "GET" && url.pathname === "/health") {
-			sendJson(response, 200, { ok: true, pid: process.pid, conversationId: root.id });
+			sendJson(response, 200, { ok: true, protocol: harnessProtocol, pid: process.pid, conversationId: root.id });
 			return;
 		}
 
@@ -732,7 +731,8 @@ const server = createServer(async (request, response) => {
 				return;
 			}
 			// A write of only kind and data is appended at once, even mid-run: it changes nothing the model sees.
-			// This is where the product's assistant bubble lives now that it keeps no message table of its own.
+			// Generic capability kept for the harness's own contract; the product's assistant bubble is derived
+			// from pi's native entries instead of being written here.
 			let entry: EntryDraft;
 			try {
 				entry = parseDisplayEntry(body.kind, body.data);
@@ -788,7 +788,7 @@ const server = createServer(async (request, response) => {
 				sendJson(response, 404, { error: "conversation not found" });
 				return;
 			}
-			sendJson(response, 200, { messages: await displayEntries(conversation) });
+			sendJson(response, 200, { messages: await transcriptEntries(conversation) });
 			return;
 		}
 

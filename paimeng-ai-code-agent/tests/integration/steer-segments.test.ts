@@ -1,19 +1,28 @@
 /**
- * 一次带插话的生成，落库气泡顺序（产品引擎 + 真实 harness 进程，桩模型，无网络无 Docker）。
+ * 一次带插话的生成，转录与 UI 消息的顺序（产品引擎 + 真实 harness 进程，桩模型，无网络无 Docker）。
  *
- * 插话在 pi 的转录里落在两个模型消息之间。产品侧的助手气泡按分段写：插话落地时封住当前段、写一条
- * `app.assistant`，紧接着写插话自己的 `app.user`，随后另起一段继续累积。`/messages` 按条目 id
- * 返回，所以刷新后看到的顺序是
+ * 转录是 pi 的：`app.user`（提交时写下的用户气泡）与 `pi.assistant` / `pi.tool-result`（模型与工具的原生
+ * 条目）按条目 id 排成一条链，产品**不再写任何 `app.assistant` 展示副本**。前端展示直接由 `loadMessages`
+ * 从这条链派生：
  *
- *   app.user → app.assistant(段 1) → app.user(插话) → app.assistant(段 2)
+ *   app.user → pi.assistant(第 1 步) → pi.tool-result → app.user(插话) → pi.assistant(第 2 步)
+ *
+ * 插话在 pi 的转录里落在两个模型消息之间（提交时排队进 `pi.inbox`，当前步骤跑完后落入转录），所以派生
+ * 出来的 UI 消息顺序天然是 `user → assistant → user(插话) → assistant`，不需要任何重排。
  *
  * 要钉住的不变量：
  *
+ * - 转录里没有 `app.assistant`（展示副本已删除）；
  * - 顺序如上，插话不进助手气泡；
- * - 两段不重复对方的文本与工具条目，且**工具调用与它的结果同段**（分段点不能把一次调用切开）；
- * - `generation.message_id` 指向第一段的条目 id（前端一次生成只挂一个用量块），第二段是它的下一个编号；
- * - 中途取消同样把已经产出的段落库（收尾在 finally 里，与是否正常结束无关）；
+ * - 一条 `pi.assistant` 条目就是一条 UI 助手消息（id = 条目 id），两段不重复对方的文本与工具条目，
+ *   且**工具调用与它的结果在同一条消息里**（结果按 toolCallId 并进那个工具调用）；
+ * - `generation.message_id` 指向真实存在的第一条 `pi.assistant` 条目 id（前端一次生成只挂一个用量块）；
+ * - 中途取消同样留下已经产出的助手条目，message_id 也指向它；
  * - D2 记账仍是每条模型消息一行。
+ *
+ * 变异检查：把 `transcriptMessages` 里 `pi.tool-result` 的合并分支整段去掉（工具结果不再并进工具调用），
+ * 或用例一的顺序断言改成 `['user', 'assistant', 'assistant', 'user']`，用例必须失败（见 pi-durable-m4.md 的
+ * 验证记录）。
  *
  * 桩模型（`DURABLE_FAUX_MODEL=1`）第一步调用 `m1_wait`（3 秒），给「运行中插话」留出确定性的窗口：
  * 夹具模型（`DURABLE_FAUX_FIXTURE=1`）的脚本没有慢步骤，插话提交会与运行结束竞争，不能用。
@@ -185,12 +194,12 @@ async function stopGeneration(running: Running) {
   await db().delete(users).where(eq(users.id, BigInt(running.actor.id)));
 }
 
-describe.skipIf(!harnessReady || !postgresReady)('插话把一次生成切成按序落库的两段', () => {
+describe.skipIf(!harnessReady || !postgresReady)('插话后的转录与派生 UI 消息顺序', () => {
   afterAll(async () => {
     await getPool().end();
   });
 
-  it('条目顺序是 user → assistant(段1) → user(插话) → assistant(段2)，两段不重复且工具条目完整', async () => {
+  it('UI 消息顺序是 user → assistant(第 1 步) → user(插话) → assistant(第 2 步)，两段不重复且工具调用与结果同消息', async () => {
     const running = await startGeneration();
     const { actor, appId, base, conversationId, requestId } = running;
     try {
@@ -198,36 +207,41 @@ describe.skipIf(!harnessReady || !postgresReady)('插话把一次生成切成按
       const task = await waitForTerminal(appId, requestId, 60_000);
       expect(task.status).toBe('ready');
 
-      // /messages（刷新读回走的就是它）按条目 id 从旧到新返回。
+      // /messages（刷新读回走的就是它）由 pi 的条目派生，顺序就是条目 id 的顺序。
       const transcript = (await loadMessages(appId)) as unknown as Bubble[];
       expect(transcript.map(bubble => bubble.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
       expect(transcript[0].parts).toEqual([{ type: 'text', text: prompt }]);
       expect(transcript[2].parts).toEqual([{ type: 'text', text: steerText }]);
 
       const [first, second] = [transcript[1], transcript[3]];
-      // 段 1：m1_wait 的调用与它的结果在同一条气泡里（分段点在模型消息边界，不会切开一次调用）。
+      // 第 1 步：m1_wait 的调用与它的结果在同一条消息里（结果按 toolCallId 并进工具调用）。
       expect(toolsOf(first).map(tool => tool.toolName)).toEqual(['m1_wait']);
       expect(toolsOf(first)[0].state).toBe('output-available');
       expect(String(toolsOf(first)[0].output)).toContain('waited 3000');
-      // 段 2：只有最终回复，没有段 1 的工具条目，也没有段 1 的文本。
+      // 第 2 步：只有最终回复，没有第 1 步的工具条目，也没有第 1 步的文本。
       expect(textsOf(second)).toEqual([finalText]);
       expect(toolsOf(second)).toEqual([]);
       expect(textsOf(first)).not.toContain(finalText);
-      // 一次生成一个用量块：message_id 指向真实存在的第一段，第二段是它的下一个编号。
-      expect(first.id).toBe(`${requestId}-assistant`);
-      expect(second.id).toBe(`${requestId}-assistant-2`);
-      expect(task.messageId).toBe(first.id);
 
-      // pi 自己的转录同样把插话放在两段回复之间（产品侧的分段镜像它，而不是自己发明顺序）。
+      // 转录里不再有 app.assistant 展示副本；助手气泡的 id 就是 pi.assistant 条目 id。
       const state = await getState(base, conversationId);
       const kinds = state.view.entries.map(entry => entry.kind);
+      expect(kinds.filter(kind => kind === 'app.assistant')).toEqual([]);
+      const assistantEntries = state.view.entries.filter(entry => entry.kind === 'pi.assistant');
+      expect(assistantEntries).toHaveLength(2);
+      expect(first.id).toBe(String(assistantEntries[0].id));
+      expect(second.id).toBe(String(assistantEntries[1].id));
+      // 一次生成一个用量块：message_id 指向真实存在的第一条 pi.assistant 条目。
+      expect(task.messageId).toBe(String(assistantEntries[0].id));
+      expect(assistantEntries.some(entry => String(entry.id) === task.messageId)).toBe(true);
+
+      // 插话条目由 pi 放在两个模型边界之间（提交时排队进 pi.inbox，下一步开始前落入转录）。
+      const steerEntry = kinds.lastIndexOf('app.user');
       const firstAssistant = kinds.indexOf('pi.assistant');
       const secondAssistant = kinds.indexOf('pi.assistant', firstAssistant + 1);
-      const steerEntry = kinds.lastIndexOf('pi.user');
       expect(steerEntry).toBeGreaterThan(firstAssistant);
       expect(steerEntry).toBeLessThan(secondAssistant);
       expect(state.view.entries[steerEntry].text).toContain(steerText);
-      expect(kinds.filter(kind => kind.startsWith('app.'))).toEqual(['app.user', 'app.assistant', 'app.user', 'app.assistant']);
 
       // D2 记账照旧每步一行：两条模型消息两行（step_number 0/1），最终验证一行构建。
       const steps = await db().select().from(generationSteps).where(eq(generationSteps.generationId, requestId));
@@ -246,24 +260,29 @@ describe.skipIf(!harnessReady || !postgresReady)('插话把一次生成切成按
     }
   }, 120_000);
 
-  it('中途取消也把已经产出的段落库', async () => {
+  it('中途取消也留下已经产出的助手条目，message_id 指向它', async () => {
     const running = await startGeneration();
-    const { actor, appId, requestId } = running;
+    const { actor, appId, base, conversationId, requestId } = running;
     try {
       // 等 m1_wait 的调用卡片已经流给客户端（观察线程已经看到这次工具调用），再取消。
       await waitForClientChunk(running.response, 'tool-input-available', 20_000);
       expect(await harnessCancelGeneration(appId, actor)).toBe(true);
-      // 取消先把任务置成终态（客户端立刻看到取消），观察线程随后才在 finally 里落库。
+      // 取消先把任务置成终态（客户端立刻看到取消），观察线程随后才在 finally 里收尾。
       await waitUntil(async () => {
         const bubbles = (await loadMessages(appId)) as unknown as Bubble[];
-        return bubbles.length === 2 && (await generationFor(appId))?.messageId === `${requestId}-assistant`;
-      }, 30_000, '取消后把已经产出的段落库');
+        return bubbles.length === 2 && !!(await generationFor(appId))?.messageId;
+      }, 30_000, '取消后留下已经产出的助手条目');
 
       const transcript = (await loadMessages(appId)) as unknown as Bubble[];
-      expect((await generationFor(appId))?.status).toBe('cancelled');
+      const task = await generationFor(appId);
+      expect(task?.status).toBe('cancelled');
       expect(transcript.map(bubble => bubble.role)).toEqual(['user', 'assistant']);
-      expect(transcript[1].id).toBe(`${requestId}-assistant`);
       expect(toolsOf(transcript[1]).map(tool => tool.toolName)).toEqual(['m1_wait']);
+      const state = await getState(base, conversationId);
+      const assistantEntry = state.view.entries.find(entry => entry.kind === 'pi.assistant');
+      expect(assistantEntry).toBeDefined();
+      expect(transcript[1].id).toBe(String(assistantEntry!.id));
+      expect(task?.messageId).toBe(String(assistantEntry!.id));
     } finally {
       await stopGeneration(running);
     }

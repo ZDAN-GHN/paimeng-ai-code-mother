@@ -54,10 +54,10 @@ POST `/api/app/chat/gen/code` 接收 `{appId,message:UIMessage,requestId:UUID}`�
 任务状态包括 `generating`、`building`、`ready`、`failed` 和 `cancelled`。每个应用只有一个活动任务。同一个请求 UUID 不重复执行。生成限流默认按用户每 60 秒 1 次，跨应用共享，可用 `CHAT_RATE_LIMIT_TYPE`（`API`/`USER`/`IP`）、`CHAT_RATE_LIMIT_RATE`、`CHAT_RATE_LIMIT_INTERVAL`、`CHAT_RATE_LIMIT_MESSAGE` 覆盖。计数保存在 `rate_limit`，与任务创建在同一事务内，位置在重复请求与租约检查之后，锁顺序为 app_user → app → rate_limit。
 
 `IP` 类型沿用旧版转发头信任模型，要求可信前置代理覆盖 `X-Forwarded-For`/`X-Real-IP` 并阻止直连；无这两个头时直连请求共用 `ip:unknown`。超限请求随事务回滚，不消耗次数。
-生成输入沿用旧版护轨：总文本不超过 1000 字、不能为空，并拒绝原敏感词和注入模式。可视化定位上下文包含在这个总长度内。模型上下文由 harness 进程自己管理（pi-durable 的会话转录按容量阈值压缩），平台没有自研的窗口/滚动摘要层：原 `MEMORY_*` 环境变量、`memory-*.ts` 与滚动摘要表已随整合第三步删除，表本身也随换 Postgres 一并清掉。平台不再有自己的消息表：完整消息与全部历史作为 pi-durable 条目（`app.user` / `app.assistant`，`data` 通道放前端要渲染的 `UIMessage`）持久保存在 harness 存储里，供页面恢复和查询，原始消息不删减。
+生成输入沿用旧版护轨：总文本不超过 1000 字、不能为空，并拒绝原敏感词和注入模式。可视化定位上下文包含在这个总长度内。模型上下文由 harness 进程自己管理（pi-durable 的会话转录按容量阈值压缩），平台没有自研的窗口/滚动摘要层：原 `MEMORY_*` 环境变量、`memory-*.ts` 与滚动摘要表已随整合第三步删除，表本身也随换 Postgres 一并清掉。平台不再有自己的消息表：完整消息与全部历史作为 pi-durable 条目持久保存在 harness 存储里，供页面恢复和查询，原始消息不删减。
 
 
-对话转录（UI 消息与工具结果）的权威存储是 harness 的条目表：用户气泡随 `/submit` 的 `entry` 落成 `app.user`，助手气泡在收尾时经 `POST /entries` 落成 `app.assistant`（展示型条目，不改模型上下文），`GET app/messages` 经 harness `/messages` 读回；助手消息 id 写进 `generation.message_id` 供用量块挂载。终态与租约释放仍在一个事务里完成（`src/server/generation-store.ts` 的 `finishGeneration`）。任务状态包括 `generating`、`building`、`ready`、`failed` 和 `cancelled`。每个应用只有一个活动任务。同一个请求 UUID 不重复执行。取消与超时只中止 harness 里仍在跑的那次运行（任务行仍是权威，由每 5 秒一次的租约心跳发现）；模型跑完后的服务端最终验证与修复轮由生成入口自己驱动，见下段。
+对话转录（UI 消息与工具结果）的权威存储是 harness 的条目表：用户气泡随 `/submit` 的 `entry` 落成 `app.user`（`data` 通道放前端要渲染的 `UIMessage`），助手气泡直接由 pi 的原生条目派生——`pi.assistant` 是一条模型消息（文本块 + 该条目的工具调用）、`pi.tool-result` 按 `toolCallId` 并进对应工具调用，产品不再写 `app.assistant` 展示副本；`GET app/messages` 经 harness `/messages` 读回整条转录后由 `loadMessages` 投影成 UI 消息，UI 消息 id 就是条目 id；本次生成第一条 `pi.assistant` 条目 id 写进 `generation.message_id` 供用量块挂载。终态与租约释放仍在一个事务里完成（`src/server/generation-store.ts` 的 `finishGeneration`）。任务状态包括 `generating`、`building`、`ready`、`failed` 和 `cancelled`。每个应用只有一个活动任务。同一个请求 UUID 不重复执行。取消与超时只中止 harness 里仍在跑的那次运行（任务行仍是权威，由每 5 秒一次的租约心跳发现）；模型跑完后的服务端最终验证与修复轮由生成入口自己驱动，见下段。
 
 服务端拥有构建验证权：每轮模型结束后先 `buildApp`，失败且诊断能定位到生成源码时把诊断交回模型，最多 `BUILD_REPAIR_ROUNDS`（默认 2）轮；源码指纹未变则用原始构建错误结束，不做空转。整次生成的时长上限由 `GENERATION_TIMEOUT_MS` 决定（默认 `0` 表示不限制），失去租约的旧进程不能覆盖新任务；模型调用失败的重试（含流已经开始后的 provider 错误）由 harness 进程按其 provider 配置处理，客户端只看到可读文案，原始错误留在 harness 日志里。
 

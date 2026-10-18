@@ -183,7 +183,7 @@ function effectiveStopReason(current: string | null, status: 'ready' | 'failed' 
 
 /**
  * 生成收尾：终态、停止原因与「这次生成写出了哪条助手消息」。
- * 助手消息本体已经作为转录条目（`app.assistant`）写进 harness 存储，这里只留 messageId 给用量块挂载。
+ * 助手消息本体是 pi 的原生转录条目（`pi.assistant`），这里只留 messageId 给用量块挂载。
  */
 export async function finishGeneration(id: string, status: 'ready' | 'failed' | 'cancelled', error: string | null, messageId?: string | null, stopReason?: GenerationStopReason) {
   const [task] = await db().select().from(generations).where(eq(generations.id, id));

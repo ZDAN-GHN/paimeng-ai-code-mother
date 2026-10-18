@@ -53,6 +53,9 @@ camelCase 列必须处处加双引号，一次改净比每个查询记得加引�
 
 ## 2. 转录搬到 harness：产品不再有消息表
 
+> **已被 §8 取代的部分**：这里写的助手展示副本 `app.assistant`（收尾时经 `POST /entries` 写入）已经不写了；
+> 助手气泡改为由 pi 的原生 `pi.assistant` / `pi.tool-result` 条目直接派生。下面这段保留为当时的记录。
+
 - **写入**：生成入口提交用户输入时带 `entry: {kind:"app.user", data:<UIMessage>}`（pi-durable 的
   input 提交允许指定自己的条目种类与 `data`）；助手气泡在收尾时经 harness 新增的 `POST /entries`
   追加为 `app.assistant`（只带 `kind` + `data` 的写入是展示型条目，不改模型上下文，运行中也立即落地）。
@@ -203,3 +206,45 @@ npm run verify:m3                                       # 四项能力（插话 
 
 npm run durable:pg -- status         # 看四个库是否就绪（容器不由本仓库管）
 ```
+
+## 8. 单一转录：助手气泡直接渲染 pi 的原生条目（2026-10-18，改动留在工作区，未提交）
+
+**结论**：前端展示就是 pi 的转录，产品不再写任何助手展示副本（`app.assistant`）。
+
+**改了什么**
+
+- **停写副本**（`src/server/durable-engine.ts`）：删掉 `AssistantSegments`（`seal()` / `#steerLanded` /
+  `AssistantTurn.message()` / `assistantMessageId`）与 `appendDisplayEntry`；`RunTranslator` 只保留一条
+  流式 `AssistantTurn`，不再分段，也不再为插话补写展示气泡。
+- **插话**（`harnessSteerGeneration`）：`submit({ whenBusy: "steer", entry: {kind:"app.user", data} })`
+  把插话自己的气泡交给 pi，在「当前步骤跑完后的下一个边界」与模型消息一起落进转录，位置天然正确。
+- **读回派生**（唯一新增能力）：harness `GET /messages` 改为返回整条转录
+  （`id / kind / model / data`，旧→新）；产品的 `loadMessages` 用 `transcriptMessages(entries)` 投影——
+  `app.user` → 用户气泡（沿用原有 `data` 载荷）、`pi.assistant` → 助手气泡（文本块 + 该条目的工具调用，
+  **条目 id 就是 UI 消息 id**）、`pi.tool-result` 按 `toolCallId` 并进对应工具调用（工具调用与结果同一条消息），
+  `pi.system` / `pi.compaction` / `pi.reset` 不进展示。顺序与分段都不再需要启发式。
+- **用量块**：`generation.message_id` 存本次生成第一条 `pi.assistant` 条目 id（跨模型轮次/插话/修复轮取最早那条），
+  一次生成仍只有一个用量块；取消/失败路径同样有 id。
+- **前端**（`src/app/app/chat/[id]/page.tsx`）：删掉为「分段重排」加的终态 `loadHistory()` 特例（顺序结构性正确）；
+  历史渲染继续消费 `app/messages`，形状未变。展示口径变化：一次生成里每条模型消息（每次工具调用一步）是一条助手
+  气泡，不再是整轮折叠成一条。
+- **顺带**：`POST /entries`（只写 kind + data 的展示条目）与它的校验保留为 harness 自身能力，产品不再调用；
+  `docs/implementation-contract.md` 的转录段同步改写。
+
+**验证（2026-10-18）**
+
+| 项目 | 命令 | 结果 |
+| --- | --- | --- |
+| 类型检查 | `npm run type-check` | 通过（exit 0，`next typegen` + `tsc --noEmit`） |
+| 静态门禁 | `npm run check:ui` / `npm run check:e2e` | 23 个 tsx / 13 个 spec 通过 |
+| 受影响 vitest | `npx vitest run tests/integration/steer-segments.test.ts tests/integration/durable-m1 tests/integration/feature-parity.test.ts tests/generation-accounting.test.ts` | **13 文件 30 用例全过**（51.1s） |
+| 变异检查 | 把 `transcriptMessages` 里 `pi.tool-result` 的合并分支改成 `continue` | `steer-segments` 第 1 例失败：`expected 'input-available' to be 'output-available'`；改回后 2/2 过 |
+| **真实模型 + 真实 Postgres** | `node --import tsx --conditions=react-server scripts/tmp-evidence-transcript.ts`（临时脚本，已删；真实 `deepseek-v4.1-flash`，隔离库 `paimeng_app_test` / `paimeng_agent_test`，自带 harness 端口） | 条目种类计数 `{app.user:2, pi.system:1, pi.assistant:6, pi.tool-result:5}`（**`app.assistant` = 0**）；`generation.message_id="17"` 且 17 就是第一条 `pi.assistant` 条目、在派生结果里存在；派生 UI 消息顺序 `[user, assistant(17), assistant(22), user(插话), assistant(27,31,35,39)]`，插话落在两个模型边界之间 |
+
+**未验证 / 已知取舍**
+
+1. `npm run test:e2e:isolated` 未跑（主 agent 串行跑）；`tests/e2e/platform.spec.ts` 里「一次生成一个用量块」的真实生成断言依赖这里刚改的 id 口径。
+2. 服务端改动需要用户**重启 `dev:durable`** 才生效：常驻 harness 进程不热加载，产品侧（Next）热更新后 /messages 与 harness 会短暂错位。
+3. 一次生成的助手气泡数 = 模型消息数（上面的真实运行是 6 条），刷新后能看到多气泡；流式期间客户端仍只有一条气泡。要不要合并相邻 `pi.assistant` 属于产品口径，需要时再定。
+4. 流式期间插话仍是「乐观插到最后一条助手气泡之前」，终态不再重取历史（按本步结论删除）；刷新后按转录顺序正确。
+5. `models.json` 取自本机的 `oc-go` provider；产物写在测试库对应的 `runtime/code_output/html_<id>`，脚本已清理。

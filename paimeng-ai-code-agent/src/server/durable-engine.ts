@@ -8,6 +8,7 @@ import { imageLimits, type ImageMediaType } from '@/shared/attachments';
 import { cancelGeneration, generationRequestSchema, uploadDirectory, uploadFileName } from './agent';
 import { readAttachmentBytes, readAttachmentOriginal } from './attachment-store';
 import { buildApp, sourceDigest, type BuildStageProgress } from './artifacts';
+import { harnessProtocol } from './durable/protocol';
 import { classifyBuildFailure, formatBuildFeedback, noProgressMessage } from './build-feedback';
 import { appForAdoption, getApp } from './business';
 import { getConfig } from './config';
@@ -111,11 +112,6 @@ function entryAssistantMessage(entry: unknown): unknown {
 type HarnessEvent = z.infer<typeof harnessEventSchema>;
 type UiChunk = Parameters<UIMessageStreamWriter<UIMessage>['write']>[0];
 
-/** 助手消息 id 由请求 id 派生（Power 的消息 id 也是这个约定），前端靠它把用量块挂到回复上。
- *  它同时写进 `generation.message_id` 与转录条目（`app.assistant`）的 `data.id`。
- *  一次运行按插话边界分段后，第一段仍是 `<requestId>-assistant`，其后依次 `-assistant-2`、`-assistant-3`…。 */
-const assistantMessageId = (requestId: string, segment: number) => segment <= 1 ? `${requestId}-assistant` : `${requestId}-assistant-${segment}`;
-
 function harnessBase(): string {
   return getConfig().durable.harnessUrl;
 }
@@ -144,7 +140,29 @@ class HarnessRequestError extends Error {
 }
 
 async function harnessJson<T>(path: string, init?: RequestInit): Promise<T> {
+  await ensureHarnessProtocol();
   return (await (await harnessFetch(path, init)).json()) as T;
+}
+
+let protocolChecked: Promise<void> | undefined;
+
+/**
+ * 校验常驻 harness 的协议版本（只查一次，成功后缓存；失败不缓存，重启 harness 后自愈）。
+ *
+ * 为什么需要：harness 是常驻进程、**不热加载**，而 Next 会热加载。只重启一半时版本会错位，
+ * 表现是静默的产品故障（曾经：新客户端读旧 `/messages`，助手回复凭空消失）。
+ */
+function ensureHarnessProtocol(): Promise<void> {
+  protocolChecked ??= (async () => {
+    const health = (await (await harnessFetch('/health')).json()) as { protocol?: number };
+    if (health.protocol !== harnessProtocol) {
+      throw new BusinessError(503, 50301, `harness 版本不匹配（运行中的 harness 协议 ${health.protocol ?? '未知'}，服务端需要 ${harnessProtocol}）：常驻 harness 不热加载，请重启 npm run dev:durable`);
+    }
+  })().catch((error: unknown) => {
+    protocolChecked = undefined;
+    throw error;
+  });
+  return protocolChecked;
 }
 
 /** harness `/state` 里本引擎用到的部分。 */
@@ -172,19 +190,22 @@ function blocksText(content: unknown): string {
 /** 转录里的纯文本（附加太晚时的兜底）：把一段文字当作一个文本块。 */
 const messageOfText = (text: string) => ({ content: [{ type: 'text', text }] });
 
-/** 一条用户消息的文本；不是用户消息时返回 null（助手消息由 `textBlocksOf` 处理）。 */
-function userTextOf(message: unknown): string | null {
-  const parsed = z.object({ role: z.literal('user'), content: z.unknown() }).safeParse(message);
-  return parsed.success ? blocksText(parsed.data.content) : null;
-}
-/** 工具结果条目的文本与错误标记。 */
-function toolResultOf(entry: unknown): { text: string; isError: boolean } {
+/** 一条 `pi.tool-result` 条目里的模型消息：工具名、调用 id、结构化 details 与错误标记都在它身上。 */
+const toolResultMessageSchema = toolResultSchema.extend({ toolCallId: z.string(), toolName: z.string(), details: z.unknown().optional() });
+
+function toolResultMessageOf(entry: unknown): z.infer<typeof toolResultMessageSchema> | null {
   const parsedEntry = z.object({ model: z.array(z.unknown()).optional() }).safeParse(entry);
   for (const message of parsedEntry.success ? parsedEntry.data.model ?? [] : []) {
-    const parsed = toolResultSchema.safeParse(message);
-    if (parsed.success) return { text: blocksText(parsed.data.content), isError: parsed.data.isError === true };
+    const parsed = toolResultMessageSchema.safeParse(message);
+    if (parsed.success) return parsed.data;
   }
-  return { text: '', isError: false };
+  return null;
+}
+
+/** 工具结果条目的文本与错误标记。 */
+function toolResultOf(entry: unknown): { text: string; isError: boolean } {
+  const message = toolResultMessageOf(entry);
+  return message ? { text: blocksText(message.content), isError: message.isError === true } : { text: '', isError: false };
 }
 
 /**
@@ -396,79 +417,25 @@ class AssistantTurn {
     const slot = this.tools.get(toolCallId);
     if (slot) slot.details = details;
   }
-
-  /** 落库的助手消息：前端刷新后靠它渲染文本与工具条目（parts 由本类构造，不是外部数据）。 */
-  message(id: string): UIMessage {
-    this.closeText();
-    const parts: AssistantPart[] = [...this.parts];
-    for (const [toolCallId, slot] of this.tools) {
-      const settled = slot.output !== undefined || slot.isError !== undefined;
-      const output = slot.details ?? slot.output;
-      parts.push({
-        type: 'dynamic-tool',
-        toolName: slot.toolName,
-        toolCallId,
-        state: settled ? (slot.isError ? 'output-error' : 'output-available') : 'input-available',
-        input: slot.input,
-        ...(output === undefined ? {} : { output }),
-        ...(slot.isError ? { errorText: typeof slot.output === 'string' ? slot.output : '工具调用失败' } : {}),
-      });
-    }
-    return { id, role: 'assistant', parts } as unknown as UIMessage;
-  }
 }
 
 /**
- * 一次运行的助手回复分段：插话落入转录时封住当前段、另起一段，每段写一条 `app.assistant` 条目。
- *
- * 条目 id 按写入顺序派生（段 1 = `<requestId>-assistant`，其后 `-assistant-2`…），所以转录里的顺序
- * 恒为 `app.user → app.assistant(段1) → app.user(插话) → app.assistant(段2)`，与 pi 的转录一致。
- * 插话气泡也由这里写（不再随 `/submit` 一起提交）：它必须排在段 1 之后，而条目 id 的顺序就是顺序。
- * `generation.message_id` 挂第一段的条目 id，一次生成因此只出现一个用量块。
+ * 本次生成第一条 `pi.assistant` 条目 id：前端一个用量块挂它，所以一次生成里的多条模型消息、
+ * 插话前后的两段与修复轮都取最早那条。条目 id 由观察线程从 `message_end` 的条目上读
+ * （会话跳多次生成共用，不能用 `/state` 反推本次范围）。
  */
-class AssistantSegments {
-  #turn: AssistantTurn;
-  /** 已落库的段数，同时用来派生下一段的条目 id。 */
-  #written = 0;
-  #firstEntryId: string | null = null;
-  /** 写入串行化：条目 id 的顺序就是转录顺序，交错写会打乱它。 */
-  #writes: Promise<void> = Promise.resolve();
+class TranscriptAnchor {
+  firstAssistantEntryId: string | null = null;
 
-  constructor(private readonly channel: ChunkChannel, private readonly conversationId: number, private readonly requestId: string) {
-    this.#turn = new AssistantTurn(channel);
+  record(entryId: string): void {
+    this.firstAssistantEntryId ??= entryId;
   }
+}
 
-  get turn(): AssistantTurn { return this.#turn; }
-
-  /** 第一段落库后的条目 id（用量块挂它）；一段都没落库时是 null。 */
-  get firstEntryId(): string | null { return this.#firstEntryId; }
-
-  /** 分段点：封住当前段（有内容才落条目），后续事件进新段。 */
-  seal(): void {
-    const sealed = this.#turn;
-    this.#turn = new AssistantTurn(this.channel);
-    const message = sealed.message(assistantMessageId(this.requestId, this.#written + 1));
-    if (!message.parts.length) return;
-    this.#written += 1;
-    this.#firstEntryId ??= message.id;
-    void this.#append(displayEntryKinds.assistant, message);
-  }
-
-  /** 追加一条展示条目（插话的 `app.user` 气泡），与分段共用同一条串行链。 */
-  append(kind: string, message: UIMessage): void {
-    void this.#append(kind, message);
-  }
-
-  /** 收尾：封住最后一段并等所有写入落地。 */
-  async settle(): Promise<void> {
-    this.seal();
-    await this.#writes;
-  }
-
-  #append(kind: string, message: UIMessage): Promise<void> {
-    this.#writes = this.#writes.then(() => appendDisplayEntry(this.conversationId, kind, message));
-    return this.#writes;
-  }
+/** 转录条目的数字 id（`message_end` 带的条目上）。 */
+function entryIdOf(entry: unknown): string | null {
+  const parsed = z.object({ id: z.number() }).safeParse(entry);
+  return parsed.success ? String(parsed.data.id) : null;
 }
 
 /**
@@ -488,8 +455,10 @@ async function observeHarnessRun(options: {
   let status: 'ready' | 'failed' | 'cancelled' = 'failed';
   let error: string | null = null;
   let stopReason: GenerationStopReason = 'model-error';
-  // 助手回复的条目写入器：跨修复轮与插话分段连续，条目 id 的顺序就是转录顺序。
-  const segments = new AssistantSegments(channel, conversationId, requestId);
+  // 前端的流式助手消息（本引擎不再写展示副本，刷新读回由 loadMessages 从 pi 条目派生）。
+  const turn = new AssistantTurn(channel);
+  // 用量块挂的条目：本次生成第一条 pi.assistant 条目 id。
+  const anchor = new TranscriptAnchor();
   // 构建尝试的记账序号：阶段构建（buildPreview）与最终验证/修复轮共用一串，与 legacy 同口径。
   let buildSteps = 0;
   // 租约心跳与取消/超时的唯一来源：任务行是权威，harness 里的运行只是执行者。
@@ -530,7 +499,7 @@ async function observeHarnessRun(options: {
     let snapshot: string | null = null;
     for (let round = 1; ; round += 1) {
       await waitForRunStart(conversationId, stop.signal);
-      const run = new RunTranslator(channel, segments, requestId, model, round);
+      const run = new RunTranslator(channel, turn, anchor, requestId, model, round);
       let failureText: string | null = null;
       const response = await harnessFetch(`/agent-events?conversationId=${conversationId}`, {
         headers: { accept: 'application/x-ndjson' },
@@ -607,14 +576,12 @@ async function observeHarnessRun(options: {
     // 落库与收尾都在断连之后照常发生：这一步不依赖任何 HTTP 流。
     try {
       // 极端情况下（运行在附加之前就已结束）事件流是空的，退回读会话里最后一条助手条目的文本。
-      if (!segments.turn.parts.length && !segments.turn.tools.size) {
+      if (!turn.parts.length && !turn.tools.size) {
         const state = await harnessState(conversationId).catch(() => null);
         const text = [...(state?.view.entries ?? [])].reverse().find(entry => entry.kind === 'pi.assistant')?.text ?? '';
-        if (text) segments.turn.seed(messageOfText(text));
+        if (text) turn.seed(messageOfText(text));
       }
-      // 取消 / 失败也要把已经产出的段落库：挂上零星半段总比丢掉整轮对话好。
-      await segments.settle();
-      await finishGeneration(requestId, status, error, segments.firstEntryId, stopReason);
+      await finishGeneration(requestId, status, error, anchor.firstAssistantEntryId, stopReason);
       channel.push({ type: 'data-progress', data: { stage: status === 'ready' ? 'ready' : status, at: Date.now() }, transient: true } as UiChunk);
     } catch (problem) {
       console.error(`生成收尾失败（生成 ${requestId}）：`, problem);
@@ -708,32 +675,28 @@ class RunTranslator {
   #chain: Promise<void> = Promise.resolve();
   readonly #toolOutcomes = new Map<string, { ok: boolean; ms: number | null }>();
 
-  constructor(readonly channel: ChunkChannel, private readonly segments: AssistantSegments, private readonly requestId: string, private readonly model: ModelIdentity, private readonly round: number) {}
-
-  /** 当前这一段（插话落入转录时会换成新的一段）。 */
-  get turn(): AssistantTurn { return this.segments.turn; }
+  constructor(readonly channel: ChunkChannel, private readonly turn: AssistantTurn, private readonly anchor: TranscriptAnchor, private readonly requestId: string, private readonly model: ModelIdentity, private readonly round: number) {}
 
   handle(event: HarnessEvent) {
     switch (event.type) {
       case 'snapshot':
         this.turn.seed(event.generation?.message);
         break;
-      case 'message_start': {
-        // 运行开始时那条用户条目在观察者附加之前就已落地，所以这里出现的用户消息只能是中途插话。
-        const text = userTextOf(event.message);
-        if (text !== null) this.#steerLanded(text);
-        // 工具结果与系统条目同样带 model 文本，但它们不是助手正文：`message_end` 只认助手条目，
-        // 这里也要一致，否则工具结果的文本会在工具卡片之外再当成助手文本流一遍。
-        else if (z.object({ role: z.literal('assistant') }).safeParse(event.message).success) this.turn.seed(event.message);
+      case 'message_start':
+        // 工具结果、系统条目与中途插话的用户消息同样带 model 文本，但它们不是助手正文：
+        // `message_end` 只认助手条目，这里也要一致，否则工具结果的文本会在工具卡片之外再当成助手文本流一遍。
+        if (z.object({ role: z.literal('assistant') }).safeParse(event.message).success) this.turn.seed(event.message);
         break;
-      }
       case 'message_update':
         this.turn.applyChanges(event.changes ?? []);
         break;
       case 'message_end': {
         const message = entryAssistantMessage(event.entry);
-        // 非助手条目（插话的用户条目、工具结果）不是模型步骤：不分段也不记这一步的账。
+        // 非助手条目（插话的用户条目、工具结果）不是模型步骤：不记这一步的账。
         if (!message) break;
+        // 用量块挂本次生成的第一条助手条目：条目本体由 pi 写在转录里，这里只记 id。
+        const entryId = entryIdOf(event.entry);
+        if (entryId !== null) this.anchor.record(entryId);
         this.turn.reconcile(message);
         this.turn.closeText();
         this.#chain = this.#chain.then(() => this.#recordAssistant(message)).catch(() => undefined);
@@ -768,16 +731,6 @@ class RunTranslator {
     await this.#chain;
     await this.#flushPending();
     this.#stopBuildWatch();
-  }
-
-  /**
-   * 插话落入转录（pi 的分段点）：封住当前段、把它写成一条 `app.assistant` 条目，紧接着写插话自己的
-   * `app.user` 条目，最后另起一段继续累积。两次写入的顺序就是条目 id 的顺序，所以刷新后看到的是
-   * 「AI 回复块 1 / 插话 / AI 回复块 2」。
-   */
-  #steerLanded(text: string): void {
-    this.segments.seal();
-    this.segments.append(displayEntryKinds.user, { id: `steer-${randomUUID()}`, role: 'user', parts: [{ type: 'text', text }] });
   }
 
   #progress(data: unknown) {
@@ -911,10 +864,10 @@ function writtenPathsOf(toolName: string, input: unknown): string[] {
 type SubmitContentBlock = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: ImageMediaType };
 
 /**
- * 产品写进转录的两种展示条目。对话转录属于 harness 存储（`entries`），产品只用 `data` 通道放
- * 前端要渲染的 UI 消息；模型上下文由 `model` 通道自己组，不读这里的 JSON。
+ * 产品写进转录的用户条目种类：用户气泡随提交落地（`submit({ entry })`），模型上下文仍由 `model` 通道自己组。
+ * 助手气泡没有对应的展示条目：它直接由 pi 的原生 `pi.assistant` / `pi.tool-result` 条目派生（见 `loadMessages`）。
  */
-const displayEntryKinds = { user: 'app.user', assistant: 'app.assistant' } as const;
+const userEntryKind = 'app.user';
 
 /** 一次 harness 提交。入参里没有任何请求 socket 或 signal，断连影响不到它。 */
 async function submitHarness(conversationId: number, content: string | SubmitContentBlock[], requestId: string | undefined, options: { whenBusy?: 'steer'; entry?: { kind: string; data: UIMessage } } = {}): Promise<void> {
@@ -925,34 +878,99 @@ async function submitHarness(conversationId: number, content: string | SubmitCon
   });
 }
 
-/** 落一条展示条目（助手回复的 UI 消息）。失败只告警：转录缺一条不该让整次生成失败。 */
-async function appendDisplayEntry(conversationId: number, kind: string, data: UIMessage): Promise<void> {
-  try {
-    await harnessJson('/entries', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ conversationId, kind, data }),
-    });
-  } catch (problem) {
-    console.warn(`写入对话转录失败（会话 ${conversationId}，${kind}）：`, problem);
+/** harness `/messages` 返回的转录条目（旧→新）：条目 id 与种类，以及模型消息或前端要渲染的 UI 载荷。 */
+const harnessMessagesSchema = z.object({
+  messages: z.array(z.object({
+    id: z.number(),
+    kind: z.string(),
+    model: z.array(z.unknown()).optional(),
+    data: z.unknown().optional(),
+  })),
+});
+type TranscriptEntry = z.infer<typeof harnessMessagesSchema>['messages'][number];
+
+/** 用户气泡载荷（提交时写下的 UI 消息）。 */
+const userBubbleSchema = z.object({ id: z.string(), role: z.literal('user'), parts: z.array(z.unknown()) }).passthrough();
+
+/** 一条助手条目里的工具调用块（id、名称与参数）。 */
+const toolCallBlockSchema = z.object({ type: z.literal('toolCall'), id: z.string(), name: z.string(), arguments: z.unknown().optional() });
+
+/** 一条助手模型消息的展示 parts：文本块与工具调用块按内容顺序排列（思考块不进 UI）。 */
+function assistantPartsOf(message: unknown): AssistantPart[] {
+  const parsed = z.object({ content: z.array(z.unknown()).optional() }).safeParse(message);
+  const parts: AssistantPart[] = [];
+  for (const block of parsed.success ? parsed.data.content ?? [] : []) {
+    const text = textBlockSchema.safeParse(block);
+    if (text.success) {
+      if (text.data.text) parts.push({ type: 'text', text: text.data.text });
+      continue;
+    }
+    const call = toolCallBlockSchema.safeParse(block);
+    if (call.success) parts.push({ type: 'dynamic-tool', toolName: call.data.name, toolCallId: call.data.id, state: 'input-available', input: call.data.arguments ?? {} });
   }
+  return parts;
 }
 
-/** harness `/messages` 返回的转录展示条目。 */
-const harnessMessagesSchema = z.object({
-  messages: z.array(z.object({ id: z.number(), kind: z.string(), data: z.object({ id: z.string(), role: z.enum(['user', 'assistant']), parts: z.array(z.unknown()) }) })),
-});
+/**
+ * 转录 → 前端的 UI 消息。前端展示就是 pi 的转录，产品不再写任何助手展示副本：
+ *
+ * - `app.user` 是提交时写下的用户气泡载荷（附件/图片回显不变）；
+ * - `pi.assistant` 是一条模型消息（文本块 + 该条目的工具调用）：**连续的模型消息合并成一个助手气泡**
+ *   （一次生成里每个工具调用回合都是一条 `pi.assistant`，逐条渲染会把一次回复拆成好几个气泡），
+ *   气泡 id 取这一段的**第一条**条目 id；
+ * - `pi.tool-result` 按 `toolCallId` 并进对应的工具调用（工具调用与它的结果同一条消息，不单列气泡）；
+ * - `pi.system` / `pi.compaction` / `pi.reset` 是框架自己的条目，不进展示。
+ *
+ * 顺序由条目 id 决定，插话落地的位置由 pi 定（“当前步骤跑完后的下一个边界”），所以刷新看到的顺序
+ * 就是模型实际看到的顺序，不需要任何重排：用户气泡天然把相邻的两段模型消息切开。
+ */
+function transcriptMessages(entries: readonly TranscriptEntry[]): UIMessage[] {
+  const messages: UIMessage[] = [];
+  const tools = new Map<string, Extract<AssistantPart, { type: 'dynamic-tool' }>>();
+  /** 当前这一段助手气泡（下一条模型消息并入它，直到出现用户气泡）。 */
+  let open: { id: string; role: 'assistant'; parts: AssistantPart[] } | undefined;
+  for (const entry of entries) {
+    if (entry.kind === userEntryKind) {
+      const bubble = userBubbleSchema.safeParse(entry.data);
+      if (bubble.success) messages.push(bubble.data as UIMessage);
+      open = undefined;
+      continue;
+    }
+    if (entry.kind === 'pi.assistant') {
+      const message = entryAssistantMessage(entry);
+      if (!message) continue;
+      const parts = assistantPartsOf(message);
+      if (open) open.parts.push(...parts);
+      else {
+        open = { id: String(entry.id), role: 'assistant', parts };
+        messages.push(open as unknown as UIMessage);
+      }
+      for (const part of parts) if (part.type === 'dynamic-tool') tools.set(part.toolCallId, part);
+      continue;
+    }
+    if (entry.kind === 'pi.tool-result') {
+      const result = toolResultMessageOf(entry);
+      const part = result ? tools.get(result.toolCallId) : undefined;
+      if (!result || !part) continue;
+      const text = blocksText(result.content);
+      part.state = result.isError === true ? 'output-error' : 'output-available';
+      part.output = result.details ?? text;
+      if (result.isError === true) part.errorText = text || '工具调用失败';
+    }
+  }
+  return messages;
+}
 
 /**
- * 一个应用的对话历史（`app/messages`）。转录在 harness 存储里，所以这里经 `/messages` 读；
- * 还没聊过（没有会话映射）时是空历史。
+ * 一个应用的对话历史（`app/messages`）。转录在 harness 存储里（`pi.*` 是权威，产品只额外写用户气泡），
+ * 所以这里经 `/messages` 读回条目再投影成 UI 消息；还没聊过（没有会话映射）时是空历史。
  */
 export async function loadMessages(appId: string): Promise<UIMessage[]> {
   const conversationId = await conversationIdOf(appId);
   if (conversationId === undefined) return [];
   const parsed = harnessMessagesSchema.safeParse(await harnessJson<unknown>(`/messages?conversationId=${conversationId}`));
   if (!parsed.success) throw new Error('harness /messages 返回了预期之外的结构');
-  return parsed.data.messages.map(entry => entry.data as UIMessage);
+  return transcriptMessages(parsed.data.messages);
 }
 
 /** 提交是异步落地的（admission 立即返回，运行随后启动），等 harness 报出这次会话的活跃运行再附加。 */async function waitForRunStart(conversationId: number, signal: AbortSignal): Promise<void> {
@@ -1071,7 +1089,7 @@ export async function harnessChatResponse(req: Request, raw: unknown, user: User
     conversationId = await conversationFor(app);
     // 指令按当前轮次对齐（带图轮次多一句「图片已随消息提供」）；只提交，不观察。
     await configureHarnessInstructions(conversationId, instructions);
-    const submitOptions = { entry: { kind: displayEntryKinds.user, data: incoming } };
+    const submitOptions = { entry: { kind: userEntryKind, data: incoming } };
     try {
       await submitHarness(conversationId, content, input.requestId, submitOptions);
     } catch (problem) {
@@ -1091,7 +1109,6 @@ export async function harnessChatResponse(req: Request, raw: unknown, user: User
   void observeHarnessRun({ conversationId, requestId: input.requestId, app, model, channel, stop });
 
   const stream = createUIMessageStream({
-    generateId: () => assistantMessageId(input.requestId, 1),
     onError: () => (stop.signal.aborted ? '生成已取消' : '生成失败，请查看任务状态'),
     execute: async ({ writer }) => {
       for await (const chunk of channel.drain()) {
@@ -1124,8 +1141,8 @@ export async function harnessCancelGeneration(appId: string, user: User): Promis
  * 普通 user 消息）。落地方式：插话交给 pi-durable 的 `submit({ whenBusy: "steer" })`，排队进
  * `pi.inbox`，在**当前步骤跑完后**的下一个边界落入 transcript 并进入下一次模型调用。
  *
- * 插话气泡不随这次提交写：它要排在插话之前的助手回复段之后，而条目 id 的顺序就是转录顺序，所以由
- * 观察线程在分段点把它写进转录（否则它会被提交时写入，排在整轮助手回复之前）。
+ * 插话自己的用户气泡也交给这次提交（`entry` 写 `app.user`）：pi 在边界处把它和模型消息一起写下，
+ * 所以它在转录里天然落在两段助手条目之间，产品不再另写一条展示副本、也不需要在流式期间补写。
  */
 export async function harnessSteerGeneration(appId: string, user: User, text: string): Promise<boolean> {
   // 插话会写进对话历史并影响这次生成，属于写操作：只有应用创建者可以（同 app/chat/gen/code）。
@@ -1135,6 +1152,7 @@ export async function harnessSteerGeneration(appId: string, user: User, text: st
   // 队列只对正在跑的那次生成有效：任务已结束或没有活跃生成时插话无处可去。
   const conversationId = active ? await conversationIdOf(appId) : undefined;
   if (!task || !active || conversationId === undefined) throw new BusinessError(409, 40900, '当前没有正在生成的步骤，插话不适用');
-  await submitHarness(conversationId, text, undefined, { whenBusy: 'steer' });
+  const bubble: UIMessage = { id: `steer-${randomUUID()}`, role: 'user', parts: [{ type: 'text', text }] } as UIMessage;
+  await submitHarness(conversationId, text, undefined, { whenBusy: 'steer', entry: { kind: userEntryKind, data: bubble } });
   return true;
 }

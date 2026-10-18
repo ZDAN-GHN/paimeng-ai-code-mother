@@ -205,7 +205,7 @@ function Chat({ id }: { id: string }) {
     },
   });
   const generating = status === 'submitted' || status === 'streaming' || task?.status === 'generating' || task?.status === 'building';
-  /** 读回转录里的对话历史：进入页面与一次生成结束后共用（后者重排插话分段后的气泡顺序）。 */
+  /** 进入页面时读回转录（前端展示 = pi 的转录，`app/messages` 已按条目顺序投影成 UI 消息）。 */
   const loadHistory = useCallback(async (): Promise<ChatMessage[]> => {
     const history = await api<ChatMessage[]>('app/messages?appId=' + encodeURIComponent(id));
     if (mounted.current) setMessages(history);
@@ -225,11 +225,7 @@ function Chat({ id }: { id: string }) {
     setProgress(current => current.outcome === 'running' ? settleProgress(current, terminal) : current);
     if (terminal === 'cancelled') setQueuePaused(true);
     else setDrainArmed(true);
-    // 插话把一次生成切成多段：流式期间客户端只有一条助手气泡（插话只能插在它前面），终态后重取一次
-    // 历史，才能按落库顺序重新渲染「段 1 / 插话 / 段 2」。队列还有消息时先让队列发出去（历史重取会
-    // 顶掉刚乐观追加的那条用户消息），下一次终态再对齐。
-    if (steered && queue.length === 0) void loadHistory().catch(() => undefined);
-  }, [task, status, steered, queue.length, loadHistory]);
+  }, [task, status]);
   const taskStatus = task?.status;
   // 每次生成结束时取一次用量：一条助手回复对应一次生成，按消息 id 挂到气泡上；生成中不轮询明细。
   const assetUrl = useCallback((path: string) => '/api/app/asset?appId=' + encodeURIComponent(id) + '&path=' + encodeURIComponent(path), [id]);
