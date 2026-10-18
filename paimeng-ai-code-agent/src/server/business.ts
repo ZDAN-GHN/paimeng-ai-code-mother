@@ -1,6 +1,6 @@
 import 'server-only';
 import { rm } from 'node:fs/promises';
-import { and, asc, desc, eq, like, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, like, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { apps, users, generations, leases, sessions } from './schema';
 import { db, now } from './db';
@@ -57,6 +57,9 @@ export async function createApp(raw:unknown,user:User){
 }
 export async function listApps(raw:unknown,scope:'my'|'good'|'admin',user?:User){
  const q=pageSchema.parse(raw);if(scope!=='admin'&&q.pageSize>20)throw new BusinessError(400,40000,'每页最多查询 20 个应用');const predicates:SQL[]=[eq(apps.isDelete,0)];
+ // 库里的行可能来自更早的版本：已废弃的类型（如 ts_fullstack）不在契约里，appView 解析会抛错，
+ // 一行脏数据足以让整个列表返回 400。列表只渲染契约内的类型，行数与记录用同一套条件保持一致。
+ predicates.push(inArray(apps.codeGenType,[...codeGenTypes]));
  if(scope==='my')predicates.push(eq(apps.userId,BigInt(user!.id)));
  if(scope==='good')predicates.push(sql`${apps.priority} >= 99`);
  if(q.id)predicates.push(eq(apps.id,BigInt(q.id)));if(q.userId&&scope!=='my')predicates.push(eq(apps.userId,BigInt(q.userId)));
