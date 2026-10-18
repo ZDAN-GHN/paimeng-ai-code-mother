@@ -1,6 +1,8 @@
-# Pi Durable 迁移 · M2a：把生成入口接到 harness
+# Pi Durable 迁移 · M2a：把生成入口接到 harness（含 M2b）
 
-状态：**已跑通**（2026-10-18）。分支 `feat/pi-durable-migration`，基线 `main@d0c9797`（M1 提交 `4edbdd0`/`1554dcc`/`345d60a`）。
+状态：M2a **已跑通**（2026-10-18）；M2b（真实业务工具接进 harness）代码与 harness 层验收已跑通，
+产品路径的真实模型验收待跑，见 §7。分支 `feat/pi-durable-migration`，基线 `main@d0c9797`
+（M1 提交 `4edbdd0`/`1554dcc`/`345d60a`，M2a 提交 `d8acf2d`）。
 设计输入是 `docs/plans/pi-durable-data-model.md`；M1 的链路与证据见 `docs/plans/pi-durable-m1.md`。
 
 ## 0. 一句话结论
@@ -203,21 +205,18 @@ npm run check:ui / npm run check:e2e            # 通过（没改 tsx 与 e2e）
 
 ## 5. 下一步
 
-### M2b：真实工具 + 里程碑 + 记账
+### M2b：真实工具 + 进度 + 里程碑 + 记账（已做，见 §7）
 
-从 `src/server/durable-engine.ts` 与 `spike/pi-durable-m1/src/server.ts` 开始：
+已完成：`buildPreview` 接进 harness 并声明工具级 `replay`；构建阶段进度与保活；里程碑预览事件；
+模型步骤用量改读 assistant 条目自带的 `usage`。剩下的属于后续阶段：
 
-1. **构建工具**：把 `buildApp` 注册成 harness 工具（`defineTool`），构建输出走 `api.output()` 流出去
-   （顺带解决构建静默期的保活，data-model §2 末段），失败把 `classifyBuildFailure` 的诊断作为
-   工具结果交回模型；`ToolTask` 的 `durationMs` 进记账。
-2. **里程碑预览**：工具成功时刷新预览并写一条 `data-progress` 的 `preview` 事件，让前端的
-   预览版本号照旧工作；对应 legacy 的 `buildStageWatch` 保活可以删掉。
-3. **最终验证与修复轮**：服务端的验证权（架构 #16）现在只在 legacy 里。迁移时用扩展的
+1. **最终验证与修复轮**：服务端的验证权（架构 #16）现在只在 legacy 里。迁移时用扩展的
    `GenerationHooks`（`onYield` 返回 `{continue}` / `afterTools`）把「构建失败 → 把诊断交回模型」
-   做成一轮，`BUILD_REPAIR_ROUNDS` 继续生效。
-4. **记账**：按 data-model §5 保留 `generation` / `generation_step`，由 `GenerationHooks` 与
-   `ToolHooks` 写（`beforeRequest` / `afterResponse` / `afterTool`）；用量块改读条目自带 usage +
-   `pi.usage`，`ts_generation.messageId` 的链接变成天然存在。
+   做成一轮，`BUILD_REPAIR_ROUNDS` 继续生效。现在 harness 路径下模型只能自己调 `buildPreview`
+   拿诊断（构建失败不会自动进入修复轮，也不会以构建错误结束任务）。
+2. **产品路径的真实浏览器验收**（见 §7.7 待办 1）：一条真实模型的 React 生成经 Next + harness
+   跑通（截图 + 时间线）、构建期间关浏览器、构建中途 kill -9 harness。本轮已用 harness 层等价
+   实验证明机制（§7.5）。
 5. **插话**：`app/chat/steer` 改成 `submit({whenBusy:"steer"})`，前端把 `pi.inbox` 的排队项与
    `ts_message` 对齐（避免同一条文字显示两次，见 §4.2）。
 6. **图片输入**：附件字节 → 模型 file part（`pi-ai` 的 file part 已支持），工作区副本沿用
@@ -253,3 +252,110 @@ npm run verify:m2a-reconnect    # ③
 cd spike/pi-durable-pg && ./pg.sh start
 cd ../../paimeng-ai-code-agent && npx vitest run tests/integration/durable-m1
 ```
+
+## 7. M2b：把真实业务工具接进 harness（2026-10-18）
+
+状态：**代码与 harness 层验收已跑通**。产品路径的真实模型 + 浏览器验收尚未跑（拓扑在 §7.7）。
+
+### 7.1 一句话结论
+
+harness 现在跑的是产品的真实构建：`buildPreview` 直接调用产品的 `buildApp`，在真实 Docker 容器里
+装依赖 / 类型检查 / 打包，阶段进度与结果走工具的 `details`，由产品观察者翻成前端已有的
+`data-progress`（前端一行未改）。构建静默期由观察者每秒补一个 `started` 事件保活。每个工具都声明了
+`replay`（崩溃后能不能重跑），"构建中途 kill -9 → 重启续跑" 因此能正确重放构建而不产生重复写入。
+
+### 7.2 工具清单与各自的 `replay` 判断
+
+`GET /tools` 可直接读回（`spike/pi-durable-m1/src/server.ts` 的 `productTools`）。
+
+| 工具 | `replay` | 为什么 |
+| --- | --- | --- |
+| `readFile` | safe | 纯读，重跑无影响 |
+| `listFiles` | safe | 纯读 |
+| `writeFiles` | safe | 写的是**完整内容**，同参数重跑得到同样的字节，不会双重追加 |
+| `modifyFile` | **unsafe** | 精确匹配替换不幂等：重跑要么二次生效，要么因为匹配已消失而报错 |
+| `deleteFile` | **unsafe** | 重跑时文件已不在，返回错误；删除不是幂等操作 |
+| `buildPreview` | safe | 同源码同产物；每次都 stage 到新目录再原子替换 dist，重放不会留下半成品或重复目录 |
+| `m1_wait` | unsafe（刻意保留默认） | 它是 M1 的夹具，`tests/integration/durable-m1/restart.test.ts` 就在它身上钉「被中断的工具不重跑」 |
+
+未声明 `replay` 的默认值是 `unsafe`（框架语义：宁可丢掉一次执行，也不重复副作用）。
+
+### 7.3 进度事件映射（前端不改）
+
+| harness | 前端 `data-progress` |
+| --- | --- |
+| `tool_execution_update.details = {stage: source\|install\|typecheck\|build, status, ms, at}` | 原样透传（与 legacy `buildStageWatch` 同一形状） |
+| 构建阶段进行中（无新 details） | 观察者每 1s 补一个同阶段的 `started`（同 legacy `buildKeepAliveMs`，约束 #40/#41） |
+| 构建成功（`details.status === "ok"`） | `{stage:"preview", version: ++n}`，前端预览版本号照旧工作 |
+| `writeFiles` / `modifyFile` / `deleteFile` 结果 | `{stage:"files", paths}`（与 M2a 一致） |
+| 运行结束 | `{stage: ready\|failed\|cancelled}` |
+| `run_end` 后 | 没有事件了：任务不会在静默期被误判（NDJSON 每秒还有 `{"type":"ping"}`） |
+
+工具的 `details` 同时作为工具卡片的输出（产品 `tool-call.tsx` 的 `buildPreviewOutput` 直接吃对象），
+不用把构建结果序列化成文本再解析。
+
+### 7.4 记账：用量改读条目自带的 `usage`
+
+- 新增 `recordAssistantStep`（`src/server/generation-accounting.ts`）：按 pi-durable 的 assistant 条目写
+  一行 `kind=model`，用量来自条目自带的 `usage`（`input/output/cacheRead/cacheWrite/reasoning`），
+  字段缺失记 `NULL`（未知，不是 0），与 legacy `recordModelStep` 同一种口径。
+- 写入时机在 `durable-engine.ts` 的 `RunTranslator`：一条模型步骤的账要在它的工具跑完后才落，所以
+  在下一条 assistant 条目或运行结束时补写；工具成败与耗时取自这一轮的 `tool_execution_*` 事件
+  （`ms` 若采集不到记 NULL）。
+- 模型身份：`alias` 取产品注册表里这次生成绑定的别名（与 legacy 同一份 `modelBindingFor`），
+  `providerId` / `modelName` 取 assistant 条目自带的 `provider` / `model`（响应模型优先），所以上游实际
+  用哪个模型也能对上。
+- `ts_generation` 与 `ts_generation_step` 两张业务表原样保留（data-model §5 的最小补充），
+  `ts_generation.messageId` 仍指向落库的助手消息，所以前端的「一条回复一个用量块」不变。
+
+### 7.5 已跑通的证据（真实 Docker 构建）
+
+原始文件在 `spike/pi-durable-m1/evidence-m2b/`（`timeline-m2b.txt` 是完整时间线）。工作区是
+`react-ts@1.0.0` 模板的真实 React 工程，模型用桩模型（只驱动工具调用，不调真实 provider）。
+
+1. **真实容器构建经 harness 跑通**：一条 NDJSON 事件流里 6 次 `tool_execution_update` 携带
+   `install 8983ms / typecheck 2641ms / build 1927ms`，最终结果
+   `预览已更新（real-react），用时 13815ms。`，产物 `dist/index.html` + `assets/` 落盘；
+   同一流里 11 个 `{"type":"ping"}`（保活）。
+2. **构建期间断开观察端**（产品用的就是这条流）：构建跑到第 6 秒时 `kill -9` 客户端，harness 记
+   `agent-events client gone — aborting the view only`；掉线瞬间
+   `tasks=[generation waiting abortRequested=false, pi.tool running abortRequested=false]`，构建照常跑完
+   （`预览已更新…用时 11297ms`），没有 `cancelled`。
+3. **构建中途 `kill -9` → 重启续跑**：杀掉时容器 `Up 1 second`；重启后重放的 `buildPreview` 用同一份
+   源码重新构建成功（`预览已更新…用时 23186ms`），`src/App.tsx` 与杀进程前逐字节相同（无重复写入），
+   `dist/` 只有一个。
+
+### 7.6 这次验收挖出的真实缺陷（已修）
+
+首次跑「中期 kill -9」时，重启后的构建报 `会话 7 没有关联应用，拒绝构建`：应用映射原先只存在
+harness 进程的内存里，而崩溃重放发生在任何请求到达之前。修法是最小且持久的：从会话持久化的
+`pi.agent.cwd`（`<runtimeRoot>/code_output/<codeGenType>_<appId>`）还原应用映射
+（`appRefFromWorkspace` + `conversationOf` 里的惰性回填，`appRefFor` 在工具执行时兜底）。
+证据：`evidence-m2b/harness-resume-before-fix.log`（修前）与 `harness-crash-resume.log`（修后）。
+
+### 7.7 回归测试
+
+```bash
+npx tsc --noEmit                                  # 两个包都干净
+npx vitest run tests/integration/durable-m1       # 6 文件 11 用例全过（新增 build-tool / replay-policy）
+```
+
+新增用例：`build-tool.test.ts`（HTML 应用走真实 `buildApp` 源码校验，断言工具结果与“没有 app 就拒绝构建”）、
+`replay-policy.test.ts`（把 §7.2 的声明钉成断言）。`support.ts` 新增 `buildRunner`（用产品 tsx + 产品根
+作为 cwd 启动 harness，产品模块的 `@/` 别名才能解析）与 `getState(base, conversationId)`。
+
+### 7.8 剩余待办（给整合阶段）
+
+1. **产品路径的真实模型 + 浏览器验收**（本轮唯一没跑的一条）：`npm run dev:durable-m1` 起全栈，
+   真实模型建一个 **react_project** 应用 → 浏览器看流式 / 工具条目 / 构建阶段进度 / 里程碑预览刷新并截图；
+   然后在构建阶段关掉整个浏览器（Firefox 优先）验证任务继续；最后在构建中途 `kill -9` harness 验证续跑。
+   可直接照抄 `spike/pi-durable-m1/src/verify-m2a.ts` / `verify-m2a-reconnect.ts` 的结构，改提示词为
+   React 应用并加一条“构建阶段”断言的脚本。**没有这一步，`durable-engine.ts` 里 `RunTranslator` 的翻译
+   逻辑只经过单元级人工核对，没有端到端证据。**
+2. **被 kill 的构建容器会残留**：`containerRun` 的 `docker rm -f` 在 finally 里，harness 被 kill -9 时来不及跑。
+   容器是 `--rm`，自己的命令跑完会自行移除；但整合阶段若要更积极，可在启动时清理 `paimeng-ts-build-*`。
+3. **自动修复轮与最终验证**（架构 #16）：harness 路径目前不会因为构建失败自动进入修复轮、也不以构建错误
+   结束任务，完全靠模型自己调 `buildPreview`。要做的话接 `GenerationHooks`（见 §5.1）。
+4. **插话 / 图片输入 / 联网工具**：仍按 §5 的 5–7 条，不在 M2b 范围。
+5. **harness 的 `/conversations` 列表在重启后为空**：`workspaces` 表是进程内存（验证脚本用），重启后
+   要反查会话需要改成持久来源；构建工具本身已不依赖它（§7.6）。
