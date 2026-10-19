@@ -30,9 +30,11 @@ import {
   modelProviderOptionChoices,
   modelProviderOptionLabels,
   modelProviderOptionKeys,
+  aliasPurposeOf,
   providerHeaderLimit,
   providerHeaderNameSchema,
   providerHeaderValueSchema,
+  optionalModelAliases,
   providerOptionKeysByFormat,
   providerOptionsSchema,
   providerModelListLimit,
@@ -47,6 +49,7 @@ import {
   type ModelAliasInput,
   type ModelAliasSettings,
   type ModelConfigVersion,
+  type OptionalModelAlias,
   type ModelProviderOptions,
   type ModelProviderView,
   type ModelProviderWriteInput,
@@ -88,12 +91,13 @@ type AliasFormValues = {
     topP?: number | null;
     maxOutputTokens?: number | null;
     reasoning?: ReasoningLevel | null;
+    reasoningContentPassthrough?: boolean;
   };
   enabled: boolean;
 };
 
 type ProviderEditor = { mode: 'create' } | { mode: 'edit'; original: ModelProviderView };
-type AliasEditor = { mode: 'create' } | { mode: 'edit'; original: ModelAlias };
+type AliasEditor = { mode: 'create'; prefill?: OptionalModelAlias } | { mode: 'edit'; original: ModelAlias };
 
 export function ModelManager() {
   return (
@@ -170,9 +174,9 @@ function ModelConfigManager() {
     setProviderEditor({ mode: 'edit', original: row });
   }
 
-  function openCreateAlias() {
+  function openCreateAlias(prefill?: OptionalModelAlias) {
     setConflict(null);
-    setAliasEditor({ mode: 'create' });
+    setAliasEditor({ mode: 'create', ...(prefill ? { prefill } : {}) });
   }
 
   function openEditAlias(row: ModelAlias) {
@@ -254,7 +258,7 @@ function ModelConfigManager() {
     setProbeText(null);
     setUpstreamModels([]);
     aliasForm.setFieldsValue(
-      aliasEditor.mode === 'edit' ? aliasFormValues(aliasEditor.original) : emptyAliasValues(),
+      aliasEditor.mode === 'edit' ? aliasFormValues(aliasEditor.original) : emptyAliasValues(aliasEditor.prefill),
     );
   }, [aliasEditor, aliasForm]);
 
@@ -373,6 +377,9 @@ function ModelConfigManager() {
   }
 
   const requiredAliasSet = new Set<string>(config.requiredAliases);
+  /** 尚未配置的可选别名：给出预填入口，而不是让用户自己猜别名名字。 */
+  const missingOptionalAliases = (Object.keys(optionalModelAliases) as OptionalModelAlias[])
+    .filter(name => !config.aliases.some(alias => alias.alias === name));
 
   const providerColumns: ColumnsType<ModelProviderView> = [
     { title: 'ID', dataIndex: 'id' },
@@ -430,12 +437,16 @@ function ModelConfigManager() {
     {
       title: '别名',
       dataIndex: 'alias',
-      render: (_, row) => (
-        <Space>
-          <span>{row.alias}</span>
-          {requiredAliasSet.has(row.alias) ? <Tag color="orange">必需</Tag> : null}
-        </Space>
-      ),
+      render: (_, row) => {
+        const purpose = aliasPurposeOf(row.alias);
+        return (
+          <Space>
+            <span>{row.alias}</span>
+            {requiredAliasSet.has(row.alias) ? <Tag color="orange">必需</Tag> : null}
+            {purpose ? <Tag color="geekblue">{purpose.label}</Tag> : null}
+          </Space>
+        );
+      },
     },
     { title: '提供商', dataIndex: 'providerId' },
     { title: '上游模型名', dataIndex: 'modelName' },
@@ -591,9 +602,16 @@ function ModelConfigManager() {
 
           <div className={styles.sectionHeading}>
             <h2>别名</h2>
-            <Button type="primary" onClick={openCreateAlias} disabled={saving}>
-              新增别名
-            </Button>
+            <Space>
+              {missingOptionalAliases.map((name) => (
+                <Button key={name} onClick={() => openCreateAlias(name)} disabled={saving}>
+                  新增{optionalModelAliases[name].label}别名
+                </Button>
+              ))}
+              <Button type="primary" onClick={() => openCreateAlias()} disabled={saving}>
+                新增别名
+              </Button>
+            </Space>
           </div>
           <Table<ModelAlias>
             rowKey="alias"
@@ -876,7 +894,7 @@ function ModelConfigManager() {
             form={aliasForm}
             layout="vertical"
             preserve={false}
-            initialValues={aliasEditor.mode === 'edit' ? aliasFormValues(aliasEditor.original) : emptyAliasValues()}
+            initialValues={aliasEditor.mode === 'edit' ? aliasFormValues(aliasEditor.original) : emptyAliasValues(aliasEditor.prefill)}
           >
             <Form.Item
               name="alias"
@@ -978,6 +996,14 @@ function ModelConfigManager() {
                   style={{ minWidth: 140 }}
                   options={reasoningLevels.map((level) => ({ value: level, label: reasoningLevelLabels[level] }))}
                 />
+              </Form.Item>
+              <Form.Item
+                name={['settings', 'reasoningContentPassthrough']}
+                label="回传思考内容"
+                valuePropName="checked"
+                tooltip="该别名指向 DeepSeek 类混合推理模型时打开：多轮对话回放历史消息会带上 reasoning_content。经第三方网关访问 DeepSeek 时必须打开，否则上游报 400；只影响这一个别名"
+              >
+                <Switch aria-label="回传思考内容" />
               </Form.Item>
             </Space>
             <Form.Item name="enabled" label="启用" valuePropName="checked">
@@ -1154,12 +1180,13 @@ function providerWriteFromView(provider: ModelProviderView): ModelProviderWriteI
     : { ...common, apiKeySource: 'inline', apiKey: '' };
 }
 
-function emptyAliasValues(): AliasFormValues {
+function emptyAliasValues(prefill?: OptionalModelAlias): AliasFormValues {
+  const optional = prefill ? optionalModelAliases[prefill] : undefined;
   return {
-    alias: '',
+    alias: prefill ?? '',
     providerId: '',
     modelName: '',
-    capabilities: { streaming: true, toolCalling: false, structuredOutput: false, imageInput: false },
+    capabilities: optional ? { ...optional.capabilities } : { streaming: true, toolCalling: false, structuredOutput: false, imageInput: false },
     settings: {},
     enabled: true,
   };
@@ -1176,6 +1203,7 @@ function aliasFormValues(alias: ModelAlias): AliasFormValues {
       topP: alias.settings.topP ?? null,
       maxOutputTokens: alias.settings.maxOutputTokens ?? null,
       reasoning: alias.settings.reasoning ?? null,
+      reasoningContentPassthrough: alias.settings.reasoningContentPassthrough ?? false,
     },
     enabled: alias.enabled,
   };
@@ -1187,6 +1215,7 @@ function toAliasInput(values: AliasFormValues): ModelAliasInput {
   if (typeof values.settings?.topP === 'number') settings.topP = values.settings.topP;
   if (typeof values.settings?.maxOutputTokens === 'number') settings.maxOutputTokens = values.settings.maxOutputTokens;
   if (values.settings?.reasoning) settings.reasoning = values.settings.reasoning;
+  if (values.settings?.reasoningContentPassthrough) settings.reasoningContentPassthrough = true;
   return {
     alias: values.alias.trim(),
     providerId: values.providerId,
@@ -1220,6 +1249,7 @@ function formatSettings(settings: ModelAliasSettings): string {
   if (settings.topP != null) parts.push(`topP ${settings.topP}`);
   if (settings.maxOutputTokens != null) parts.push(`maxOutputTokens ${settings.maxOutputTokens}`);
   if (settings.reasoning != null) parts.push(`思考 ${reasoningLevelLabels[settings.reasoning]}`);
+  if (settings.reasoningContentPassthrough) parts.push('回传思考内容');
   return parts.length > 0 ? parts.join('，') : '默认';
 }
 

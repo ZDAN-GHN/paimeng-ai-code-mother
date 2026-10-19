@@ -168,6 +168,54 @@ test('管理员可编辑提供商与别名并普通保存', async ({ page }) => 
   await expect(page.getByRole('cell', { name: 'renamed-codegen-model', exact: true })).toBeVisible();
 });
 
+test('回传思考内容按别名单独声明，并提供语音转写别名的预填入口', async ({ page }) => {
+  const connection = await testConnection();
+  try {
+    await seedModelConfig(connection);
+  } finally {
+    await connection.end();
+  }
+  await adminLogin(page, uniqueAccount());
+  await page.goto('/admin/modelManage');
+
+  // 「回传思考内容」跟着别名走：只影响这一个别名，提供商下其它模型不受牵连。
+  await aliasRow(page, 'codegen.default').getByRole('button', { name: /^编\s*辑$/ }).click();
+  const aliasDialog = page.getByRole('dialog');
+  const passthrough = aliasDialog.getByRole('switch', { name: '回传思考内容' });
+  await expect(passthrough).toHaveAttribute('aria-checked', 'false');
+  await passthrough.click();
+  await aliasDialog.getByRole('button', { name: /保\s*存$/ }).click();
+  await expect(page.getByText('别名已保存', { exact: true })).toBeVisible();
+
+  const stored = await testConnection();
+  try {
+    const { rows } = await stored.query("SELECT alias, settings FROM model_alias WHERE alias IN ('codegen.default','route.classify')");
+    const byAlias = new Map((rows as { alias: string; settings: unknown }[]).map(row => [row.alias, row.settings as Record<string, unknown>]));
+    expect(byAlias.get('codegen.default')).toMatchObject({ reasoningContentPassthrough: true });
+    expect(byAlias.get('route.classify')).not.toHaveProperty('reasoningContentPassthrough');
+  } finally {
+    await stored.end();
+  }
+  // 提供商选项里不再出现这个开关：它不是提供商级配置。
+  await providerRow(page).getByRole('button', { name: /^编\s*辑$/ }).click();
+  const providerDialog = page.getByRole('dialog');
+  await expect(providerDialog.getByRole('switch', { name: '回传思考内容' })).toHaveCount(0);
+  await providerDialog.getByRole('button', { name: /取\s*消$/ }).click();
+
+  // 语音转写是可选别名：未配置时给出预填入口，配置后表格里标出用途。
+  await page.getByRole('button', { name: '新增语音输入转写别名' }).click();
+  const audioDialog = page.getByRole('dialog');
+  await expect(audioDialog.getByLabel('别名', { exact: true })).toHaveValue('speech.transcribe');
+  await audioDialog.getByLabel('提供商', { exact: true }).click();
+  await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').getByText('默认提供商', { exact: false }).first().click();
+  await audioDialog.getByLabel('上游模型名', { exact: true }).fill('whisper-1');
+  await audioDialog.getByRole('button', { name: /保\s*存$/ }).click();
+  // 上一条保存的提示还没消失，会同时存在两条「别名已保存」，取最后一条。
+  await expect(page.getByText('别名已保存', { exact: true }).last()).toBeVisible();
+  await expect(aliasRow(page, 'speech.transcribe').getByText('语音输入转写', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '新增语音输入转写别名' })).toHaveCount(0);
+});
+
 test('直接输入的密钥以密文入库，界面与接口都不回显明文', async ({ page }) => {
   const connection = await testConnection();
   try {

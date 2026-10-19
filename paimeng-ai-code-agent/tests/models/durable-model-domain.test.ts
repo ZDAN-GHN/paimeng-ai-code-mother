@@ -230,8 +230,8 @@ describe('产品库别名 → pi-ai 请求', () => {
 		// 上游处于 thinking 模式时要求每条 assistant 消息都带 reasoning_content 字段（哪怕为空），
 		// 否则 400「The reasoning_content in the thinking mode must be passed back」。
 		mocks.readConfigSnapshot.mockResolvedValue(snapshotOf(
-			[providerRecord({ options: { reasoningContentPassthrough: true } })],
-			[aliasRecord(), routeAlias],
+			[providerRecord()],
+			[aliasRecord({ settings: { reasoning: 'max', maxOutputTokens: 1234, reasoningContentPassthrough: true } }), routeAlias],
 		));
 		const binding = await admitGenerationModel();
 		const captured: CapturedRequest[] = [];

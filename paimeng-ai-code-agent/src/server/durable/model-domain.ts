@@ -125,7 +125,7 @@ const passthroughThinkingLevels: ThinkingLevelMap = { off: null, minimal: "minim
  */
 const deepSeekThinkingLevels: ThinkingLevelMap = { off: "disabled", minimal: "low", low: "low", medium: null, high: "high", xhigh: null, max: "max" };
 
-function openAiCompatible(options: ModelProviderOptions): OpenAICompletionsCompat {
+function openAiCompatible(options: ModelProviderOptions, settings: ModelAliasSettings): OpenAICompletionsCompat {
 	return {
 		supportsStore: false,
 		supportsDeveloperRole: false,
@@ -133,14 +133,14 @@ function openAiCompatible(options: ModelProviderOptions): OpenAICompletionsCompa
 		supportsUsageInStreaming: options.includeUsage ?? true,
 		maxTokensField: "max_tokens",
 		// 第三方网关跑 DeepSeek 类混合推理模型时，上游处于 thinking 模式会要求回传 reasoning_content
-		// （否则 400）；thinkingSwitch 未启用（走不到 deepseek 格式）时按这个兼容选项声明回写。
-		...(options.reasoningContentPassthrough ? { requiresReasoningContentOnAssistantMessages: true } : {}),
+		// （否则 400）；这个声明跟着别名走，同一提供商下别的模型不受影响。
+		...(settings.reasoningContentPassthrough ? { requiresReasoningContentOnAssistantMessages: true } : {}),
 	};
 }
 
 function deepSeekCompatible(options: ModelProviderOptions, supportsReasoningEffort: boolean): OpenAICompletionsCompat {
 	return {
-		...openAiCompatible(options),
+		...openAiCompatible(options, {}),
 		supportsReasoningEffort,
 		requiresReasoningContentOnAssistantMessages: true,
 		thinkingFormat: "deepseek",
@@ -169,7 +169,7 @@ function thinkingPlan(options: ModelProviderOptions, settings: ModelAliasSetting
 				thinkingLevelMap: deepSeekThinkingLevels,
 			};
 		default:
-			return { level: reasoning ?? "off", compat: openAiCompatible(options), thinkingLevelMap: passthroughThinkingLevels };
+			return { level: reasoning ?? "off", compat: openAiCompatible(options, settings), thinkingLevelMap: passthroughThinkingLevels };
 	}
 }
 

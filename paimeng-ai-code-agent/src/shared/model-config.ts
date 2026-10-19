@@ -4,6 +4,25 @@ import { z } from 'zod';
 export const requiredModelAliases = ['codegen.default', 'route.classify'] as const;
 export type RequiredModelAlias = typeof requiredModelAliases[number];
 
+/**
+ * 业务可用的可选别名：不配置时对应功能优雅降级（当前只有语音输入），配置后由注册表按名字解析。
+ * 管理端据此在别名列表里标注用途、并提供预填了名字与能力的新建入口。
+ */
+export const optionalModelAliases = {
+  'speech.transcribe': {
+    label: '语音输入转写',
+    purpose: '浏览器录音转文字，需要提供商提供 OpenAI 兼容的 /audio/transcriptions 接口；未配置时聊天页禁用麦克风按钮',
+    /** 转写不走对话补全，声明上没有流式/工具/结构化输出需求。 */
+    capabilities: { streaming: false, toolCalling: false, structuredOutput: false, imageInput: false },
+  },
+} as const satisfies Record<string, { label: string; purpose: string; capabilities: ModelAliasCapabilities }>;
+export type OptionalModelAlias = keyof typeof optionalModelAliases;
+
+/** 别名用途说明；未知别名返回 null（界面不标注）。 */
+export function aliasPurposeOf(alias: string): { label: string; purpose: string } | null {
+  return alias in optionalModelAliases ? optionalModelAliases[alias as OptionalModelAlias] : null;
+}
+
 /** 第一版支持的 API 格式；值写入 model_provider.api_format。 */
 export const providerApiFormats = ['openai-chat', 'openai-responses', 'anthropic-messages'] as const;
 export type ProviderApiFormat = typeof providerApiFormats[number];
@@ -74,7 +93,6 @@ const providerOptionFlags = {
   supportsStructuredOutputs: z.boolean().optional(),
   supportsMultiPartToolContent: z.boolean().optional(),
   thinkingSwitch: z.enum(thinkingSwitchValues).optional(),
-  reasoningContentPassthrough: z.boolean().optional(),
 };
 
 /** 管理端可编辑的兼容选项键，由 schema 派生，避免两处名单漂移。 */
@@ -86,7 +104,6 @@ export const modelProviderOptionLabels: Record<ModelProviderOptionKey, string> =
   supportsStructuredOutputs: '支持结构化输出',
   supportsMultiPartToolContent: '支持多段工具内容',
   thinkingSwitch: '思考开关（DeepSeek Chat）',
-  reasoningContentPassthrough: '回传思考内容（DeepSeek 类模型）',
 };
 
 /** 取值不是布尔开关的选项键；界面要用下拉而不是开关渲染。 */
@@ -102,7 +119,7 @@ export type ModelProviderOptions = z.infer<typeof providerOptionsSchema>;
 
 /** 每种 API 格式允许的选项键；没有对应语义的格式留空，界面据此隐藏开关。 */
 export const providerOptionKeysByFormat: Record<ProviderApiFormat, readonly ModelProviderOptionKey[]> = {
-  'openai-chat': ['includeUsage', 'supportsStructuredOutputs', 'supportsMultiPartToolContent', 'thinkingSwitch', 'reasoningContentPassthrough'],
+  'openai-chat': ['includeUsage', 'supportsStructuredOutputs', 'supportsMultiPartToolContent', 'thinkingSwitch'],
   'openai-responses': [],
   'anthropic-messages': [],
 };
@@ -228,6 +245,12 @@ export const aliasSettingsSchema = z.strictObject({
   topP: z.number().min(0).max(1).optional(),
   maxOutputTokens: z.number().int().min(1).max(1000000).optional(),
   reasoning: z.enum(reasoningLevels).optional(),
+  /**
+   * 这个别名指向的模型是不是 DeepSeek 类混合推理模型：是时多轮回放会给 assistant 消息回写
+   * `reasoning_content`（哪怕空串），否则上游 thinking 模式报 400。按别名而非提供商配置——
+   * 网关下并非每个模型都是 DeepSeek 类。
+   */
+  reasoningContentPassthrough: z.boolean().optional(),
 }).default({});
 export type ModelAliasSettings = z.infer<typeof aliasSettingsSchema>;
 
