@@ -1,7 +1,7 @@
 import 'server-only';
 import type { LookupFunction } from 'node:net';
 import { Agent, ProxyAgent, request, type Dispatcher } from 'undici';
-import { delegatedTarget, parseTarget, resolveTarget, trustedTarget, type ExtraNetwork, type Lookup, type LookupAddress, type ResolvedTarget } from './network';
+import { delegatedTarget, parseTarget, resolveTarget, trustedFacilityTarget, trustedTarget, type ExtraNetwork, type Lookup, type LookupAddress, type ResolvedTarget } from './network';
 import { WebAccessError } from './types';
 
 export const httpUserAgent = 'paimeng-web-access/1.0 (+https://github.com/zdan/paimeng-ai-code-mother)';
@@ -21,6 +21,8 @@ export type HttpRequestOptions = {
   proxy?: string;
   /** 服务商固定端点：跳过本地地址校验，禁止跟随重定向。 */
   trustedHost?: boolean;
+  /** 部署者配置的自建设施端点（如本机 SearXNG）：允许 HTTP 与本机地址，禁止跟随重定向。 */
+  trustedFacility?: boolean;
   accept?: string;
   headers?: Record<string, string>;
   deps?: HttpDeps;
@@ -110,7 +112,7 @@ async function perform(rawUrl: string, init: { method: string; body?: string }, 
   const transport = options.deps?.transport ?? undiciTransport;
   let current = parseTarget(rawUrl, '请求地址');
   for (let hop = 0; ; hop += 1) {
-    const target = options.trustedHost ? trustedTarget(current) : options.proxy ? delegatedTarget(current) : await resolveTarget(current, { lookup: options.deps?.lookup, networks: options.networks });
+    const target = options.trustedFacility ? trustedFacilityTarget(current) : options.trustedHost ? trustedTarget(current) : options.proxy ? delegatedTarget(current) : await resolveTarget(current, { lookup: options.deps?.lookup, networks: options.networks });
     const dispatcher = createDispatcher(target, options);
     const timer = timeoutSignal(options.signal, options.timeoutMs);
     const headers: Record<string, string> = { accept: options.accept ?? 'application/json', 'user-agent': httpUserAgent, ...(options.headers ?? {}) };

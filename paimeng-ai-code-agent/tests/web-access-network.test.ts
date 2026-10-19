@@ -10,10 +10,17 @@ async function rejectsWithCode(work: () => Promise<unknown>, code: string) {
   await work().catch(error => expect((error as WebAccessError).code).toBe(code));
 }
 
-describe('目标地址只接受无凭据的默认端口 HTTP(S)', () => {
-  it('拒绝非 HTTP(S)、携带凭据与非默认端口', () => {
-    for (const raw of ['ftp://example.com/x', 'file:///etc/passwd', 'https://user:pass@example.com/', 'https://example.com:8443/', 'http://example.com:443/', 'https://']) {
+describe('目标地址只接受无凭据的 HTTP(S)，端口限制由 target 分支执行', () => {
+  it('parseTarget 拒绝非 HTTP(S)、携带凭据；trusted/resolve 路径拒绝非默认端口', async () => {
+    for (const raw of ['ftp://example.com/x', 'file:///etc/passwd', 'https://user:pass@example.com/', 'https://']) {
       expect(() => parseTarget(raw)).toThrow(WebAccessError);
+    }
+    // 非默认端口在模型可控路径（resolveTarget/trustedTarget/delegatedTarget）拒绝；
+    // trustedFacilityTarget 是部署者自建设施（如本机 SearXNG 任意端口），不受此限。
+    for (const url of [new URL('https://example.com:8443/'), new URL('http://example.com:443/')]) {
+      expect(() => trustedTarget(url)).toThrow(WebAccessError);
+      // resolveTarget 是 async：体内 throw 变成 rejected promise，用 rejects 断言。
+      await expect(resolveTarget(url, { networks: [] })).rejects.toThrow(WebAccessError);
     }
     expect(parseTarget('https://example.com/a?b=1').hostname).toBe('example.com');
     expect(() => parseTarget('http://example.com:80/a')).not.toThrow();

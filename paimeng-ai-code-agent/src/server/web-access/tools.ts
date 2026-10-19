@@ -5,7 +5,7 @@ import { webAccessLimits, webAccessSettings } from './config';
 import { searchImageCandidates, type ImageCandidate } from './images';
 import { persistImport, prepareImport } from './import';
 import { readPage } from './read';
-import { tavilySearch } from './tavily';
+import { searchWithFallback } from './providers';
 import {
   WebAccessError, toolEmpty, toolFailure, toolOk,
   type ImageCandidateView, type ImageSearchData, type ImportedImageData,
@@ -106,7 +106,8 @@ export function createWebAccessOperations(options: { app: WorkspaceApp; session:
       try {
         runtime.check();
         const budget = webAccessLimits.search.totalChars;
-        const { results } = await tavilySearch({ query, maxResults: webAccessLimits.search.results, includeImages: false, signal: runtime.signal, deps });
+        // 搜索源降级链（searxng -> brave -> tavily，按配置可用性）：配额耗尽自动换下一个源。
+        const { provider, results } = await searchWithFallback(query, { maxResults: webAccessLimits.search.results, signal: runtime.signal, deps });
         if (!results.length) return toolEmpty<WebSearchData>('没有搜索到结果，请调整关键词后重试');
         const trimmed: WebSearchResult[] = [];
         let used = 0;
@@ -117,7 +118,7 @@ export function createWebAccessOperations(options: { app: WorkspaceApp; session:
           used += size;
           trimmed.push({ title: result.title, url: result.url, snippet });
         }
-        const data: WebSearchData = { provider: 'tavily', query, retrievedAt: new Date().toISOString(), results: trimmed };
+        const data: WebSearchData = { provider, query, retrievedAt: new Date().toISOString(), results: trimmed };
         return toolOk(data);
       } catch (error) {
         return toolFailure<WebSearchData>(error);

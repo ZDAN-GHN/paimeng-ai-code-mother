@@ -4,6 +4,7 @@ import { getConfig } from '../config';
 /** 服务商固定端点。首版不支持任意 baseUrl，避免把密钥发给用户可控地址。 */
 export const webAccessEndpoints = {
   tavily: 'https://api.tavily.com',
+  brave: 'https://api.search.brave.com/res/v1/web/search',
   jinaReader: 'https://r.jina.ai/',
   openverse: 'https://api.openverse.org/v1/images/',
 } as const;
