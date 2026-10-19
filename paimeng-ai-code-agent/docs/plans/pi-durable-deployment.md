@@ -44,7 +44,7 @@ Next 的管理端负责加密 inline 密钥，harness 按需解密。两进程�
 
 `GET /model?conversationId=` 从内存或持久描述返回原身份，包括模型循环已结束、产品仍在最终构建的会话。客户端断连只结束观察流；取消由显式业务操作与租约状态驱动。
 
-harness 默认仅监听回环地址，Next 是创建者权限入口。不要把本地控制面当作公网 API。文件工具是原生 read/write/edit，保留工作区相对路径准入；不提供 bash，因为工具运行在宿主账号下。
+harness 默认仅监听回环地址，Next 是创建者权限入口。不要把本地控制面当作公网 API。文件工具是原生 read/write/edit，保留工作区相对路径准入；不提供 bash，因为工具运行在宿主账号下。交给模型的工具就是这些：read / write / edit、listFiles、buildPreview，加上管理端打开联网后的 webSearch / readWebPage / searchImages / importImage；`m1_wait` 只随 `DURABLE_FAUX_*` 脚本桩注册，真实生成里没有它。
 
 ## 频率与全局并发
 

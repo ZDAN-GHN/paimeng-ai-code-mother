@@ -47,7 +47,7 @@ npm run durable:inspect -- --conversations          # 列出 harness 已打开�
 
 | 想知道什么 | 去哪看 |
 | --- | --- |
-| 工具注册（read/write/edit/listFiles/buildPreview/联网） | `src/server/durable/harness-server.ts` |
+| 工具注册（read/write/edit/listFiles/buildPreview/联网；`m1_wait` 只给 `DURABLE_FAUX_*` 脚本桩） | `src/server/durable/harness-server.ts` |
 | harness 事件 → 前端协议、记账、落库 | `src/server/durable-engine.ts` |
 | attach 路由（仅创建者鉴权） | `src/app/api/durable/[...path]/route.ts` |
 | Postgres 存储（pi-durable 的 Storage 实现） | `src/server/durable/storage-pg.ts` |

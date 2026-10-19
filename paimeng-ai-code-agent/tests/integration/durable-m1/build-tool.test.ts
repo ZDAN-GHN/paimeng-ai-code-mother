@@ -13,6 +13,25 @@ const appId = '901000000000000201';
 const workspace = join(productRoot, 'runtime', 'code_output', `html_${appId}`);
 
 describe.skipIf(!harnessReady || !postgresReady)('durable M2b：harness 里的 buildPreview', () => {
+  it('真实模型面不含夹具：只有原生文件工具与产品工具', async () => {
+    const port = await freePort();
+    const runDir = mkdtempSync(join(tmpdir(), 'durable-m2b-surface-'));
+    const base = baseUrl(port);
+    // 关掉脚本桩就是真实生成看到的工具面；联网工具默认关闭。
+    const harness = startHarness({ port, runDir, reset: true, waitMs: 0, finalText: 'M2B_SURFACE_DONE', env: { DURABLE_FAUX_MODEL: '' } });
+    try {
+      await waitHealthy(base, 60_000);
+      const body = (await (await fetch(`${base}/tools`)).json()) as { tools: { name: string }[] };
+      const names = body.tools.map((tool) => tool.name).sort();
+      expect(names).toEqual(['buildPreview', 'edit', 'listFiles', 'read', 'write']);
+      expect(names).not.toContain('m1_wait');
+      expect(names).not.toContain('bash');
+    } finally {
+      await stopHarness(harness);
+      rmSync(runDir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it('构建属于本会话的应用并把成功结果写回转录', async () => {
     mkdirSync(workspace, { recursive: true });
     writeFileSync(join(workspace, 'index.html'), '<!doctype html><html><body>m2b build</body></html>');

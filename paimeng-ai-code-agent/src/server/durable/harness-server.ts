@@ -46,6 +46,8 @@ import {
 	type WebAccessRuntime,
 	type WebAccessSession,
 } from "../web-access/tools";
+import { fauxFixtureEnabled } from "./faux-fixture";
+import { fauxModelEnabled } from "./faux-model";
 import { context, entryText, openPgHarness } from "./harness";
 import {
 	admitGenerationModel,
@@ -405,13 +407,16 @@ if (process.env.DURABLE_HARNESS_RESET === "1") {
 	await resetPostgresStorage();
 	log("storage reset (DURABLE_HARNESS_RESET=1)");
 }
-const productTools = [...fileTools, listFilesTool, buildPreviewTool, waitTool, ...webToolsForConfig()];
+// 脚本桩（DURABLE_FAUX_*）需要一次可写脚本、可被中途打断的工具调用；真实模型不提供 m1_wait。
+const stubTools: ToolRegistration[] = fauxModelEnabled() || fauxFixtureEnabled() ? [waitTool] : [];
+
+const productTools = [...fileTools, listFilesTool, buildPreviewTool, ...stubTools, ...webToolsForConfig()];
 
 const { harness, models } = await openPgHarness({
 	codingTools: false,
 	extensions: [
 		defineExtension({
-			name: "m1.tools",
+			name: "product.tools",
 			tools: productTools,
 			hooks: [workspacePathHook],
 		}),
