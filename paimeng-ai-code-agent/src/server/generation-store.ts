@@ -33,9 +33,6 @@ export async function withAppWriter<T>(appId: string, work: (tx: Transaction, ap
   return db().transaction(async tx => {
     const app = await lockedApp(tx, appId);
     if (generationId) {
-      // 默认只是一致性读：写路径里包含整次容器构建（buildApp 跑在 write() 事务内），长时间锁住租约行
-      // 会让每 5 秒一次的心跳 UPDATE 一直等锁直到语句超时，先把仍在跑的构建判死。只有「必须确认任务
-      // 此刻仍在生成中」的摘要提交才用 lockTask 加行锁，与取消提交（setGeneration 的普通 UPDATE）互斥。
       const leaseRows = options.lockTask
         ? await tx.select().from(leases).where(eq(leases.appId, app.id)).limit(1).for('update')
         : await tx.select().from(leases).where(eq(leases.appId, app.id)).limit(1);
@@ -58,13 +55,6 @@ export async function withAppWriter<T>(appId: string, work: (tx: Transaction, ap
   });
 }
 
-/**
- * 开始一次生成：Redis 预定限流额度 → 应用与任务行加锁 → 任务与租约落库。
- * 用户消息本身不在这里落库——它随 `/submit` 作为转录条目（`app.user`）写进 harness 存储。
- *
- * 限流额度在 PG 事务之外先预定：额度用尽在这里直接 429，不写任何生成行或租约。事务里的权限（403）、
- * 重复请求（409）与全局并发（429）拒绝都要把这一格退还，一次被拒的请求不能吃掉用户的生成次数。
- */
 export async function beginGeneration(appId: string, id: string, user: User, clientAddress = 'unknown'): Promise<void> {
   const [busy] = await db().select().from(leases).where(eq(leases.appId, BigInt(appId))).limit(1);
   if (busy && busy.expiresAt > now()) throw new BusinessError(409, 40900, '应用已有正在运行的生成任务');
@@ -92,11 +82,6 @@ export async function beginGeneration(appId: string, id: string, user: User, cli
   }
 }
 
-/**
- * 全局并发上限：租约行是「应用正在生成」的权威记录，未过期租约数就是同时在跑的生成数。
- * 准入用一条事务级 advisory lock 串行化「计数 + 插入」，否则两个请求会同时看到 limit-1 而双双插入。
- * 超限直接拒绝（429），不排队：排队要额外的队列进程和用户可见的等待态，而单应用已经有 409 等待语义。
- */
 const admissionLockKey = 0x67656e61646d6974n;
 async function admitGeneration(tx: Transaction) {
   const limit = getConfig().generationMaxConcurrent;
@@ -182,15 +167,10 @@ export async function generationFor(appId: string) {
   return row ? { ...row, appId: String(row.appId), userId: String(row.userId) } : null;
 }
 
-/** 一次生成的停止原因（词表见 generation-accounting）：并发取消/租约回收已经写过时以它为准。 */
 function effectiveStopReason(current: string | null, status: 'ready' | 'failed' | 'cancelled', proposed?: GenerationStopReason): GenerationStopReason | null {
   return stopReasonFrom(current) ?? proposed ?? (status === 'ready' ? 'completed' : status === 'cancelled' ? 'cancelled' : null);
 }
 
-/**
- * 生成收尾：终态、停止原因与「这次生成写出了哪条助手消息」。
- * 助手消息本体是 pi 的原生转录条目（`pi.assistant`），这里只留 messageId 给用量块挂载。
- */
 export async function finishGeneration(id: string, status: 'ready' | 'failed' | 'cancelled', error: string | null, messageId?: string | null, stopReason?: GenerationStopReason) {
   const [task] = await db().select().from(generations).where(eq(generations.id, id));
   if (!task) return;

@@ -1,16 +1,8 @@
 import { z } from 'zod';
 
-/**
- * 生成链路的模型绑定契约：Next（attach 客户端）与常驻 harness（解析与执行）共用的公开部分。
- *
- * 这里只有身份、能力与不透明令牌，没有密钥，也没有 provider 运行时：Next 不需要（也不应该）
- * 为了读一个常量去加载 pi-ai/pi-durable。
- */
 
-/** 生成链路使用的产品库别名：harness 按它解析，Next 在记账里用它当「期望身份」。 */
 export const generationModelAlias = 'codegen.default';
 
-/** 显式 `DURABLE_MODEL_*` 覆盖登记进 pi-ai 目录的固定 provider 标识。 */
 export const envModelProviderId = 'durable';
 
 /** 一次生成的公开身份：进记账行与前端，不含密钥。 */

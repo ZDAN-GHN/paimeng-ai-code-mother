@@ -22,7 +22,6 @@ let server: Server;
 let baseUrl: string;
 let captured: CapturedRequest[] = [];
 let respond: (body: Record<string, unknown>, reply: (payload: unknown) => void) => void;
-/** Responses API 走非流式 JSON，但请求体里可能仍带 stream 标记，用它强制返回 JSON。 */
 let forceJson = false;
 
 const modelName = 'local-test-model';
@@ -374,7 +373,6 @@ describe('buildAliasModels', () => {
     expect(models.bindings['memory.summarize']).toBeUndefined();
     expect(models.failures['memory.summarize']).toContain('密钥密文格式无法识别');
     expect(Object.isFrozen(models.failures)).toBe(true);
-    // 必需别名自身的构建失败仍然是整体失败（fail-closed）。
     expect(() => buildAliasModels([{ ...providerFixture, baseUrl, apiKeySource: 'inline', apiKeyCiphertext: 'not-a-ciphertext' }], [aliasFixture()]))
       .toThrow(/密钥密文格式无法识别/);
   });

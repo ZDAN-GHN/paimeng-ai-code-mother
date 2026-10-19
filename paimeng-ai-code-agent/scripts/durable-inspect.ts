@@ -1,12 +1,3 @@
-/**
- * 会话检视：只读地看 harness 里某个会话的转录与运行状态。
- *
- *   npm run durable:inspect -- <conversationId> [--full]
- *   npm run durable:inspect -- --conversations
- *
- * 数据来自 harness 的 `/state` 与 `/messages`。转录按条目 id 升序打印，并给出 kind 计数：
- * 一眼能看出有没有重复的展示条目（历史上 `app.assistant` 就是产品自己写的重复层）。
- */
 const base = (process.env.DURABLE_HARNESS_URL ?? `http://127.0.0.1:${process.env.DURABLE_HARNESS_PORT ?? '5599'}`).replace(/\/+$/, '');
 
 type Entry = { id: number; kind: string; text: string };

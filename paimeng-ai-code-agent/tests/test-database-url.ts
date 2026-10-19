@@ -7,7 +7,6 @@ export function testDatabaseUrl(raw: string) {
   return url.href;
 }
 
-/** The pi-durable storage database beside the product test database; the harness creates its own tables there. */
 export function storageTestDatabaseUrl(raw: string) {
   const url = new URL(raw);
   if (url.protocol !== 'postgres:') throw new Error('The harness storage requires a Postgres URL');

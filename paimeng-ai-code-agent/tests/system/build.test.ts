@@ -25,16 +25,13 @@ export default defineConfig({ plugins: [vue()], base: './' });`);
   process.env.TS_BUILD_SECRET='dummy-platform-private-test';
   try{
    await buildApp(vue);expect(await readFile(join(workspace(vue),'dist/index.html'),'utf8')).toContain('assets/');
-   // 源码没动：紧接着再构建一次应该直接复用，产物文件原样不动（不产生第二次容器构建）。
    const built=await stat(join(workspace(vue),'dist/index.html'));
    await expect(buildApp(vue)).resolves.toBeUndefined();
    expect((await stat(join(workspace(vue),'dist/index.html'))).mtimeMs).toBe(built.mtimeMs);
    expect((await loadBuildState(vue))?.sourceHash).toBe(await sourceDigest(vue));
   }
   finally{if(original===undefined)delete process.env.TS_BUILD_SECRET;else process.env.TS_BUILD_SECRET=original;}
-  // 真实容器内要跑一次 npm install（走网络），机器负载高时实测接近 170 秒，留出更宽的余量。
  },300000);
- // 通过黑洞 registry（10.255.255.1 不可路由）让容器内 npm 卡住，超时路径在任何网络下都必然命中，不依赖真实网络快慢。
  it('构建超时以可读原因报给客户端，而不是笼统的「服务处理失败」',async()=>{
   for(const file of fixtureFiles('vue_project','超时验收'))await writeProjectFile(vue,file.path,file.content);
   const timeout=process.env.BUILD_TIMEOUT_MS;const registry=process.env.BUILD_NPM_REGISTRY;

@@ -1,15 +1,3 @@
-/**
- * M3：harness 路径的图片输入（附件随消息进入模型上下文）。
- *
- * 产品的图片链路是「附件字节 → 模型 user 消息里的 image 块」。这里用桩模型（不联网、不 Docker）
- * 把 harness 侧的接口钉住：
- *
- * - `/submit` 接受模型 user 消息的 content 数组（text + image 块），而不是只接受纯字符串；
- * - 图片块真的进了模型上下文（`/context` 里该条 user 消息 images = 1）；
- * - 非法 content 会被信任边界拒绝（400），不会静默当成文本或崩溃。
- *
- * 需要 Postgres（127.0.0.1:5432）；没有时打印原因并 skip。
- */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,11 +6,9 @@ import { baseUrl, freePort, harnessAvailable, postgresReachable, postgresUrl, st
 
 const harnessReady = harnessAvailable();
 const postgresReady = harnessReady && (await postgresReachable(postgresUrl));
-// process.stderr keeps the skip reason visible: vitest drops console output from a file with no run tests.
 if (!harnessReady) process.stderr.write('[durable-m1] 跳过附件：找不到产品 harness 入口或 tsx，先装依赖（npm install）\n');
 else if (!postgresReady) process.stderr.write(`[durable-m1] 跳过附件：Postgres 不可达（${postgresUrl}），先跑 npm run durable:pg -- start\n`);
 
-/** 1x1 PNG；桩模型不解码字节，只需要它是合法的 image 块。 */
 const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
 type ModelContext = { messages: { role: string; text: string; images: number }[] };

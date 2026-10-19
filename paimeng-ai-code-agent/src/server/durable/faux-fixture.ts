@@ -1,8 +1,3 @@
-/**
- * Deterministic generation model for the resident harness, using fixture-content.ts.
- * Enabled only by DURABLE_FAUX_FIXTURE=1; production also requires ALLOW_TEST_FIXTURE=1.
- * Takes precedence over DURABLE_FAUX_MODEL.
- */
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type FauxResponseFactory, type Message, type ToolCall } from "@earendil-works/pi-ai";
 import { createModels, type MutableModels } from "@earendil-works/pi-ai/models";
 import type { CodeGenType } from "@/shared/contracts";
@@ -11,7 +6,6 @@ import { fixtureReadSteps, fixtureReplyText, fixtureWriteSteps } from "../fixtur
 export const FAUX_FIXTURE_PROVIDER = "faux";
 export const FAUX_FIXTURE_MODEL_ID = "fixture-1";
 
-/** The script is stateless, so the queue refills instead of counting turns. */
 const QUEUE_REFILL_THRESHOLD = 4;
 const QUEUE_REFILL_SIZE = 32;
 
@@ -30,7 +24,6 @@ export function fauxFixtureRef() {
 const APP_TYPE = /当前应用类型 (html|multi_file|vue_project|react_project)/;
 const TEMPLATED = /当前工程已从 \S+@\S+ 模板初始化/;
 
-/** Text of one model message; the resident instructions and the user's request both live here. */
 function messageText(message: Message): string {
 	if (message.role === "system") {
 		const content = typeof message.content === "string" ? [message.content] : message.content.map((block) => block.text);
@@ -45,11 +38,6 @@ function messageText(message: Message): string {
 
 type ScriptedTurn = { tool: string; args: ToolCall["arguments"] } | { tool: null };
 
-/**
- * The turn script is driven by the tool results already in this request, so one model instance can serve
- * every run of the process. The app type and the template flag come from the
- * resident instructions; the user's text is the page title.
- */
 function scriptedTurn(messages: readonly Message[]): ScriptedTurn {
 	let lastUser = -1;
 	for (let index = messages.length - 1; index >= 0; index--) {

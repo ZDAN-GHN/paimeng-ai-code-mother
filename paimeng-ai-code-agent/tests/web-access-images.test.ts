@@ -20,7 +20,6 @@ const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(
 const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(120, 3)]);
 const webp = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WEBP'), Buffer.alloc(40, 1)]);
 
-/** 每个用例用自己的图片地址，避免复用同一候选而命中「已导入」分支。 */
 function candidateFor(imageUrl: string, extra: Partial<ImageCandidate> = {}): ImageCandidate {
   return {
     id: candidateIdFor(imageUrl),
@@ -105,13 +104,11 @@ describe('图片候选的来源与许可', () => {
     })));
     const { candidates } = await webImages('泉此方', { deps: { transport, lookup } });
     const byUrl = new Map(candidates.map(candidate => [candidate.imageUrl, candidate]));
-    // 顶层图片用页面名字，而不是机器翻译的描述
     expect(byUrl.get('https://img.test/wikia.png')).toMatchObject({
       title: 'Konata Izumi | Lucky Star Wiki | Fandom',
       description: 'Коно Судзумия из "Lucky Star" изображена…',
       sourcePage: '',
     });
-    // 条目内图片用自己的标题，否则退回所属结果的标题
     expect(byUrl.get('https://img.test/entry-title.png')?.title).toBe('条目内的标题');
     expect(byUrl.get('https://img.test/no-title.png')?.title).toBe('角色页');
     expect(byUrl.get('https://img.test/no-title.png')?.description).toBe('无标题的图片描述');

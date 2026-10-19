@@ -21,7 +21,6 @@ describe.each(cases)('$id 静态模板', item => {
     expect(await listProjectFiles(app)).toContain('AGENTS.md');
     expect(() => templateTypecheck(template)).toThrow('静态模板没有');
     expect(await hasPreview(app)).toBe(false);
-    // 写入不再做产品形状门禁：静态应用留下工程文件也接受，交给构建判定。
     for (const path of ['package.json', 'src/App.vue', 'vite.config.js']) {
       await expect(writeProjectFile(app, path, '{}')).resolves.toBeUndefined();
     }
@@ -34,7 +33,6 @@ describe.each(cases)('$id 静态模板', item => {
     expect(bytes.toString()).toContain('AGENTS.md');
     expect(bytes.toString()).not.toContain(TEMPLATE_MARKER);
 
-    // 遗留脚手架不参与静态构建判定，构建只看 index.html 是否有效。
     await expect(writeProjectFile(app, 'package.json', '{"name":"bad"}')).resolves.toBeUndefined();
     await expect(buildApp(app)).resolves.toBeUndefined();
     await writeProjectFile(app, 'index.html', 'not html at all');

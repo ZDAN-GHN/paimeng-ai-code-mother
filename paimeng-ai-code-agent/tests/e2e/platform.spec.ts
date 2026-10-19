@@ -58,7 +58,6 @@ test('浏览器完成注册、登录、生成、编辑、预览、发布和下�
   const appId = page.url().split('/').at(-1)!;
   await expect(page.getByText(/文件已生成/)).toBeVisible();
   await expect(page.getByText('可预览', { exact: true })).toBeVisible();
-  // 工具调用是可读操作记录：有中文动作与文件名，没有原始 JSON 与工具调用 id。
   const toolCalls = page.locator('.message-ai .tool-call');
   await expect(toolCalls.first()).toBeVisible();
   await expect(toolCalls.filter({ hasText: '写入文件' }).first()).toBeVisible();
@@ -66,7 +65,6 @@ test('浏览器完成注册、登录、生成、编辑、预览、发布和下�
   expect(bubbleText).not.toContain('toolCallId');
   expect(bubbleText).not.toContain('output-available');
   expect(bubbleText).not.toContain('"content"');
-  // 用量挂在对应的助手回复上（一条回复一个用量），展开后能看到逐步明细。
   const usage = page.locator('.message-ai .generation-usage');
   await expect(usage).toBeVisible();
   await expect(usage.locator('summary')).toContainText('本次生成用量');
@@ -179,7 +177,6 @@ test('普通用户不能打开管理员页面，管理员可查询和编辑', as
   await page.goto('/app/chat/' + appId);
   await expect(page.getByText(/文件已生成/)).toBeVisible();
   await expect(page.getByText('可预览', { exact: true })).toBeVisible();
-  // 用量挂在对应的助手回复上（一条回复一个用量），展开后能看到逐步明细。
   const usage = page.locator('.message-ai .generation-usage');
   await expect(usage).toBeVisible();
   await expect(usage.locator('summary')).toContainText('本次生成用量');

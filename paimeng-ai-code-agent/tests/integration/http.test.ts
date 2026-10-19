@@ -61,7 +61,6 @@ describe('真实 MySQL 与 HTTP 契约',()=>{
  expect((await json(await request(`user/get?id=${userId}`))).data).not.toHaveProperty('userPassword');
  expect((await json(await request('user/update',{id:userId,userName:'集成测试管理员'}))).data).toBe(true);
  expect((await json(await request(`app/admin/get/vo?id=${appId}`))).data).toMatchObject({id:appId});
- // 对话历史由 harness 存储承载：这个应用还没有会话映射，所以是空历史而不是一张消息表。
  expect((await json(await request(`app/messages?appId=${appId}`))).data).toEqual([]);
  const extra=(await json(await request('app/add',{initPrompt:'待删除',codeGenType:'html'}))).data as string;
  expect((await json(await request('app/admin/delete',{id:extra}))).data).toBe(true);expect((await request(`app/get/vo?id=${extra}`)).status).toBe(404);

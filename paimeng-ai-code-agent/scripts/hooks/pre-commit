@@ -1,7 +1,4 @@
 #!/bin/sh
-# 快速静态检查（三条各 ~0.24s）：UI 写法、E2E 地址/locator、归档边界。
-# 由 git 钩子调用（core.hooksPath = paimeng-ai-code-agent/scripts/hooks），也可手动 `npm run check:fast`。
-# 紧急绕过：git commit --no-verify
 set -e
 root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 cd "$root/paimeng-ai-code-agent" 2>/dev/null || exit 0

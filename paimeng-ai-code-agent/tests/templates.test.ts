@@ -45,13 +45,11 @@ describe.each(cases)('版本化 $id 工程模板', item => {
     await initializeTemplate(fresh, template);
     await expect(readProjectFile(fresh, TEMPLATE_MARKER)).rejects.toThrow('文件路径不允许访问');
     await expect(writeProjectFile(fresh, TEMPLATE_MARKER, '{}')).rejects.toThrow('文件路径不允许访问');
-    // 锁文件与依赖清单的写入不再由工具拒绝，交给构建按模板版本校验。
     await expect(writeProjectFile(fresh, 'package-lock.json', '')).resolves.toBeUndefined();
     const stages: string[] = [];
     const lockError = await buildApp(fresh, undefined, (stage, status) => { stages.push(`${stage}:${status}`); }).catch((error: unknown) => error);
     expect(lockError).toBeInstanceOf(Error);
     expect((lockError as Error).message).toContain('模板依赖锁已改变');
-    // 锁可写，所以改锁是模型能修的源码问题，且失败发生在上报的 source 阶段内。
     expect(classifyBuildFailure(lockError)).toMatchObject({ repairable: true, stage: 'source' });
     expect(stages).toEqual(['source:started', 'source:failed']);
     await expect(writeProjectFile(fresh, 'package-lock.json', await readTemplateFile(template, 'package-lock.json'))).resolves.toBeUndefined();

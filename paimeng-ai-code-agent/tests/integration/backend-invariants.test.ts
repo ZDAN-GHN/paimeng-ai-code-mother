@@ -19,7 +19,6 @@ process.env.REDIS_URL = testRedisUrl(process.env.REDIS_URL ?? 'redis://127.0.0.1
 let actor: User;
 let appId: string;
 
-/** 限流测试只碰独立的 /15 测试库；生产库（/0）与开发数据都不清、不写。 */
 function testRedisUrl(raw: string) {
   const url = new URL(raw);
   if (url.protocol !== 'redis:') throw new Error('Integration tests require a Redis URL');
@@ -27,7 +26,6 @@ function testRedisUrl(raw: string) {
   return url.href;
 }
 
-// The rate limit window lives outside the generation rows, so tests must clear it explicitly.
 async function clearRateLimit() { await (await rateLimitRedis()).del(chatRateLimitKey(actor.id, 'unknown')); }
 
 describe('后端关键不变量（独立 Postgres 测试库）', () => {
@@ -101,7 +99,6 @@ describe('后端关键不变量（独立 Postgres 测试库）', () => {
     for (const id of [secondId, thirdId]) await db().insert(apps).values({ id, initPrompt: '跨应用限流', codeGenType: 'html', userId: BigInt(actor.id), createTime: now(), updateTime: now() });
     const secondApp = secondId.toString(); const thirdApp = thirdId.toString();
     try {
-      // The shared Redis window makes the per-user check atomic across different apps.
       const results = await Promise.allSettled([
         beginGeneration(secondApp, randomUUID(), actor),
         beginGeneration(thirdApp, randomUUID(), actor),
@@ -110,7 +107,6 @@ describe('后端关键不变量（独立 Postgres 测试库）', () => {
       const rows = await db().select().from(generations).where(eq(generations.userId, BigInt(actor.id)));
       expect(rows).toHaveLength(1);
       await expect(beginGeneration(appId, randomUUID(), actor)).rejects.toMatchObject({ status: 429 });
-      // 限流拒绝发生在 PG 事务之前：不写任何生成行或租约。
       expect(await db().select().from(generations).where(eq(generations.appId, BigInt(appId)))).toEqual([]);
       expect(await db().select().from(leases).where(eq(leases.appId, BigInt(appId)))).toEqual([]);
       await clearRateLimit();
@@ -133,7 +129,6 @@ describe('后端关键不变量（独立 Postgres 测试库）', () => {
     try {
       await beginGeneration(appId, randomUUID(), actor);
       await clearRateLimit();
-      // 限流额度先预定、并发拒绝后退还：这次 429 说的是并发而不是频率，也不吃掉用户的生成次数。
       await expect(beginGeneration(otherApp, randomUUID(), actor)).rejects.toMatchObject({ status: 429, message: expect.stringContaining('并发') });
       expect(await db().select().from(generations).where(eq(generations.appId, BigInt(otherApp)))).toEqual([]);
       expect(await db().select().from(leases).where(eq(leases.appId, BigInt(otherApp)))).toEqual([]);

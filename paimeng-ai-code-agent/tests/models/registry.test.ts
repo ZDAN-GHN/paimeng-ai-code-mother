@@ -116,7 +116,6 @@ describe('模型注册表 TTL 与刷新序号', () => {
     expect((await registry.resolveBinding('codegen.default')).modelName).toBe('model-a');
     expect(state.snapshotCalls).toBe(1);
 
-    // 未立即生效的保存：revision 变了但 refreshEpoch 不变。
     state.snapshot = snapshot('2', '0', 'model-b');
     time.advance(modelRegistryTtlMs - 1);
     expect((await registry.resolveBinding('codegen.default')).modelName).toBe('model-a');
@@ -145,7 +144,6 @@ describe('模型注册表 TTL 与刷新序号', () => {
     expect((await registry.resolveBinding('codegen.default')).modelName).toBe('model-a');
     expect(registry.status().loadedAt).toBe(modelRegistryTtlMs + 1000);
 
-    // 距离上次一致读开始已经超过 TTL，尽管距加载完成只有 0ms。
     snapshotModel = 'model-b';
     expect((await registry.resolveBinding('codegen.default')).modelName).toBe('model-b');
   });
@@ -171,7 +169,6 @@ describe('模型注册表 TTL 与刷新序号', () => {
 
     expect((await registry.resolveBinding('codegen.default')).modelName).toBe('model-b');
 
-    // 读到旧副本：revision 与 epoch 都更低。
     state.snapshot = snapshot('1', '1', 'model-a');
     state.currentEpoch = '1';
     time.advance(modelRegistryTtlMs);
@@ -312,7 +309,6 @@ describe('故障回退与不可掩盖的错误', () => {
     expect(registry.status().degraded).toBe(true);
     expect(state.epochCalls).toBe(baselineEpochCalls + 1);
 
-    // 退避窗口内每次解析仍会探测共享 epoch（否则可能掩盖新版本），但不再重载整份快照。
     time.advance(modelLoadBackoffMs - 1);
     expect((await registry.resolveBinding('codegen.default')).modelName).toBe('model-a');
     expect(state.epochCalls).toBe(baselineEpochCalls + 2);
@@ -327,18 +323,15 @@ describe('故障回退与不可掩盖的错误', () => {
     await registry.resolveBinding('codegen.default');
     expect(state.snapshotCalls).toBe(1);
 
-    // epoch 仍可读且未变，只有整份快照读取失败：宽限期内降级使用旧快照。
     state.snapshotError = new Error('database unavailable');
     time.advance(modelRegistryTtlMs);
     expect((await registry.resolveBinding('codegen.default')).modelName).toBe('model-a');
     expect(state.snapshotCalls).toBe(2);
 
-    // 退避窗口内不重复重载整份快照。
     time.advance(modelLoadBackoffMs - 1);
     expect((await registry.resolveBinding('codegen.default')).modelName).toBe('model-a');
     expect(state.snapshotCalls).toBe(2);
 
-    // 窗口过后恢复重试。
     time.advance(1);
     expect((await registry.resolveBinding('codegen.default')).modelName).toBe('model-a');
     expect(state.snapshotCalls).toBe(3);
@@ -351,14 +344,12 @@ describe('故障回退与不可掩盖的错误', () => {
 
     await registry.resolveBinding('codegen.default');
 
-    // 瞬时故障：epoch 与快照都读不到，宽限期内降级到 model-a 并进入退避。
     state.snapshotError = new Error('database unavailable');
     state.epochError = new Error('database unavailable');
     time.advance(modelRegistryTtlMs);
     expect((await registry.resolveBinding('codegen.default')).modelName).toBe('model-a');
     expect(registry.status().degraded).toBe(true);
 
-    // 退避窗口尚未结束时 DB 恢复，且有一次手动 apply 把 refreshEpoch 推进到 1。
     state.snapshotError = null;
     state.epochError = null;
     state.snapshot = snapshot('2', '1', 'model-b');
@@ -393,7 +384,6 @@ describe('故障回退与不可掩盖的错误', () => {
 
     await expect(registry.resolveBinding('codegen.default')).rejects.toMatchObject({ status: 503, code: 50300 });
 
-    // 之后连版本都读不到，仍然不能用旧快照兜底。
     state.epochError = new Error('database unavailable');
     time.advance(modelLoadBackoffMs);
     await expect(registry.resolveBinding('codegen.default')).rejects.toMatchObject({ status: 503, code: 50300 });
@@ -445,13 +435,11 @@ describe('故障回退与不可掩盖的错误', () => {
     time.advance(modelRegistryTtlMs);
     await expect(registry.resolveBinding('codegen.default')).rejects.toMatchObject({ status: 503, code: 50300 });
 
-    // 配置仍无效、DB 又读不到：退避与宽限期内也不能用旧快照兜底。
     state.epochError = new Error('database unavailable');
     state.snapshotError = new Error('database unavailable');
     time.advance(modelLoadBackoffMs);
     await expect(registry.resolveBinding('codegen.default')).rejects.toMatchObject({ status: 503, code: 50300 });
 
-    // 修好配置后可以恢复，失败关闭不是永久锁定（退避窗口内仍会拒绝探测）。
     state.epochError = null;
     state.snapshotError = null;
     state.snapshot = snapshot('3', '2', 'model-c');
@@ -474,13 +462,11 @@ describe('故障回退与不可掩盖的错误', () => {
     time.advance(modelRegistryTtlMs);
     await expect(registry.resolveBinding('codegen.default')).rejects.toMatchObject({ status: 503, code: 50300 });
 
-    // 修复过程中读到的是更旧的合法快照：install 因版本回退拒绝，但不能因此把已装的旧模型放行。
     state.snapshot = snapshot('1', '0', 'model-a');
     state.currentEpoch = '0';
     await expect(registry.resolveBinding('codegen.default')).rejects.toMatchObject({ status: 503, code: 50300 });
     expect(registry.status().lastError).toContain('codegen.default');
 
-    // 不回退的合法快照到达后才恢复。
     state.snapshot = snapshot('4', '1', 'model-d');
     state.currentEpoch = '1';
     expect((await registry.resolveBinding('codegen.default')).modelName).toBe('model-d');

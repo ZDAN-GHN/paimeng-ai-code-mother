@@ -22,12 +22,10 @@ describe.each(cases)('真实 $id 模板构建', item => {
     const before = await readFile(join(workspace(fresh), 'dist/index.html'), 'utf8');
     expect(before).toContain('./assets/');
 
-    // 锁文件被改：构建拒绝，旧的 dist 原样保留。
     await writeFile(join(workspace(fresh), 'package-lock.json'), '{}');
     await expect(buildApp(fresh)).rejects.toThrow('模板依赖锁已改变');
     expect(await readFile(join(workspace(fresh), 'dist/index.html'), 'utf8')).toBe(before);
 
-    // 写入非法依赖：工具放行，构建拒绝且不覆盖旧产物，恢复模板依赖后构建重新通过。
     await writeFile(join(workspace(fresh), 'package-lock.json'), await readTemplateFile(template, 'package-lock.json'));
     const manifest = JSON.parse(await readProjectFile(fresh, 'package.json'));
     manifest.dependencies.vite = 'https://evil.invalid/package.tgz';
@@ -37,7 +35,6 @@ describe.each(cases)('真实 $id 模板构建', item => {
     await writeProjectFile(fresh, 'package.json', await readTemplateFile(template, 'package.json'));
     await expect(buildApp(fresh)).resolves.toBeUndefined();
 
-    // 类型错误：构建拒绝，旧的 dist 原样保留。
     await writeProjectFile(fresh, 'src/type-error.ts', 'export const count: number = "这不是数字";');
     await expect(buildApp(fresh)).rejects.toThrow('not assignable to type');
     expect(await readFile(join(workspace(fresh), 'dist/index.html'), 'utf8')).toBe(before);

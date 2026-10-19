@@ -16,19 +16,13 @@ export function clientIp(headers: Headers) {
   return 'unknown';
 }
 
-/** 限流窗口键（与旧版 PG 实现逐字一致）：API 全局、USER 按用户、IP 按来源地址。 */
 export function chatRateLimitKey(userId: string, ip: string) {
   const { type } = getConfig().chatRateLimit;
   return type === 'IP' ? `ip:${ip}` : type === 'USER' ? `user:${userId}` : 'api:app.chat.gen.code';
 }
 
-/** 已计入窗口的一格额度：key + 窗口 id 是退还所需的全部信息，不含连接串或任何凭据。 */
 export type ChatRateLimitReservation = { key: string; windowId: string };
 
-/**
- * 固定窗口计数。窗口在第一次放行时创建（token 是该窗口的唯一 id，TTL 是窗口长度），之后的命中只自增，
- * 不刷新 TTL：窗口不因请求延长，拒绝也不改变窗口，到点整键过期后自然重新计数。
- */
 const reserveScript = `
 local key = KEYS[1]
 local rate = tonumber(ARGV[1])
@@ -47,10 +41,6 @@ redis.call('HINCRBY', key, 'count', 1)
 return {1, redis.call('HGET', key, 'token')}
 `;
 
-/**
- * 退还一格。只有窗口 token 与预定时一致才回减：窗口已过期并被新请求重建（新 token）时不动新窗口，
- * 避免把别人新窗口的计数减掉。键不存在时自然什么都不做。
- */
 const refundScript = `
 local key = KEYS[1]
 if redis.call('HGET', key, 'token') ~= ARGV[1] then return 0 end

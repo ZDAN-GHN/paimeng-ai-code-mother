@@ -165,7 +165,6 @@ export async function buildApp(app: WorkspaceApp, signal?: AbortSignal, onStage?
     try {
       const manifest = await readProjectFile(app, 'package.json');
       const dependencies = template ? validateTemplateManifest(template, manifest) : validateProjectManifest(projectCodeGenType, manifest);
-      // 锁文件可由工具写入，改动它就是模型能修的源码问题，所以按 source 阶段交回修复。
       if (lock && await readProjectFile(app, 'package-lock.json') !== lock) throw new Error('模板依赖锁已改变，请恢复对应模板版本的 package-lock.json');
       return dependencies;
     } catch (error) { throw sourceFailure(error); }

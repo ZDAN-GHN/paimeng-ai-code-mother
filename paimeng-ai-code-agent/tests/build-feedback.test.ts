@@ -43,7 +43,6 @@ describe('模型可读诊断', () => {
     expect(feedback).not.toContain('/work/');
     expect(feedback).toContain('main.ts(2,1)');
     expect(feedback).toContain('保留换行');
-    // 依赖声明不允许增删改动，但误改后允许恢复成模板自带的版本。
     expect(feedback).toContain('不要添加或改动既有依赖');
     expect(feedback).toContain('把 package.json 与锁文件恢复成模板自带的内容');
   });

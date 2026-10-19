@@ -35,7 +35,6 @@ function makeTools(transport: Transport, overrides: { signal?: AbortSignal; chec
     write: async work => work(),
     deps: { transport, lookup: async () => [{ address: '93.184.216.34', family: 4 }] },
   });
-  // 直接调用 execute：测试里没有 runner 提供的执行上下文，只需满足 SDK 的参数类型。
   const call = { toolCallId: 't', messages: [], abortSignal: undefined, context: undefined } as never;
   const search = (query: string) => tools.webSearch.execute!({ query }, call) as Promise<ToolStatus<WebSearchData>>;
   const read = (url: string) => tools.readWebPage.execute!({ url }, call) as Promise<ToolStatus<WebPageData>>;

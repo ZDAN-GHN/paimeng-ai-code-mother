@@ -69,7 +69,6 @@ function providerCommon(draft: ProviderDraft) {
   };
 }
 
-/** 存储口径：直接输入的密钥只有密文。 */
 const provider = (overrides: Partial<ProviderDraft> = {}): ModelProviderInput => {
   const draft = providerDraft(overrides);
   return draft.apiKeySource === 'env'
@@ -77,7 +76,6 @@ const provider = (overrides: Partial<ProviderDraft> = {}): ModelProviderInput =>
     : { ...providerCommon(draft), apiKeySource: 'inline', apiKeyCiphertext: draft.apiKeyCiphertext };
 };
 
-/** 写入口径：直接输入的密钥是明文，允许空串表示保持原密钥。 */
 const providerWrite = (overrides: Partial<ProviderDraft> = {}): ModelProviderWriteInput => {
   const draft = providerDraft(overrides);
   return draft.apiKeySource === 'env'
@@ -155,7 +153,6 @@ describe('API 格式、选项与密钥来源', () => {
     expect(modelProviderWriteSchema.safeParse(providerWrite({ apiKeySource: 'inline', apiKey: '' })).success).toBe(true);
     expect(modelProviderWriteSchema.safeParse(providerWrite({ apiKeySource: 'inline', apiKey: 'x'.repeat(1025) })).success).toBe(false);
     expect(modelProviderInputSchema.safeParse(provider({ apiKeySource: 'inline' })).success).toBe(true);
-    // 存储口径不接受明文，写入口径也不接受密文。
     expect(modelProviderInputSchema.safeParse(providerWrite({ apiKeySource: 'inline' })).success).toBe(false);
     expect(modelProviderWriteSchema.safeParse(provider({ apiKeySource: 'inline' })).success).toBe(false);
   });

@@ -1,12 +1,3 @@
-/**
- * Test-only driver for the resident harness process.
- *
- * The durable invariants (a client disconnect must not cancel the run; a killed
- * process resumes from its checkpoint) belong to the harness process, which owns
- * the storage. These helpers spawn it with the deterministic faux model
- * (`src/server/durable/faux-model.ts`), so the cases need neither a real model nor
- * Docker. Postgres must be running; the callers skip when it is not.
- */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer, connect, type Socket } from 'node:net';
@@ -14,16 +5,12 @@ import { join, resolve } from 'node:path';
 
 export const productRoot = process.cwd();
 const harnessEntry = resolve(productRoot, 'src', 'server', 'durable', 'harness-server.ts');
-// The storage lives in its own test database (`paimeng_agent_test`), beside the product test database
-// (`paimeng_app_test`); its tables (`durable_*`, `entries`, …) are created by the storage itself.
 export const postgresUrl = process.env.DURABLE_PG_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/paimeng_agent_test';
 
-/** The harness runs on the product's tsx, which resolves the product's `@/` alias. */
 export function harnessAvailable(): boolean {
   return existsSync(harnessEntry) && existsSync(join(productRoot, 'node_modules', 'tsx'));
 }
 
-/** TCP probe so cases can skip cleanly when no Postgres is listening. */
 export function postgresReachable(url: string): Promise<boolean> {
   const parsed = new URL(url);
   return new Promise((done) => {
@@ -63,7 +50,6 @@ const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
 export type HarnessProcess = { child: ChildProcess; output: () => string };
 
-/** Spawn the harness on its own port and run directory; `reset` empties the schema before serving. */
 export function startHarness(options: { port: number; runDir: string; reset: boolean; waitMs: number; finalText: string; workspace?: string; tool?: string; args?: unknown; env?: Record<string, string> }): HarnessProcess {
   let output = '';
   const env = {
@@ -81,7 +67,6 @@ export function startHarness(options: { port: number; runDir: string; reset: boo
     ...(options.reset ? { DURABLE_HARNESS_RESET: '1' } : {}),
     ...options.env,
   };
-  // The product root as cwd is what makes the product's `@/` alias and runtime root resolve.
   const child = spawn(process.execPath, ['--import', 'tsx', '--conditions=react-server', harnessEntry], { cwd: productRoot, env, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString(); });
   child.stderr?.on('data', (chunk: Buffer) => { output += chunk.toString(); });
@@ -116,7 +101,6 @@ export async function waitHealthy(base: string, timeoutMs: number): Promise<void
     try {
       if ((await fetch(`${base}/health`)).ok) return;
     } catch {
-      // not listening yet
     }
     await delay(200);
   }
@@ -146,7 +130,6 @@ export async function waitForState(base: string, done: (state: HarnessState) => 
   throw new Error(`${label}: timed out; last state=${JSON.stringify(last)}`);
 }
 
-/** Raw TCP SSE client, so the disconnect is a socket destroy rather than an AbortController. */
 export function attachSse(base: string): { socket: Socket; text: () => string; firstByte: Promise<void> } {
   const url = new URL(`${base}/events`);
   const socket = connect(Number(url.port), url.hostname);
@@ -162,7 +145,6 @@ export function attachSse(base: string): { socket: Socket; text: () => string; f
   return { socket, text: () => text, firstByte };
 }
 
-/** One-shot SSE read; resolves with everything the response produced before the timer. */
 export function readSse(base: string, timeoutMs: number): Promise<string> {
   const controller = new AbortController();
   return new Promise((done) => {
@@ -179,7 +161,6 @@ export function readSse(base: string, timeoutMs: number): Promise<string> {
           text += decoder.decode(value, { stream: true });
         }
       } catch {
-        // the timer aborted the view, which is the whole point of this read
       } finally {
         clearTimeout(timer);
         done(text);

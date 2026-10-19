@@ -1,14 +1,3 @@
-/**
- * Ensures the four databases of the local Postgres instance and reports readiness.
- *
- *   npm run durable:pg            # 建缺失的 database，再打印就绪状态
- *   npm run durable:pg -- status  # 只打印就绪状态
- *
- * The instance is the machine's own Postgres container (`zslm-postgres`, 127.0.0.1:5432);
- * this repository does not manage its lifecycle. Host, port and credentials come from
- * `DATABASE_URL`. Same instance, four databases: `paimeng_app` (product business tables) and
- * `paimeng_agent` (pi-durable storage), with `paimeng_app_test` / `paimeng_agent_test` beside them.
- */
 import assert from 'node:assert/strict';
 import pg from 'pg';
 
@@ -23,7 +12,6 @@ assert.match(url.pathname, /^\/paimeng_app(?:_test)?$/, 'DATABASE_URL 必须指�
 const host = url.hostname;
 const port = url.port || '5432';
 
-// 建库要连到维护库；四个库与产品库同一个实例。
 const admin = new pg.Client({ connectionString: new URL('/postgres', url).href });
 try {
   await admin.connect();

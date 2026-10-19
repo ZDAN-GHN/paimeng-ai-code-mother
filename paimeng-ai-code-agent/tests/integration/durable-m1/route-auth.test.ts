@@ -1,12 +1,3 @@
-/**
- * The attach route must sit at the same permission level as
- * `app/chat/gen/code` and `app/chat/steer`: a logged-in user who created the app,
- * and nobody else (admins included).
- *
- * It also pins the boundary that keeps a dropped browser connection from
- * cancelling a run: only `GET /events` forwards `request.signal` upstream. A
- * fake harness records what it observes, so the cases need no harness process.
- */
 import { createServer, type Server } from 'node:http';
 import { loadEnvFile } from 'node:process';
 import { eq, like } from 'drizzle-orm';
@@ -73,7 +64,6 @@ beforeAll(async () => {
     response.on('close', () => {
       if (!response.writableEnded) record.aborted = true;
     });
-    // /events stays open so a client abort is observable; /submit answers slowly so its abort would be too.
     if (incoming.url?.startsWith('/events')) {
       response.writeHead(200, { 'content-type': 'text/event-stream' });
       response.write('event: snapshot\ndata: {}\n\n');
@@ -126,7 +116,6 @@ describe('durable M1 attach 路由鉴权与视图限界', () => {
   });
 
   it('断连只中止 SSE 视图，不中止提交', async () => {
-    // GET /events forwards the client signal upstream.
     const viewAbort = new AbortController();
     const view = GET(request(`events?appId=${appId}`, { method: 'GET', session: cookie, signal: viewAbort.signal }), params('events'));
     const viewRecord = await waitForRecord('GET /events');
@@ -135,7 +124,6 @@ describe('durable M1 attach 路由鉴权与视图限界', () => {
     for (let attempt = 0; attempt < 200 && !viewRecord.aborted; attempt += 1) await delay(25);
     expect(viewRecord.aborted).toBe(true);
 
-    // POST /submit must not: the durable admission outlives the request socket.
     const submitAbort = new AbortController();
     const submit = POST(request('submit', { method: 'POST', session: cookie, body: { appId, content: 'hello' }, signal: submitAbort.signal }), params('submit'));
     const submitRecord = await waitForRecord('POST /submit');

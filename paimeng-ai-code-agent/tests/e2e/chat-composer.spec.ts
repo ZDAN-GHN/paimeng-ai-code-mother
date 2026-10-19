@@ -134,7 +134,6 @@ test('工具调用渲染成可读操作记录：没有原始 JSON、工具调用
   const thumbnail = calls.nth(2).locator('img');
   await expect(thumbnail).toHaveAttribute('src', /\/api\/app\/asset\?appId=\d+&path=assets%2Fhero.jpg/);
   await expect(calls.nth(2)).toContainText('CC0');
-  // 阶段构建：成功的显示里程碑与阶段耗时，失败的按失败呈现并把诊断留给用户看。
   await expect(calls.nth(3).locator('.tool-call-title')).toHaveText('阶段构建：首页可用');
   await expect(calls.nth(3)).toContainText('预览已更新');
   await calls.nth(3).locator('.tool-call-header').click();
@@ -144,9 +143,7 @@ test('工具调用渲染成可读操作记录：没有原始 JSON、工具调用
   await expect(calls.nth(4)).toHaveClass(/tool-call-error/);
   await expect(calls.nth(4)).toContainText('类型检查');
   await expect(calls.nth(4).locator('.tool-call-code')).toContainText('TS2304');
-  // 流式内容长高（缩略图、工具明细、诊断）不能把用户踢出「贴底」状态，凭空冒出回到底部按钮。
   await expect(page.getByRole('button', { name: /回到最新/ })).toHaveCount(0);
-  // 展开/收起是用户可控的，且原始协议字段一个都不出现在页面上。
   const bubble = page.locator('.message-ai .message-bubble').last();
   await expect(bubble).not.toContainText('toolCallId');
   await expect(bubble).not.toContainText('call_00_hidden');
@@ -161,7 +158,6 @@ test('生成中追加消息不打断用户向上翻历史，出现回到底部�
   await page.setViewportSize({ width: 1280, height: 720 });
   const history = Array.from({ length: 24 }, (_, index) => ({ id: 'history-' + index, role: index % 2 ? 'assistant' : 'user', parts: [{ type: 'text', text: `历史消息 ${index}：` + '内容'.repeat(40) }] }));
   await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: history } }));
-  // 真的按时间流式返回：只有慢速流才能验证「追加不影响滚动位置」。
   const chunks = ['第一段回复。', '第二段回复。', '第三段回复。'];
   const server = createServer((_, response) => {
     response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
@@ -182,7 +178,6 @@ test('生成中追加消息不打断用户向上翻历史，出现回到底部�
     await page.getByLabel('对话消息').fill('再补一条需求');
     await page.getByRole('button', { name: /^发\s*送$/ }).click();
     await expect(page.locator('.message-ai .message-bubble').last()).toContainText('第一段回复。');
-    // 生成还在继续时向上翻历史：后续追加不能再把用户拉回底部。
     await list.evaluate(node => { node.scrollTop = 0; });
     await expect(page.getByRole('button', { name: /回到最新/ })).toBeVisible();
     await expect(page.locator('.message-ai .message-bubble').last()).toContainText('第三段回复。');
@@ -198,7 +193,6 @@ test('生成中追加消息不打断用户向上翻历史，出现回到底部�
 
 test('输入区常显键盘提示：未生成是直接发送，生成中变成排队发送', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
-  // 输入框里已有文字（应用初始需求）时提示也必须可见——这正是它从常显文字改成输入框背景文字的原因。
   await expect(page.getByLabel('对话消息')).toHaveValue(prompt);
   await expect(page.locator('.composer-keys')).toContainText('Enter 直接发送');
   await expect(page.locator('.composer-keys')).toContainText('Ctrl + Enter 中途插话');
@@ -332,7 +326,6 @@ test('进度事件画出时间线，preview 事件给 iframe 加上版本参数'
 
 test('生成中连接被切断：错误条说人话，时间线不再停在运行中的阶段', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
-  // 真写一段 SSE 后直接断开 socket：这就是浏览器看到的「响应体传输中断」（没有终态事件）。
   const server = createServer((_request, response) => {
     response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
     const write = (part: unknown) => response.write(`data: ${JSON.stringify(part)}\n\n`);
@@ -357,9 +350,7 @@ test('生成中连接被切断：错误条说人话，时间线不再停在运�
     await page.getByRole('button', { name: /^发\s*送$/ }).click();
     const timeline = page.locator('.build-progress');
     await expect(timeline).toContainText('安装依赖');
-    // 当前 requestId 的任务已 cancelled：提示按任务真实状态说话，不出现浏览器/流协议原文。
     await expect(page.locator('.ant-alert-warning')).toHaveText('生成连接中断，任务已取消；可重新发送需求继续');
-    // 「时间线停在安装依赖 运行中」就是这个 bug 的可见症状：中断后不能还有运行中的阶段。
     await expect(timeline.locator('.build-progress-running')).toHaveCount(0);
     await expect(timeline.locator('.anticon-loading')).toHaveCount(0);
     await expect(timeline.locator('.build-progress-item', { hasText: '安装依赖' })).toHaveClass(/build-progress-cancelled/);
@@ -379,7 +370,6 @@ test('流式阶段构建：进行中不显示失败，结果失败后诊断默�
     write({ type: 'start', messageId: 'milestone-assistant' });
     write({ type: 'tool-input-start', toolCallId: 'call_milestone', toolName: 'buildPreview' });
     write({ type: 'tool-input-available', toolCallId: 'call_milestone', toolName: 'buildPreview', input: { milestone: '预约页可用' } });
-    // 构建阶段每秒一个保活进度事件（ms 是已用时长）：流里有字节，时间线也能显示已用时长。
     write({ type: 'data-progress', data: { stage: 'install', status: 'started', ms: 0, at: 3 }, transient: true });
     write({ type: 'data-progress', data: { stage: 'install', status: 'started', ms: 4200, at: 5 }, transient: true });
     void gate.then(() => {
@@ -399,18 +389,14 @@ test('流式阶段构建：进行中不显示失败，结果失败后诊断默�
     await page.getByRole('button', { name: /^发\s*送$/ }).click();
     const card = page.locator('.message-ai .tool-call');
     await expect(card.locator('.tool-call-title')).toHaveText('阶段构建：预约页可用');
-    // 进行中：显示「正在构建…」，不能有失败标签，也不能整卡变红。
     await expect(card).toContainText('正在构建…');
     await expect(card.locator('.tool-call-tag')).toHaveCount(0);
     await expect(card).not.toHaveClass(/tool-call-error/);
-    // 保活事件让时间线显示安装依赖已用时长，而不是一个没有反馈的转圈。
     await expect(page.locator('.build-progress-item', { hasText: '安装依赖' })).toContainText('已用 4.2s');
     release();
-    // 结果失败：变红并带失败标签，诊断默认可见（不需要用户手动展开）。
     await expect(card).toHaveClass(/tool-call-error/);
     await expect(card.locator('.tool-call-tag')).toHaveText('失败');
     await expect(card.locator('.tool-call-code')).toContainText('TS2304');
-    // 手动收起仍然有效。
     await card.locator('.tool-call-header').click();
     await expect(card.locator('.tool-call-code')).toHaveCount(0);
   } finally {
@@ -446,7 +432,6 @@ test('断流后轮询先拿到 generating 再拿到 cancelled：时间线收尾�
     return route.continue({ url: `http://127.0.0.1:${port}/stream` });
   });
   try {
-    // 加载时任务已结束，发送按钮可用；发送后任务仍在生成（断流期间的真实状态）。
     await page.reload();
     await expect(page.getByLabel('对话消息')).toBeEnabled();
     taskStatus = 'generating';
@@ -455,13 +440,11 @@ test('断流后轮询先拿到 generating 再拿到 cancelled：时间线收尾�
     const timeline = page.locator('.build-progress');
     await expect(timeline).toContainText('安装依赖');
     await expect(page.locator('.ant-alert-warning')).toContainText('生成连接中断');
-    // 轮询先只拿到 generating：进行中的阶段还在转，提示不说「已取消」。
     await expect.poll(() => polls).toBeGreaterThan(1);
     await expect(timeline.locator('.build-progress-running')).not.toHaveCount(0);
     await page.getByLabel('对话消息').fill('排队的需求');
     await page.getByLabel('对话消息').press('Enter');
     await expect(page.locator('.composer-queue-chip')).toHaveCount(1);
-    // 轮询拿到 cancelled：进行中的阶段收尾，排队的消息不发出去。
     taskStatus = 'cancelled';
     await expect(timeline.locator('.build-progress-running')).toHaveCount(0);
     await expect(timeline.locator('.build-progress-item', { hasText: '安装依赖' })).toHaveClass(/build-progress-cancelled/);

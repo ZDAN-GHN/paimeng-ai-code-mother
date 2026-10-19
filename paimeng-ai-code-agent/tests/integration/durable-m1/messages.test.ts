@@ -1,15 +1,3 @@
-/**
- * 转录读取契约（docs/plans/archive/pi-durable-m4.md）：产品库不再有自己的消息表，转录由 harness 的条目承载。
- *
- * 这里用桩模型（不联网、不 Docker）钉住三个接口行为：
- *
- * - `/submit` 可以把一条用户输入放成自己的条目种类（`app.user`）并带上 UI 载荷；
- * - `/entries` 还能追加展示型条目（只有 kind 与 data，不进模型上下文）；
- * - `/messages` 按从旧到新的顺序返回**整条转录**（id / kind / model / data）：用户气泡与助手气泡的
- *   权威来源，产品据此派生 UI 消息（助手气泡直接用 pi 的原生条目，不再写 `app.assistant` 副本）。
- *
- * 需要 Postgres（127.0.0.1:5432）；没有时打印原因并 skip。
- */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -46,20 +34,17 @@ describe.skipIf(!harnessReady || !postgresReady)('durable M4：对话转录条�
       expect((await postJson(base, '/submit', { conversationId, requestId: 'request-1', content: 'M4_ENTRY_TEXT', entry: { kind: 'app.user', data: userMessage } })).status).toBe(202);
       await waitForState(base, (state) => state.view.entries.some((entry) => entry.kind === 'pi.assistant' && entry.text.includes('M4_ENTRY_DONE')), 60_000, 'run settles', conversationId);
 
-      // 展示条目只在 UI 通道，不进入模型上下文。
       expect((await postJson(base, '/entries', { conversationId, kind: 'app.assistant', data: displayMessage })).status).toBe(201);
       const context = (await (await fetch(`${base}/context?conversationId=${conversationId}`)).json()) as { messages: { role: string; text: string }[] };
       expect(context.messages.some((message) => message.text.includes('M4_ENTRY_ANSWER'))).toBe(false);
 
       const messages = (await (await fetch(`${base}/messages?conversationId=${conversationId}`)).json()) as { messages: TranscriptEntry[] };
-      // 整条转录：pi 自己的条目（助手/系统/工具结果）与产品写下的 `app.*` 条目都在里面，按条目 id 从旧到新。
       expect(messages.messages.map((entry) => entry.id)).toEqual([...messages.messages].map((entry) => entry.id).sort((left, right) => left - right));
       const kinds = messages.messages.map((entry) => entry.kind);
       expect(kinds).toContain('pi.assistant');
       expect(kinds.filter((kind) => kind.startsWith('app.'))).toEqual(['app.user', 'app.assistant']);
       expect(messages.messages.find((entry) => entry.kind === 'app.user')?.data).toEqual(userMessage);
       expect(messages.messages.find((entry) => entry.kind === 'app.assistant')?.data).toEqual(displayMessage);
-      // 助手条目的模型消息也随转录下发：前端派生助手气泡只靠它（文本块 + 工具调用）。
       expect(messages.messages.find((entry) => entry.kind === 'pi.assistant')?.model).toBeInstanceOf(Array);
     } finally {
       await stopHarness(harness);

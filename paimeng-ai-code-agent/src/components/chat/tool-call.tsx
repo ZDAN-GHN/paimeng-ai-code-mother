@@ -207,7 +207,6 @@ function Code({ content, language }: { content: string; language?: string }) {
   return <pre className="tool-call-code" data-language={language}>{content}</pre>;
 }
 
-/** 一次编辑调用的改动：每处替换一个对比块（原生 edit 一次可以给多处 edits）。 */
 function ModifiedBody({ view }: { view: Extract<ToolCallView, { kind: 'file-modified' }> }) {
   return <>{view.edits.map((edit, index) => <div className="tool-call-file" key={index}>
     <div className="tool-call-diff">

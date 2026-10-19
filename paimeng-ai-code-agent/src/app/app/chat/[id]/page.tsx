@@ -206,7 +206,6 @@ function Chat({ id }: { id: string }) {
     },
   });
   const generating = status === 'submitted' || status === 'streaming' || task?.status === 'generating' || task?.status === 'building';
-  /** 进入页面时读回转录（前端展示 = pi 的转录，`app/messages` 已按条目顺序投影成 UI 消息）。 */
   const loadHistory = useCallback(async (): Promise<ChatMessage[]> => {
     const history = await api<ChatMessage[]>('app/messages?appId=' + encodeURIComponent(id));
     if (mounted.current) setMessages(history);
@@ -311,7 +310,6 @@ function Chat({ id }: { id: string }) {
   const followNewContent = useCallback(() => {
     const list = messageList.current;
     if (!list || !stick.current) return;
-    // scroll 事件可能晚于流式更新到达，先检查用户是否已经上移，避免把他拉回底部。
     if (list.scrollTop < followedScrollTop.current - 1) {
       stick.current = false;
       setStickToBottom(false);

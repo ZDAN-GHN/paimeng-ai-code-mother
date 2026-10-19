@@ -6,17 +6,14 @@ import { BusinessError } from './http';
 import { codeGenTypes, type CodeGenType } from '@/shared/contracts';
 import { modelRegistry } from './models/registry';
 
-/** 模型别名未配置或未启用时的固定 503 文案；registry.resolveBinding 就抛它。 */
 export function aliasNotConfiguredMessage(alias: string): string {
  return `模型别名 ${alias} 未配置或未启用`;
 }
 
-/** 只有「别名不存在或未启用」这一种 503 算未配置，其它模型配置错误必须原样上抛。 */
 export function isAliasNotConfigured(error: unknown, alias: string): boolean {
  return error instanceof BusinessError && error.status === 503 && error.code === 50300 && error.message === aliasNotConfiguredMessage(alias);
 }
 
-/** 路由是部署可配置项：失败要告诉用户改哪个别名，并且不能把密钥或整段上游报文原样抛给前端。 */
 function routingFailureDetail(error: unknown) {
  const raw = error instanceof Error ? error.message : String(error);
  return raw.replace(/\s+/g, ' ').replace(/(sk-|Bearer\s+)[A-Za-z0-9._-]{6,}/gi, '$1***').slice(0, 300) || '未知错误';
@@ -24,7 +21,6 @@ function routingFailureDetail(error: unknown) {
 
 export async function routeCodeGenType(prompt: string): Promise<CodeGenType> {
  if (getConfig().aiMode === 'fixture') {
-  // 测试只固定类型分类；生成夹具由 harness 的 DURABLE_FAUX_* 控制。
   if (/react/i.test(prompt)) return 'react_project';
   return /商城|管理|登录|购物|评论|vue|复杂交互/i.test(prompt) ? 'vue_project' : /多页面|多个页面|多文件|分离.*css/i.test(prompt) ? 'multi_file' : 'html';
  }

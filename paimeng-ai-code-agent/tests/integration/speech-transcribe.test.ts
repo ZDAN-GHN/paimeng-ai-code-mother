@@ -18,7 +18,6 @@ process.env.DATABASE_URL = testDatabaseUrl(process.env.DATABASE_URL ?? '');
 process.env.AI_MODEL = 'speech-test-model';
 process.env.AI_BASE_URL = 'https://speech.example.test/v1';
 process.env.AI_API_KEY = speechApiKey;
-/** 与 speech.ts 的 speechTranscribeAlias 同名；测试里显式写死，别名改名必须同步改这里。 */
 const speechAlias: ModelAliasInput = {
   alias: 'speech.transcribe',
   providerId: defaultModelProviderId,
@@ -68,7 +67,6 @@ function recordingForm(audio: Blob, filename = 'recording.webm') {
 
 const audioBlob = (bytes: number, type = 'audio/webm') => new Blob([new Uint8Array(bytes)], { type });
 
-/** 模型配置是全局共享状态，本文件自己建自己清，避免影响其他用例。 */
 async function resetModelConfig() {
   await db().delete(modelAliases);
   await db().delete(modelProviders);
@@ -145,7 +143,6 @@ describe('语音转写接口', () => {
     expect(wrongType.status).toBe(400);
     expect((await json(wrongType)).message).toContain('只支持 webm');
 
-    // 声明类型缺失时按扩展名兜底；扩展名也无法判定则 400。
     const noExtension = await postTranscribe(cookie, recordingForm(new Blob([new Uint8Array(4)]), 'clip'));
     expect(noExtension.status).toBe(400);
 

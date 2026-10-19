@@ -1,7 +1,3 @@
-/**
- * 浏览器用例共用的小型数据库夹具：连测试库、给账号管理员权限、铺一份确定的模型配置。
- * 列名按 Postgres 产品的 snake_case（docs/plans/archive/pi-durable-m4.md）；测试库由 `npm run db:test:setup` 建好。
- */
 import pg from 'pg';
 import { testDatabaseUrl } from '../../test-database-url';
 
@@ -17,7 +13,6 @@ export async function grantAdmin(client: pg.Client, account: string) {
   await client.query("UPDATE app_user SET user_role='admin' WHERE user_account=$1", [account]);
 }
 
-/** 清空模型配置，把版本号归零：之后的初始化必须由被测代码自己完成。 */
 export async function emptyModelConfig(client: pg.Client) {
   await client.query('DELETE FROM model_alias');
   await client.query('DELETE FROM model_provider');
@@ -26,7 +21,6 @@ export async function emptyModelConfig(client: pg.Client) {
   );
 }
 
-/** 铺一份 provider + 两个别名 + 版本 1 的配置，供管理端用例直接读写。 */
 export async function seedModelConfig(client: pg.Client, baseUrl = 'https://api.example.test/v1') {
   await client.query('DELETE FROM model_alias');
   await client.query('DELETE FROM model_provider');
@@ -57,7 +51,6 @@ export async function seedModelConfig(client: pg.Client, baseUrl = 'https://api.
   );
 }
 
-/** jsonb 回来已经是对象，字符串则是 JSON 文本；两种都还原成对象。 */
 export async function readProviderHeaders(client: pg.Client): Promise<Record<string, string>> {
   const { rows } = await client.query("SELECT headers FROM model_provider WHERE id='env-default'");
   const value = (rows as { headers: unknown }[])[0]?.headers;

@@ -1,20 +1,3 @@
-/**
- * Postgres backend for the pi-durable `Storage` contract.
- *
- * This is a direct port of the framework's own `SqliteStorage` reference
- * implementation (`dist/storage/sqlite/storage.js`) onto Postgres, so the
- * semantics — global record IDs, commit sequences, fork-aware entry scans,
- * document incarnations and deltas — match the reference byte for byte. Only
- * the physical layer differs:
- *
- *   - one pinned connection behind a serial queue (the contract is a single
- *     writer; Postgres would allow more, the Session does not),
- *   - a session advisory lock so a second process cannot open the same database,
- *   - JSONB for document content, JSON text for the table records (Postgres
- *     rejects lone UTF-16 surrogates in JSONB, and the conformance suite
- *     deliberately stores them),
- *   - BIGINT for IDs and sequences, mapped back to JS numbers.
- */
 import { apply, type Op } from "@earendil-works/chord/delta";
 import type { Context, JsonValue } from "@earendil-works/chord";
 import {
@@ -53,12 +36,6 @@ import pg from "pg";
 // enough to be an exact JS number. The parser is set on this backend's own
 // clients rather than globally: the product's pool (src/server/db.ts) keeps
 // BIGINT in the string domain because its snowflake IDs exceed 2^53.
-/**
- * The storage lives in its own database on the same Postgres instance as the product
- * (`DURABLE_PG_URL`). There is deliberately no `DATABASE_URL` fallback: the product and the
- * storage are two databases, and falling back would silently mix the durable tables into the
- * business database.
- */
 function defaultPgUrl(): string {
 	return process.env.DURABLE_PG_URL ?? "postgres://postgres:postgres@127.0.0.1:5432/paimeng_agent";
 }
@@ -68,7 +45,6 @@ const bigintAsNumber = { getTypeParser: (oid: number, format?: "text" | "binary"
 type StoredTask = TaskRecord<JsonValue, JsonValue, JsonValue>;
 
 const ROOT_SCOPE_OWNER = 0;
-/** Advisory-lock key held for the storage lifetime; any 64-bit constant works. */
 const ADVISORY_LOCK_KEY = 0x64757261626c65n;
 
 const idAt = (value: number): Id<string> => value as Id<string>;
@@ -85,10 +61,8 @@ const encodeRecord = (value: unknown): string => JSON.stringify(value);
 // JSON-encoding keeps indexed identities lossless (they match the SQLite backend).
 const encodeIndexedString = (value: string): string => JSON.stringify(value);
 
-/** Ordered scan position: the order plus the last ID a previous page returned. */
 type ScanStart = { readonly order: ScanOrder; readonly after: number | undefined };
 
-/** Resolve a scan's order and position; a cursor continues in its own order. */
 function scanStart(requested: ScanOrder | undefined, cursor: Cursor | undefined, fallback: ScanOrder): ScanStart {
 	if (requested !== undefined && requested !== "ascending" && requested !== "descending") {
 		throw new StorageRequestError(`Invalid scan order: ${String(requested)}`);
@@ -114,13 +88,11 @@ const pageOf = <T extends { readonly id: number }>(values: readonly T[], limit: 
 	return { items, next: nextCursor(items.at(-1)!.id, order) };
 };
 
-/** The ID condition, its parameter, and the `ORDER BY` direction of a table scan. */
 const scanSql = (start: ScanStart): { clause: string; param: number; direction: "ASC" | "DESC" } =>
 	start.order === "ascending"
 		? { clause: "id > $1", param: start.after ?? -1, direction: "ASC" }
 		: { clause: "id < $1", param: start.after ?? Number.MAX_SAFE_INTEGER, direction: "DESC" };
 
-/** Indexed scope columns derived from a document scope. */
 const scopeColumns = (scope: DocumentRecord["scope"]): { scopeKind: string; ownerId: number } => {
 	switch (scope.kind) {
 		case "session":
@@ -154,7 +126,6 @@ const isAliveAt = (record: DocumentRecord, at: DocumentPoint): boolean => {
 
 const isCurrentOnly = (record: DocumentRecord): boolean => record.scope.kind !== "conversation" || record.history === "latest";
 
-/** The record ID a write claims, if any. */
 const writeId = (write: StorageWrite): number | undefined => {
 	switch (write.type) {
 		case "conversation":
@@ -171,7 +142,6 @@ const writeId = (write: StorageWrite): number | undefined => {
 	}
 };
 
-/** Per-document intent collected from one commit batch before it is validated. */
 type DocumentAction = {
 	create?: DocumentCreate;
 	content?: DocumentContent;
@@ -286,10 +256,6 @@ export type PostgresStorageOptions = {
 	readonly lock?: boolean;
 };
 
-/**
- * Serial queue: the Session serializes commits itself, but reads and ID minting
- * arrive concurrently, and a single pinned connection cannot interleave.
- */
 class SerialQueue {
 	#tail: Promise<unknown> = Promise.resolve();
 
@@ -314,7 +280,6 @@ export class PostgresStorage implements Storage {
 		this.#nextId = nextId;
 	}
 
-	/** Connect, migrate, take the exclusive lock, and read the ID counter. */
 	static async open(options: PostgresStorageOptions = {}): Promise<PostgresStorage> {
 		const client = new pg.Client({
 			connectionString: options.connectionString ?? defaultPgUrl(),
@@ -341,7 +306,6 @@ export class PostgresStorage implements Storage {
 			try {
 				await client.end();
 			} catch {
-				// Preserve the initialization failure.
 			}
 			throw error;
 		}
@@ -378,7 +342,6 @@ export class PostgresStorage implements Storage {
 			try {
 				await this.#client.query("ROLLBACK");
 			} catch {
-				// Preserve the original failure.
 			}
 			throw error;
 		}
@@ -544,7 +507,6 @@ export class PostgresStorage implements Storage {
 		return pageOf(values, limit, "descending");
 	}
 
-	/** Oldest first: the fork chain's segments from the root conversation forward, each up to its fork point. */
 	async #readEntriesAscending(query: EntryQuery, limit: number, after: number | undefined) {
 		const segments: { conversationId: number; upper: number | undefined }[] = [];
 		let conversation = await this.#readConversation(query.conversationId);
@@ -1017,7 +979,6 @@ const cursorAfter = (cursor: Cursor | undefined): number | undefined => {
 	return after;
 };
 
-/** Collect per-document intents, rejecting a batch that commands one document twice. */
 function prepareDocumentActions(writes: readonly StorageWrite[]): Map<number, DocumentAction> {
 	const actions = new Map<number, DocumentAction>();
 	for (const write of writes) {
@@ -1060,7 +1021,6 @@ function prepareDocumentActions(writes: readonly StorageWrite[]): Map<number, Do
 	return actions;
 }
 
-/** Apply every pending migration under a version gate. */
 async function applyMigrations(client: pg.Client): Promise<void> {
 	await client.query("BEGIN");
 	try {
@@ -1084,7 +1044,6 @@ async function applyMigrations(client: pg.Client): Promise<void> {
 		try {
 			await client.query("ROLLBACK");
 		} catch {
-			// Preserve the original failure.
 		}
 		throw error;
 	}

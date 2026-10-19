@@ -1,9 +1,3 @@
-/**
- * 构建失败的分类与模型可读诊断。纯函数，不依赖运行时。
- *
- * 阶段标记通过 WeakMap 挂在错误对象上：不改错误类型、消息与对外序列化，
- * 只让 agent.ts 判断这次失败能否交给模型修复。见 docs/plans/archive/agent-design-review.md §8。
- */
 export type BuildStage = 'source' | 'template' | 'install' | 'typecheck' | 'build' | 'platform';
 /** 能定位到生成源码、因而可以交给模型修复的阶段。 */
 export type RepairableStage = 'source' | 'typecheck' | 'build';
@@ -55,7 +49,6 @@ function messageOf(error: unknown) {
   return (error instanceof Error ? error.message : String(error)).slice(0, summaryChars);
 }
 
-/** 容器内路径（--workdir /work）归一化成工程相对路径，模型才能用 read 的路径直接对上。 */
 function normalizeContainerPaths(text: string) {
   return text.split('/work/').join('');
 }

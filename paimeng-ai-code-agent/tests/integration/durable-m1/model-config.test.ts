@@ -1,10 +1,3 @@
-/**
- * 产品库模型配置的端到端验收：同一个常驻 harness 进程里，每轮生成都按产品库的 `codegen.default`
- * 解析模型，改库后**下一次生成**才生效；密钥只在 harness 里按需解析，不出现在任何序列化面。
- *
- * 桩上游是测试进程里的本地 HTTP 服务（OpenAI Chat Completions 流式应答），记录每个请求的路径、
- * 模型名、鉴权头与采样/思考字段；产品库用测试库里的真实行，harness 是真实子进程（不是夹具模型）。
- */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
@@ -39,7 +32,6 @@ process.env.AI_BASE_URL = 'https://placeholder.example.test/v1';
 
 const productRoot = process.cwd();
 const harnessEntry = resolve(productRoot, 'src', 'server', 'durable', 'harness-server.ts');
-/** 环境变量来源的密钥：允许名单里的变量名，值只进 harness 子进程。 */
 const allowedKeyEnv = 'CODEGEN_STUB_KEY';
 const envKeyValue = 'sk-sentinel-env-4b81';
 const unallowedKeyEnv = 'CODEGEN_NOT_ALLOWED_KEY';
@@ -54,14 +46,11 @@ const sentinel = (suffix: string) => `sk-sentinel-${suffix}-7c2e`;
 
 type CapturedRequest = { index: number; path: string; authorization: string | undefined; model: string; body: Record<string, unknown> };
 
-/** OpenAI Chat Completions 的流式桩：可挂起某个模型的第一个请求，用来在运行中途改库。 */
 class StubUpstream {
 	readonly requests: CapturedRequest[] = [];
 	readonly server: Server;
 	baseUrl = '';
-	/** 为 true 时，每个模型名的第一个请求先要求调用 `listFiles`，之后的请求直接答一句话。 */
 	toolCallFirst = false;
-	/** 这些模型名的第一个请求挂起，直到 `release()`。 */
 	readonly holdModels = new Set<string>();
 	readonly #releases = new Map<string, () => void>();
 	readonly #calls = new Map<string, number>();
@@ -95,7 +84,6 @@ class StubUpstream {
 	}
 
 	async #handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
-		// 被杀死的 harness 会让挂起的响应写到死 socket 上；这里的错误只属于测试桩。
 		response.on("error", () => undefined);
 		request.on("error", () => undefined);
 		let raw = '';
@@ -139,7 +127,6 @@ let workspace = '';
 let port = 0;
 let savedModels: { providers: typeof modelProviders.$inferSelect[]; aliases: typeof modelAliases.$inferSelect[]; state: typeof modelConfigState.$inferSelect[] } | undefined;
 
-/** 真实 harness（无夹具模型）：模型来自产品库，密钥来自提供商配置本身；`reset: false` 就是重启同一份存储。 */
 function startProductHarness(port: number, options: { reset: boolean } = { reset: true }): HarnessProcess {
 	let output = '';
 	const env: NodeJS.ProcessEnv = {
@@ -150,7 +137,6 @@ function startProductHarness(port: number, options: { reset: boolean } = { reset
 		DURABLE_HARNESS_WORKSPACE: workspace,
 		DURABLE_PG_URL: postgresUrl,
 		...(options.reset ? { DURABLE_HARNESS_RESET: '1' } : {}),
-		// 显式覆盖与夹具都不参与：这个用例验收的是产品库那一条路径。
 		DURABLE_MODEL_BASE_URL: '',
 		DURABLE_MODEL_API_KEY: '',
 		DURABLE_MODEL_ID: '',
@@ -169,7 +155,6 @@ function startProductHarness(port: number, options: { reset: boolean } = { reset
 	return { child, output: () => output };
 }
 
-/** 从空库建出完整合法配置（必需别名齐全），之后再换提供商与 codegen.default。 */
 async function resetModelConfig(): Promise<void> {
 	await db().delete(modelAliases);
 	await db().delete(modelProviders);
@@ -221,14 +206,12 @@ async function writeCodegenAlias(options: { modelName: string; providerId?: stri
 	await upsertAlias(alias, { expectedRevision: revision });
 }
 
-/** 桩提供商 + codegen.default 的正常配置。 */
 async function seedStubModel(options: { apiKey?: string; apiKeySource?: 'inline' | 'env'; modelName?: string; settings?: ModelAliasSettings; headers?: Record<string, string> } = {}): Promise<void> {
 	await resetModelConfig();
 	await writeStubProvider(options);
 	await writeCodegenAlias({ modelName: options.modelName ?? 'stub-model', settings: options.settings });
 }
 
-/** 走产品的准入接口：只有公开身份与能力 + 不透明令牌。 */
 async function admit(): Promise<ModelAdmission> {
 	const response = await fetch(`${harnessBase}/model`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
 	const text = await response.text();
@@ -244,7 +227,6 @@ async function admissionFailure(): Promise<{ status: number; body: { error?: str
 	return { status: response.status, body: await response.json() as { error?: string; code?: number } };
 }
 
-/** 同一份存储上再起一个 harness：端口沿用，runDir/workspace 不变，不重置存储。 */
 async function restartHarness(): Promise<void> {
 	if (harness) await stopHarness(harness);
 	harness = startProductHarness(port, { reset: false });
@@ -262,7 +244,6 @@ async function createConversation(token: string): Promise<number> {
 	return (JSON.parse(text) as { conversationId: number }).conversationId;
 }
 
-/** 提交一次生成（不带请求 socket 语义，和产品路径一样只是 attach 客户端）；不给 token 就是产品路径的修复轮/插话。 */
 async function submit(conversationId: number, text: string, token?: string): Promise<number> {
 	const response = await fetch(`${harnessBase}/submit`, {
 		method: 'POST',
@@ -278,17 +259,12 @@ async function submitOrFail(conversationId: number, text: string, token?: string
 	expect(status, `submit expected 202, got ${status}`).toBe(202);
 }
 
-/** `GET /model` 的只读身份（记账与验证证据）。 */
 async function modelIdentity(conversationId: number): Promise<{ model: { provider: string; modelId: string } | null; identity: { alias: string; providerId: string | null; modelName: string | null } | null }> {
 	const response = await fetch(`${harnessBase}/model?conversationId=${conversationId}`);
 	expect(response.status).toBe(200);
 	return await response.json() as Awaited<ReturnType<typeof modelIdentity>>;
 }
 
-/**
- * 提交之后先等桩上游收到这次运行的请求（admission 是异步落地的，直接读状态会在开始前读到 idle），
- * 再等这次运行结束。
- */
 async function settleRun(conversationId: number, requestsBefore: number): Promise<HarnessState> {
 	await waitForRequests(requests => requests.length > requestsBefore, '这次运行的模型请求');
 	return waitForState(
@@ -300,7 +276,6 @@ async function settleRun(conversationId: number, requestsBefore: number): Promis
 	);
 }
 
-/** 一次完整生成：准入令牌建会话 → 提交 → 等运行结束。 */
 async function runGeneration(token: string, text: string, conversationId?: number): Promise<number> {
 	const id = conversationId ?? await createConversation(token);
 	const requestsBefore = stub.requests.length;
@@ -375,10 +350,8 @@ describe.skipIf(!harnessReady || !postgresReady)('durable：产品库模型配�
 		const [firstRequest] = await waitForRequests(requests => requests.length >= 1, '第一轮的模型请求');
 		expect(firstRequest).toMatchObject({ path: '/v1/chat/completions', model: 'stub-model-a', authorization: `Bearer ${sentinel('a')}` });
 		expect(firstRequest.body).toMatchObject({ max_tokens: 777, temperature: 0.2, reasoning_effort: 'max' });
-		// 通用 OpenAI 兼容端点不该收到 DeepSeek 专有的 thinking 字段。
 		expect(firstRequest.body.thinking).toBeUndefined();
 
-		// 改库：换模型名、换密钥、换思考档位、去掉采样参数。
 		await writeStubProvider({ apiKey: sentinel('b'), headers: { 'x-stub-tag': 'tag-b' } });
 		await writeCodegenAlias({ modelName: 'stub-model-b', settings: { reasoning: 'high', maxOutputTokens: 999 } });
 
@@ -406,23 +379,19 @@ describe.skipIf(!harnessReady || !postgresReady)('durable：产品库模型配�
 		await submitOrFail(conversationId, '运行中改库', admission.token!);
 		await waitForRequests(requests => requests.some(request => request.model === 'stub-model-hold'), '被挂起的模型请求');
 
-		// 运行中给同一会话提交**另一个 token**：必须在改任何状态之前拒绝（默认排队语义也一样拒绝）。
 		const conflicting = await admit();
 		expect(await submit(conversationId, '换一个模型绑定', conflicting.token!)).toBe(409);
 
-		// A 仍在跑：现在改库，再把请求放行（放行后模型要求调用工具，同一轮会再发一次）。
 		await writeStubProvider({ apiKey: sentinel('d') });
 		await writeCodegenAlias({ modelName: 'stub-model-next' });
 		stub.release('stub-model-hold');
 		const held = await waitForRequests(requests => requests.filter(request => request.model === 'stub-model-hold').length >= 2, '同一轮的第二请求');
 		expect(held.filter(request => request.model === 'stub-model-hold').every(request => request.authorization === `Bearer ${sentinel('c')}`)).toBe(true);
 		expect(held.some(request => request.model === 'stub-model-next')).toBe(false);
-		// 被拒绝的提交既没有换成新 token 的密钥，也没有删掉 A 的 provider：A 的每个请求都还是旧配置。
 		expect(held.filter(request => request.model === 'stub-model-hold').map(request => request.authorization))
 			.toEqual(held.filter(request => request.model === 'stub-model-hold').map(() => `Bearer ${sentinel('c')}`));
 		await settleRun(conversationId, requestsBefore);
 
-		// 下一次生成才用新配置。
 		const next = await admit();
 		expect(next.identity).toMatchObject({ modelName: 'stub-model-next' });
 		await runGeneration(next.token!, '改库后的下一轮');
@@ -462,7 +431,6 @@ describe.skipIf(!harnessReady || !postgresReady)('durable：产品库模型配�
 		expect(unallowed.status).toBe(503);
 		expect(unallowed.body.error).toContain('未允许的环境变量');
 
-		// 每一次拒绝都发生在提交之前：桩上游没有收到任何请求。
 		expect(stub.requests).toHaveLength(0);
 	}, 180_000);
 
@@ -534,14 +502,12 @@ describe.skipIf(!harnessReady || !postgresReady)('durable：产品库模型配�
 		await submitOrFail(conversationId, '改别名后被杀', admission.token!);
 		await waitForRequests(requests => requests.some(request => request.model === 'stub-model-old'), '被挂起的旧模型请求');
 
-		// 断言这次运行已经落在原提供商上，然后改别名、再 kill -9（重启后用同一份存储）。
 		await writeStubProvider({ id: 'stub-provider-2', apiKey: sentinel('f') });
 		await writeCodegenAlias({ providerId: 'stub-provider-2', modelName: 'stub-model-new' });
 		const requestsBeforeRestart = stub.requests.length;
 		await kill9(harness!);
 		await restartHarness();
 
-		// 恢复的任务按持久描述重建 provider：重新发出的请求仍是原模型与原密钥，没有落到新别名上。
 		const resumed = await waitForRequests(requests => requests.length > requestsBeforeRestart, '恢复后的模型请求');
 		const replay = resumed[resumed.length - 1]!;
 		expect(replay.model).toBe('stub-model-old');
@@ -549,7 +515,6 @@ describe.skipIf(!harnessReady || !postgresReady)('durable：产品库模型配�
 		expect(resumed.some(request => request.model === 'stub-model-new')).toBe(false);
 		await settleRun(conversationId, requestsBeforeRestart);
 		expect(await modelIdentity(conversationId)).toMatchObject({
-			// 恢复后登记的是持久描述里的实例 provider，身份仍是原提供商与原模型。
 			model: { provider: expect.stringMatching(new RegExp(`^${generationModelAlias}#[0-9a-f]{8}$`)), modelId: 'stub-model-old' },
 			identity: { alias: generationModelAlias, providerId: 'stub-provider', modelName: 'stub-model-old' },
 		});
@@ -562,15 +527,12 @@ describe.skipIf(!harnessReady || !postgresReady)('durable：产品库模型配�
 		const before = await modelIdentity(conversationId);
 		expect(before.identity).toMatchObject({ alias: generationModelAlias, providerId: 'stub-provider', modelName: 'stub-model-first' });
 
-		// 模型循环已经结束（会话不再 busy），管理端把别名改指到另一个提供商，然后重启 harness。
 		await writeStubProvider({ id: 'stub-provider-2', apiKey: sentinel('h') });
 		await writeCodegenAlias({ providerId: 'stub-provider-2', modelName: 'stub-model-second' });
 		await restartHarness();
 
-		// 只读身份来自持久描述：没有重新解析别名，也没有取凭据。
 		expect(await modelIdentity(conversationId)).toEqual(before);
 
-		// 产品路径里不换绑定的后续提交（修复轮/插话）仍用原绑定，不落到新别名上。
 		const requestsBefore = stub.requests.length;
 		await submitOrFail(conversationId, '重启后的后续提交');
 		const after = await waitForRequests(requests => requests.length > requestsBefore, '重启后的模型请求');

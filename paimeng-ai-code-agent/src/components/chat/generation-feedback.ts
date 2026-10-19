@@ -1,14 +1,6 @@
 import { z } from 'zod';
 import type { BuildProgressEvent, GenerationStatus } from '@/shared/contracts';
 
-/**
- * 对话输入与生成进度的纯逻辑。组件只做渲染与副作用，这里全部可以直接单测：
- * 键位决策、排队进出、`data-progress` 事件归约成时间线阶段。
- *
- * 交互约定（用户明确要求，见 docs/plans/archive/agent-design-review.md）：
- * Enter 生成中排队、空闲直接发；Ctrl/⌘ + Enter 生成中中途插话、空闲等同发送；
- * Shift + Enter 换行。
- */
 
 export type ComposerAction = 'send' | 'queue' | 'steer' | 'newline' | 'none';
 

@@ -1,6 +1,4 @@
 name: paimeng-ts-refactor
-# 本仓库不再自带 Postgres：产品库与 harness 存储都放在这台机器已有的 Postgres 16 实例里
-# （127.0.0.1:5432，四个 database，连接串在 .env，见 README「使用本机自己的数据库容器」）。
 services:
   mysql:
     container_name: zslm-mysql

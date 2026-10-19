@@ -1,4 +1,3 @@
-/** 一次性旧数据副本迁移；不属于日常启动或测试入口，使用条件见 scripts/README.md。 */
 import { resolve, relative, isAbsolute } from 'node:path';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import pg from 'pg';

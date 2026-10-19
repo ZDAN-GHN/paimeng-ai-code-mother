@@ -5,7 +5,6 @@ import { createModelRegistry, modelRegistry } from '@/server/models/registry';
 import { BusinessError } from '@/server/http';
 import type { ModelAlias, ModelConfigSnapshot, ModelProvider } from '@/shared/model-config';
 
-// 用受控注册表替换单例：provider 路由测试需要冻结绑定，但不应访问数据库。
 vi.mock('@/server/models/registry', async importOriginal => {
   const actual = await importOriginal<typeof import('@/server/models/registry')>();
   return { ...actual, modelRegistry: vi.fn() };
@@ -87,12 +86,9 @@ describe('应用类型路由（F01）', () => {
 
     expect(captured).toHaveLength(1);
     expect(captured[0].url).toContain('/chat/completions');
-    // 路由使用 route.classify 的模型名，而不是生成用的 codegen.default。
     expect(captured[0].body.model).toBe('test-model');
     expect(JSON.stringify(captured[0].body.messages)).toContain('需要多个页面的网站');
-    // generateText asked the provider for a JSON object, not free text.
     expect(captured[0].body.response_format).toMatchObject({ type: 'json_object' });
-    // The actual request body must carry the JSON field guidance the model needs.
     const requestBody = JSON.stringify(captured[0].body);
     expect(requestBody).toMatch(/JSON/i);
     expect(requestBody).toContain('codeGenType');
@@ -100,7 +96,6 @@ describe('应用类型路由（F01）', () => {
     expect(requestBody).toContain('vue_project');
     expect(requestBody).toContain('react_project');
 
-    // 需求指明 React 时同样由路由返回 React 工程类型。
     content = '{"codeGenType":"react_project"}';
     await expect(routeCodeGenType('用 React 实现数据仪表盘')).resolves.toBe('react_project');
     expect(captured).toHaveLength(2);

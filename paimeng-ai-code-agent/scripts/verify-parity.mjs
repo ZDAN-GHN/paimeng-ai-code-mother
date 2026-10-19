@@ -1,4 +1,3 @@
-/** 一次性旧平台 UI 对照验收；不属于日常启动或测试入口，使用条件见 scripts/README.md。 */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { access, mkdir, writeFile } from 'node:fs/promises';

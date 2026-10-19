@@ -24,7 +24,6 @@ vi.mock('@/server/artifacts', async (importOriginal) => ({
 
 loadEnvFile('.env');
 process.env.DATABASE_URL = testDatabaseUrl(process.env.DATABASE_URL ?? '');
-// F01 routing must stay deterministic and never call a provider inside these tests.
 process.env.AI_MODE = 'fixture';
 
 let actor: User;
@@ -82,7 +81,6 @@ describe('功能补齐的后端行为（独立 Postgres 测试库）', () => {
     const [plainRow] = await db().select().from(apps).where(eq(apps.id, BigInt(plain)));
     expect(plainRow.codeGenType).toBe('html');
 
-    // 需求里指明 React 时，路由自动落到 React 工程与对应模板。
     const react = await createApp({ initPrompt: '用 React 做一个后台数据管理系统' }, actor);
     created.push({ id: react, codeGenType: 'react_project' });
     expect(await getApp(react, actor)).toMatchObject({ codeGenType: 'react_project', template: { id: 'react-ts', version: '1.0.0' } });

@@ -9,22 +9,12 @@ loadEnvFile('.env');
 const password = 'password123';
 const origin = appOrigin();
 
-/**
- * 只在开发构建里出现的告警检查。
- *
- * 2026-10-12 的 Form.Item 死控件（`{' '}` 让受控开关不再绑定表单）与 2026-10-13 的
- * Space direction / Input addonAfter 废弃告警，都属于「dev 控制台能看见、用户会截图报障，
- * 而生产构建 E2E 完全看不到」的一类。这个文件把这类问题变成会失败的断言。
- *
- * 只在 E2E_APP_MODE=dev 时运行：`npm run test:e2e:dev`。
- */
 test.skip(process.env.E2E_APP_MODE !== 'dev', '仅 dev 模式有效：请跑 npm run test:e2e:dev（生产构建会剥离这些告警）');
 test.describe.configure({ timeout: 240000 });
 
-/** 与本类问题无关的噪音；每条都写清为什么可以忽略。 */
 const ignored: readonly RegExp[] = [
-  /Download the React DevTools/, // React 的常规开发提示
-  /Failed to load resource/, // 页面里故意触发的接口失败（例如未登录时拉取）
+  /Download the React DevTools/,
+  /Failed to load resource/,
 ];
 
 function watchConsole(page: Page): string[] {
@@ -79,7 +69,6 @@ test('管理端与模型配置弹窗在 dev 模式下没有告警', async ({ pag
     await expect(page.locator('body')).toBeVisible();
   }
 
-  // Form.Item + 受控开关是死控件的现场，别名的 AutoComplete 曾经用过废弃的 addonAfter。
   await page.getByRole('button', { name: '新增提供商' }).click();
   await page.getByRole('dialog').getByRole('button', { name: /取\s*消$/ }).click();
   const provider = page.getByRole('row').filter({ has: page.getByRole('cell', { name: 'https://api.example.test/v1', exact: true }) });

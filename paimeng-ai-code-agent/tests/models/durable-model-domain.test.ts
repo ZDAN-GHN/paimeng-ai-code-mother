@@ -1,9 +1,3 @@
-/**
- * harness 侧模型域的单元验收：产品库的 provider/alias 记录变成 pi-ai 的什么请求。
- *
- * 产品库读取用 mock（单元测试不连库），其余都是真代码：密钥解密、三种 API 格式的适配与请求体
- * 都由 pi-ai 的适配器生成，断言从拦截到的 `fetch` 上读回，所以失败能直接指出「配置没进上游请求」。
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Api, Model, Provider } from '@earendil-works/pi-ai';
 import { createModels } from '@earendil-works/pi-ai/models';
@@ -85,7 +79,6 @@ const aliasRecord = (overrides: Partial<ModelAliasInput> = {}): ModelAlias => {
 	return { ...input, createTime: '2026-10-18 00:00:00.000', updateTime: '2026-10-18 00:00:00.000' };
 };
 
-/** route.classify 是必需别名，快照校验要求它存在，所以每份快照都带上它。 */
 const routeAlias = aliasRecord({ alias: 'route.classify', modelName: 'route-model', settings: {}, capabilities: { streaming: false, toolCalling: false, structuredOutput: true, imageInput: false } });
 
 function snapshotOf(providers: ModelProvider[], aliases: ModelAlias[]): ModelConfigSnapshot {
@@ -94,7 +87,6 @@ function snapshotOf(providers: ModelProvider[], aliases: ModelAlias[]): ModelCon
 
 type CapturedRequest = { url: string; headers: Record<string, string>; body: Record<string, unknown> };
 
-/** 拦下适配器的 `fetch`：请求体与请求头都按上游真实形态读回，响应只要立刻结束即可。 */
 function captureFetch(captured: CapturedRequest[], reply = 'data: [DONE]\n\n'): typeof fetch {
 	const stub = async (input: unknown, init?: RequestInit): Promise<Response> => {
 		const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : String((input as Request).url);
@@ -111,10 +103,6 @@ function captureFetch(captured: CapturedRequest[], reply = 'data: [DONE]\n\n'): 
 
 const delay = (ms: number) => new Promise<void>(done => setTimeout(done, ms));
 
-/**
- * 用真 provider 发一次请求，返回上游收到的那个请求。
- * 生成的流立刻结束，所以只断言请求本身；响应解析归集成用例管。
- */
 async function requestOf(binding: GenerationModelBinding, reasoning = binding.thinkingLevel): Promise<CapturedRequest> {
 	const captured: CapturedRequest[] = [];
 	const models = createModels();
@@ -130,7 +118,6 @@ async function requestOf(binding: GenerationModelBinding, reasoning = binding.th
 	return captured[0]!;
 }
 
-/** 发一次请求并等它结束，用来断言 auth 解析失败这类「没有请求发出」的路径。 */
 async function outcomeOf(binding: GenerationModelBinding): Promise<{ stopReason: string; errorMessage?: string }> {
 	const models = createModels();
 	models.setProvider(binding.provider as Provider<Api>);
@@ -199,7 +186,6 @@ describe('产品库别名 → pi-ai 请求', () => {
 			top_p: 0.9,
 			reasoning_effort: 'max',
 		});
-		// 通用 OpenAI 兼容端点不接受 DeepSeek 的 thinking 字段（只有声明了思考开关的提供商才发）。
 		expect(request.body.thinking).toBeUndefined();
 		expect(request.headers.authorization).toBe(`Bearer ${sentinel('inline')}`);
 		expect(request.headers['x-provider-tag']).toBe('tag-one');
@@ -222,7 +208,6 @@ describe('产品库别名 → pi-ai 请求', () => {
 			[aliasRecord({ settings: { reasoning: 'high', maxOutputTokens: 1234 } }), routeAlias],
 		));
 		const binding = await admitGenerationModel();
-		// 开关优先于别名 reasoning：运行档位是 off，不是 high。
 		expect(binding.thinkingLevel).toBe('off');
 		const request = await requestOf(binding);
 		expect(request.body.thinking).toEqual({ type: 'disabled' });
@@ -376,7 +361,6 @@ describe('解析顺序与重启恢复', () => {
 });
 
 describe('持久运行描述：旧运行不跟着当前别名走', () => {
-	/** 一次产品库形态的准入，返回要持久化的描述。 */
 	async function admittedDescriptor(overrides: Partial<ProviderDraft> = {}): Promise<RunModelDescriptor> {
 		mocks.readConfigSnapshot.mockResolvedValue(snapshotOf([providerRecord(overrides)], [aliasRecord(), routeAlias]));
 		return (await admitGenerationModel()).descriptor;
@@ -384,13 +368,11 @@ describe('持久运行描述：旧运行不跟着当前别名走', () => {
 
 	it('别名改指别的提供商后，按描述重建的旧运行仍用原地址、原格式、原模型与原密钥引用', async () => {
 		const descriptor = await admittedDescriptor({ headers: { 'x-provider-tag': 'tag-one' } });
-		// 管理端把 codegen.default 改指到另一个提供商、另一个模型。
 		const other = providerRecord({ id: 'gateway-2', baseUrl: 'https://other.example.test/v1', apiFormat: 'openai-responses', apiKey: sentinel('inline') });
 		mocks.readConfigSnapshot.mockResolvedValue(snapshotOf([providerRecord({ headers: { 'x-provider-tag': 'tag-one' } }), other], [aliasRecord({ providerId: 'gateway-2', modelName: 'another-model' }), routeAlias]));
 
 		const rebuilt = rebuildRunModel(descriptor);
 		expect(rebuilt).not.toBeNull();
-		// 身份、引用与思考档位都来自描述，不是当前别名。
 		expect(rebuilt!.identity).toEqual({ alias: generationModelAlias, providerId: 'gateway', modelName: 'upstream-model-one', apiFormat: 'openai-chat' });
 		expect(rebuilt!.ref).toEqual(descriptor.ref);
 		expect(identityOfDescriptor(descriptor)).toEqual(rebuilt!.identity);
@@ -408,14 +390,12 @@ describe('持久运行描述：旧运行不跟着当前别名走', () => {
 		const descriptor = await admittedDescriptor({ apiKeySource: 'env' });
 		mocks.readConfigSnapshot.mockRejectedValue(new Error('数据库连接被关闭'));
 
-		// 准入之后清掉读库记录：后面的重建与请求都不能再读产品库。
 		mocks.readConfigSnapshot.mockClear();
 		const rebuilt = rebuildRunModel(descriptor);
 		expect(rebuilt).not.toBeNull();
 		const request = await requestOf(rebuilt!);
 		expect(request.body.model).toBe('upstream-model-one');
 		expect(request.headers.authorization).toBe(`Bearer ${sentinel('env')}`);
-		// 只按描述重建：没有读当前别名，也没有读当前提供商。
 		expect(mocks.readConfigSnapshot).not.toHaveBeenCalled();
 	});
 
@@ -439,7 +419,6 @@ describe('持久运行描述：旧运行不跟着当前别名走', () => {
 		process.env.DURABLE_MODEL_ID = 'override-model-one';
 		const descriptor = (await admitGenerationModel()).descriptor;
 
-		// 重启时环境变量换成了另一个端点与模型，旧引用（M1）必须仍然能解析。
 		process.env.DURABLE_MODEL_BASE_URL = 'https://override-two.example.test/v1';
 		process.env.DURABLE_MODEL_ID = 'override-model-two';
 		const rebuilt = rebuildRunModel(descriptor);

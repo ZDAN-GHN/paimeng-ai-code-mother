@@ -50,7 +50,6 @@ export type WebAccessToolOptions = {
   deps?: HttpDeps;
 };
 
-/** 一次工具调用的运行时上下文：信号与租约检查随调用变化，所以和会话状态分开。 */
 export type WebAccessRuntime = Pick<WebAccessToolOptions, 'signal' | 'check' | 'ensureWritable' | 'write'>;
 
 export type WebAccessOperations = {
@@ -112,10 +111,6 @@ function candidateView(candidate: ImageCandidate): ImageCandidateView {
   };
 }
 
-/**
- * 四个联网工具的操作体：只依赖会话状态（预算、候选、缓存）与单次调用的运行时。
- * legacy 用 AI SDK 的 tool() 包一层，harness 用 pi-durable 的 defineTool 包一层，行为只在这里定义一次。
- */
 export function createWebAccessOperations(options: { app: WorkspaceApp; session: WebAccessSession; deps?: HttpDeps }): WebAccessOperations {
   const { app, session, deps } = options;
   const searchCache = new Map<string, Promise<ToolStatus<WebSearchData>>>();
@@ -217,7 +212,6 @@ export function createWebAccessOperations(options: { app: WorkspaceApp; session:
     if (!candidate) return toolFailure<ImportedImageData>(new WebAccessError('unsupported', '候选不存在或不属于本轮生成，请重新调用 searchImages'));
     try {
       charge(session, 'imageImport', webAccessLimits.budgets.imageImport);
-      // 下载在写入锁外完成，避免长时间占用工程写入。
       const prepared = await prepareImport(app, candidate, { signal: runtime.signal, deps, importedBytes: session.imageBytes });
       if (prepared.kind === 'existing') return toolOk(prepared.data);
       const imported = await runtime.write(async () => {

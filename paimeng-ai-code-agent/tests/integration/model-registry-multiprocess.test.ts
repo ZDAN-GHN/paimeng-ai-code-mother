@@ -67,7 +67,6 @@ function startRegistryProcess(): RegistryProcess {
       try {
         await this.request({ command: 'close' });
       } catch {
-        // 关闭响应丢失时直接结束进程
       }
       child.kill();
     },

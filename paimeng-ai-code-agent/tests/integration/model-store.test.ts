@@ -55,7 +55,6 @@ const providerDraft = (overrides: Partial<ProviderDraft> = {}): ProviderDraft =>
   ...overrides,
 });
 
-/** 只构造写入口径：直接输入的密钥是明文，由存储层加密。 */
 const provider = (overrides: Partial<ProviderDraft> = {}): ModelProviderWriteInput => {
   const draft = providerDraft(overrides);
   const common = {
@@ -100,7 +99,6 @@ async function resetDatabase() {
     .onConflictDoUpdate({ target: modelConfigState.id, set: { revision: 0n, refreshEpoch: 0n } });
 }
 
-/** 完整配置无法由单次写入建立，必须先走显式初始化，之后的写入都以它为基础。 */
 async function seedFromEnv() {
   return initializeModelConfigFromEnv();
 }
@@ -343,13 +341,10 @@ describe('模型配置存储', () => {
 
   it('HTTP 地址在本机/局域网或部署允许名单内放行', async () => {
     await seedFromEnv();
-    // 公网 HTTP 与内网域名都不在默认放行范围内。
     await expect(upsertProvider(provider({ id: 'env-default', baseUrl: 'http://api.example.test/v1' }), { expectedRevision: '1' })).rejects.toMatchObject({ status: 400, code: 40000 });
     await expect(upsertProvider(provider({ id: 'env-default', baseUrl: 'http://internal.example:8080/v1' }), { expectedRevision: '1' })).rejects.toMatchObject({ status: 400, code: 40000 });
-    // 本机与局域网字面量不需要允许名单（自建模型网关的常见形态）。
     await expect(upsertProvider(provider({ id: 'env-default', baseUrl: 'http://127.0.0.1:8787/v1' }), { expectedRevision: '1' })).resolves.toMatchObject({ revision: '2' });
     await expect(upsertProvider(provider({ id: 'env-default', baseUrl: 'http://192.168.1.20:8080/v1' }), { expectedRevision: '2' })).resolves.toMatchObject({ revision: '3' });
-    // 其它主机名仍要写进名单，且只放行列出的来源。
     process.env.MODEL_INTERNAL_BASE_URL_ORIGINS = 'http://internal.example:8080';
     await expect(upsertProvider(provider({ id: 'env-default', baseUrl: 'http://internal.example:8080/v1' }), { expectedRevision: '3' })).resolves.toMatchObject({ revision: '4' });
     await expect(upsertProvider(provider({ id: 'env-default', baseUrl: 'http://internal.example:9090/v1' }), { expectedRevision: '4' })).rejects.toMatchObject({ status: 400, code: 40000 });

@@ -7,7 +7,6 @@ import { closeRateLimitRedis, rateLimitRedis } from '@/server/redis';
 
 loadEnvFile('.env');
 
-/** 限流测试只碰独立的 /15 测试库；生产库（/0）与开发数据都不清、不写。 */
 function testRedisUrl(raw: string) {
   const url = new URL(raw);
   if (url.protocol !== 'redis:') throw new Error('Integration tests require a Redis URL');
@@ -20,7 +19,6 @@ const names = ['CHAT_RATE_LIMIT_TYPE', 'CHAT_RATE_LIMIT_RATE', 'CHAT_RATE_LIMIT_
 const saved = new Map(names.map(name => [name, process.env[name]]));
 const delay = (ms: number) => new Promise<void>(done => setTimeout(done, ms));
 
-// 只删本用例碰过的精确键（记在预定时的配置下算出的键名），不做 FLUSHDB。
 const touched = new Set<string>();
 const reserve = async (userId: string, ip: string): Promise<ChatRateLimitReservation | null> => {
   touched.add(chatRateLimitKey(userId, ip));

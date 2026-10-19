@@ -1,35 +1,3 @@
-/**
- * 一次带插话的生成，转录与 UI 消息的顺序（产品引擎 + 真实 harness 进程，桩模型，无网络无 Docker）。
- *
- * 转录是 pi 的：`app.user`（提交时写下的用户气泡）与 `pi.assistant` / `pi.tool-result`（模型与工具的原生
- * 条目）按条目 id 排成一条链，产品**不再写任何 `app.assistant` 展示副本**。前端展示直接由 `loadMessages`
- * 从这条链派生：
- *
- *   app.user → pi.assistant(第 1 步) → pi.tool-result → app.user(插话) → pi.assistant(第 2 步)
- *
- * 插话在 pi 的转录里落在两个模型消息之间（提交时排队进 `pi.inbox`，当前步骤跑完后落入转录），所以派生
- * 出来的 UI 消息顺序天然是 `user → assistant → user(插话) → assistant`，不需要任何重排。
- *
- * 要钉住的不变量：
- *
- * - 转录里没有 `app.assistant`（展示副本已删除）；
- * - 顺序如上，插话不进助手气泡；
- * - 一条 `pi.assistant` 条目就是一条 UI 助手消息（id = 条目 id），两段不重复对方的文本与工具条目，
- *   且**工具调用与它的结果在同一条消息里**（结果按 toolCallId 并进那个工具调用）；
- * - `generation.message_id` 指向真实存在的第一条 `pi.assistant` 条目 id（前端一次生成只挂一个用量块）；
- * - 中途取消同样留下已经产出的助手条目，message_id 也指向它；
- * - D2 记账仍是每条模型消息一行。
- *
- * 变异检查：把 `transcriptMessages` 里 `pi.tool-result` 的合并分支整段去掉（工具结果不再并进工具调用），
- * 或用例一的顺序断言改成 `['user', 'assistant', 'assistant', 'user']`，用例必须失败（见 pi-durable-m4.md 的
- * 验证记录）。
- *
- * 桩模型（`DURABLE_FAUX_MODEL=1`）第一步调用 `m1_wait`（3 秒），给「运行中插话」留出确定性的窗口：
- * 夹具模型（`DURABLE_FAUX_FIXTURE=1`）的脚本没有慢步骤，插话提交会与运行结束竞争，不能用。
- *
- * 需要 Postgres：产品库 `paimeng_app_test` 与存储库 `paimeng_agent_test`（127.0.0.1:5432）；
- * 没有时按既有方式打印原因并 skip。
- */
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -50,11 +18,9 @@ import { baseUrl, freePort, getState, harnessAvailable, postgresReachable, postg
 
 const harnessReady = harnessAvailable();
 const postgresReady = harnessReady && (await postgresReachable(postgresUrl));
-// process.stderr keeps the skip reason visible: vitest drops console output from a file with no run tests.
 if (!harnessReady) process.stderr.write('[steer-segments] 跳过：找不到产品 harness 入口或 tsx，先装依赖（npm install）\n');
 else if (!postgresReady) process.stderr.write(`[steer-segments] 跳过：Postgres 不可达（${postgresUrl}），先跑 npm run durable:pg -- start\n`);
 
-// 产品库是独立测试库（同 tests/integration 的既有做法）；不要 loadEnvFile('.env')，否则会把开发存储库带进来。
 process.env.DATABASE_URL = testDatabaseUrl('postgres://postgres:postgres@127.0.0.1:5432/paimeng_app');
 process.env.AI_MODE = 'fixture';
 
@@ -75,7 +41,6 @@ const toolsOf = (bubble: Bubble) => bubble.parts.filter(part => part.type === 'd
 let actor: User;
 const createdApps: string[] = [];
 
-/** 每条用例一个用户：生成限流是「每用户每 60 秒一次」（vitest.config.ts 的 CHAT_RATE_LIMIT_*）。 */
 async function addActor(): Promise<User> {
   const id = await nextSnowflakeId();
   await db().insert(users).values({ id, userAccount: 'ts_steer_segments_' + randomUUID(), userPassword: 'unused', userRole: 'user', createTime: now(), updateTime: now() });
@@ -102,7 +67,6 @@ function waitUntil(check: () => Promise<boolean>, timeoutMs: number, label: stri
   })();
 }
 
-/** 事件流里给客户端的块（SSE 的 data 行）。 */
 function chunksOf(sse: string): { type: string; delta?: string; toolName?: string }[] {
   return sse.split('\n')
     .filter(line => line.startsWith('data: '))
@@ -118,7 +82,6 @@ function chunksOf(sse: string): { type: string; delta?: string; toolName?: strin
     });
 }
 
-/** 一条生成跑到终态（任务态是权威；取消时它先于落库变成终态）。 */
 async function waitForTerminal(appId: string, requestId: string, timeoutMs: number) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -129,7 +92,6 @@ async function waitForTerminal(appId: string, requestId: string, timeoutMs: numb
   throw new Error('生成没有在预期时间内结束');
 }
 
-/** 一个应用加一条已经跑起来的生成：桩模型第一步睡 3 秒，插话与取消都发生在运行中。 */
 type Running = { actor: User; appId: string; requestId: string; conversationId: number; base: string; harness: HarnessProcess; runDir: string; response: Response };
 
 async function startGeneration(): Promise<Running> {
@@ -139,7 +101,6 @@ async function startGeneration(): Promise<Running> {
   const runDir = mkdtempSync(join(tmpdir(), 'steer-segments-'));
   const base = baseUrl(port);
   process.env.DURABLE_HARNESS_URL = base;
-  // 静态应用的最终验证只看 index.html 存在且是 HTML：先放一个合法的，本轮就不会进修复轮。
   await writeProjectFile({ id: appId, codeGenType: 'html' }, 'index.html', '<!doctype html><html><body>STEER_SEGMENT_PLACEHOLDER</body></html>');
   const harness = startHarness({ port, runDir, reset: true, waitMs: 3000, finalText, tool: 'm1_wait' });
   const requestId = randomUUID();
@@ -163,7 +124,6 @@ async function startGeneration(): Promise<Running> {
   }
 }
 
-/** 观察线程写给客户端的事件流（SSE）里出现某个块之后才算“用户看得见”。 */
 async function waitForClientChunk(response: Response, marker: string, timeoutMs: number): Promise<void> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
@@ -177,7 +137,6 @@ async function waitForClientChunk(response: Response, marker: string, timeoutMs:
       if (buffer.includes(marker)) return;
     }
   } finally {
-    // 停止读取只是「浏览器断开」，与生成无关（docs/plans/archive/pi-durable-m1.md 的 D1–D5）。
     void reader.cancel().catch(() => undefined);
   }
   throw new Error(`事件流里没有出现 ${marker}`);
@@ -209,23 +168,19 @@ describe.skipIf(!harnessReady || !postgresReady)('插话后的转录与派生 UI
       const task = await waitForTerminal(appId, requestId, 60_000);
       expect(task.status).toBe('ready');
 
-      // /messages（刷新读回走的就是它）由 pi 的条目派生，顺序就是条目 id 的顺序。
       const transcript = (await loadMessages(appId)) as unknown as Bubble[];
       expect(transcript.map(bubble => bubble.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
       expect(transcript[0].parts).toEqual([{ type: 'text', text: prompt }]);
       expect(transcript[2].parts).toEqual([{ type: 'text', text: steerText }]);
 
       const [first, second] = [transcript[1], transcript[3]];
-      // 第 1 步：m1_wait 的调用与它的结果在同一条消息里（结果按 toolCallId 并进工具调用）。
       expect(toolsOf(first).map(tool => tool.toolName)).toEqual(['m1_wait']);
       expect(toolsOf(first)[0].state).toBe('output-available');
       expect(String(toolsOf(first)[0].output)).toContain('waited 3000');
-      // 第 2 步：只有最终回复，没有第 1 步的工具条目，也没有第 1 步的文本。
       expect(textsOf(second)).toEqual([finalText]);
       expect(toolsOf(second)).toEqual([]);
       expect(textsOf(first)).not.toContain(finalText);
 
-      // 转录里不再有 app.assistant 展示副本；助手气泡的 id 就是 pi.assistant 条目 id。
       const state = await getState(base, conversationId);
       const kinds = state.view.entries.map(entry => entry.kind);
       expect(kinds.filter(kind => kind === 'app.assistant')).toEqual([]);
@@ -233,11 +188,9 @@ describe.skipIf(!harnessReady || !postgresReady)('插话后的转录与派生 UI
       expect(assistantEntries).toHaveLength(2);
       expect(first.id).toBe(String(assistantEntries[0].id));
       expect(second.id).toBe(String(assistantEntries[1].id));
-      // 一次生成一个用量块：message_id 指向真实存在的第一条 pi.assistant 条目。
       expect(task.messageId).toBe(String(assistantEntries[0].id));
       expect(assistantEntries.some(entry => String(entry.id) === task.messageId)).toBe(true);
 
-      // 插话条目由 pi 放在两个模型边界之间（提交时排队进 pi.inbox，下一步开始前落入转录）。
       const steerEntry = kinds.lastIndexOf('app.user');
       const firstAssistant = kinds.indexOf('pi.assistant');
       const secondAssistant = kinds.indexOf('pi.assistant', firstAssistant + 1);
@@ -245,12 +198,10 @@ describe.skipIf(!harnessReady || !postgresReady)('插话后的转录与派生 UI
       expect(steerEntry).toBeLessThan(secondAssistant);
       expect(state.view.entries[steerEntry].text).toContain(steerText);
 
-      // D2 记账照旧每步一行：两条模型消息两行（step_number 0/1），最终验证一行构建。
       const steps = await db().select().from(generationSteps).where(eq(generationSteps.generationId, requestId));
       expect(steps.filter(step => step.kind === 'model').map(step => step.stepNumber).sort((left, right) => left - right)).toEqual([0, 1]);
       expect(steps.filter(step => step.kind === 'build').length).toBeGreaterThan(0);
 
-      // 客户端看的流也要对：工具结果已经在工具卡片里，不能再当成助手文本流一遍。
       const chunks = chunksOf(await running.response.text());
       const streamedText = chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta ?? '').join('');
       expect(chunks.filter(chunk => chunk.type === 'tool-input-available').map(chunk => chunk.toolName)).toEqual(['m1_wait']);
@@ -266,10 +217,8 @@ describe.skipIf(!harnessReady || !postgresReady)('插话后的转录与派生 UI
     const running = await startGeneration();
     const { actor, appId, base, conversationId, requestId } = running;
     try {
-      // 等 m1_wait 的调用卡片已经流给客户端（观察线程已经看到这次工具调用），再取消。
       await waitForClientChunk(running.response, 'tool-input-available', 20_000);
       expect(await harnessCancelGeneration(appId, actor)).toBe(true);
-      // 取消先把任务置成终态（客户端立刻看到取消），观察线程随后才在 finally 里收尾。
       await waitUntil(async () => {
         const bubbles = (await loadMessages(appId)) as unknown as Bubble[];
         return bubbles.length === 2 && !!(await generationFor(appId))?.messageId;

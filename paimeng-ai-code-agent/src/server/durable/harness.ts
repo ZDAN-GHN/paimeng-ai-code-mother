@@ -1,23 +1,3 @@
-/**
- * Wiring for the product's resident pi-durable harness: Postgres storage, the model
- * directory, and the tool registry.
- *
- * The harness process is the only writer of conversation storage, so nothing
- * else in the product opens `storage-pg.ts`.
- *
- * The generation model itself is resolved per run by `model-domain.ts`: the product
- * database's `codegen.default` alias by default, `DURABLE_MODEL_*` as an explicit
- * override, and the deterministic stubs under the faux flags. Env
- * (never logged, never written to disk):
- *   DURABLE_MODEL_BASE_URL  OpenAI-compatible endpoint (explicit override)
- *   DURABLE_MODEL_API_KEY   api key (explicit override)
- *   DURABLE_MODEL_ID        model id (explicit override)
- *   DURABLE_PG_URL          Postgres connection string (defaults to the local dev instance)
- *
- * `DURABLE_FAUX_MODEL=1` swaps the network model for the deterministic stub in
- * `faux-model.ts`; `DURABLE_FAUX_FIXTURE=1` swaps it for the scripted fixture in
- * `faux-fixture.ts`. Regression tests use both and never need credentials.
- */
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels, type MutableModels } from "@earendil-works/pi-ai/models";
@@ -31,11 +11,6 @@ import { PostgresStorage } from "./storage-pg";
 
 export const context: Context = BACKGROUND_CONTEXT;
 
-/**
- * The model directory the harness serves. Managed runs register their provider through
- * `model-domain.ts` per admission (`setProvider`), so the directory starts empty; the faux
- * flags register their own provider here.
- */
 export function durableModels(): MutableModels {
 	if (fauxFixtureEnabled()) return fauxFixtureModels();
 	if (fauxModelEnabled()) return fauxModels();

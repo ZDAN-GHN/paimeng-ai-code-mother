@@ -4,14 +4,6 @@ import { db, now } from './db';
 import { generationSteps, generations } from './schema';
 import type { BuildVerdict } from './build-feedback';
 
-/**
- * 生成任务统一记账（docs/plans/archive/agent-design-review.md D2）。
- *
- * 每个模型步骤、每次构建尝试各写一行 generation_step；任务级停止原因写在 generation.stop_reason。写入全部是尽力而为：记账失败只告警，不影响生成与状态转移。
- * 上游没有返回的用量记为 NULL（未知），不记成 0；读取端用 usageUnknown 区分「已知的零」和「未知」。
- * 只保存工具名、成败与耗时，不保存提示词、工具正文或模型输出。
- * 读模型类型（AccountStep / GenerationAccount）定义在 @/shared/contracts，前后端共用。
- */
 import { generationStopReasons, type AccountStep, type AccountStepKind, type AccountToolCall, type GenerationAccount, type GenerationStopReason, type ModelIdentity } from '@/shared/contracts';
 
 export type { AccountStep, AccountStepKind, AccountToolCall, GenerationAccount, GenerationStopReason, ModelIdentity };
@@ -52,7 +44,6 @@ async function insertStep(values: typeof generationSteps.$inferInsert): Promise<
   }
 }
 
-/** pi-durable assistant 条目自带的用量（harness 引擎），字段名与 SDK 的 Usage 不同。 */
 export type EntryUsage = { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number | null };
 
 /**

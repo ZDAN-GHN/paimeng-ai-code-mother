@@ -7,7 +7,6 @@ function imageFile(name: string, type: string, bytes = 3) {
   return new File([new Uint8Array(bytes)], name, { type });
 }
 
-/** 只实现取图用到的 items/files/types 三个字段，其余按浏览器形状补足类型。 */
 function dataTransfer(input: { files?: File[]; itemFiles?: File[]; types?: string[] }): DataTransfer {
   return {
     files: (input.files ?? []) as unknown as FileList,

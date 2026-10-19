@@ -6,7 +6,6 @@ import { z } from 'zod';
 import { createModelRegistry, modelRegistry, type ModelRegistryStore } from '@/server/models/registry';
 import type { ModelAlias, ModelConfigSnapshot, ModelProvider } from '@/shared/model-config';
 
-// 用受控注册表替换单例，让解析不访问数据库但仍走真实冻结绑定。
 vi.mock('@/server/models/registry', async importOriginal => {
   const actual = await importOriginal<typeof import('@/server/models/registry')>();
   return { ...actual, modelRegistry: vi.fn() };
@@ -94,7 +93,6 @@ beforeAll(async () => {
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;
-  // 注册表拒绝非 HTTPS 地址，除非部署显式放行；本地受控端点需登记来源。
   process.env.MODEL_INTERNAL_BASE_URL_ORIGINS = new URL(baseUrl).origin;
   process.env.AI_MODE = 'provider';
 });
@@ -127,11 +125,9 @@ describe('AI SDK 注册表模型实例的绑定冻结', () => {
       inputSchema: z.object({ path: z.string(), content: z.string() }),
       execute: async ({ path }) => {
         toolExecutions += 1;
-        // 管理端保存并“立即生效”：换密钥、改绑定、提升共享 refreshEpoch。
         process.env.AI_API_KEY = 'secret-b';
         state.snapshot = snapshotOf(baseUrl, '2', '1', 'model-b', { temperature: 0.9 });
         state.epoch = '1';
-        // 即便此刻有别的解析让注册表安装新快照，进行中的任务也不该受影响。
         installedAfterEdit = (await registry.resolveBinding('codegen.default')).modelName;
         return { written: path };
       },

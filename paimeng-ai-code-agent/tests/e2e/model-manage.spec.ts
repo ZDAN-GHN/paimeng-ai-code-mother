@@ -144,7 +144,6 @@ test('管理员可编辑提供商与别名并普通保存', async ({ page }) => 
   await expect(page.getByText('提供商已保存', { exact: true })).toBeVisible();
   await expect(page.getByRole('cell', { name: '默认提供商（改）', exact: true })).toBeVisible();
 
-  // 开关必须真正写入表单：过去 Form.Item 里多出的空白文本节点会让 antd 跳过受控注入，开关点了等于没点。
   const stored = await testConnection();
   try {
     const { rows } = await stored.query("SELECT options FROM model_provider WHERE id='env-default'");
@@ -207,7 +206,6 @@ test('直接输入的密钥以密文入库，界面与接口都不回显明文',
   expect(body).not.toContain(secret);
   expect(body).toContain('"apiKeySource":"inline"');
 
-  // 重新打开编辑器时不回填明文密钥，界面只显示已切换到直接输入。
   await row.getByRole('button', { name: /^编\s*辑$/ }).click();
   await expect(page.getByRole('dialog').getByLabel('密钥', { exact: true })).toHaveValue('');
 });
@@ -332,8 +330,6 @@ test('从下拉里选中的上游模型名会写进数据库', async ({ page }) 
     await dialog.getByRole('button', { name: '获取模型' }).click();
     await expect(page.getByText('已获取 2 个上游模型', { exact: true })).toBeVisible({ timeout: 30000 });
 
-    // 下拉选中项必须真正写进表单：若 Form.Item 的直接子节点不是控件（例如外面又包了一层 Space.Compact），
-    // antd 注入的 value/onChange 会被丢掉，输入框里留下手输的 mimo，保存后数据库还是旧值。
     await modelName.click();
     await page
       .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option')
@@ -399,14 +395,12 @@ test('自定义请求头可增删、保存后随探测请求发送', async ({ pa
       await stored.end();
     }
 
-    // 重开编辑器必须回填已保存的请求头。
     await row.getByRole('button', { name: /^编\s*辑$/ }).click();
     const reopened = page.getByRole('dialog');
     await expect
       .poll(() => dialogHeaders(reopened))
       .toEqual({ 'User-Agent': 'paimeng-ai-code-mother/1.0', 'X-Title': 'paimeng' });
 
-    // 测试连接直接提交表单草稿，探测请求必须带上自定义头。
     await reopened.getByRole('button', { name: '测试连接' }).click();
     await expect(reopened.getByText(/连接正常/)).toBeVisible({ timeout: 30000 });
     const formProbe = captured.at(-1);
@@ -415,7 +409,6 @@ test('自定义请求头可增删、保存后随探测请求发送', async ({ pa
     expect(formProbe?.xTitle).toBe('paimeng');
     await reopened.getByRole('button', { name: /取\s*消$/ }).click();
 
-    // 别名的「获取模型」走库里已保存的提供商，验证存储的请求头同样生效。
     await aliasRow(page, 'codegen.default').getByRole('button', { name: /^编\s*辑$/ }).click();
     const aliasDialog = page.getByRole('dialog');
     await aliasDialog.getByRole('button', { name: '获取模型' }).click();
@@ -425,7 +418,6 @@ test('自定义请求头可增删、保存后随探测请求发送', async ({ pa
     expect(storedProbe?.xTitle).toBe('paimeng');
     await aliasDialog.getByRole('button', { name: /取\s*消$/ }).click();
 
-    // 删除 User-Agent 一条并保存，库里应只剩 X-Title。
     await row.getByRole('button', { name: /^编\s*辑$/ }).click();
     const editDialog = page.getByRole('dialog');
     await expect.poll(() => dialogHeaders(editDialog)).toEqual({ 'User-Agent': 'paimeng-ai-code-mother/1.0', 'X-Title': 'paimeng' });
@@ -440,14 +432,12 @@ test('自定义请求头可增删、保存后随探测请求发送', async ({ pa
       await afterDelete.end();
     }
 
-    // 切换 API 格式不应丢掉请求头。
     await row.getByRole('button', { name: /^编\s*辑$/ }).click();
     const formatDialog = page.getByRole('dialog');
     await formatDialog.getByLabel('API 格式').click();
     await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').getByText(/OpenAI Responses/).click();
     await expect.poll(() => dialogHeaders(formatDialog)).toEqual({ 'X-Title': 'paimeng' });
 
-    // 新增提供商表单不能残留上一次编辑的请求头。
     await formatDialog.getByRole('button', { name: /取\s*消$/ }).click();
     await page.getByRole('button', { name: '新增提供商' }).click();
     const createDialog = page.getByRole('dialog');

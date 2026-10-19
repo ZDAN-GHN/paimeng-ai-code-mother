@@ -1,20 +1,3 @@
-/**
- * One command for the durable stack: the machine's own Postgres instance,
- * the resident harness process, the preview server, and the Next.js dev server
- * that attaches to the harness. Ctrl-C stops them all.
- *
- *   npm run dev
- *
- * The harness resolves the generation model from the product database's
- * `codegen.default` alias (change it in「模型管理」). `DURABLE_MODEL_BASE_URL` /
- * `DURABLE_MODEL_API_KEY` / `DURABLE_MODEL_ID` override it explicitly (all three,
- * never derived); `DURABLE_FAUX_MODEL=1` runs the deterministic stub instead.
- * Secrets only enter the child process environment; they are never written to disk.
- *
- * The product generation entry requires the request origin to equal APP_ORIGIN
- * (guardRequest), and Next listens on DURABLE_APP_PORT, so the child process
- * gets an explicit APP_ORIGIN.
- */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
@@ -32,7 +15,6 @@ const harnessPort = Number(process.env.DURABLE_HARNESS_PORT ?? 5599);
 const appPort = Number(process.env.DURABLE_APP_PORT ?? 3000);
 const appOrigin = process.env.DURABLE_APP_ORIGIN ?? `http://localhost:${appPort}`;
 const harnessUrl = `http://127.0.0.1:${harnessPort}`;
-// 预览服务器既服务生成产物的 iframe，也服务应用封面（/covers/<key>.png）：不起它，首页封面与预览都是空的。
 const previewOrigin = new URL(process.env.PREVIEW_ORIGIN ?? 'http://127.0.0.1:3001');
 
 const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
@@ -110,7 +92,6 @@ function start(label: keyof typeof labels, command: string, args: string[], opti
 
 for (const value of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(value, () => { void stop(130); });
 
-/** The instance is the machine's own container; this script never starts or stops it. */
 async function ensurePostgres() {
   const url = new URL(pgUrl);
   const host = url.hostname;
@@ -149,7 +130,6 @@ while (Date.now() < deadline) {
   try {
     if ((await fetch(`${harnessUrl}/health`)).ok) break;
   } catch {
-    // not listening yet
   }
   await delay(200);
 }

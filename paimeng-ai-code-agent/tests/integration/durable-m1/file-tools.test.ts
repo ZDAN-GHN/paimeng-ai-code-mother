@@ -1,16 +1,3 @@
-/**
- * 原生文件工具（框架的 read / write / edit）在 harness 里的行为守卫，桩模型、无 Docker。
- *
- * 工具换成框架实现后，四件事只能靠真实运行钉住：
- *
- * - `read` 的 offset/limit 分页：返回的只该是被选中的那几行（截断与续读由框架自己处理，产品不再自研）；
- * - `edit` 一次多处替换：`edits` 是多元素数组，要求两处都落到文件上；
- * - 工作区相对路径限制：它从被替换的实现搬到了工具调用的前置检查，越界必须被拦且不读到工作区外的文件；
- * - 夹具模型的多次 `write`：`write` 一次只写一个文件，多文件运行必须是多次工具调用。
- *
- * 需要 Postgres（127.0.0.1:5432）与产品 tsx；任一缺失时打印原因并 skip。每次运行一个 harness 进程：
- * 桩模型一步只调一个工具，之后必然给出终态回复。
- */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,13 +7,11 @@ import { baseUrl, freePort, postgresReachable, postgresUrl, harnessAvailable, st
 
 const harnessReady = harnessAvailable();
 const postgresReady = harnessReady && (await postgresReachable(postgresUrl));
-// process.stderr keeps the skip reason visible: vitest drops console output from a file with no run tests.
 if (!harnessReady) process.stderr.write('[durable-m1] 跳过原生文件工具：找不到产品 harness 入口或 tsx，先装依赖（npm install）\n');
 else if (!postgresReady) process.stderr.write(`[durable-m1] 跳过原生文件工具：Postgres 不可达（${postgresUrl}），先跑 npm run durable:pg -- start\n`);
 
 type Started = { base: string; workspace: string; harness: HarnessProcess };
 
-/** Spawn a harness serving `workspace` on its own port; the caller seeds the workspace first. */
 async function startHarnessFor(options: { runDir: string; workspace: string; tool?: string; args?: unknown; env?: Record<string, string>; finalText: string }): Promise<Started> {
 	mkdirSync(options.workspace, { recursive: true });
 	const port = await freePort();
@@ -60,7 +45,6 @@ async function submit(base: string, conversationId: number, content: string, req
 	expect(submitted.status).toBe(202);
 }
 
-/** 等这次运行结束，返回转录里每条工具结果的文本（读回的是存储里的条目，不只是运行内存）。 */
 async function settledToolResults(base: string, conversationId: number, finalText: string): Promise<string[]> {
 	const settled = await waitForState(base, (state) => state.view.entries.some((entry) => entry.kind === 'pi.assistant' && entry.text.includes(finalText)), 60_000, 'run settles', conversationId);
 	return settled.view.entries.filter((entry) => entry.kind === 'pi.tool-result').map((entry) => entry.text);

@@ -1,22 +1,17 @@
-/** Shared deterministic pages for harness fixtures and build regressions. */
 import type { CodeGenType } from '@/shared/contracts';
 
 export type FixtureFile = { path: string; content: string };
 
-/** Final answer of a scripted run; the browser E2E matches this text exactly. */
 export const fixtureReplyText = '文件已生成，正在验证与构建。此回复来自可控测试模型。';
 
-/** The entry file a project template keeps; only that file is rewritten over a template. */
 export function fixtureSourcePath(type: CodeGenType) {
   return type === 'react_project' ? 'src/App.tsx' : type === 'vue_project' ? 'src/App.vue' : 'index.html';
 }
 
-/** Read-only prefix of a template turn: list the workspace, then read the guide and the entry. */
 export function fixtureReadSteps(type: CodeGenType): { tool: 'listFiles' | 'read'; path?: string }[] {
   return [{ tool: 'listFiles' }, { tool: 'read', path: 'AGENTS.md' }, { tool: 'read', path: fixtureSourcePath(type) }];
 }
 
-/** The template ships a TypeScript entry, so the rewritten source is typed. */
 function fixtureTypedSource(type: CodeGenType, prompt: string): FixtureFile | undefined {
   if (type !== 'react_project' && type !== 'vue_project') return undefined;
   const source = fixtureFiles(type, prompt).find(file => file.path === fixtureSourcePath(type));
@@ -27,11 +22,6 @@ function fixtureTypedSource(type: CodeGenType, prompt: string): FixtureFile | un
   return { ...source, content };
 }
 
-/**
- * The file writes a scripted run makes, in order. The `write` tool takes one file per call, so a
- * multi-file run is several tool calls. A templated project only rewrites its typed entry: the
- * template's package.json and lock file stay as they are (a rewritten manifest would break `npm ci`).
- */
 export function fixtureWriteSteps(type: CodeGenType, prompt: string, templated: boolean): FixtureFile[] {
   const project = type === 'react_project' || type === 'vue_project';
   const typed = templated && project ? fixtureTypedSource(type, prompt) : undefined;

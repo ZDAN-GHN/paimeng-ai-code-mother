@@ -2,12 +2,6 @@ import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { appOrigin } from './support/app-origin';
 
-/**
- * 语音输入的真实浏览器链路：录音 → 上传转写 → 文本填进输入框（不自动发送）。
- * 无头环境没有麦克风，所以用桩替换 getUserMedia / MediaRecorder，并拦下转写接口——
- * 这里验证的是客户端的录音状态机、上传拼装与结果落位；服务端转发逻辑由
- * tests/integration/speech-transcribe.test.ts 覆盖。
- */
 const origin = appOrigin();
 const prompt = '语音输入回归测试';
 const transcript = '帮我做一个台球厅的预约网站';
@@ -56,7 +50,6 @@ test('录音结束后转写文本追加进输入框，且不自动发送', async
     uploads.push({ contentType: route.request().headers()['content-type'] ?? null });
     return route.fulfill({ json: { code: 0, data: { text: transcript } } });
   });
-  // 可用性是在页面加载时探测的，所以桩要在这个刷新之前挂上。
   await page.reload();
   await expect(page.getByLabel('对话消息')).toBeEnabled();
 
@@ -68,7 +61,6 @@ test('录音结束后转写文本追加进输入框，且不自动发送', async
 
   const input = page.getByLabel('对话消息');
   await expect(input).toHaveValue(prompt + ' ' + transcript);
-  // 转写走 multipart 上传，且结果只填进输入框——没有自动发出。
   expect(uploads).toHaveLength(1);
   expect(uploads[0]!.contentType).toContain('multipart/form-data');
 });
@@ -82,7 +74,6 @@ test('未配置转写模型时麦克风禁用并说明原因', async ({ page }) 
   await expect(page.getByLabel('对话消息')).toBeEnabled();
   const mic = page.getByRole('button', { name: '语音输入' });
   await expect(mic).toBeDisabled();
-  // 原因只在悬浮时展示（不再常显一行，避免把按钮行撑宽），所以这里悬停后断言「说明白为什么不能用」。
   await mic.hover();
   await expect(page.getByText(/未配置语音转写模型/)).toBeVisible();
 });

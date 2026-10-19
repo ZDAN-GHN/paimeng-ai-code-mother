@@ -66,7 +66,6 @@ type ProviderDraft = {
   enabled: boolean;
 };
 
-/** 管理端提交口径：直接输入的密钥是明文。 */
 function providerInput(overrides: Partial<ProviderDraft> = {}): ModelProviderWriteInput {
   const draft: ProviderDraft = {
     id: 'env-default',
@@ -243,7 +242,6 @@ describe('模型管理 API', () => {
       'apiFormat', 'apiKeyConfigured', 'apiKeySource', 'baseUrl', 'createTime', 'displayName', 'enabled', 'headers', 'id', 'options', 'updateTime',
     ]);
 
-    // 再次提交空密钥表示保持已保存的密钥，不会被当成新建而拒绝。
     const kept = await request(
       'model/admin/provider/upsert',
       { provider: providerInput({ id: 'inline-provider', apiKeySource: 'inline', apiKey: '' }), expectedRevision: '2' },
@@ -488,7 +486,6 @@ describe('模型管理 API', () => {
     expect(anonymous.status).toBe(401);
     expect((await request('model/admin/provider/models', { provider: providerInput() }, memberCookie)).status).toBe(403);
 
-    // 非 HTTPS 且不是本机/局域网地址时必须命中部署允许的来源，否则先被地址校验拒绝。
     const blockedAddress = await request(
       'model/admin/provider/models',
       { provider: providerInput({ baseUrl: 'http://api.example.com/v1' }) },
@@ -542,7 +539,6 @@ describe('模型管理 API', () => {
       });
       expect(received.at(-1)).toBe(`Bearer ${secretValue}`);
 
-      // 直接输入密钥：没提交明文时用库里已保存的密文解出来的密钥。
       const inlineKey = 'sk-inline-probe-secret';
       const upsert = await request(
         'model/admin/provider/upsert',

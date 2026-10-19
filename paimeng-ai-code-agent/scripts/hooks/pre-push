@@ -1,7 +1,4 @@
 #!/bin/sh
-# 推送前的类型检查：npm run type-check（next typegen && tsc --noEmit，~30s）。
-# 裸 tsc 会报 .next/types/* 的过期生成类型，所以这里必须走 `type-check`。
-# 紧急绕过：git push --no-verify
 set -e
 root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 cd "$root/paimeng-ai-code-agent" 2>/dev/null || exit 0

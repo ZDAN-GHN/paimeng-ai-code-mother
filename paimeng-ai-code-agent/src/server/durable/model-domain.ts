@@ -1,15 +1,3 @@
-/**
- * 生成链路的模型域：把产品库的 `model_provider` / `model_alias` 解析成 pi-ai 的 provider，并给每次运行
- * 留下一条**非敏感**的运行模型描述（`runModelDoc`），让重启后的恢复按原样重建，而不是重新解释当前别名。
- *
- * 解析顺序：
- *   1. 夹具（`DURABLE_FAUX_FIXTURE=1` 优先，其次 `DURABLE_FAUX_MODEL=1`）：不读库、不要凭据；
- *   2. 显式覆盖 `DURABLE_MODEL_BASE_URL` / `DURABLE_MODEL_API_KEY` / `DURABLE_MODEL_ID`：三者必须齐全；
- *   3. 产品库的 `codegen.default` 别名（默认来源）。
- *
- * 密钥不落任何持久层：描述里只有「密钥引用」（环境变量名，或 inline 的提供商 id），明文与密文都只留在
- * 产品库 `model_provider` 里，每次请求在 auth 回调里按引用现解析（架构约束 #47 / #48）。
- */
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { z, ZodError } from "zod";
@@ -72,7 +60,6 @@ export const runModelDoc: ConversationDocToken<{ run?: JsonValue }> = defineDoc(
 
 const modelRefSchema = z.strictObject({ provider: z.string().min(1), modelId: z.string().min(1) });
 
-/** 密钥引用：环境变量名，或「inline 密钥仍在产品库提供商行里」（不含密文本体）。 */
 const keyReferenceSchema = z.discriminatedUnion("kind", [
 	z.strictObject({ kind: z.literal("env"), env: modelApiKeyEnvSchema }),
 	z.strictObject({ kind: z.literal("inline") }),
@@ -113,7 +100,6 @@ const fixtureDescriptorSchema = z.strictObject({
 export const runModelDescriptorSchema = z.discriminatedUnion("source", [productDescriptorSchema, envOverrideDescriptorSchema, fixtureDescriptorSchema]);
 export type RunModelDescriptor = z.infer<typeof runModelDescriptorSchema>;
 
-/** 一次运行的模型绑定：要登记的 provider、pi 引用、公开身份、思考档位与要持久化的描述。 */
 export type GenerationModelBinding = {
 	readonly ref: ModelRef;
 	readonly identity: GenerationModelIdentity;
@@ -124,10 +110,6 @@ export type GenerationModelBinding = {
 	readonly provider: Provider<Api> | null;
 };
 
-/**
- * 产品库没有价格与上下文预算字段，沿用 harness 原有的常量：换模型后成本与上下文预算不准，
- * 但只影响展示与压缩阈值，不影响调用正确性与记账口径（docs/plans/provider-convergence.md）。
- */
 const generationModelCost = { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 };
 const generationModelContextWindow = 1_000_000;
 const generationModelMaxTokens = 32_000;
@@ -135,7 +117,6 @@ const generationModelMaxTokens = 32_000;
 /** 显式覆盖端点的档位映射：`off` 为 null，与收敛前的行为一致（关闭时不发送任何思考字段）。 */
 const overrideThinkingLevels: ThinkingLevelMap = { off: null, minimal: "low", low: "low", medium: null, high: "high", xhigh: null, max: "max" };
 
-/** 通用 OpenAI 兼容端点的档位映射：档位原样作为 `reasoning_effort` 发出，关闭时不发该字段。 */
 const passthroughThinkingLevels: ThinkingLevelMap = { off: null, minimal: "minimal", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" };
 
 /**
@@ -144,7 +125,6 @@ const passthroughThinkingLevels: ThinkingLevelMap = { off: null, minimal: "minim
  */
 const deepSeekThinkingLevels: ThinkingLevelMap = { off: "disabled", minimal: "low", low: "low", medium: null, high: "high", xhigh: null, max: "max" };
 
-/** OpenAI Chat Completions 的通用兼容开关；没给选项时沿用原来的默认（全部为真）。 */
 function openAiCompatible(options: ModelProviderOptions): OpenAICompletionsCompat {
 	return {
 		supportsStore: false,
@@ -155,7 +135,6 @@ function openAiCompatible(options: ModelProviderOptions): OpenAICompletionsCompa
 	};
 }
 
-/** DeepSeek Chat 的兼容开关：`thinking` + `reasoning_effort`，助手消息带回 reasoning_content。 */
 function deepSeekCompatible(options: ModelProviderOptions, supportsReasoningEffort: boolean): OpenAICompletionsCompat {
 	return {
 		...openAiCompatible(options),
@@ -165,22 +144,14 @@ function deepSeekCompatible(options: ModelProviderOptions, supportsReasoningEffo
 	};
 }
 
-/** 显式覆盖端点保留 DeepSeek 语义与 oc-go 的会话路由头（与收敛前一致）。 */
 const overrideCompat: OpenAICompletionsCompat = deepSeekCompatible({}, true);
 
-/** 别名声明的思考强度（`none` 与未配置都表示「不发强度」，强度由思考开关决定）。 */
 function declaredReasoning(settings: ModelAliasSettings): Exclude<ReasoningLevel, "none"> | undefined {
 	return settings.reasoning === undefined || settings.reasoning === "none" ? undefined : settings.reasoning;
 }
 
 type ThinkingPlan = { level: ModelThinkingLevel; compat: OpenAICompletionsCompat; thinkingLevelMap: ThinkingLevelMap };
 
-/**
- * 思考开关的取值优先于别名 reasoning，并决定请求体里的 `thinking.type`：
- * - `disabled`：强制 `thinking: {type: "disabled"}`，不发 reasoning_effort（别名配了 high 也一样）；
- * - `enabled`：强制 `thinking: {type: "enabled"}`，别名配了强度就发它映射出的 reasoning_effort，没配就不发；
- * - 未声明开关：通用 OpenAI 兼容语义，不发送任何 DeepSeek 专有字段（reasoning 只映射成 reasoning_effort）。
- */
 function thinkingPlan(options: ModelProviderOptions, settings: ModelAliasSettings): ThinkingPlan {
 	const reasoning = declaredReasoning(settings);
 	switch (options.thinkingSwitch) {
@@ -199,7 +170,6 @@ function thinkingPlan(options: ModelProviderOptions, settings: ModelAliasSetting
 	}
 }
 
-/** 别名的采样设置 → 请求体键名（OpenAI 兼容格式消费；anthropic 适配器不读模型级采样参数）。 */
 function samplingParamsOf(settings: ModelAliasSettings): Record<string, unknown> | undefined {
 	const params: Record<string, unknown> = {};
 	if (settings.temperature !== undefined) params.temperature = settings.temperature;
@@ -207,7 +177,6 @@ function samplingParamsOf(settings: ModelAliasSettings): Record<string, unknown>
 	return Object.keys(params).length ? params : undefined;
 }
 
-/** 产品库的 API 格式 → pi-ai 的流实现与 `model.api`。库里出现别的值（旧行、更新过的管理端）就明确拒绝。 */
 function piApiFor(apiFormat: ProviderApiFormat): { api: Api; streams: ProviderStreams } {
 	switch (apiFormat) {
 		case "openai-chat":
@@ -230,15 +199,10 @@ function anthropicBaseUrl(baseUrl: string): string {
 	return baseUrl.replace(/\/v1\/?$/, "");
 }
 
-/** 每次运行一个实例号，让并发的会话各用各的 provider，互不覆盖（它也进持久引用）。 */
 function instanceProviderId(alias: string): string {
 	return `${alias}#${randomUUID().slice(0, 8)}`;
 }
 
-/**
- * 按密钥引用现解析明文：`env` 读环境变量（受部署允许名单约束），`inline` 现读产品库的提供商行再解密。
- * 产品库没有这一行、或已经不是 inline 来源时明确失败，而不是改用当前别名指向的提供商。
- */
 async function resolveKey(reference: KeyReference, providerId: string): Promise<string> {
 	if (reference.kind === "env") {
 		if (!isAllowedModelApiKeyEnv(reference.env, getConfig().modelApiKeyEnvAllowlist)) {
@@ -256,12 +220,10 @@ async function resolveKey(reference: KeyReference, providerId: string): Promise<
 	return decryptModelSecret(provider.apiKeyCiphertext);
 }
 
-/** 密钥来源的展示标签；只回显来源，不带密钥本身。 */
 function keyLabel(reference: KeyReference): string {
 	return reference.kind === "env" ? reference.env : "模型管理（直接输入）";
 }
 
-/** 产品库形态的运行模型规格：运行时字段（引用、别名、能力、密钥引用）。 */
 type ProductModelSpec = {
 	ref: ModelRef;
 	alias: string;
@@ -275,7 +237,6 @@ type ProductModelSpec = {
 	key: KeyReference;
 };
 
-/** 描述 → 运行时规格：只用描述里的字段，不读当前别名。 */
 function specOfDescriptor(descriptor: RunModelDescriptor): ProductModelSpec {
 	if (descriptor.source !== "product") throw new Error(`descriptor ${descriptor.source} 不是产品库形态`);
 	return {
@@ -292,7 +253,6 @@ function specOfDescriptor(descriptor: RunModelDescriptor): ProductModelSpec {
 	};
 }
 
-/** 运行时规格 → 要持久化的描述。 */
 function descriptorOfSpec(spec: ProductModelSpec): RunModelDescriptor {
 	return {
 		source: "product",
@@ -309,7 +269,6 @@ function descriptorOfSpec(spec: ProductModelSpec): RunModelDescriptor {
 	};
 }
 
-/** 本轮只在闭包保留准入时的密文，明文在请求时解密；恢复运行则按原提供商引用解析。 */
 function productBinding(spec: ProductModelSpec, admittedCiphertext?: string): GenerationModelBinding {
 	const plan = thinkingPlan(spec.options, spec.settings);
 	const { api, streams } = piApiFor(spec.apiFormat);
@@ -359,7 +318,6 @@ function productBinding(spec: ProductModelSpec, admittedCiphertext?: string): Ge
 	};
 }
 
-/** 显式覆盖的规格 → 要登记的 provider：地址与模型名来自规格，密钥每次从环境变量现取。 */
 function envOverrideBinding(ref: ModelRef, baseUrl: string, imageInput: boolean): GenerationModelBinding {
 	const entry: Model<Api> = {
 		id: ref.modelId,
@@ -403,7 +361,6 @@ function envOverrideBinding(ref: ModelRef, baseUrl: string, imageInput: boolean)
 	};
 }
 
-/** 夹具模型的绑定：模型与 provider 已经在目录里（`durableModels()`），这里只给身份与描述。 */
 function fixtureBinding(ref: ModelRef, imageInput: boolean): GenerationModelBinding {
 	return {
 		ref,
@@ -415,7 +372,6 @@ function fixtureBinding(ref: ModelRef, imageInput: boolean): GenerationModelBind
 	};
 }
 
-/** 显式覆盖的三件套：要么都设、要么都不设；部分设置是配置错误，不回退到产品库。 */
 type EnvOverride = { baseUrl: string; modelId: string };
 
 function envOverride(): EnvOverride | null {
@@ -428,21 +384,18 @@ function envOverride(): EnvOverride | null {
 	return { baseUrl: values[0]!, modelId: values[2]! };
 }
 
-/** 读产品库并解析一个别名；缺失、禁用、引用断裂与配置非法都在这里变成可读的 503。 */
 async function databaseModel(aliasName: string): Promise<{ provider: ModelProvider; alias: ModelAlias }> {
 	let snapshot;
 	try {
 		snapshot = await readConfigSnapshot();
 	} catch (error) {
 		if (error instanceof BusinessError) throw error;
-		// 数据库原始报错可能带连接串与参数，一律静态化（同 Next 侧注册表的做法）。
 		if (error instanceof ZodError) {
 			if (error.issues.some(issue => issue.path.includes("apiFormat"))) throw new BusinessError(503, 50300, "提供商的 API 格式不支持，请在「模型管理」中选择已支持的 API 格式");
 			throw new BusinessError(503, 50300, "数据库中的模型配置不符合 schema，请在「模型管理」里重新保存");
 		}
 		throw new BusinessError(503, 50300, "模型配置读取失败");
 	}
-	// 别名缺失/禁用先报：这是管理端最常见的状态，文案与 Next 侧注册表保持一致。
 	const alias = snapshot.aliases.find(candidate => candidate.alias === aliasName);
 	if (!alias || !alias.enabled) throw new BusinessError(503, 50300, aliasNotConfiguredMessage(aliasName));
 	const provider = snapshot.providers.find(candidate => candidate.id === alias.providerId);
@@ -457,7 +410,6 @@ async function databaseModel(aliasName: string): Promise<{ provider: ModelProvid
 	return { provider, alias };
 }
 
-/** 密钥引用取提供商行当时的来源：inline 只存引用（密文留在库里），env 存变量名。 */
 function keyReferenceOf(provider: ModelProvider): KeyReference {
 	if (provider.apiKeySource === "inline") return { kind: "inline" };
 	if (!isAllowedModelApiKeyEnv(provider.apiKeyEnv, getConfig().modelApiKeyEnvAllowlist)) {
@@ -466,7 +418,6 @@ function keyReferenceOf(provider: ModelProvider): KeyReference {
 	return { kind: "env", env: provider.apiKeyEnv };
 }
 
-/** 准入时校验一次密钥可用（明文随即丢弃），之后每次请求在 auth 回调里按引用现取。 */
 function validateKey(reference: KeyReference, provider: ModelProvider): void {
 	if (reference.kind === "inline") {
 		if (provider.apiKeySource !== "inline" || !decryptModelSecret(provider.apiKeyCiphertext)) {
@@ -480,10 +431,6 @@ function validateKey(reference: KeyReference, provider: ModelProvider): void {
 	if (!process.env[reference.env]) throw new BusinessError(503, 50300, `提供商 ${provider.id} 的密钥环境变量 ${reference.env} 未配置`);
 }
 
-/**
- * 把失败统一成可读的 503：我们自己构造的文案（业务错误、配置无效）原样上抛，其余一律静态化，
- * 避免把上游/Drizzle 的原始报文、连接串或参数带到接口与日志里。
- */
 function modelFailure(error: unknown): BusinessError {
 	if (error instanceof BusinessError) return error;
 	if (error instanceof ModelConfigInvalidError) return new BusinessError(503, 50300, error.message.slice(0, 300));
@@ -497,7 +444,6 @@ async function admittedModel(): Promise<GenerationModelBinding> {
 	if (override) return envOverrideBinding({ provider: envModelProviderId, modelId: override.modelId }, override.baseUrl, true);
 	const { provider, alias } = await databaseModel(generationModelAlias);
 	const key = keyReferenceOf(provider);
-	// 准入时校验密钥可用；provider 闭包只捕获引用，不捕获明文。
 	validateKey(key, provider);
 	return productBinding({
 		ref: { provider: instanceProviderId(generationModelAlias), modelId: alias.modelName },
@@ -534,7 +480,6 @@ export function rebuildRunModel(descriptor: RunModelDescriptor): GenerationModel
 	return productBinding(specOfDescriptor(descriptor));
 }
 
-/** 描述里的公开身份；`GET /model` 与接管记账都用它，不需要任何凭据。 */
 export function identityOfDescriptor(descriptor: RunModelDescriptor): GenerationModelIdentity {
 	switch (descriptor.source) {
 		case "product":

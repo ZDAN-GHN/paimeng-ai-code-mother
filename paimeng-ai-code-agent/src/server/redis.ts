@@ -2,9 +2,7 @@ import 'server-only';
 import { createClient, type RedisClientType } from 'redis';
 import { getConfig } from './config';
 
-/** 建连上限：Redis 抖动时限流入口不能跟着挂住（限流是 fail open 的旁路能力）。 */
 const connectTimeoutMs = 2000;
-/** 告警去重窗口：socket 错误会反复触发，同一窗口内只留一条，避免刷满日志。 */
 const unavailableWarnIntervalMs = 1000;
 
 type RedisState = {
@@ -21,13 +19,11 @@ const state: RedisState = ((globalThis as typeof globalThis & { tsRateLimitRedis
   shutdownHookInstalled: false,
 });
 
-/** 只保留 errno 风格的安全码（ECONNREFUSED、ETIMEDOUT 等）：连接串、账号与原始异常文本都不进日志。 */
 function safeReason(error: unknown): string {
   const code = (error as { code?: unknown } | null)?.code;
   return typeof code === 'string' && /^[A-Z][A-Z0-9_]{1,31}$/.test(code) ? code : 'unavailable';
 }
 
-/** Redis 不可用时的结构化告警（去重、不含敏感字段）：限流跳过、请求照常放行。 */
 export function warnRateLimitRedisUnavailable(reason: string) {
   const at = Date.now();
   if (at - state.lastWarnAt < unavailableWarnIntervalMs) return;
@@ -36,7 +32,7 @@ export function warnRateLimitRedisUnavailable(reason: string) {
 }
 
 function destroyQuietly(client: RedisClientType) {
-  try { client.destroy(); } catch { /* 连接已经关闭，无需再处理 */ }
+  try { client.destroy(); } catch { }
 }
 
 function newClient(): RedisClientType {
@@ -118,7 +114,6 @@ export async function closeRateLimitRedis(): Promise<void> {
   }
 }
 
-// 退出回调只作兜底；客户端可能阻止 beforeExit，调用方和测试应显式关闭连接。
 if (!state.shutdownHookInstalled) {
   state.shutdownHookInstalled = true;
   process.once('beforeExit', () => { void closeRateLimitRedis(); });
