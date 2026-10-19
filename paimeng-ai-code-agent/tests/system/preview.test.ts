@@ -66,6 +66,15 @@ describe('真实预览 HTTP 边界', () => {
     expect(response.body).not.toContain('style.outline');
     expect(response.body).not.toContain("removeProperty('outline')");
   });
+  it('编辑桥接按快照上报多选，并提供上限与按选择器移除命令', async () => {
+    const response = await rawGet(`/preview/html_${app.id}/`);
+    expect(response.body).toContain("type:'ELEMENTS_SELECTED'");
+    expect(response.body).toContain('MAX_SELECTED=5');
+    expect(response.body).toContain("type:'SELECTION_LIMIT'");
+    expect(response.body).toContain("event.data.type==='CLEAR_SELECTION'");
+    expect(response.body).toContain("selected.indexOf(element)");
+    expect(response.body).not.toContain("type:'ELEMENT_SELECTED'");
+  });
   it('拒绝穿越、隐藏文件与软链接，保留 6 字符旧发布键', async () => {
     expect(deployedUrl('ABC123')).toContain('/deploy/ABC123/');
     expect((await rawGet('/deploy/ABC123/')).body).toContain('旧发布键');

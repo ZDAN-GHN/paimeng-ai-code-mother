@@ -5,6 +5,7 @@ import { join, relative, isAbsolute, extname } from 'node:path';
 import { getConfig } from './config';
 import { ensureRuntime, validateDeployKey } from './workspace';
 import { isProjectCodeGenType } from '@/shared/contracts';
+import { maxSelectedElements } from '@/shared/element-selection';
 
 const mime: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'application/javascript; charset=utf-8',
@@ -19,12 +20,13 @@ export function contentType(path: string) { return mime[extname(path)] ?? null; 
 function editorBridge(parentOrigin: string) {
   return `<script data-paimeng-editor>(function(){
   var parentOrigin=${JSON.stringify(parentOrigin)};
+  var MAX_SELECTED=${maxSelectedElements};
   var HOVER='paimeng-edit-hover';
   var SELECTED='paimeng-edit-selected';
   var STYLE_ID='paimeng-editor-style';
   var enabled=false;
   var hovered=null;
-  var selected=null;
+  var selected=[];
   function styleOnce(){
     if(document.getElementById(STYLE_ID))return;
     var style=document.createElement('style');
@@ -33,7 +35,7 @@ function editorBridge(parentOrigin: string) {
     (document.head||document.documentElement).appendChild(style);
   }
   function clearHover(){if(hovered){hovered.classList.remove(HOVER);hovered=null;}}
-  function clearSelected(){if(selected){selected.classList.remove(SELECTED);selected=null;}}
+  function clearSelected(){for(var index=0;index<selected.length;index++)selected[index].classList.remove(SELECTED);selected=[];}
   function clearAll(){clearHover();clearSelected();}
   function classListOf(element){return typeof element.className==='string'?element.className.split(/\\s+/).filter(Boolean):[];}
   function selectorFor(element){
@@ -64,6 +66,13 @@ function editorBridge(parentOrigin: string) {
       pagePath:location.pathname+location.hash
     };
   }
+  function reportSelected(){parent.postMessage({type:'ELEMENTS_SELECTED',elements:selected.map(elementInfo)},parentOrigin);}
+  function toggleSelected(element){
+    var index=selected.indexOf(element);
+    if(index>=0){selected.splice(index,1);element.classList.remove(SELECTED);reportSelected();return;}
+    if(selected.length>=MAX_SELECTED){parent.postMessage({type:'SELECTION_LIMIT',max:MAX_SELECTED},parentOrigin);return;}
+    selected.push(element);element.classList.add(SELECTED);reportSelected();
+  }
   window.addEventListener('message',function(event){
     if(event.source!==parent||event.origin!==parentOrigin||!event.data||typeof event.data!=='object')return;
     if(event.data.type==='TOGGLE_EDIT_MODE'){
@@ -73,7 +82,12 @@ function editorBridge(parentOrigin: string) {
     }else if(event.data.type==='CLEAR_ALL_EFFECTS'){
       enabled=false;clearAll();
     }else if(event.data.type==='CLEAR_SELECTION'){
-      clearSelected();
+      var selector=event.data.selector;
+      if(typeof selector==='string'){
+        for(var index=selected.length-1;index>=0;index--){
+          if(selectorFor(selected[index])===selector){selected[index].classList.remove(SELECTED);selected.splice(index,1);}
+        }
+      }else clearSelected();
     }
   });
   document.addEventListener('mouseover',function(event){
@@ -81,7 +95,7 @@ function editorBridge(parentOrigin: string) {
     var target=event.target;
     if(target===document.body||target===document.documentElement)return;
     if(target.tagName==='SCRIPT'||target.tagName==='STYLE')return;
-    if(target===selected||target===hovered)return;
+    if(target===hovered||selected.indexOf(target)>=0)return;
     clearHover();
     target.classList.add(HOVER);
     hovered=target;
@@ -98,10 +112,8 @@ function editorBridge(parentOrigin: string) {
     var target=event.target;
     if(target===document.body||target===document.documentElement)return;
     if(target.tagName==='SCRIPT'||target.tagName==='STYLE')return;
-    clearHover();clearSelected();
-    target.classList.add(SELECTED);
-    selected=target;
-    parent.postMessage({type:'ELEMENT_SELECTED',elementInfo:elementInfo(target)},parentOrigin);
+    clearHover();
+    toggleSelected(target);
   },true);
   parent.postMessage({type:'EDITOR_READY'},parentOrigin);
 })();</script>`;

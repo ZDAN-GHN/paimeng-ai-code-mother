@@ -1,4 +1,4 @@
-import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxResponseStep, type ToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall, type FauxResponseStep, type ToolCall } from "@earendil-works/pi-ai";
 import { createModels, type MutableModels } from "@earendil-works/pi-ai/models";
 
 export const FAUX_PROVIDER = "faux";
@@ -20,9 +20,10 @@ export function fauxModels(): MutableModels {
 	const rawArgs = process.env.DURABLE_FAUX_ARGS;
 	const args: ToolCall["arguments"] = rawArgs ? (JSON.parse(rawArgs) as ToolCall["arguments"]) : { ms: waitMs };
 	const faux = fauxProvider({ provider: FAUX_PROVIDER, models: [{ id: FAUX_MODEL_ID, contextWindow: 200_000, maxTokens: 8_192 }] });
+	const thinkingText = process.env.DURABLE_FAUX_THINKING;
 	const step: FauxResponseStep = (context) =>
 		context.messages.some((message) => message.role === "toolResult")
-			? fauxAssistantMessage(finalText)
+			? fauxAssistantMessage(thinkingText ? ([fauxThinking(thinkingText), fauxText(finalText)] as const) : finalText)
 			: fauxAssistantMessage([fauxToolCall(toolName, args)], { stopReason: "toolUse" });
 	faux.setResponses(Array.from({ length: FAUX_STEPS }, () => step));
 	const models = createModels();

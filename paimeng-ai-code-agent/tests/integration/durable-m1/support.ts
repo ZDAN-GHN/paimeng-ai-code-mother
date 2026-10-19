@@ -50,7 +50,7 @@ const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
 export type HarnessProcess = { child: ChildProcess; output: () => string };
 
-export function startHarness(options: { port: number; runDir: string; reset: boolean; waitMs: number; finalText: string; workspace?: string; tool?: string; args?: unknown; env?: Record<string, string> }): HarnessProcess {
+export function startHarness(options: { port: number; runDir: string; reset: boolean; waitMs: number; finalText: string; thinking?: string; workspace?: string; tool?: string; args?: unknown; env?: Record<string, string> }): HarnessProcess {
   let output = '';
   const env = {
     ...process.env,
@@ -62,6 +62,7 @@ export function startHarness(options: { port: number; runDir: string; reset: boo
     DURABLE_FAUX_MODEL: '1',
     DURABLE_FAUX_WAIT_MS: String(options.waitMs),
     DURABLE_FAUX_FINAL: options.finalText,
+    ...(options.thinking ? { DURABLE_FAUX_THINKING: options.thinking } : {}),
     ...(options.tool ? { DURABLE_FAUX_TOOL: options.tool } : {}),
     ...(options.args === undefined ? {} : { DURABLE_FAUX_ARGS: JSON.stringify(options.args) }),
     ...(options.reset ? { DURABLE_HARNESS_RESET: '1' } : {}),

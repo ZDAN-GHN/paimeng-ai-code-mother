@@ -27,6 +27,7 @@ import { workspace, writeProjectFileBytes } from './workspace';
 import { webAccessInstructions } from './web-access/tools';
 
 const textBlockSchema = z.object({ type: z.literal('text'), text: z.string() });
+const thinkingBlockSchema = z.object({ type: z.literal('thinking'), thinking: z.string() });
 const contentSchema = z.union([z.string(), z.array(z.unknown())]);
 
 /**
@@ -70,6 +71,17 @@ function textBlocksOf(message: unknown): Map<number, string> {
   (parsed.data.content ?? []).forEach((block, index) => {
     const text = textBlockSchema.safeParse(block);
     if (text.success) blocks.set(index, text.data.text);
+  });
+  return blocks;
+}
+
+function thinkingBlocksOf(message: unknown): Map<number, string> {
+  const blocks = new Map<number, string>();
+  const parsed = z.object({ content: z.array(z.unknown()).optional() }).safeParse(message);
+  if (!parsed.success) return blocks;
+  (parsed.data.content ?? []).forEach((block, index) => {
+    const thinking = thinkingBlockSchema.safeParse(block);
+    if (thinking.success && thinking.data.thinking) blocks.set(index, thinking.data.thinking);
   });
   return blocks;
 }
@@ -277,12 +289,16 @@ class ChunkChannel {
 type ToolSlot = { toolName: string; input: unknown; output?: unknown; details?: unknown; isError?: boolean };
 type AssistantPart =
   | { type: 'text'; text: string }
+  | { type: 'reasoning'; text: string }
   | { type: 'dynamic-tool'; toolName: string; toolCallId: string; state: 'input-available' | 'output-available' | 'output-error'; input: unknown; output?: unknown; errorText?: string };
 
 class AssistantTurn {
   #blocks = new Map<number, string>();
   #emitted = '';
   #textId: string | null = null;
+  #thinking = new Map<number, string>();
+  #thinkingEmitted = '';
+  #thinkingId: string | null = null;
   #streamedParts = 0;
   readonly parts: AssistantPart[] = [];
   readonly tools = new Map<string, ToolSlot>();
@@ -310,7 +326,19 @@ class AssistantTurn {
         const index = change.contentIndex ?? 0;
         this.#blocks.set(index, (this.#blocks.get(index) ?? '') + change.delta);
         changed = true;
+      } else if (change.type === 'thinking_delta' && change.delta) {
+        // 思考块与文字块分开累计：pi 在 delta 里会先思考后作答（OpenAI 兼容端把 reasoning_content
+        // 归一到 thinking 块，内容先于正文到达）。
+        const index = change.contentIndex ?? 0;
+        this.#thinking.set(index, (this.#thinking.get(index) ?? '') + change.delta);
+        changed = true;
       } else if (change.type === 'block') {
+        const parsed = thinkingBlockSchema.safeParse(change.block);
+        if (parsed.success) {
+          this.#thinking.set(change.contentIndex ?? 0, parsed.data.thinking);
+          changed = true;
+          continue;
+        }
         const block = textBlockSchema.safeParse(change.block);
         if (block.success) {
           this.#blocks.set(change.contentIndex ?? 0, block.data.text);
@@ -318,6 +346,7 @@ class AssistantTurn {
         }
       } else if (change.type === 'message') {
         this.#blocks = textBlocksOf(change.message);
+        this.#thinking = thinkingBlocksOf(change.message);
         changed = true;
       }
     }
@@ -330,8 +359,10 @@ class AssistantTurn {
    */
   reconcile(message: unknown) {
     const blocks = textBlocksOf(message);
-    if (blocks.size === 0) return;
+    const thinking = thinkingBlocksOf(message);
+    if (blocks.size === 0 && thinking.size === 0) return;
     this.#blocks = blocks;
+    this.#thinking = thinking;
     this.#flush();
   }
 
@@ -339,7 +370,12 @@ class AssistantTurn {
     return [...this.#blocks.entries()].sort((left, right) => left[0] - right[0]).map(([, text]) => text).join('');
   }
 
+  #authoritativeThinking(): string {
+    return [...this.#thinking.entries()].sort((left, right) => left[0] - right[0]).map(([, text]) => text).join('');
+  }
+
   #flush() {
+    this.#flushThinking();
     const next = this.#authoritative();
     if (!next || next === this.#emitted) return;
     if (!next.startsWith(this.#emitted)) {
@@ -357,6 +393,31 @@ class AssistantTurn {
     this.channel.push({ type: 'text-delta', id: this.#textId, delta });
   }
 
+  /** 思考内容与正文分别成段：AI SDK 的 reasoning part（前端折叠展示），早于正文到达时先发出。 */
+  #flushThinking() {
+    const next = this.#authoritativeThinking();
+    if (!next || next === this.#thinkingEmitted) return;
+    if (!next.startsWith(this.#thinkingEmitted)) {
+      this.#endThinking();
+      this.#thinkingEmitted = '';
+    }
+    const delta = next.slice(this.#thinkingEmitted.length);
+    if (!delta) return;
+    if (this.#thinkingId === null) {
+      this.#thinkingId = `${Math.random().toString(36).slice(2)}-thinking`;
+      this.#streamedParts += 1;
+      this.channel.push({ type: 'reasoning-start', id: this.#thinkingId });
+    }
+    this.#thinkingEmitted = next;
+    this.channel.push({ type: 'reasoning-delta', id: this.#thinkingId, delta });
+  }
+
+  #endThinking() {
+    if (this.#thinkingId === null) return;
+    this.channel.push({ type: 'reasoning-end', id: this.#thinkingId });
+    this.#thinkingId = null;
+  }
+
   #endSegment() {
     if (this.#textId === null) return;
     this.channel.push({ type: 'text-end', id: this.#textId });
@@ -364,11 +425,16 @@ class AssistantTurn {
   }
 
   closeText() {
+    const thinking = this.#authoritativeThinking();
     const text = this.#authoritative();
+    this.#endThinking();
     this.#endSegment();
+    if (thinking) this.parts.push({ type: 'reasoning', text: thinking });
     if (text) this.parts.push({ type: 'text', text });
     this.#blocks.clear();
+    this.#thinking.clear();
     this.#emitted = '';
+    this.#thinkingEmitted = '';
   }
 
   toolStart(toolCallId: string, toolName: string, input: unknown) {
@@ -922,6 +988,11 @@ function assistantPartsOf(message: unknown): AssistantPart[] {
       if (text.data.text) parts.push({ type: 'text', text: text.data.text });
       continue;
     }
+    const thinking = thinkingBlockSchema.safeParse(block);
+    if (thinking.success) {
+      if (thinking.data.thinking) parts.push({ type: 'reasoning', text: thinking.data.thinking });
+      continue;
+    }
     const call = toolCallBlockSchema.safeParse(block);
     if (call.success) parts.push({ type: 'dynamic-tool', toolName: call.data.name, toolCallId: call.data.id, state: 'input-available', input: call.data.arguments ?? {} });
   }
@@ -1054,7 +1125,6 @@ export async function harnessSubmitInput(raw: unknown, user: User): Promise<Chat
   const input = chatInputSchema.parse(raw);
   const app = await getApp(input.appId, user, true);
   validatePrompt(input.text);
-  if (input.mode === 'steer' && input.attachments.length) throw new BusinessError(400, 40000, '插话只支持文字，请使用排队发送附图');
   const task = await generationStatus(input.appId);
   if (!task || (task.status !== 'generating' && task.status !== 'building')) throw new BusinessError(409, 40900, '当前任务已结束，请直接发送消息');
   const conversationId = await conversationIdOf(input.appId);

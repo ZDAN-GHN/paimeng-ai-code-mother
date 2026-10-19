@@ -132,6 +132,9 @@ function openAiCompatible(options: ModelProviderOptions): OpenAICompletionsCompa
 		supportsStrictMode: options.supportsStructuredOutputs ?? true,
 		supportsUsageInStreaming: options.includeUsage ?? true,
 		maxTokensField: "max_tokens",
+		// 第三方网关跑 DeepSeek 类混合推理模型时，上游处于 thinking 模式会要求回传 reasoning_content
+		// （否则 400）；thinkingSwitch 未启用（走不到 deepseek 格式）时按这个兼容选项声明回写。
+		...(options.reasoningContentPassthrough ? { requiresReasoningContentOnAssistantMessages: true } : {}),
 	};
 }
 

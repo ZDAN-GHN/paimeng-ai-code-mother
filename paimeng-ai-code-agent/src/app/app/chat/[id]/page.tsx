@@ -10,6 +10,7 @@ import { useAuth } from '@/components/providers';
 import { type AppInfo, type Generation, type GenerationAccount, isProjectCodeGenType } from '@/shared/contracts';
 import type { ChatInputMode, ChatInputReceipt, ChatMessage, ChatRuntime } from '@/shared/chat-runtime';
 import { imageLimits, type AttachmentPart } from '@/shared/attachments';
+import { maxSelectedElements, selectedElementsSchema, selectionContext, type SelectedElement } from '@/shared/element-selection';
 import { draggingFiles, filesFromClipboard, filesFromDrop } from '@/components/clipboard-images';
 import { ImageAttachments, MessageImages, messageAttachments, outgoingParts, useImageAttachments } from '@/components/chat/image-attachments';
 import { VoiceInput, appendTranscript } from '@/components/chat/voice-input';
@@ -23,7 +24,6 @@ import { AppDetailModal, formatCodeGenType } from '@/components/chat/app-detail-
 import { DeploySuccessModal } from '@/components/chat/deploy-success-modal';
 import './chat.css';
 
-type Selected = { selector: string; tagName: string; id: string; className: string; textContent: string; pagePath: string };
 const statusLabels = { generating: '生成中', building: '构建中', ready: '可预览', failed: '失败', cancelled: '已取消' } as const;
 const historyPageSize = 10;
 const inputLimit = 1000;
@@ -92,17 +92,6 @@ function LostInputChip({ item, resendable, onResend, onRemove }: { item: LostInp
   </span>;
 }
 
-function selectionContext(selected: Selected) {
-  const lines = ['\n\n选中元素信息：'];
-  if (selected.pagePath) lines.push('- 页面路径: ' + selected.pagePath);
-  lines.push('- 标签: ' + selected.tagName.toLowerCase());
-  lines.push('- 选择器: ' + selected.selector);
-  if (selected.id) lines.push('- ID: ' + selected.id);
-  if (selected.className) lines.push('- class: ' + selected.className);
-  if (selected.textContent) lines.push('- 当前内容: ' + selected.textContent.slice(0, 100));
-  return lines.join('\n');
-}
-
 export default function AppChat({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   return <Chat key={id} id={id} />;
@@ -123,7 +112,7 @@ function Chat({ id }: { id: string }) {
   const [historySettled, setHistorySettled] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [selected, setSelected] = useState<Selected | null>(null);
+  const [selected, setSelected] = useState<SelectedElement[]>([]);
   const [publishing, setPublishing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
@@ -466,34 +455,35 @@ function Chat({ id }: { id: string }) {
     if (!previewLoaded.current || !previewOrigin) return;
     iframe.current?.contentWindow?.postMessage(value, previewOrigin);
   }, [previewOrigin]);
-  useEffect(() => { previewLoaded.current = false; }, [app?.previewUrl, task?.id]);
+  useEffect(() => { previewLoaded.current = false; setSelected([]); }, [app?.previewUrl, task?.id]);
   useEffect(() => {
     editorMessage({ type: 'TOGGLE_EDIT_MODE', editMode: editing });
     if (editing) return;
-    setSelected(null);
+    setSelected([]);
     editorMessage({ type: 'CLEAR_ALL_EFFECTS' });
   }, [editing, editorMessage]);
+  /** 移除单个选中元素：本地列表与预览里只剩的选中态要同时收起来，否则再点它会被桥接当成取消选择。 */
+  const removeSelected = useCallback((selector: string) => {
+    setSelected(current => current.filter(item => item.selector !== selector));
+    editorMessage({ type: 'CLEAR_SELECTION', selector });
+  }, [editorMessage]);
   useEffect(() => {
     function receive(event: MessageEvent) {
       if (!previewOrigin || event.origin !== previewOrigin || event.source !== iframe.current?.contentWindow ||
           !event.data || typeof event.data !== 'object') return;
       if (event.data.type === 'EDITOR_READY') { editorMessage({ type: 'TOGGLE_EDIT_MODE', editMode: editing }); return; }
-      const info = (event.data as { elementInfo?: Record<string, unknown> }).elementInfo;
-      if (editing && canEdit && event.data.type === 'ELEMENT_SELECTED' && info &&
-          typeof info.selector === 'string' && info.selector.length > 0 && info.selector.length <= 512 &&
-          typeof info.tagName === 'string' && info.tagName.length > 0 && info.tagName.length <= 64 &&
-          typeof info.textContent === 'string' && typeof info.id === 'string' && info.id.length <= 256 &&
-          typeof info.className === 'string' && info.className.length <= 512 &&
-          typeof info.pagePath === 'string' && info.pagePath.length <= 512) {
-        setSelected({
-          selector: info.selector, tagName: info.tagName, id: info.id, className: info.className,
-          pagePath: info.pagePath, textContent: info.textContent.slice(0, 2000),
-        });
+      if (!editing || !canEdit) return;
+      if (event.data.type === 'ELEMENTS_SELECTED') {
+        // 整份快照替换：预览里的点击（选中/取消/移除）都是权威状态，接收端不做增量合并。
+        const parsed = selectedElementsSchema.safeParse((event.data as { elements?: unknown }).elements);
+        if (parsed.success) setSelected(parsed.data);
+        return;
       }
+      if (event.data.type === 'SELECTION_LIMIT') message.warning(`最多同时选中 ${maxSelectedElements} 个元素，请先移除不需要的`);
     }
     window.addEventListener('message', receive);
     return () => window.removeEventListener('message', receive);
-  }, [previewOrigin, editing, canEdit, editorMessage]);
+  }, [previewOrigin, editing, canEdit, editorMessage, message]);
 
   // 粘贴附图：只要还能编辑就监听（生成中也要能附图，排队发送会带上它）；没有文件时不插手粘贴。
   useEffect(() => {
@@ -511,7 +501,7 @@ function Chat({ id }: { id: string }) {
   const submit = useCallback(async (original: string, attachments: readonly AttachmentPart[] = [], options: { keepDraft?: boolean } = {}): Promise<boolean> => {
     if (!original.trim() || generating || submitting.current || !canEdit || !loaded) return false;
     if (!options.keepDraft && imageBlockReason) { message.warning(imageBlockReason); return false; }
-    const context = !options.keepDraft && selected ? selectionContext(selected) : '';
+    const context = !options.keepDraft && selected.length ? selectionContext(selected) : '';
     const text = original.trim() + context;
     if (text.length > inputLimit) { setError('消息与选中元素信息合计不能超过 1000 字，请精简后重试'); return false; }
     initialPromptHandled.current = true;
@@ -523,7 +513,7 @@ function Chat({ id }: { id: string }) {
     setProgress(initialProgress());
     setPreviewVersion(null);
     setError(''); clearError(); setDismissedTaskError('');
-    if (!options.keepDraft) { setInput(''); setSelected(null); setEditing(false); clearSentImages(attachments); }
+    if (!options.keepDraft) { setInput(''); setSelected([]); setEditing(false); clearSentImages(attachments); }
     try {
       await sendMessage({ text, metadata: attachments.length ? { attachments: [...attachments] } : undefined });
       await refresh();
@@ -562,17 +552,21 @@ function Chat({ id }: { id: string }) {
     } finally { postingInput.current = false; }
   }, [id, message]);
   const sendInput = useCallback(async (mode: ChatInputMode) => {
-    const text = input.trim();
-    if (!text || !canEdit || !loaded) return;
-    if (mode === 'followUp' && imageBlockReason) { message.warning(imageBlockReason); return; }
-    // 插话只支持文字：附图改走 followUp，图片与文本一起进本轮之后的那一轮。
-    const attachments = mode === 'followUp' ? [...imageParts] : [];
+    const draft = input.trim();
+    if (!draft || !canEdit || !loaded) return;
+    if (imageBlockReason) { message.warning(imageBlockReason); return; }
+    // 插话与排队消息都允许附图；选中元素的定位上下文与普通发送一样随消息一起发。
+    const context = selected.length ? selectionContext(selected) : '';
+    const text = draft + context;
+    if (text.length > inputLimit) { message.warning('消息与选中元素信息合计不能超过 1000 字，请精简后重试'); return; }
+    const attachments = [...imageParts];
     const sent = await postInput({ id: crypto.randomUUID(), mode, text, attachments });
-    if (!sent) { setInput(current => current.trim() ? current : text); return; }
-    // 请求期间用户又写了新内容时不覆盖它；否则清掉刚发出去的那条。附件只在成功后清。
-    setInput(current => current.trim() === text ? '' : current);
+    if (!sent) { setInput(current => current.trim() ? current : draft); return; }
+    // 请求期间用户又写了新内容时不覆盖它；否则清掉刚发出去的那条。附件与选中元素只在成功后清。
+    setInput(current => current.trim() === draft ? '' : current);
+    if (context) { setSelected([]); editorMessage({ type: 'CLEAR_SELECTION' }); }
     clearSentImages(attachments);
-  }, [input, canEdit, loaded, imageBlockReason, imageParts, clearSentImages, postInput]);
+  }, [input, selected, canEdit, loaded, imageBlockReason, imageParts, clearSentImages, postInput, editorMessage, message]);
 
   /** 撤回队列里的一条输入：服务端说已经进了 pi 上下文（`already_placed`/`settled`）时就当交付处理。 */
   const recallInput = useCallback(async (item: QueuedInput) => {
@@ -684,7 +678,7 @@ function Chat({ id }: { id: string }) {
   const lastAssistantMessageId = [...visibleMessages].reverse().find(message => message.role === 'assistant')?.id ?? null;
   const bubbleIdOf = (input: PlacedInput) => input.messageId ?? lastAssistantMessageId;
   const leftoverInputs = placed.filter(input => input.boundary === null || !bubbleIdOf(input) || !visibleMessageIds.has(bubbleIdOf(input) ?? ''));
-  const contextLength = selected ? selectionContext(selected).length : 0;
+  const contextLength = selected.length ? selectionContext(selected).length : 0;
   const textareaMax = Math.max(0, inputLimit - contextLength);
   const previewSrc = canPreview && app?.previewUrl
     ? app.previewUrl + (app.previewUrl.includes('?') ? '&' : '?') + 'generation=' + encodeURIComponent(task?.id || '') + (previewVersion === null ? '' : '&pv=' + previewVersion)
@@ -766,12 +760,20 @@ function Chat({ id }: { id: string }) {
                 onResend={item => { void resendLostInput(item); }} onRemove={item => setLostInputs(current => current.filter(entry => entry.id !== item.id))} />)}</div>
             </div>}
           </div>}
-          {selected && <Alert className="selected-element-alert" type="info" closable onClose={() => setSelected(null)}
-            title={'已选中 ' + selected.tagName.toLowerCase() + (selected.id ? ' #' + selected.id : '') + (selected.className ? ' .' + selected.className.split(/\s+/).filter(Boolean).join('.') : '')}
+          {selected.length > 0 && <Alert className="selected-element-alert" type="info" closable
+            onClose={() => { setSelected([]); editorMessage({ type: 'CLEAR_SELECTION' }); }}
+            title={`已选中 ${selected.length} 个元素`}
             description={<div className="element-details">
-              {selected.pagePath && <div className="element-item">页面路径: {selected.pagePath}</div>}
-              <div className="element-item">选择器: <code className="element-selector-code">{selected.selector}</code></div>
-              {selected.textContent && <div className="element-item">内容: {selected.textContent.slice(0, 50)}{selected.textContent.length > 50 ? '…' : ''}</div>}
+              {selected.map((item, index) => <div className="element-item" key={index + '-' + item.selector}>
+                <div className="element-head">
+                  <span className="element-summary">{index + 1}. {item.tagName.toLowerCase()}{item.id ? ' #' + item.id : ''}{item.className ? ' .' + item.className.split(/\s+/).filter(Boolean).join('.') : ''}</span>
+                  <Button type="text" size="small" className="element-remove" aria-label={'移除选中元素 ' + item.selector} onClick={() => removeSelected(item.selector)}>×</Button>
+                </div>
+                {item.pagePath && <div className="element-item-detail">页面路径: {item.pagePath}</div>}
+                <div className="element-item-detail">选择器: <code className="element-selector-code">{item.selector}</code></div>
+                {item.textContent && <div className="element-item-detail">内容: {item.textContent.slice(0, 50)}{item.textContent.length > 50 ? '…' : ''}</div>}
+              </div>)}
+              {contextLength >= inputLimit && <div className="element-item-detail">选中信息已占满 1000 字输入上限，请移除部分元素</div>}
             </div>} />}
           <ImageAttachments appId={id} drafts={imageDrafts} onRemove={removeImage} onRetry={retryImage} />
           {/* 键盘提示固定显示在输入框右下角（绝对定位，不参与布局，所以不会像真实文字那样把按钮行撑出面板），
@@ -786,7 +788,6 @@ function Chat({ id }: { id: string }) {
                 e.preventDefault();
                 if (action === 'send') void submit(input, imageParts);
                 else if (action === 'followUp') void sendInput('followUp');
-                else if (imageDrafts.length) message.warning('插话只支持文字，等本轮结束再附图');
                 else void sendInput('steer');
               }} />
             <span className="composer-keys">{canEdit ? (generating ? 'Enter 排队发送 · Ctrl + Enter 中途插话 · Shift + Enter 换行' : 'Enter 直接发送 · Ctrl + Enter 中途插话 · Shift + Enter 换行') : ''}</span>
@@ -814,13 +815,13 @@ function Chat({ id }: { id: string }) {
       </section>
       <section className="preview-panel">
         <div className="preview-bar"><h3>生成后的网页展示</h3><Space>
-          {canPreview && <Button size="small" type="link" danger={editing} disabled={!canEdit || generating} onClick={() => setEditing(value => !value)}>{editing ? '退出编辑' : '可视化编辑'}</Button>}
+          {canPreview && <Button size="small" type="link" danger={editing} disabled={!canEdit} onClick={() => setEditing(value => !value)}>{editing ? '退出编辑' : '可视化编辑'}</Button>}
           {canPreview && <Button size="small" type="link" icon={<ExportOutlined aria-hidden="true" />} onClick={() => { if (app?.previewUrl) window.open(app.previewUrl, '_blank', 'noopener'); }}>新窗口打开</Button>}
           {app?.deployUrl && <a href={app.deployUrl} target="_blank" rel="noopener noreferrer">访问作品</a>}
         </Space></div>
         {canPreview ? <div className="preview-live">
           {generating && <div className="preview-live-badge" role="status">生成中，内容会持续更新</div>}
-          <iframe ref={iframe} className="preview-frame" title="应用预览" src={previewSrc} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={() => { previewLoaded.current = true; editorMessage({ type: 'TOGGLE_EDIT_MODE', editMode: editing }); }} />
+          <iframe ref={iframe} className="preview-frame" title="应用预览" src={previewSrc} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={() => { previewLoaded.current = true; setSelected([]); editorMessage({ type: 'TOGGLE_EDIT_MODE', editMode: editing }); }} />
         </div> :
           generating || rebuilding ? <div className="preview-loading" role="status"><Spin size="large" /><p>{generating ? '正在生成网站...' : '正在重建预览...'}</p></div> :
           <div className="preview-placeholder"><div className="preview-placeholder-icon">🌐</div><p>网站文件生成完成后将在这里展示</p></div>}

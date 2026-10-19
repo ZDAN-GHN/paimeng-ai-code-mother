@@ -226,6 +226,58 @@ describe('产品库别名 → pi-ai 请求', () => {
 		expect(request.body.reasoning_effort).toBeUndefined();
 	});
 
+	it('回传思考内容：第三方网关跑 DeepSeek 类模型时，历史 assistant 消息带上空 reasoning_content', async () => {
+		// 上游处于 thinking 模式时要求每条 assistant 消息都带 reasoning_content 字段（哪怕为空），
+		// 否则 400「The reasoning_content in the thinking mode must be passed back」。
+		mocks.readConfigSnapshot.mockResolvedValue(snapshotOf(
+			[providerRecord({ options: { reasoningContentPassthrough: true } })],
+			[aliasRecord(), routeAlias],
+		));
+		const binding = await admitGenerationModel();
+		const captured: CapturedRequest[] = [];
+		const models = createModels();
+		models.setProvider(binding.provider as Provider<Api>);
+		const model = models.getModel(binding.ref.provider, binding.ref.modelId);
+		// 上下文里放一条历史 assistant 消息（带过 tool 调用形式）：回放时应在其上补 reasoning_content。
+		models.streamSimple(model as Model<Api>, {
+			messages: [
+				{ role: 'user', content: '你好', timestamp: Date.now() },
+				{ role: 'assistant', content: [{ type: 'text', text: '先看结构' }], stopReason: 'stop', timestamp: Date.now(), api: 'openai-completions', provider: 'gateway', model: 'upstream-model-one', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 } } as never,
+				{ role: 'user', content: '继续', timestamp: Date.now() },
+			],
+		}, { reasoning: binding.thinkingLevel === 'off' ? undefined : binding.thinkingLevel, fetch: captureFetch(captured) });
+		const deadline = Date.now() + 10_000;
+		while (captured.length === 0 && Date.now() < deadline) await delay(20);
+		expect(captured.length, 'pi-ai sent the request').toBeGreaterThan(0);
+		const replayed = (captured[0]!.body.messages as { role: string }[]).filter(message => message.role === 'assistant');
+		expect(replayed.length).toBe(1);
+		expect(replayed[0]).toMatchObject({ role: 'assistant', reasoning_content: '' });
+	});
+
+	it('不声明回传思考内容时，历史 assistant 消息不带 reasoning_content 字段', async () => {
+		mocks.readConfigSnapshot.mockResolvedValue(snapshotOf(
+			[providerRecord()],
+			[aliasRecord(), routeAlias],
+		));
+		const binding = await admitGenerationModel();
+		const captured: CapturedRequest[] = [];
+		const models = createModels();
+		models.setProvider(binding.provider as Provider<Api>);
+		const model = models.getModel(binding.ref.provider, binding.ref.modelId);
+		models.streamSimple(model as Model<Api>, {
+			messages: [
+				{ role: 'user', content: '你好', timestamp: Date.now() },
+				{ role: 'assistant', content: [{ type: 'text', text: '先看结构' }], stopReason: 'stop', timestamp: Date.now(), api: 'openai-completions', provider: 'gateway', model: 'upstream-model-one', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 } } as never,
+				{ role: 'user', content: '继续', timestamp: Date.now() },
+			],
+		}, { reasoning: binding.thinkingLevel === 'off' ? undefined : binding.thinkingLevel, fetch: captureFetch(captured) });
+		const deadline = Date.now() + 10_000;
+		while (captured.length === 0 && Date.now() < deadline) await delay(20);
+		expect(captured.length, 'pi-ai sent the request').toBeGreaterThan(0);
+		const replayed = (captured[0]!.body.messages as { role: string }[]).filter(message => message.role === 'assistant');
+		expect('reasoning_content' in replayed[0]).toBe(false);
+	});
+
 	it('openai-responses：走 /responses，思考档位进 reasoning.effort', async () => {
 		mocks.readConfigSnapshot.mockResolvedValue(snapshotOf(
 			[providerRecord({ apiFormat: 'openai-responses', headers: { 'x-provider-tag': 'tag-two' } })],

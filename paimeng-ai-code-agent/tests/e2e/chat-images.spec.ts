@@ -65,3 +65,27 @@ test('非图片文件被客户端拒绝：提示具体原因且不进草稿', as
   await expect(page.locator('.image-attachment-item')).toHaveCount(0);
   await expect(page.locator('.ant-message')).toContainText('只支持');
 });
+
+test('生成中附图插话：图片随 Ctrl+Enter 的 steer 一起排队', async ({ page }) => {
+  const inputs: Array<Record<string, unknown>> = [];
+  await page.unroute('**/api/app/generation?*');
+  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'image-steer-task', status: 'generating' } } }));
+  await page.route('**/api/app/chat/input', async route => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    inputs.push(body);
+    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 41, generationId: 'image-steer-task', state: 'queued' } } });
+  });
+  await page.reload();
+  await expect(page.getByLabel('对话消息')).toHaveValue(prompt);
+  await page.locator('input[type=file]').setInputFiles({ name: '插话参考图.png', mimeType: 'image/png', buffer: pngBytes });
+  const draft = page.locator('.image-attachment-item');
+  await expect(draft).toHaveCount(1);
+  // 上传完成前发送会被“图片正在上传”挡下：等缩略图改走服务端地址再插话。
+  await expect(draft.locator('img')).toHaveAttribute('src', /^\/api\/app\/attachment/);
+  await page.getByLabel('对话消息').fill('照这张图调整');
+  await page.getByLabel('对话消息').press('Control+Enter');
+  await expect.poll(() => inputs.length).toBe(1);
+  expect(inputs[0]).toMatchObject({ mode: 'steer', text: '照这张图调整' });
+  expect(inputs[0].attachments).toHaveLength(1);
+  await expect(page.locator('.composer-queue-steer .composer-queue-chip')).toContainText('1 张图');
+});

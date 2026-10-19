@@ -74,6 +74,7 @@ const providerOptionFlags = {
   supportsStructuredOutputs: z.boolean().optional(),
   supportsMultiPartToolContent: z.boolean().optional(),
   thinkingSwitch: z.enum(thinkingSwitchValues).optional(),
+  reasoningContentPassthrough: z.boolean().optional(),
 };
 
 /** 管理端可编辑的兼容选项键，由 schema 派生，避免两处名单漂移。 */
@@ -85,6 +86,7 @@ export const modelProviderOptionLabels: Record<ModelProviderOptionKey, string> =
   supportsStructuredOutputs: '支持结构化输出',
   supportsMultiPartToolContent: '支持多段工具内容',
   thinkingSwitch: '思考开关（DeepSeek Chat）',
+  reasoningContentPassthrough: '回传思考内容（DeepSeek 类模型）',
 };
 
 /** 取值不是布尔开关的选项键；界面要用下拉而不是开关渲染。 */
@@ -100,7 +102,7 @@ export type ModelProviderOptions = z.infer<typeof providerOptionsSchema>;
 
 /** 每种 API 格式允许的选项键；没有对应语义的格式留空，界面据此隐藏开关。 */
 export const providerOptionKeysByFormat: Record<ProviderApiFormat, readonly ModelProviderOptionKey[]> = {
-  'openai-chat': ['includeUsage', 'supportsStructuredOutputs', 'supportsMultiPartToolContent', 'thinkingSwitch'],
+  'openai-chat': ['includeUsage', 'supportsStructuredOutputs', 'supportsMultiPartToolContent', 'thinkingSwitch', 'reasoningContentPassthrough'],
   'openai-responses': [],
   'anthropic-messages': [],
 };

@@ -746,6 +746,7 @@ function ModelConfigManager() {
                       <Space orientation="vertical" size={8}>
                         {choiceKeys.map((key) => (
                           <Space key={key} size={8}>
+                            <span>{modelProviderOptionLabels[key]}</span>
                             <Form.Item name={['options', key]} noStyle>
                               <Select
                                 allowClear
@@ -755,17 +756,16 @@ function ModelConfigManager() {
                                 style={{ minWidth: 180 }}
                               />
                             </Form.Item>
-                            <span>{modelProviderOptionLabels[key]}</span>
                           </Space>
                         ))}
                         {switchKeys.length > 0 ? (
                           <Space size={16} wrap>
                             {switchKeys.map((key) => (
                               <Space key={key} size={8}>
+                                <span>{modelProviderOptionLabels[key]}</span>
                                 <Form.Item name={['options', key]} valuePropName="checked" noStyle>
                                   <Switch aria-label={modelProviderOptionLabels[key]} />
                                 </Form.Item>
-                                <span>{modelProviderOptionLabels[key]}</span>
                               </Space>
                             ))}
                           </Space>

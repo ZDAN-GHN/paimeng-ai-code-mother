@@ -206,6 +206,7 @@ describe('模型管理 API', () => {
       'supportsStructuredOutputs',
       'supportsMultiPartToolContent',
       'thinkingSwitch',
+      'reasoningContentPassthrough',
     ]);
     expect(data.providerFormats[1]?.optionKeys).toEqual([]);
     expect(data.allowedApiKeyEnvs).toEqual(['AI_API_KEY']);

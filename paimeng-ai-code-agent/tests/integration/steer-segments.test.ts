@@ -3,11 +3,14 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import sharp from 'sharp';
 import { and, eq } from 'drizzle-orm';
 import { db, getPool, now } from '@/server/db';
 import { withRateLimitRedis } from '@/server/redis';
 import { nextSnowflakeId } from '@/server/snowflake';
-import { apps, generations, generationSteps, leases, users } from '@/server/schema';
+import { apps, attachments, generations, generationSteps, leases, users } from '@/server/schema';
+import { createImageAttachment } from '@/server/attachment-store';
+import { getConfig } from '@/server/config';
 import { publicUser } from '@/server/auth';
 import { chatRuntime, generationStatus, harnessCancelGeneration, harnessCancelInput, harnessChatResponse, harnessSteerGeneration, harnessSubmitInput, loadMessages } from '@/server/durable-engine';
 import { generationFor } from '@/server/generation-store';
@@ -27,6 +30,8 @@ process.env.AI_MODE = 'fixture';
 const prompt = 'STEER_SEGMENT_PROMPT 做一个静态页面';
 const steerText = 'STEER_SEGMENT_NOTE 顺便加一个标题';
 const finalText = 'STEER_SEGMENT_FINAL';
+const thinkingText = 'STEER_SEGMENT_THINKING 先看结构再动手';
+const pngBytes = () => sharp({ create: { width: 8, height: 8, channels: 3, background: { r: 12, g: 34, b: 56 } } }).png().toBuffer();
 const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
 type Bubble = {
@@ -37,6 +42,7 @@ type Bubble = {
 
 const textsOf = (bubble: Bubble) => bubble.parts.filter(part => part.type === 'text').map(part => part.text);
 const toolsOf = (bubble: Bubble) => bubble.parts.filter(part => part.type === 'dynamic-tool');
+const reasoningOf = (bubble: Bubble) => bubble.parts.filter(part => part.type === 'reasoning').map(part => part.text);
 
 let actor: User;
 const createdApps: string[] = [];
@@ -107,7 +113,7 @@ async function startGeneration(): Promise<Running> {
   const base = baseUrl(port);
   process.env.DURABLE_HARNESS_URL = base;
   await writeProjectFile({ id: appId, codeGenType: 'html' }, 'index.html', '<!doctype html><html><body>STEER_SEGMENT_PLACEHOLDER</body></html>');
-  const harness = startHarness({ port, runDir, reset: true, waitMs: 3000, finalText, tool: 'm1_wait' });
+  const harness = startHarness({ port, runDir, reset: true, waitMs: 3000, finalText, thinking: thinkingText, tool: 'm1_wait' });
   const requestId = randomUUID();
   try {
     await waitHealthy(base, 30_000);
@@ -156,6 +162,8 @@ async function stopGeneration(running: Running) {
     await rmSync(workspace({ id: app, codeGenType: 'html' }), { recursive: true, force: true });
   }
   createdApps.length = 0;
+  await db().delete(attachments).where(eq(attachments.ownerUserId, BigInt(running.actor.id)));
+  await rmSync(join(getConfig().runtimeRoot, 'attachments', running.actor.id), { recursive: true, force: true });
   await withRateLimitRedis(client => client.del('user:' + running.actor.id));
   await db().delete(users).where(eq(users.id, BigInt(running.actor.id)));
 }
@@ -187,6 +195,11 @@ describe.skipIf(!harnessReady || !postgresReady)('插话后的转录与派生 UI
       expect(textsOf(second)).toEqual([finalText]);
       expect(toolsOf(second)).toEqual([]);
       expect(textsOf(first)).not.toContain(finalText);
+      // 思考内容（faux 模型在最后一步带 thinking 块）要转成 reasoning part：转录投影里可见，
+      // 否则 pi 已归一好的思考块会在转换层被丢弃（此前 DeepSeek 的 reasoning_content 正是这样丢的）。
+      expect(reasoningOf(second)).toEqual([thinkingText]);
+      expect(reasoningOf(first)).toEqual([]);
+      // 流式路径同样发思考内容：reasoning 分段事件先于正文（faux 第二步 thinking 块在 toolResult 后）。
 
       const state = await getState(base, conversationId);
       const kinds = state.view.entries.map(entry => entry.kind);
@@ -214,6 +227,11 @@ describe.skipIf(!harnessReady || !postgresReady)('插话后的转录与派生 UI
       expect(chunks.filter(chunk => chunk.type === 'tool-input-available').map(chunk => chunk.toolName)).toEqual(['m1_wait']);
       expect(streamedText).toContain(finalText);
       expect(streamedText).not.toContain('waited 3000');
+      // 流式路径同样发思考内容：faux 第二步的 thinking 与正文同批产出，节流提交下到达次序不固定，
+      // 只断内容完整出现（存在 reasoning 分段事件），不锁与正文的先后顺序。
+      const streamedThinking = chunks.filter(chunk => chunk.type === 'reasoning-delta').map(chunk => chunk.delta ?? '').join('');
+      expect(streamedThinking).toBe(thinkingText);
+      expect(chunks.some(chunk => chunk.type === 'reasoning-start')).toBe(true);
       expect(textsOf(transcript[1])).toEqual([]);
 
       // 客户端拿 `data-steer` 决定插话气泡落在哪一段：边界前只产出了 1 个 part（第一步的 m1_wait 工具调用，
@@ -230,13 +248,17 @@ describe.skipIf(!harnessReady || !postgresReady)('插话后的转录与派生 UI
   it('原生插话和 followUp 分别排队，只在 pi 接收后进入对话，连续 run 不提前构建收尾', async () => {
     const running = await startGeneration();
     try {
-      const steer = await harnessSubmitInput({ appId: running.appId, id: 'input-' + randomUUID(), mode: 'steer', text: 'NEXT_STEP_NOTE' }, running.actor);
+      // 插话不再限制输入类型：带图插话与附图排队消息走同一条附件存储与 content 组装路径。
+      const image = await createImageAttachment({ userId: running.actor.id, appId: running.appId, originalName: '插话参考图.png', data: await pngBytes() });
+      const attachment = { type: 'attachment' as const, attachmentId: image.id, mediaType: 'image/png' as const, filename: image.originalName };
+      const steer = await harnessSubmitInput({ appId: running.appId, id: 'input-' + randomUUID(), mode: 'steer', text: 'NEXT_STEP_NOTE', attachments: [attachment] }, running.actor);
       const followUp = await harnessSubmitInput({ appId: running.appId, id: 'input-' + randomUUID(), mode: 'followUp', text: 'NEXT_RUN_NOTE' }, running.actor);
       expect(steer.state).toBe('queued');
       expect(followUp.state).toBe('queued');
       const blocked = await chatRuntime(running.appId, running.actor);
       expect(blocked.busy).toBe(true);
-      expect(blocked.pending.map(item => [item.id, item.mode])).toEqual([[steer.id, 'steer'], [followUp.id, 'followUp']]);
+      expect(blocked.pending.map(item => [item.id, item.mode, item.attachments.length])).toEqual([[steer.id, 'steer', 1], [followUp.id, 'followUp', 0]]);
+      expect(blocked.pending[0].attachments).toEqual([attachment]);
       expect(blocked.messages.some(message => message.id === steer.id || message.id === followUp.id)).toBe(false);
       const terminal = await waitForTerminal(running.appId, running.requestId, 60_000);
       expect(terminal.status).toBe('ready');
@@ -245,10 +267,12 @@ describe.skipIf(!harnessReady || !postgresReady)('插话后的转录与派生 UI
       expect(runtime.busy).toBe(false);
       expect(runtime.messages.map(message => message.role)).toEqual(['user', 'assistant', 'user', 'assistant', 'user', 'assistant']);
       expect(runtime.messages[2].id).toBe(steer.id);
+      expect(runtime.messages[2].metadata?.attachments).toEqual([attachment]);
       expect(runtime.messages[4].id).toBe(followUp.id);
       const events = chunksOf(await running.response.text());
       const boundaries = events.filter(chunk => chunk.type === 'data-steer').map(chunk => chunk.data);
-      expect(boundaries).toEqual([{ id: steer.id, index: 1 }, { id: followUp.id, index: 2 }]);
+      // 插话在第一步后接收（1 个工具 part）；followUp 在整条回复后接收（工具 + 思考 + 文字 = 3 个 part）。
+      expect(boundaries).toEqual([{ id: steer.id, index: 1 }, { id: followUp.id, index: 3 }]);
       expect(events.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta).join('')).toBe(finalText + finalText);
     } finally {
       await stopGeneration(running);

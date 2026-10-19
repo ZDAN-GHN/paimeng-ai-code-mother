@@ -65,13 +65,17 @@ async function setup(page: Page, options: Options = {}) {
   return state;
 }
 
-async function mockPreview(page: Page) {
+type MockElement = { tagName: string; id: string; className: string; textContent: string; selector: string; pagePath: string };
+const heroElement: MockElement = { tagName: 'H1', id: 'hero', className: 'title main', textContent: '预览标题', selector: 'body>h1#hero', pagePath: `/preview/html_${appId}/` };
+const navElement: MockElement = { tagName: 'NAV', id: 'nav', className: 'menu', textContent: '首页 关于', selector: 'body>nav#nav', pagePath: `/preview/html_${appId}/` };
+
+async function mockPreview(page: Page, elements: MockElement[] = [heroElement]) {
   await page.route(`${previewOrigin}/**`, route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><body><h1 id="hero" class="title main">预览标题</h1>
 <script>
 window.addEventListener('message', function (event) {
   if (event.data && event.data.type === 'TOGGLE_EDIT_MODE' && event.data.editMode === true) {
     setTimeout(function () {
-      parent.postMessage({ type: 'ELEMENT_SELECTED', elementInfo: { tagName: 'H1', id: 'hero', className: 'title main', textContent: '预览标题', selector: 'body>h1#hero', pagePath: '/preview/html_${appId}/' } }, '${appOrigin()}');
+      parent.postMessage({ type: 'ELEMENTS_SELECTED', elements: ${JSON.stringify(elements)} }, '${appOrigin()}');
     }, 30);
   }
 });
@@ -143,11 +147,12 @@ test('可视化编辑保留悬停/选中定位上下文并传入模型请求', a
   await page.goto('/app/chat/' + appId);
   await page.getByRole('button', { name: '可视化编辑' }).click();
   const alert = page.locator('.selected-element-alert');
-  await expect(alert).toContainText('已选中 h1 #hero .title.main');
+  await expect(alert).toContainText('已选中 1 个元素');
+  await expect(alert).toContainText('1. h1 #hero .title.main');
   await expect(alert).toContainText('页面路径: /preview/html_' + appId + '/');
   await expect(alert).toContainText('选择器: body>h1#hero');
 
-  await page.evaluate(target => window.postMessage({ type: 'ELEMENT_SELECTED', elementInfo: { tagName: 'H1', id: 'wrong', className: '', textContent: '', selector: 'body>h1', pagePath: '/' } }, target), appOrigin());
+  await page.evaluate(target => window.postMessage({ type: 'ELEMENTS_SELECTED', elements: [{ tagName: 'H1', id: 'wrong', className: '', textContent: '', selector: 'body>h1', pagePath: '/' }] }, target), appOrigin());
   await page.waitForTimeout(100);
   await expect(alert).not.toContainText('#wrong');
 
@@ -160,6 +165,61 @@ test('可视化编辑保留悬停/选中定位上下文并传入模型请求', a
   expect(text).toContain('选择器: body>h1#hero');
   expect(text).toContain('ID: hero');
   expect(text).toContain('class: title main');
+});
+
+test('可视化编辑支持多选：逐个展示、可单独移除，定位上下文一起发送', async ({ page }) => {
+  const state = await setup(page, { previewUrl, sourceAvailable: true, task: { id: 'task-ready', status: 'ready' } });
+  await mockPreview(page, [heroElement, navElement]);
+  await page.goto('/app/chat/' + appId);
+  await page.getByRole('button', { name: '可视化编辑' }).click();
+  const alert = page.locator('.selected-element-alert');
+  await expect(alert).toContainText('已选中 2 个元素');
+  await expect(alert).toContainText('1. h1 #hero .title.main');
+  await expect(alert).toContainText('2. nav #nav .menu');
+  await expect(alert).toContainText('选择器: body>h1#hero');
+  await expect(alert).toContainText('选择器: body>nav#nav');
+
+  await page.getByLabel('移除选中元素 body>nav#nav').click();
+  await expect(alert).toContainText('已选中 1 个元素');
+  await expect(alert).not.toContainText('body>nav#nav');
+
+  await page.getByLabel('对话消息').fill('只改标题');
+  await page.getByRole('button', { name: /发\s*送$/ }).click();
+  await expect.poll(() => state.chatRequests).toBe(1);
+  const text = state.lastChatBody?.message?.parts?.[0]?.text ?? '';
+  expect(text).toContain('选中元素信息（1 个）');
+  expect(text).toContain('选择器: body>h1#hero');
+  expect(text).not.toContain('body>nav#nav');
+});
+
+test('生成中可视化编辑仍可用，选中元素随 Ctrl+Enter 插话发送', async ({ page }) => {
+  await setup(page, { previewUrl, sourceAvailable: true, task: { id: 'task-generating', status: 'generating' } });
+  await mockPreview(page, [heroElement, navElement]);
+  const inputs: Array<Record<string, unknown>> = [];
+  await page.route('**/api/app/chat/input', async route => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    inputs.push(body);
+    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 31, generationId: 'task-generating', state: 'queued' } } });
+  });
+  await page.goto('/app/chat/' + appId);
+  const edit = page.getByRole('button', { name: '可视化编辑' });
+  await expect(edit).toBeEnabled();
+  await edit.click();
+  const alert = page.locator('.selected-element-alert');
+  await expect(alert).toContainText('已选中 2 个元素');
+
+  await page.getByLabel('对话消息').fill('按选中的两个元素调整');
+  await page.getByLabel('对话消息').press('Control+Enter');
+  await expect.poll(() => inputs.length).toBe(1);
+  const body = inputs[0] as { mode?: string; text?: string; attachments?: unknown[] };
+  expect(body.mode).toBe('steer');
+  expect(body.text).toContain('按选中的两个元素调整');
+  expect(body.text).toContain('选择器: body>h1#hero');
+  expect(body.text).toContain('选择器: body>nav#nav');
+  expect(body.attachments).toEqual([]);
+  await expect(page.locator('.composer-queue-steer .composer-queue-chip')).toHaveCount(1);
+  await expect(alert).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '退出编辑' })).toBeVisible();
 });
 
 test('助手 Markdown、GFM、代码高亮安全渲染且不执行原始 HTML', async ({ page }) => {

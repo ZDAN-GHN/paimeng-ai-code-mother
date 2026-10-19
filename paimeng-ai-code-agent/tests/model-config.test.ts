@@ -244,8 +244,8 @@ describe('别名思考强度', () => {
     expect(modelAliasInputSchema.safeParse(invalidSettings).success).toBe(false);
   });
 
-  it('选项键名单从 schema 派生，开关之外的键只有思考开关', () => {
-    expect(modelProviderOptionKeys).toEqual(['includeUsage', 'supportsStructuredOutputs', 'supportsMultiPartToolContent', 'thinkingSwitch']);
+  it('选项键名单从 schema 派生，开关之外的键只有思考开关与回传思考内容', () => {
+    expect(modelProviderOptionKeys).toEqual(['includeUsage', 'supportsStructuredOutputs', 'supportsMultiPartToolContent', 'thinkingSwitch', 'reasoningContentPassthrough']);
   });
 });
 
