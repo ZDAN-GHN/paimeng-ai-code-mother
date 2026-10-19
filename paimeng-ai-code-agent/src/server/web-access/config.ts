@@ -8,13 +8,15 @@ export const webAccessEndpoints = {
   openverse: 'https://api.openverse.org/v1/images/',
 } as const;
 
-/** 单次调用的大小、时长与返回量上限。免密钥搜索实测可达 10 秒，因此搜索预算单独放宽到 20 秒。 */
+/**
+ * 单次调用的大小、时长与返回量上限。只约束一次请求的字节与时长，不设调用次数或每轮累计额度：
+ * 模型自己决定检索多少次，配额由工作区总大小与上游服务商把控。
+ * 免密钥搜索实测可达 10 秒，因此搜索超时单独放宽到 20 秒。
+ */
 export const webAccessLimits = {
   search: { results: 5, snippetChars: 500, totalChars: 4000, maxBytes: 1024 * 1024, timeoutMs: 20000 },
   page: { chars: 8000, maxBytes: 2 * 1024 * 1024, timeoutMs: 15000 },
   images: { results: 6, maxBytes: 2 * 1024 * 1024, timeoutMs: 30000, downloadTimeoutMs: 15000 },
-  turn: { outputChars: 16000, maxImageBytes: 8 * 1024 * 1024 },
-  budgets: { search: 3, read: 3, imageSearch: 2, imageImport: 4 },
 } as const;
 
 export function webAccessSettings() {

@@ -16,6 +16,7 @@ import { publicUser } from '@/server/auth';
 import { createApp } from '@/server/business';
 import { harnessChatResponse } from '@/server/durable-engine';
 import { generationAccount } from '@/server/generation-accounting';
+import { withAppWriter } from '@/server/generation-store';
 import { withRateLimitRedis } from '@/server/redis';
 import { nextSnowflakeId } from '@/server/snowflake';
 import { workspace as appWorkspace } from '@/server/workspace';
@@ -51,6 +52,8 @@ class StubUpstream {
 	readonly server: Server;
 	baseUrl = '';
 	toolCallFirst = false;
+	retryFirst = false;
+	failFirst = false;
 	readonly holdModels = new Set<string>();
 	readonly #releases = new Map<string, () => void>();
 	readonly #calls = new Map<string, number>();
@@ -67,6 +70,8 @@ class StubUpstream {
 	reset(): void {
 		this.requests.length = 0;
 		this.toolCallFirst = false;
+		this.retryFirst = false;
+		this.failFirst = false;
 		this.holdModels.clear();
 		for (const release of this.#releases.values()) release();
 		this.#releases.clear();
@@ -103,6 +108,16 @@ class StubUpstream {
 		this.#calls.set(model, calls);
 		if (calls === 1 && this.holdModels.has(model)) await new Promise<void>(done => { this.#releases.set(model, done); });
 
+		if (this.failFirst && calls === 1) {
+			response.writeHead(403, { 'content-type': 'application/json' });
+			response.end(JSON.stringify({ error: { message: 'quota exhausted', type: 'insufficient_quota' } }));
+			return;
+		}
+		if (this.retryFirst && calls === 1) {
+			response.writeHead(503, { 'content-type': 'application/json' });
+			response.end(JSON.stringify({ error: { message: 'temporary service unavailable', type: 'server_error' } }));
+			return;
+		}
 		response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', connection: 'keep-alive' });
 		const chunk = (choices: unknown[], extra: Record<string, unknown> = {}) =>
 			JSON.stringify({ id: 'chatcmpl-stub', object: 'chat.completion.chunk', created: 1, model, choices, ...extra });
@@ -298,6 +313,57 @@ async function harnessPid(): Promise<number> {
 	return health.pid ?? 0;
 }
 
+/** 新输入持有应用锁，在旧观察者采集失败快照后、取得收尾锁前进入 pi。 */
+async function inputBeforeSettlement(appId: string, generationId: string) {
+	let intercepted = false;
+	const server = createServer((request, response) => {
+		response.on('error', () => undefined);
+		void (async () => {
+			const chunks: Buffer[] = [];
+			for await (const chunk of request) chunks.push(Buffer.from(chunk));
+			const upstream = await fetch(harnessBase + request.url, {
+				method: request.method,
+				...(request.method === 'POST' ? { headers: { 'content-type': 'application/json' }, body: Buffer.concat(chunks).toString() } : {}),
+			});
+			response.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json' });
+			if (request.url?.startsWith('/runtime?') && !intercepted) {
+				const snapshot = await upstream.text();
+				const conversationId = Number(new URL(request.url, harnessBase).searchParams.get('conversationId'));
+				intercepted = true;
+				await withAppWriter(appId, async () => {
+					response.end(snapshot);
+					const id = 'input-' + randomUUID();
+					const accepted = await fetch(`${harnessBase}/submit`, {
+						method: 'POST', headers: { 'content-type': 'application/json' },
+						body: JSON.stringify({ conversationId, requestId: id, whenBusy: 'followUp', content: '模型恢复后继续完成页面', entry: { kind: 'app.user', data: {
+							id, role: 'user', parts: [{ type: 'text', text: '模型恢复后继续完成页面' }], metadata: { generationId, inputMode: 'followUp' },
+						} } }),
+					});
+					expect(accepted.status).toBe(202);
+				}, generationId, { lockTask: true });
+			} else {
+				const reader = upstream.body?.getReader();
+				if (reader) {
+					try {
+						for (;;) {
+							const { done, value } = await reader.read();
+							if (done) break;
+							response.write(value);
+						}
+					} finally { reader.releaseLock(); }
+				}
+				response.end();
+			}
+		})().catch(error => { response.destroy(error instanceof Error ? error : new Error(String(error))); });
+	});
+	await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+	return {
+		url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+		intercepted: () => intercepted,
+		close: () => new Promise<void>(done => { server.closeAllConnections(); server.close(() => done()); }),
+	};
+}
+
 describe.skipIf(!harnessReady || !postgresReady)('durable：产品库模型配置驱动生成', () => {
 	beforeAll(async () => {
 		savedModels = { providers: await db().select().from(modelProviders), aliases: await db().select().from(modelAliases), state: await db().select().from(modelConfigState) };
@@ -434,7 +500,7 @@ describe.skipIf(!harnessReady || !postgresReady)('durable：产品库模型配�
 		expect(stub.requests).toHaveLength(0);
 	}, 180_000);
 
-	it('产品入口在配置错误时不落任务；成功后的账目保留产品 providerId 与真实模型名', async () => {
+	it.each(['normal', 'retry', 'new-input-after-error'] as const)('产品入口配置校验与最终成功记账（%s）', async mode => {
 		await seedStubModel({ apiKey: sentinel('account'), modelName: 'stub-model-account' });
 		const userId = await nextSnowflakeId();
 		await db().insert(users).values({ id: userId, userAccount: 'model_account_' + randomUUID(), userPassword: 'unused', userRole: 'user', createTime: now(), updateTime: now() });
@@ -442,6 +508,7 @@ describe.skipIf(!harnessReady || !postgresReady)('durable：产品库模型配�
 		const actor = publicUser(row);
 		const appId = await createApp({ initPrompt: '模型身份记账验收', codeGenType: 'html' }, actor);
 		const previousUrl = process.env.DURABLE_HARNESS_URL;
+		let bridge: Awaited<ReturnType<typeof inputBeforeSettlement>> | undefined;
 		process.env.DURABLE_HARNESS_URL = harnessBase;
 		const run = (requestId: string) => harnessChatResponse(new Request('http://localhost:3000/api/app/chat/gen/code'), {
 			appId, requestId, message: { id: requestId, role: 'user', parts: [{ type: 'text', text: '模型身份记账验收' }] },
@@ -456,7 +523,13 @@ describe.skipIf(!harnessReady || !postgresReady)('durable：产品库模型配�
 
 			await writeCodegenAlias({ modelName: 'stub-model-account' });
 			stub.holdModels.add('stub-model-account');
+			stub.retryFirst = mode === 'retry';
+			stub.failFirst = mode === 'new-input-after-error';
 			const requestId = randomUUID();
+			if (mode === 'new-input-after-error') {
+				bridge = await inputBeforeSettlement(appId, requestId);
+				process.env.DURABLE_HARNESS_URL = bridge.url;
+			}
 			const response = await run(requestId);
 			await waitForRequests(requests => requests.some(request => request.model === 'stub-model-account'), '产品入口的实际请求');
 			stub.release('stub-model-account');
@@ -464,8 +537,14 @@ describe.skipIf(!harnessReady || !postgresReady)('durable：产品库模型配�
 			const account = await generationAccount(requestId);
 			expect(account).toMatchObject({ status: 'ready', model: { alias: generationModelAlias, providerId: 'stub-provider', modelName: 'stub-model-account' } });
 			expect(account?.steps.some(step => step.kind === 'model' && step.upstreamProvider?.startsWith(generationModelAlias + '#') && step.upstreamModelId === 'stub-model-account')).toBe(true);
+			if (mode !== 'normal') {
+				expect(stub.requests.filter(request => request.model === 'stub-model-account')).toHaveLength(2);
+				expect(account?.steps.some(step => step.kind === 'model' && step.finishReason === 'error')).toBe(true);
+			}
+			if (bridge) expect(bridge.intercepted()).toBe(true);
 		} finally {
 			if (previousUrl === undefined) delete process.env.DURABLE_HARNESS_URL; else process.env.DURABLE_HARNESS_URL = previousUrl;
+			if (bridge) await bridge.close();
 			await db().delete(leases).where(eq(leases.appId, BigInt(appId)));
 			await db().delete(generations).where(eq(generations.appId, BigInt(appId)));
 			await db().delete(apps).where(eq(apps.id, BigInt(appId)));

@@ -116,7 +116,7 @@ function toImported(asset: StoredAsset, directory: string): ImportedImageData {
   };
 }
 
-export type ImportOptions = { signal?: AbortSignal; deps?: HttpDeps; importedBytes: number };
+export type ImportOptions = { signal?: AbortSignal; deps?: HttpDeps };
 export type PreparedImport = { kind: 'existing'; data: ImportedImageData } | { kind: 'download'; bytes: Buffer; format: ImageFormat };
 
 /**
@@ -133,9 +133,6 @@ export async function prepareImport(app: WorkspaceApp, candidate: ImageCandidate
     } catch { /* 文件被删过就重新下载 */ }
   }
   const { bytes, format } = await downloadImage(candidate.imageUrl, options);
-  if (options.importedBytes + bytes.byteLength > webAccessLimits.turn.maxImageBytes) {
-    throw new WebAccessError('budget-exceeded', '本轮导入的图片总量已达上限');
-  }
   return { kind: 'download', bytes, format };
 }
 

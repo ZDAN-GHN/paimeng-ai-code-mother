@@ -1,4 +1,5 @@
 import 'server-only';
+import { z } from 'zod';
 import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { db, now, type Transaction } from './db';
 import { apps, generations, leases, users } from './schema';
@@ -109,10 +110,23 @@ export async function staleActiveGenerations(appId?: string): Promise<{ id: stri
  * 只给接管路径用。条件更新兼当互斥：多个 Next 实例同时尝试接管时只有一个能续上（行锁序列化）。
  */
 export async function adoptLease(id: string): Promise<boolean> {
-  const result = await db().update(leases).set({ expiresAt: expiry() }).where(and(eq(leases.generationId, id), lte(leases.expiresAt, now())));
-  if (!result.rowCount) return false;
   const [task] = await db().select().from(generations).where(eq(generations.id, id));
-  return Boolean(task && activeStatuses.includes(task.status));
+  if (!task) return false;
+  return db().transaction(async tx => {
+    await lockedApp(tx, String(task.appId));
+    const [current] = await tx.select().from(generations).where(eq(generations.id, id)).for('update');
+    if (!current || !activeStatuses.includes(current.status)) return false;
+    const [lease] = await tx.select().from(leases).where(eq(leases.appId, task.appId)).for('update');
+    if (lease) {
+      if (lease.generationId !== id || lease.expiresAt > now()) return false;
+      await tx.update(leases).set({ expiresAt: expiry() }).where(eq(leases.appId, task.appId));
+    } else {
+      const [latest] = await tx.select({ id: generations.id }).from(generations).where(eq(generations.appId, task.appId)).orderBy(desc(generations.createTime), desc(generations.id)).limit(1);
+      if (latest?.id !== id) return false;
+      await tx.insert(leases).values({ appId: task.appId, generationId: id, expiresAt: expiry() });
+    }
+    return true;
+  });
 }
 
 export async function setGeneration(id: string, status: GenerationStatus, error: string | null = null, stopReason: GenerationStopReason | null = null) {
@@ -133,9 +147,6 @@ export async function heartbeat(id: string) {
   return task?.status;
 }
 
-let lastSweepAt = 0;
-const sweepCooldownMs = 10000;
-
 export async function sweepStaleLeases(limit = 10) {
   const expired = await db().select().from(leases).where(lte(leases.expiresAt, now())).orderBy(asc(leases.expiresAt)).limit(limit);
   for (const lease of expired) {
@@ -151,10 +162,6 @@ export async function sweepStaleLeases(limit = 10) {
 }
 
 export async function generationFor(appId: string) {
-  if (Date.now() - lastSweepAt > sweepCooldownMs) {
-    lastSweepAt = Date.now();
-    await sweepStaleLeases();
-  }
   const [lease] = await db().select().from(leases).where(eq(leases.appId, BigInt(appId)));
   if (lease && lease.expiresAt <= now()) {
     await db().transaction(async tx => {
@@ -164,21 +171,22 @@ export async function generationFor(appId: string) {
     });
   }
   const [row] = await db().select().from(generations).where(eq(generations.appId, BigInt(appId))).orderBy(desc(generations.createTime), desc(generations.id)).limit(1);
-  return row ? { ...row, appId: String(row.appId), userId: String(row.userId) } : null;
+  return row ? { ...row, status: z.enum(['generating', 'building', 'ready', 'failed', 'cancelled']).parse(row.status), appId: String(row.appId), userId: String(row.userId) } : null;
 }
 
 function effectiveStopReason(current: string | null, status: 'ready' | 'failed' | 'cancelled', proposed?: GenerationStopReason): GenerationStopReason | null {
   return stopReasonFrom(current) ?? proposed ?? (status === 'ready' ? 'completed' : status === 'cancelled' ? 'cancelled' : null);
 }
 
-export async function finishGeneration(id: string, status: 'ready' | 'failed' | 'cancelled', error: string | null, messageId?: string | null, stopReason?: GenerationStopReason) {
+export async function finishGeneration(id: string, status: 'ready' | 'failed' | 'cancelled', error: string | null, messageId?: string | null, stopReason?: GenerationStopReason, canFinish?: () => Promise<boolean>): Promise<boolean> {
   const [task] = await db().select().from(generations).where(eq(generations.id, id));
-  if (!task) return;
-  await db().transaction(async tx => {
+  if (!task) return false;
+  return db().transaction(async tx => {
     await lockedApp(tx, String(task.appId));
     const [lease] = await tx.select().from(leases).where(eq(leases.appId, task.appId)).limit(1);
-    if (!lease || lease.generationId !== id) return;
+    if (!lease || lease.generationId !== id) return false;
     const [current] = await tx.select().from(generations).where(eq(generations.id, id)).for('update');
+    if (activeStatuses.includes(current.status) && canFinish && !await canFinish()) return false;
     if (!activeStatuses.includes(current.status)) {
       status = current.status as 'ready' | 'failed' | 'cancelled';
       error = current.error ?? (status === 'cancelled' ? '生成已取消' : null);
@@ -186,5 +194,6 @@ export async function finishGeneration(id: string, status: 'ready' | 'failed' | 
     }
     await tx.update(generations).set({ status, error, stopReason: effectiveStopReason(current.stopReason, status, stopReason), messageId: messageId ?? null, updateTime: now() }).where(eq(generations.id, id));
     await tx.delete(leases).where(and(eq(leases.appId, task.appId), eq(leases.generationId, id)));
+    return true;
   });
 }

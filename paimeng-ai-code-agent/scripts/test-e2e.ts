@@ -189,7 +189,7 @@ try {
     // 你自己的工作区通常已经占着一个 dev server，Next 16 用 <distDir>/dev/lock 做单例锁，换个 distDir 才能并行。
     console.log('E2E_APP_MODE=dev：跳过生产构建，用独立 distDir 启动开发服务器');
     const devEnv: NodeJS.ProcessEnv = { ...fixtureEnv, NEXT_DIST_DIR: '.next/dev-check' };
-    start('npx', ['next', 'dev', '--hostname', '127.0.0.1', '--port', String(appPort)], devEnv, true);
+    start('npx', ['next', 'dev', '--webpack', '--hostname', '127.0.0.1', '--port', String(appPort)], devEnv, true);
   } else {
     start('npm', ['run', 'start', '--', '--port', String(appPort)], fixtureEnv, true);
   }

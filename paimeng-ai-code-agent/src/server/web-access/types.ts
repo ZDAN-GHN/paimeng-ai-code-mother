@@ -1,5 +1,5 @@
 /** 联网工具的错误码与结果状态。错误码面向模型和日志，不承载上游响应正文。 */
-export const webAccessErrorCodes = ['auth', 'quota', 'timeout', 'unavailable', 'blocked-url', 'invalid-response', 'budget-exceeded', 'too-large', 'unsupported', 'not-found'] as const;
+export const webAccessErrorCodes = ['auth', 'quota', 'timeout', 'unavailable', 'blocked-url', 'invalid-response', 'too-large', 'unsupported', 'not-found'] as const;
 
 export type WebAccessErrorCode = (typeof webAccessErrorCodes)[number];
 

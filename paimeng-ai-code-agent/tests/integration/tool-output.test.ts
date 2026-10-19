@@ -25,6 +25,7 @@ const cases = [
   { name: '分页读取的正文', tool: 'read', args: { path: 'rows.txt', offset: 2, limit: 1 }, expected: 'row-2' },
   { name: '精确编辑的文本结果', tool: 'edit', args: { path: 'rows.txt', edits: [{ oldText: 'row-2', newText: 'edited-row' }] }, expected: 'Successfully replaced 1 block(s)' },
   { name: '列文件的结构化结果', tool: 'listFiles', args: {}, expected: null },
+  { name: '阶段构建的最终结果覆盖过程 details', tool: 'buildPreview', args: { milestone: '工具最终结果' }, expected: 'preview-ok' },
 ];
 
 describe.skipIf(!available)('原生工具结果在实时流和历史中的转换', () => {
@@ -58,7 +59,9 @@ describe.skipIf(!available)('原生工具结果在实时流和历史中的转换
       const history = await loadMessages(app.id);
       const part = history.flatMap(message => message.parts).find(part => part.type === 'dynamic-tool' && part.toolName === tool);
       expect(part).toMatchObject({ state: 'output-available', output: streamed.output });
-      if (expected === null) {
+      if (tool === 'buildPreview') {
+        expect(streamed.output).toMatchObject({ status: 'ok', milestone: '工具最终结果', note: expect.any(String), stages: expect.any(Array) });
+      } else if (expected === null) {
         expect(streamed.output).toMatchObject({ files: expect.arrayContaining(['index.html', 'pixel.png', 'rows.txt', 'src/', 'src/App.tsx']) });
       } else {
         expect(typeof streamed.output).toBe('string');

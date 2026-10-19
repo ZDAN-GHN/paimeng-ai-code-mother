@@ -3,7 +3,7 @@ import { guardRequest, body, success, failure, BusinessError, withHeartbeat } fr
 import { login, logout, register, requireUser, requireAdmin } from '@/server/auth';
 import * as business from '@/server/business';
 import { generationAccounts } from '@/server/generation-accounting';
-import { generationStatus, harnessCancelGeneration, harnessChatResponse, harnessSteerGeneration, loadMessages } from '@/server/durable-engine';
+import { chatRuntime, generationStatus, harnessCancelGeneration, harnessCancelInput, harnessChatResponse, harnessSteerGeneration, harnessSubmitInput, loadMessages } from '@/server/durable-engine';
 import { applyModelConfigNow, deleteModelAlias, deleteModelProvider, probeProviderModels, readModelAdminConfig, upsertModelAlias, upsertModelProvider } from '@/server/models/admin';
 import { uploadImages } from '@/server/image-upload';
 import { transcribeEnabled, transcribeSpeech } from '@/server/speech';
@@ -28,6 +28,7 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/get/vo')return success(await business.getApp(idSchema.parse(query.get('id'))));
    if(path==='app/admin/get/vo'){await requireAdmin(req);return success(await business.getApp(idSchema.parse(query.get('id'))));}
    if(path==='app/messages'){const user=await requireUser(req);const id=idSchema.parse(query.get('appId'));await business.getApp(id,user,true,true);return success(await loadMessages(id));}
+   if(path==='app/chat/runtime'){const user=await requireUser(req);return success(await chatRuntime(idSchema.parse(query.get('appId')),user));}
    if(path==='app/generation'){const user=await requireUser(req);const id=idSchema.parse(query.get('appId'));await business.getApp(id,user,true,true);return success(await generationStatus(id));}
    if(path==='app/generation/accounts'){const user=await requireUser(req);const id=idSchema.parse(query.get('appId'));await business.getApp(id,user,true,true);const limit=z.coerce.number().int().min(1).max(20).default(10).parse(query.get('limit')??undefined);return success(await generationAccounts(id,limit));}
    if(path==='app/chat/transcribe'){await requireUser(req);return success({enabled:await transcribeEnabled()});}
@@ -49,6 +50,8 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/build')return withHeartbeat(async()=>success(await business.rebuildPreview(value,user)));
    if(path==='app/chat/gen/code')return await harnessChatResponse(req,value,user);
    if(path==='app/generation/cancel'){const appId=z.object({appId:idSchema}).parse(value).appId;return success(await harnessCancelGeneration(appId,user));}
+   if(path==='app/chat/input')return success(await harnessSubmitInput(value,user));
+   if(path==='app/chat/input/cancel'){const input=z.object({appId:idSchema,submissionId:z.number().int().positive()}).parse(value);return success(await harnessCancelInput(input.appId,input.submissionId,user));}
    if(path==='app/chat/steer'){const steer=z.object({appId:idSchema,text:z.string().trim().min(1).max(1000)}).parse(value);return success(await harnessSteerGeneration(steer.appId,user,steer.text));}
    await requireAdmin(req);
    if(path==='model/admin/config')return success(await readModelAdminConfig(value));

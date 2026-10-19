@@ -57,16 +57,21 @@ export type ToolCallView =
   | { kind: 'images-searched'; label: string; query: string | null; candidates: z.infer<typeof candidateSchema>[] }
   | { kind: 'web-searched'; label: string; query: string | null; results: z.infer<typeof searchData>['results'] }
   | { kind: 'page-read'; label: string; url: string | null; title: string | null; content: string | null }
-  | { kind: 'unknown'; label: string; name: string; target: string | null };
+  /* 联网工具自己报的空结果/失败（没搜到、限额、上游不可用）：也要说清楚，不能停在「正在联网搜索…」。 */
+  | { kind: 'web-empty'; label: string; target: string | null; message: string }
+  | { kind: 'web-error'; label: string; target: string | null; message: string }
+  | { kind: 'unknown'; label: string; name: string; target: string | null; text: string | null };
 
 export type ToolCall = { view: ToolCallView; status: ToolCallStatus; errorText: string | null };
 
 /**
- * 卡片是否按失败呈现。只有真正失败才算：工具本身报错，或阶段构建的结果已经返回且没通过。
- * 构建还在跑（running）时不能算失败——那会让「正在构建」的卡片提前变红、显示「构建未通过」。
+ * 卡片是否按失败呈现。只有真正失败才算：工具本身报错，或阶段构建/联网工具的结果已经返回且没通过。
+ * 构建、检索还在跑（running）时不能算失败——那会让「正在构建」的卡片提前变红。
  */
 export function toolCallFailed(call: ToolCall) {
-  return call.status === 'error' || (call.status === 'done' && call.view.kind === 'preview-built' && !call.view.ok);
+  return call.status === 'error'
+    || (call.status === 'done' && call.view.kind === 'preview-built' && !call.view.ok)
+    || (call.status === 'done' && call.view.kind === 'web-error');
 }
 
 const labels: Record<string, string> = {
@@ -80,13 +85,28 @@ const firstText = (...values: unknown[]) => values.find((value): value is string
 const lines = (content: string) => content.split('\n').length;
 const formatBytes = (bytes: number) => bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 
-/** web 工具的结果统一是 `{ status, data }`；失败/空结果也要有可读文案。 */
-function webData(output: unknown) {
+/** 联网工具的输出统一是 `{ status, data }`：ok 的数据交给各自的 schema，empty/error 出可读说明。 */
+type WebOutcome<T> =
+  | { kind: 'data'; data: T }
+  | { kind: 'note'; tone: 'empty' | 'error'; message: string }
+  | { kind: 'invalid' };
+
+function webOutcome<S extends z.ZodType>(output: unknown, schema: S): WebOutcome<z.output<S>> {
   const parsed = webOutput.safeParse(output);
-  if (!parsed.success) return { data: undefined, message: null as string | null };
-  if (parsed.data.status === 'ok') return { data: parsed.data.data, message: null };
-  return { data: undefined, message: parsed.data.message ?? (parsed.data.status === 'empty' ? '没有结果' : '调用失败') };
+  if (!parsed.success) return { kind: 'invalid' };
+  if (parsed.data.status === 'ok') {
+    const data = schema.safeParse(parsed.data.data);
+    return data.success ? { kind: 'data', data: data.data } : { kind: 'invalid' };
+  }
+  return { kind: 'note', tone: parsed.data.status, message: parsed.data.message ?? (parsed.data.status === 'empty' ? '没有结果' : '调用失败') };
 }
+
+const noteView = (label: string, target: string | null, note: { tone: 'empty' | 'error'; message: string }): ToolCallView => note.tone === 'error'
+  ? { kind: 'web-error', label, target, message: note.message }
+  : { kind: 'web-empty', label, target, message: note.message };
+
+/** 没有专门渲染器的工具：把原始结果文本留成兜底明细，别让卡片永远停在「正在…」。 */
+const rawTextOf = (output: unknown) => typeof output === 'string' ? output : output === undefined ? null : JSON.stringify(output);
 
 /** 工具 part → 展示模型。解析失败（例如流式中的半截参数）返回 null，由调用方退化成通用标题。 */
 export function toolCallOf(part: unknown): ToolCall | null {
@@ -101,7 +121,7 @@ export function toolCallOf(part: unknown): ToolCall | null {
   const output = part.output;
   const label = labelOf(name);
   const target = isRecord(input) ? firstText(input.path, input.query, input.url) : null;
-  const fallback: ToolCall = { view: { kind: 'unknown', label, name, target }, status, errorText };
+  const fallback: ToolCall = { view: { kind: 'unknown', label, name, target, text: rawTextOf(output) }, status, errorText };
 
   if (name === 'write') {
     const parsed = writeInput.safeParse(input);
@@ -140,25 +160,29 @@ export function toolCallOf(part: unknown): ToolCall | null {
     };
   }
   if (name === 'importImage') {
-    const parsed = importedImage.safeParse(webData(output).data);
-    if (!parsed.success) return fallback;
-    return { view: { kind: 'images-imported', label, images: [parsed.data] }, status, errorText };
+    const outcome = webOutcome(output, importedImage);
+    if (outcome.kind === 'invalid') return fallback;
+    if (outcome.kind === 'note') return { view: noteView(label, target, outcome), status, errorText };
+    return { view: { kind: 'images-imported', label, images: [outcome.data] }, status, errorText };
   }
   if (name === 'searchImages') {
-    const parsed = imageSearchData.safeParse(webData(output).data);
-    if (!parsed.success) return fallback;
-    return { view: { kind: 'images-searched', label, query: parsed.data.query ?? (isRecord(input) && typeof input.query === 'string' ? input.query : null), candidates: parsed.data.candidates }, status, errorText };
+    const outcome = webOutcome(output, imageSearchData);
+    if (outcome.kind === 'invalid') return fallback;
+    if (outcome.kind === 'note') return { view: noteView(label, target, outcome), status, errorText };
+    return { view: { kind: 'images-searched', label, query: outcome.data.query ?? (isRecord(input) && typeof input.query === 'string' ? input.query : null), candidates: outcome.data.candidates }, status, errorText };
   }
   if (name === 'webSearch') {
-    const parsed = searchData.safeParse(webData(output).data);
-    if (!parsed.success) return fallback;
-    return { view: { kind: 'web-searched', label, query: parsed.data.query ?? null, results: parsed.data.results }, status, errorText };
+    const outcome = webOutcome(output, searchData);
+    if (outcome.kind === 'invalid') return fallback;
+    if (outcome.kind === 'note') return { view: noteView(label, target, outcome), status, errorText };
+    return { view: { kind: 'web-searched', label, query: outcome.data.query ?? null, results: outcome.data.results }, status, errorText };
   }
   if (name === 'readWebPage') {
-    const parsed = pageData.safeParse(webData(output).data);
+    const outcome = webOutcome(output, pageData);
     const requested = urlInput.safeParse(input);
-    if (!parsed.success) return fallback;
-    return { view: { kind: 'page-read', label, url: parsed.data.finalUrl ?? (requested.success ? requested.data.url : null), title: parsed.data.title ?? null, content: parsed.data.content }, status, errorText };
+    if (outcome.kind === 'invalid') return fallback;
+    if (outcome.kind === 'note') return { view: noteView(label, target, outcome), status, errorText };
+    return { view: { kind: 'page-read', label, url: outcome.data.finalUrl ?? (requested.success ? requested.data.url : null), title: outcome.data.title ?? null, content: outcome.data.content }, status, errorText };
   }
   return fallback;
 }
@@ -177,6 +201,7 @@ function titleOf(view: ToolCallView) {
   if (view.kind === 'images-imported') return `${view.label} ${view.images[0]?.src ?? ''}`;
   if (view.kind === 'images-searched') return `${view.label}${view.query ? ` “${view.query}”` : ''}${view.candidates.length ? ` · ${view.candidates.length} 个候选` : ''}`;
   if (view.kind === 'web-searched') return `${view.label}${view.query ? ` “${view.query}”` : ''}${view.results.length ? ` · ${view.results.length} 条结果` : ''}`;
+  if (view.kind === 'web-empty' || view.kind === 'web-error') return `${view.label}${view.target ? ` ${view.target}` : ''}`;
   if (view.kind === 'page-read') return `${view.label} ${view.title ?? view.url ?? ''}`;
   return `${view.label}${view.target ? ` ${view.target}` : ''}`;
 }
@@ -191,6 +216,7 @@ function summaryOf(call: ToolCall) {
   if (view.kind === 'files-written') return view.files.length > 1 ? view.files.map(file => file.path).join('、') : `${lines(view.files[0]?.content ?? '')} 行`;
   if (view.kind === 'file-read' && view.content !== null) return `${lines(view.content)} 行`;
   if (view.kind === 'images-imported') return [view.images[0]?.format, typeof view.images[0]?.bytes === 'number' ? formatBytes(view.images[0].bytes) : null].filter(Boolean).join(' · ');
+  if (view.kind === 'web-empty' || view.kind === 'web-error') return view.message;
   if (view.kind === 'file-modified') {
     const first = view.edits[0];
     return view.edits.length > 1 || first === undefined ? `${view.edits.length} 处替换` : `${lines(first.oldText)} 行 → ${lines(first.newText)} 行`;
@@ -277,7 +303,11 @@ export function ToolCall({ call, assetUrl }: { call: ToolCall; assetUrl: (path: 
         <div className="tool-call-file-head"><a className="tool-call-link" href={view.url ?? '#'} target="_blank" rel="noreferrer noopener">{view.title ?? view.url ?? '网页'}</a></div>
         {view.content === null ? <p className="tool-call-meta">未读到正文</p> : <Code content={view.content} />}
       </div>}
-      {view.kind === 'unknown' && <p className="tool-call-meta">正在{view.label}…</p>}
+      {view.kind === 'web-empty' && <p className="tool-call-meta">{view.message}</p>}
+      {view.kind === 'web-error' && <p className="tool-call-error-text">{view.message}</p>}
+      {view.kind === 'unknown' && (call.status === 'running'
+        ? <p className="tool-call-meta">正在{view.label}…</p>
+        : view.text === null ? <p className="tool-call-meta">没有可展示的明细</p> : <Code content={view.text} />)}
     </div>}
   </div>;
 }

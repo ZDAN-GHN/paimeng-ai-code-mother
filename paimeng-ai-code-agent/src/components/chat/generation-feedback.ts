@@ -1,10 +1,13 @@
 import { z } from 'zod';
-import type { BuildProgressEvent, GenerationStatus } from '@/shared/contracts';
+import type { BuildProgressEvent, GenerationStatus, SteerLandedEvent } from '@/shared/contracts';
 
 
-export type ComposerAction = 'send' | 'queue' | 'steer' | 'newline' | 'none';
+export type ComposerAction = 'send' | 'followUp' | 'steer' | 'newline' | 'none';
 
-/** 一次按键该做什么。组合键保护（`isComposing`）留在组件的 onKeyDown 里，不属于纯逻辑。 */
+/**
+ * 一次按键该做什么。组合键保护（`isComposing`）留在组件的 onKeyDown 里，不属于纯逻辑。
+ * 生成中 Enter 是 followUp（交服务端原生队列，本轮结束后自动开始下一轮），Ctrl/⌘ + Enter 是 steer。
+ */
 export function composerAction(input: {
   key: string;
   shiftKey: boolean;
@@ -15,27 +18,7 @@ export function composerAction(input: {
   if (input.key !== 'Enter') return 'none';
   if (input.shiftKey) return 'newline';
   if (!input.generating) return 'send';
-  return input.ctrlKey || input.metaKey ? 'steer' : 'queue';
-}
-
-/**
- * 生成中按 Enter 的消息按先后排队；空白文本不入队。元素可以是纯文本，也可以是带附件的
- * `{ text }` 对象（U3）：文本统一 trim，其余字段原样保留。
- */
-export function enqueue(queue: readonly string[], text: string): string[];
-export function enqueue<T extends { text: string }>(queue: readonly T[], item: T): T[];
-export function enqueue(queue: readonly (string | { text: string })[], item: string | { text: string }): (string | { text: string })[] {
-  const text = (typeof item === 'string' ? item : item.text).trim();
-  if (!text) return [...queue];
-  return [...queue, typeof item === 'string' ? text : Object.assign({}, item, { text })];
-}
-
-export function dequeue<T>(queue: readonly T[]): { head: T | null; rest: T[] } {
-  return queue.length ? { head: queue[0], rest: queue.slice(1) } : { head: null, rest: [] };
-}
-
-export function removeQueued<T>(queue: readonly T[], index: number): T[] {
-  return queue.filter((_, position) => position !== index);
+  return input.ctrlKey || input.metaKey ? 'steer' : 'followUp';
 }
 
 const checkEvent = (stage: 'source' | 'install' | 'typecheck' | 'build') => z.object({
@@ -57,6 +40,14 @@ const progressEventSchema = z.discriminatedUnion('stage', [
 export function parseProgressEvent(input: unknown): BuildProgressEvent | null {
   const parsed = progressEventSchema.safeParse(input);
   return parsed.success ? parsed.data satisfies BuildProgressEvent : null;
+}
+
+const steerLandedSchema = z.object({ id: z.string().min(1), index: z.number().int().min(0) });
+
+/** 校验服务端的 `data-steer` 载荷（插话落地的分段位置）；形状不合法时返回 null，不抛错。 */
+export function parseSteerLanded(input: unknown): SteerLandedEvent | null {
+  const parsed = steerLandedSchema.safeParse(input);
+  return parsed.success ? parsed.data satisfies SteerLandedEvent : null;
 }
 
 /** 构建阶段的中文名：时间线、工具卡片与历史文本共用同一份。 */

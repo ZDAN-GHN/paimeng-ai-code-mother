@@ -154,7 +154,7 @@ describe('图片落进工程', () => {
   it('下载、改名、写清单与署名页，并返回可用的本地路径', async () => {
     const candidate = candidateFor('https://img.test/konata.png');
     const { calls, transport } = makeTransport(() => reply(200, 'image/png', jpeg));
-    const imported = await importImageCandidate(htmlApp, candidate, { deps: { transport, lookup }, importedBytes: 0 });
+    const imported = await importImageCandidate(htmlApp, candidate, { deps: { transport, lookup } });
     expect(calls).toHaveLength(1);
     expect(imported.path).toMatch(/^assets\/[a-f0-9]{32}\.jpg$/);
     expect(imported.src).toBe('./assets/' + imported.path.split('/').pop());
@@ -174,7 +174,7 @@ describe('图片落进工程', () => {
   it('没有落地页的候选在署名页写明「未提供页面链接」', async () => {
     const candidate = candidateFor('https://img.test/no-page.png', { title: 'Konata Izumi | Lucky Star Wiki | Fandom', sourcePage: '' });
     const { transport } = makeTransport(() => reply(200, 'image/png', png));
-    const imported = await importImageCandidate(htmlApp, candidate, { deps: { transport, lookup }, importedBytes: 0 });
+    const imported = await importImageCandidate(htmlApp, candidate, { deps: { transport, lookup } });
     const credits = await readProjectFile(htmlApp, 'assets/credits.html');
     expect(credits).toContain('Konata Izumi | Lucky Star Wiki | Fandom');
     expect(credits).toContain('未提供页面链接');
@@ -186,28 +186,26 @@ describe('图片落进工程', () => {
   it('同一候选重复导入不再下载，且 Vite 工程写入 public/assets', async () => {
     const candidate = candidateFor('https://img.test/konata-vue.png');
     const first = makeTransport(() => reply(200, 'image/png', png));
-    const imported = await importImageCandidate(vueApp, candidate, { deps: { transport: first.transport, lookup }, importedBytes: 0 });
+    const imported = await importImageCandidate(vueApp, candidate, { deps: { transport: first.transport, lookup } });
     expect(imported.path).toMatch(/^public\/assets\/[a-f0-9]{32}\.png$/);
     expect(imported.src).toBe('./assets/' + imported.path.split('/').pop());
     expect(assetsDirectory(vueApp)).toBe('public/assets');
     const second = makeTransport(() => { throw new Error('不应再次下载'); });
-    const again = await importImageCandidate(vueApp, candidate, { deps: { transport: second.transport, lookup }, importedBytes: 0 });
+    const again = await importImageCandidate(vueApp, candidate, { deps: { transport: second.transport, lookup } });
     expect(again.path).toBe(imported.path);
     expect(second.calls).toHaveLength(0);
   });
 
-  it('拒绝网页内容、超大图片与超预算导入', async () => {
+  it('拒绝网页内容与超大图片', async () => {
     const html = makeTransport(() => reply(200, 'text/html', '<html></html>'));
-    await expect(importImageCandidate(htmlApp, candidateFor('https://img.test/html.png'), { deps: { transport: html.transport, lookup }, importedBytes: 0 })).rejects.toMatchObject({ code: 'invalid-response' });
+    await expect(importImageCandidate(htmlApp, candidateFor('https://img.test/html.png'), { deps: { transport: html.transport, lookup } })).rejects.toMatchObject({ code: 'invalid-response' });
     const huge = makeTransport(() => reply(200, 'image/png', Buffer.concat([png, Buffer.alloc(2 * 1024 * 1024)])));
-    await expect(importImageCandidate(htmlApp, candidateFor('https://img.test/huge.png'), { deps: { transport: huge.transport, lookup }, importedBytes: 0 })).rejects.toMatchObject({ code: 'too-large' });
-    const small = makeTransport(() => reply(200, 'image/png', png));
-    await expect(importImageCandidate(htmlApp, candidateFor('https://img.test/budget.png'), { deps: { transport: small.transport, lookup }, importedBytes: 8 * 1024 * 1024 })).rejects.toMatchObject({ code: 'budget-exceeded' });
+    await expect(importImageCandidate(htmlApp, candidateFor('https://img.test/huge.png'), { deps: { transport: huge.transport, lookup } })).rejects.toMatchObject({ code: 'too-large' });
   });
 
   it('内网图片地址在下载前被拒绝', async () => {
     const { calls, transport } = makeTransport(() => reply(200, 'image/png', png));
-    await expect(importImageCandidate(htmlApp, candidateFor('http://169.254.169.254/latest/meta-data/'), { deps: { transport, lookup }, importedBytes: 0 })).rejects.toMatchObject({ code: 'blocked-url' });
+    await expect(importImageCandidate(htmlApp, candidateFor('http://169.254.169.254/latest/meta-data/'), { deps: { transport, lookup } })).rejects.toMatchObject({ code: 'blocked-url' });
     expect(calls).toHaveLength(0);
   });
 
@@ -215,7 +213,7 @@ describe('图片落进工程', () => {
     const candidate = candidateFor('https://img.test/prepare.webp');
     const { transport } = makeTransport(() => reply(200, 'image/webp', webp));
     const before = await listProjectFiles(htmlApp);
-    const prepared = await prepareImport(htmlApp, candidate, { deps: { transport, lookup }, importedBytes: 0 });
+    const prepared = await prepareImport(htmlApp, candidate, { deps: { transport, lookup } });
     expect(prepared.kind).toBe('download');
     expect(await listProjectFiles(htmlApp)).toEqual(before);
     if (prepared.kind === 'download') {
@@ -236,11 +234,11 @@ describe('素材文件与构建指纹', () => {
   it('大于文本上限的图片参与指纹，且图片字节变化会改变指纹', async () => {
     const large = Buffer.concat([png, Buffer.alloc(300 * 1024, 9)]);
     const write = makeTransport(() => reply(200, 'image/png', large));
-    const first = await importImageCandidate(bigApp, candidateFor('https://img.test/large.png'), { deps: { transport: write.transport, lookup }, importedBytes: 0 });
+    const first = await importImageCandidate(bigApp, candidateFor('https://img.test/large.png'), { deps: { transport: write.transport, lookup } });
     expect(first.bytes).toBeGreaterThan(256 * 1024);
     const digestWithLargeImage = await sourceDigest(bigApp);
     const changed = makeTransport(() => reply(200, 'image/png', Buffer.concat([png, Buffer.alloc(300 * 1024, 8)])));
-    const second = await importImageCandidate(bigApp, candidateFor('https://img.test/other.png'), { deps: { transport: changed.transport, lookup }, importedBytes: 0 });
+    const second = await importImageCandidate(bigApp, candidateFor('https://img.test/other.png'), { deps: { transport: changed.transport, lookup } });
     expect(second.path).not.toBe(first.path);
     expect(await sourceDigest(bigApp)).not.toBe(digestWithLargeImage);
   });

@@ -49,7 +49,7 @@ beforeAll(async () => {
     width: 1,
     height: 1,
     attribution: '"单像素素材" by 示例作者 is licensed under CC0.',
-  }, { deps: { transport: imageTransport(), lookup: async () => [{ address: '93.184.216.34', family: 4 }] }, importedBytes: 0 });
+  }, { deps: { transport: imageTransport(), lookup: async () => [{ address: '93.184.216.34', family: 4 }] } });
   await writeProjectFile(app, 'index.html', `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><title>素材预览</title></head>
 <body>

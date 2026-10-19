@@ -25,7 +25,7 @@ import { promisify } from "node:util";
 import { Type, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { JsonValue } from "@earendil-works/chord";
 import { withAbortSignal } from "@earendil-works/chord/context";
-import type { AgentEvent, Conversation, ConversationId, ConversationView, Cursor, EntryDraft, LiveState, ModelRef, ToolExecutionApi } from "@earendil-works/pi-durable";
+import type { AgentEvent, Conversation, ConversationId, ConversationView, Cursor, EntryDraft, LiveState, ModelRef, SubmissionId, ToolExecutionApi } from "@earendil-works/pi-durable";
 import { ToolTask, defineExtension, defineTool, hook, watchEvents } from "@earendil-works/pi-durable";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { createCodingTools } from "@earendil-works/pi-durable/tools";
@@ -49,6 +49,7 @@ import {
 import { fauxFixtureEnabled } from "./faux-fixture";
 import { fauxModelEnabled } from "./faux-model";
 import { context, entryText, openPgHarness } from "./harness";
+import { webToolResult } from "./web-tool-result";
 import {
 	admitGenerationModel,
 	identityOfDescriptor,
@@ -289,10 +290,6 @@ function webRuntime(toolContext: { abortSignal?: AbortSignal }): WebAccessRuntim
 	};
 }
 
-function toolResult(value: unknown) {
-	return { output: [{ type: "text" as const, text: typeof value === "string" ? value : JSON.stringify(value) }] };
-}
-
 function webToolsForConfig(): ToolRegistration[] {
 	const settings = getConfig().webAccess;
 	const names = enabledWebToolNames({ enabled: settings.enabled, images: settings.images });
@@ -306,28 +303,28 @@ function webToolsForConfig(): ToolRegistration[] {
 			description: webAccessToolDescriptions.webSearch,
 			parameters: query,
 			replay: "safe",
-			execute: async (args, api, toolContext) => toolResult(await (await webOperationsFor(api.conversationId)).webSearch(args, webRuntime(toolContext))),
+			execute: async (args, api, toolContext) => webToolResult(await (await webOperationsFor(api.conversationId)).webSearch(args, webRuntime(toolContext))),
 		}),
 		readWebPage: defineTool({
 			name: "readWebPage",
 			description: webAccessToolDescriptions.readWebPage,
 			parameters: url,
 			replay: "safe",
-			execute: async (args, api, toolContext) => toolResult(await (await webOperationsFor(api.conversationId)).readWebPage(args, webRuntime(toolContext))),
+			execute: async (args, api, toolContext) => webToolResult(await (await webOperationsFor(api.conversationId)).readWebPage(args, webRuntime(toolContext))),
 		}),
 		searchImages: defineTool({
 			name: "searchImages",
 			description: webAccessToolDescriptions.searchImages,
 			parameters: query,
 			replay: "safe",
-			execute: async (args, api, toolContext) => toolResult(await (await webOperationsFor(api.conversationId)).searchImages(args, webRuntime(toolContext))),
+			execute: async (args, api, toolContext) => webToolResult(await (await webOperationsFor(api.conversationId)).searchImages(args, webRuntime(toolContext))),
 		}),
 		importImage: defineTool({
 			name: "importImage",
 			description: webAccessToolDescriptions.importImage,
 			parameters: candidate,
 			replay: "unsafe",
-			execute: async (args, api, toolContext) => toolResult(await (await webOperationsFor(api.conversationId)).importImage(args, webRuntime(toolContext))),
+			execute: async (args, api, toolContext) => webToolResult(await (await webOperationsFor(api.conversationId)).importImage(args, webRuntime(toolContext))),
 		}),
 	};
 	return names.map((name) => definitions[name]);
@@ -433,6 +430,7 @@ type ConversationModel = {
 	readonly ref: ModelRef;
 	readonly thinkingLevel: ModelThinkingLevel;
 	readonly identity: GenerationModelIdentity | null;
+	readonly imageInput: boolean;
 	readonly token?: string;
 };
 
@@ -457,6 +455,7 @@ function rememberModel(conversationId: number, binding: GenerationModelBinding, 
 		ref: binding.ref,
 		thinkingLevel: binding.thinkingLevel,
 		identity: binding.identity,
+		imageInput: binding.imageInput,
 		...(token === undefined ? {} : { token }),
 	};
 	conversationModels.set(conversationId, installed);
@@ -654,7 +653,11 @@ async function inspection() {
 
 async function stateBody(conversation: Conversation) {
 	const view = await conversation.viewState(context);
-	return { ...(await inspection()), view: project(view.value) };
+	try {
+		return { ...(await inspection()), view: project(view.value) };
+	} finally {
+		view.dispose();
+	}
 }
 
 function messageText(message: { role: string; content: unknown }): string {
@@ -717,13 +720,13 @@ const server = createServer(async (request, response) => {
 			}
 			const current = conversationModels.get(conversation.id);
 			if (current) {
-				sendJson(response, 200, { model: current.ref, thinkingLevel: current.thinkingLevel, identity: current.identity });
+				sendJson(response, 200, { model: current.ref, thinkingLevel: current.thinkingLevel, identity: current.identity, imageInput: current.imageInput });
 				return;
 			}
 			const descriptor = await storedRunModel(conversation.id);
 			sendJson(response, 200, descriptor
-				? { model: descriptor.ref, thinkingLevel: thinkingLevelOfDescriptor(descriptor), identity: identityOfDescriptor(descriptor) }
-				: { model: null, thinkingLevel: null, identity: null });
+				? { model: descriptor.ref, thinkingLevel: thinkingLevelOfDescriptor(descriptor), identity: identityOfDescriptor(descriptor), imageInput: descriptor.imageInput }
+				: { model: null, thinkingLevel: null, identity: null, imageInput: false });
 			return;
 		}
 
@@ -789,7 +792,7 @@ const server = createServer(async (request, response) => {
 				} catch (error) {
 					return { kind: "refused" as const, error };
 				}
-				if (body.whenBusy !== "steer") resetWebSession(conversation.id);
+				if (!body.whenBusy || body.whenBusy === "reject") resetWebSession(conversation.id);
 				// `whenBusy: "steer"` is how the product's mid-run steer lands: queued in `pi.inbox` and placed
 				// at the next boundary instead of starting a competing run.
 				return { kind: "admitted" as const, submission: await conversation.submit({ type: "input", content, requestId: body.requestId, whenBusy: body.whenBusy, entry }, context) };
@@ -800,7 +803,21 @@ const server = createServer(async (request, response) => {
 			}
 			const submission = outcome.submission;
 			log(`submit admitted conversation=${conversation.id} submission=${submission.id} requestId=${body.requestId ?? "-"} whenBusy=${body.whenBusy ?? "-"}`);
-			sendJson(response, 202, { submissionId: submission.id });
+			const record = await submission.status(context);
+			sendJson(response, 202, { submissionId: submission.id, status: record.status });
+			return;
+		}
+
+		if (request.method === "POST" && url.pathname === "/input/cancel") {
+			const body = JSON.parse(await readBody(request)) as { conversationId?: number; submissionId?: number };
+			const conversationId = conversationIdFrom(body.conversationId);
+			const submissionId = body.submissionId;
+			if (conversationId === undefined || typeof submissionId !== "number" || !Number.isSafeInteger(submissionId) || submissionId <= 0) {
+				sendJson(response, 400, { error: "conversationId and submissionId are required" });
+				return;
+			}
+			const state = await harness.abortSubmission(submissionId as SubmissionId, context, conversationId);
+			sendJson(response, state === "not_found" ? 404 : 200, { state });
 			return;
 		}
 
@@ -864,6 +881,22 @@ const server = createServer(async (request, response) => {
 				return;
 			}
 			sendJson(response, 200, { messages: await transcriptEntries(conversation) });
+			return;
+		}
+
+		if (request.method === "GET" && url.pathname === "/runtime") {
+			const conversation = await conversationOf(conversationIdFrom(url.searchParams.get("conversationId")) ?? root.id);
+			if (!conversation) {
+				sendJson(response, 404, { error: "conversation not found" });
+				return;
+			}
+			const view = await conversation.viewState(context);
+			try {
+				const value = view.value;
+				sendJson(response, 200, { messages: value.entries, live: value.docs["pi.live"] ?? {}, inbox: value.docs["pi.inbox"] ?? { items: [] } });
+			} finally {
+				view.dispose();
+			}
 			return;
 		}
 
@@ -978,7 +1011,8 @@ const server = createServer(async (request, response) => {
 			}
 			stream.start(async (events: readonly AgentEvent[]) => {
 				for (const event of events) writeEvent(event);
-				if (events.some((event) => event.type === "run_end")) finish();
+				const idleSnapshot = events.some((event) => event.type === "snapshot" && event.run === undefined);
+				if (idleSnapshot || (events.some((event) => event.type === "run_end") && !events.some((event) => event.type === "run_start"))) finish();
 			});
 			stream.closed.then(finish, finish);
 			return;

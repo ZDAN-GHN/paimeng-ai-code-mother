@@ -1,13 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   composerAction,
-  dequeue,
-  enqueue,
   initialProgress,
   interruptedStreamMessage,
   parseProgressEvent,
   progressReducer,
-  removeQueued,
   settleProgress,
   type ProgressState,
 } from '@/components/chat/generation-feedback';
@@ -24,8 +21,8 @@ describe('对话输入键位', () => {
     expect(composerAction(key({ metaKey: true }))).toBe('send');
   });
 
-  it('生成中 Enter 排队，Ctrl / Meta + Enter 中途插话', () => {
-    expect(composerAction(key({ generating: true }))).toBe('queue');
+  it('生成中 Enter 走 followUp（服务端原生队列），Ctrl / Meta + Enter 中途插话', () => {
+    expect(composerAction(key({ generating: true }))).toBe('followUp');
     expect(composerAction(key({ generating: true, ctrlKey: true }))).toBe('steer');
     expect(composerAction(key({ generating: true, metaKey: true }))).toBe('steer');
   });
@@ -36,35 +33,6 @@ describe('对话输入键位', () => {
     expect(composerAction(key({ shiftKey: true, ctrlKey: true, generating: true }))).toBe('newline');
     expect(composerAction(key({ key: 'a' }))).toBe('none');
     expect(composerAction(key({ key: 'Escape', generating: true }))).toBe('none');
-  });
-});
-
-describe('排队消息', () => {
-  it('按先后进队，空白文本不入队', () => {
-    expect(enqueue([], '  第一条  ')).toEqual(['第一条']);
-    expect(enqueue(['第一条'], '第二条')).toEqual(['第一条', '第二条']);
-    expect(enqueue(['第一条'], '   ')).toEqual(['第一条']);
-  });
-
-  it('出队取队首并返回剩余，空队列返回 null', () => {
-    expect(dequeue(['a', 'b'])).toEqual({ head: 'a', rest: ['b'] });
-    expect(dequeue([])).toEqual({ head: null, rest: [] });
-  });
-
-  it('按位置删除排队项', () => {
-    expect(removeQueued(['a', 'b', 'c'], 1)).toEqual(['a', 'c']);
-    expect(removeQueued(['a'], 5)).toEqual(['a']);
-  });
-
-  it('元素也可以是带附件的对象：文本 trim，附件原样保留', () => {
-    const attachments = [{ type: 'attachment', attachmentId: 'a-1', mediaType: 'image/png', filename: 'a.png' }];
-    const queued = enqueue<{ text: string; attachments: typeof attachments }>([], { text: '  第一条  ', attachments });
-    expect(queued).toEqual([{ text: '第一条', attachments }]);
-    const two = enqueue(queued, { text: '第二条', attachments: [] });
-    expect(two.map(item => item.text)).toEqual(['第一条', '第二条']);
-    expect(dequeue(two)).toEqual({ head: { text: '第一条', attachments }, rest: [{ text: '第二条', attachments: [] }] });
-    expect(removeQueued(two, 0)).toEqual([{ text: '第二条', attachments: [] }]);
-    expect(enqueue(queued, { text: '   ', attachments: [] })).toEqual(queued);
   });
 });
 

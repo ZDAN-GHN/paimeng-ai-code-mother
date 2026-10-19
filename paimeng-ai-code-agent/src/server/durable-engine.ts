@@ -1,10 +1,11 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage, type UIMessageStreamWriter } from 'ai';
-import type { AppInfo, User } from '@/shared/contracts';
-import { imageLimits, type ImageMediaType } from '@/shared/attachments';
+import type { AppInfo, SteerLandedEvent, User } from '@/shared/contracts';
+import { attachmentPartsSchema, imageLimits, type ImageMediaType } from '@/shared/attachments';
+import { chatInputModeSchema, chatInputSchema, type ChatInputReceipt, type ChatMessage, type ChatRuntime, type PendingChatInput } from '@/shared/chat-runtime';
 import { cancelGeneration, generationRequestSchema, uploadDirectory, uploadFileName } from './agent';
 import { readAttachmentBytes, readAttachmentOriginal } from './attachment-store';
 import { buildApp, sourceDigest, type BuildStageProgress } from './artifacts';
@@ -14,11 +15,11 @@ import { classifyBuildFailure, formatBuildFeedback, noProgressMessage } from './
 import { appForAdoption, getApp } from './business';
 import { getConfig } from './config';
 import { db } from './db';
-import { adoptLease, beginGeneration, finishGeneration, generationFor, heartbeat, restoreGeneration, setGeneration, staleActiveGenerations } from './generation-store';
+import { adoptLease, beginGeneration, finishGeneration, generationFor, heartbeat, restoreGeneration, setGeneration, staleActiveGenerations, withAppWriter } from './generation-store';
 import { recordAssistantStep, recordBuildStep, type AccountToolCall, type EntryUsage, type GenerationStopReason, type ModelIdentity } from './generation-accounting';
 import { BusinessError } from './http';
 import { clientIp } from './rate-limit';
-import { apps } from './schema';
+import { apps, generationSteps } from './schema';
 import { validatePrompt } from './prompt-safety';
 import { generationInstructions } from './generation-instructions';
 import { templateEntry } from './templates';
@@ -55,6 +56,8 @@ const harnessEventSchema = z
     entry: z.unknown().optional(),
     message: z.unknown().optional(),
     generation: z.object({ message: z.unknown().optional() }).optional(),
+    entries: z.array(z.unknown()).optional(),
+    tools: z.array(z.object({ callId: z.string(), name: z.string(), status: z.string(), details: z.unknown().optional() })).optional(),
   })
   .passthrough();
 
@@ -85,8 +88,6 @@ type UiChunk = Parameters<UIMessageStreamWriter<UIMessage>['write']>[0];
 function harnessBase(): string {
   return getConfig().durable.harnessUrl;
 }
-
-const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
 async function harnessFetchRaw(path: string, init?: RequestInit): Promise<Response> {
   try {
@@ -282,8 +283,18 @@ class AssistantTurn {
   #blocks = new Map<number, string>();
   #emitted = '';
   #textId: string | null = null;
+  #streamedParts = 0;
   readonly parts: AssistantPart[] = [];
   readonly tools = new Map<string, ToolSlot>();
+  readonly seenEntries = new Set<string>();
+  readonly endedTools = new Set<string>();
+  recordedModelSteps = new Set<number>();
+  seenModelSteps = 0;
+
+  /** 客户端这条助手消息当前的 parts 下标边界：`text-start` 与 `tool-input-available` 各压入一个 part。 */
+  get streamedParts(): number {
+    return this.#streamedParts;
+  }
 
   constructor(private readonly channel: ChunkChannel) {}
 
@@ -339,6 +350,7 @@ class AssistantTurn {
     if (!delta) return;
     if (this.#textId === null) {
       this.#textId = `${Math.random().toString(36).slice(2)}-text`;
+      this.#streamedParts += 1;
       this.channel.push({ type: 'text-start', id: this.#textId });
     }
     this.#emitted = next;
@@ -360,8 +372,10 @@ class AssistantTurn {
   }
 
   toolStart(toolCallId: string, toolName: string, input: unknown) {
+    if (this.tools.has(toolCallId)) return;
     this.closeText();
     this.tools.set(toolCallId, { toolName, input });
+    this.#streamedParts += 1;
     this.channel.push({ type: 'tool-input-available', toolCallId, toolName, input, dynamic: true });
   }
 
@@ -371,8 +385,9 @@ class AssistantTurn {
     if (slot) {
       slot.output = text;
       slot.isError = isError;
+      slot.details = details ?? slot.details;
     }
-    const rendered = toolOutputPayload(toolName, slot?.details ?? details, text);
+    const rendered = toolOutputPayload(toolName, details ?? slot?.details, text);
     this.channel.push(isError
       ? { type: 'tool-output-error', toolCallId, errorText: text || '工具调用失败', dynamic: true }
       : { type: 'tool-output-available', toolCallId, output: rendered, dynamic: true });
@@ -397,6 +412,19 @@ function entryIdOf(entry: unknown): string | null {
   return parsed.success ? String(parsed.data.id) : null;
 }
 
+declare global {
+  var paimengGenerationObservers: Map<string, AbortController> | undefined;
+}
+const generationObservers = globalThis.paimengGenerationObservers ??= new Map<string, AbortController>();
+
+function startHarnessObservation(options: Parameters<typeof observeHarnessRun>[0]): void {
+  if (generationObservers.has(options.requestId)) return;
+  generationObservers.set(options.requestId, options.stop);
+  void observeHarnessRun(options).finally(() => {
+    if (generationObservers.get(options.requestId) === options.stop) generationObservers.delete(options.requestId);
+  });
+}
+
 async function observeHarnessRun(options: {
   conversationId: number;
   requestId: string;
@@ -413,6 +441,7 @@ async function observeHarnessRun(options: {
   const turn = new AssistantTurn(channel);
   const anchor = new TranscriptAnchor();
   let buildSteps = 0;
+  let finished = false;
   const pulse = setInterval(() => {
     void heartbeat(requestId).then(current => {
       if (current === 'cancelled') { stop.abort(new Error('生成已取消')); void abortHarnessRun(app.id); }
@@ -442,9 +471,11 @@ async function observeHarnessRun(options: {
     }
   };
   try {
+    const accounted = await db().select({ stepNumber: generationSteps.stepNumber }).from(generationSteps).where(and(eq(generationSteps.generationId, requestId), eq(generationSteps.kind, 'model')));
+    turn.recordedModelSteps = new Set(accounted.map(step => step.stepNumber));
     let snapshot: string | null = null;
-    for (let round = 1; ; round += 1) {
-      await waitForRunStart(conversationId, stop.signal);
+    let round = 1;
+    for (;;) {
       const run = new RunTranslator(channel, turn, anchor, requestId, model, round);
       let failureText: string | null = null;
       const response = await harnessFetch(`/agent-events?conversationId=${conversationId}`, {
@@ -452,30 +483,62 @@ async function observeHarnessRun(options: {
         signal: stop.signal,
       });
       if (!response.body) throw new Error('harness /agent-events 没有返回响应体');
-      for await (const event of readEvents(response.body)) {
-        run.handle(event);
-        if (event.type === 'task_failed' && typeof event.message === 'string') failureText = event.message;
-        if (event.type === 'run_end') break;
+      try {
+        try {
+          for await (const event of readEvents(response.body)) {
+            run.handle(event);
+            if (event.type === 'run_start') failureText = null;
+            if (event.type === 'task_failed' && event.kind === 'pi.generation' && typeof event.message === 'string') failureText = event.message;
+          }
+        } catch (problem) {
+          if (stop.signal.aborted) throw problem;
+          // 观察连接失败不代表 durable 任务失败；用已提交快照补齐，再重新挂接仍活跃的运行。
+          const runtime = await harnessRuntime(conversationId);
+          run.handle({ type: 'snapshot', entries: runtime.messages, generation: runtime.live.generation, tools: runtime.live.tools });
+        }
+      } finally {
+        await run.finalize();
       }
-      await run.finalize();
       if (stop.signal.aborted) {
         status = 'cancelled';
         error = '生成已取消';
         stopReason = 'cancelled';
         break;
       }
+      // 基线来自同一个原子快照：新增 run 已开始时不能把它的输入当成“已完成生成”的验证基线。
+      const baseline = await harnessRuntime(conversationId);
+      if (baseline.live.run) continue;
+      const verifiedInput = latestInputId(baseline);
+      const finishChecked = async (outcome: 'ready' | 'failed', detail: string | null, reason: GenerationStopReason) => {
+        finished = await finishGeneration(requestId, outcome, detail, anchor.firstAssistantEntryId, reason, async () => {
+          const current = await harnessRuntime(conversationId);
+          return !current.live.run && latestInputId(current) === verifiedInput;
+        });
+        if (!finished) {
+          if (!await setGeneration(requestId, 'generating')) throw new Error('生成任务已停止');
+          return false;
+        }
+        status = outcome;
+        error = detail;
+        stopReason = reason;
+        return true;
+      };
+      failureText ??= finalModelFailure(baseline);
       if (failureText) {
-        status = 'failed';
-        error = failureText.slice(0, 1000);
-        stopReason = 'model-error';
-        break;
+        if (await finishChecked('failed', failureText.slice(0, 1000), 'model-error')) break;
+        continue;
       }
       if (!await setGeneration(requestId, 'building')) throw new Error('生成任务已停止');
       const verdict = await verify(round);
+      // 输入可能在最终验证期间直接启动下一 run；继续观察，等代码稳定后再做最终验证。
+      const afterBuild = await harnessRuntime(conversationId);
+      if (!stop.signal.aborted && (afterBuild.live.run || latestInputId(afterBuild) !== verifiedInput)) {
+        if (!await restoreGeneration(requestId)) throw new Error('生成任务已停止');
+        continue;
+      }
       if (verdict.ok) {
-        status = 'ready';
-        stopReason = 'completed';
-        break;
+        if (await finishChecked('ready', null, 'completed')) break;
+        continue;
       }
       if (stop.signal.aborted) {
         status = 'cancelled';
@@ -487,21 +550,19 @@ async function observeHarnessRun(options: {
       const classified = classifyBuildFailure(problem);
       const repairs = round - 1;
       if (!classified.repairable || repairs >= buildRepairRounds) {
-        status = 'failed';
-        error = problem instanceof Error ? problem.message.slice(0, 1000) : '构建失败';
-        stopReason = 'verification-failed';
-        break;
+        const detail = problem instanceof Error ? problem.message.slice(0, 1000) : '构建失败';
+        if (await finishChecked('failed', detail, 'verification-failed')) break;
+        continue;
       }
       const current = await sourceDigest(app);
       if (snapshot !== null && current === snapshot) {
-        status = 'failed';
-        error = noProgressMessage(problem).slice(0, 1000);
-        stopReason = 'verification-failed';
-        break;
+        if (await finishChecked('failed', noProgressMessage(problem).slice(0, 1000), 'verification-failed')) break;
+        continue;
       }
       snapshot = current;
       if (!await restoreGeneration(requestId)) throw new Error('生成任务已停止');
       channel.push({ type: 'data-build', data: { status: 'repairing', attempt: repairs + 1, maxAttempts: buildRepairRounds }, transient: true } as UiChunk);
+      round += 1;
       await submitHarness(conversationId, formatBuildFeedback(problem, repairs + 1, buildRepairRounds), undefined);
     }
   } catch (problem) {
@@ -523,8 +584,10 @@ async function observeHarnessRun(options: {
         const text = [...(state?.view.entries ?? [])].reverse().find(entry => entry.kind === 'pi.assistant')?.text ?? '';
         if (text) turn.seed(messageOfText(text));
       }
-      await finishGeneration(requestId, status, error, anchor.firstAssistantEntryId, stopReason);
-      channel.push({ type: 'data-progress', data: { stage: status === 'ready' ? 'ready' : status, at: Date.now() }, transient: true } as UiChunk);
+      if (!finished) await finishGeneration(requestId, status, error, anchor.firstAssistantEntryId, stopReason);
+      const task = await generationFor(app.id);
+      if (task?.id === requestId && (task.status === 'ready' || task.status === 'failed' || task.status === 'cancelled')) status = task.status;
+      channel.push({ type: 'data-progress', data: { stage: status, at: Date.now() }, transient: true } as UiChunk);
     } catch (problem) {
       console.error(`生成收尾失败（生成 ${requestId}）：`, problem);
       channel.push({ type: 'error', errorText: '生成结果落库失败' } as UiChunk);
@@ -599,18 +662,38 @@ class RunTranslator {
   #buildStage: (typeof buildStageNames)[number] | null = null;
   #buildStageStartedAt = 0;
   #previewVersion = 0;
-  #stepNumber = 0;
   #pending: PendingModel | null = null;
   #chain: Promise<void> = Promise.resolve();
+  #seenEntries: Set<string>;
+  #endedTools: Set<string>;
   readonly #toolOutcomes = new Map<string, { ok: boolean; ms: number | null }>();
 
-  constructor(readonly channel: ChunkChannel, private readonly turn: AssistantTurn, private readonly anchor: TranscriptAnchor, private readonly requestId: string, private readonly model: ModelIdentity, private readonly round: number) {}
+  constructor(readonly channel: ChunkChannel, private readonly turn: AssistantTurn, private readonly anchor: TranscriptAnchor, private readonly requestId: string, private readonly model: ModelIdentity, private readonly round: number) {
+    this.#seenEntries = turn.seenEntries;
+    this.#endedTools = turn.endedTools;
+  }
 
   handle(event: HarnessEvent) {
     switch (event.type) {
-      case 'snapshot':
+      case 'snapshot': {
+        const entries = (event.entries ?? []).flatMap(entry => {
+          const parsed = transcriptEntrySchema.safeParse(entry);
+          return parsed.success ? [parsed.data] : [];
+        });
+        const from = entries.findIndex(entry => entry.kind === userEntryKind && userBubbleSchema.safeParse(entry.data).data?.id === `${this.requestId}-user`);
+        for (const entry of from < 0 ? [] : entries.slice(from)) {
+          const result = toolResultMessageOf(entry);
+          if (result) this.handle({ type: 'tool_execution_end', toolCallId: result.toolCallId, toolName: result.toolName, entry });
+          else this.handle({ type: 'message_end', entry });
+        }
+        for (const tool of event.tools ?? []) {
+          if (this.#endedTools.has(tool.callId)) continue;
+          if (tool.name === 'buildPreview') this.#startBuildWatch();
+          if (tool.details !== undefined) this.#toolDetails(tool.callId, tool.details);
+        }
         this.turn.seed(event.generation?.message);
         break;
+      }
       case 'message_start':
         if (z.object({ role: z.literal('assistant') }).safeParse(event.message).success) this.turn.seed(event.message);
         break;
@@ -618,17 +701,33 @@ class RunTranslator {
         this.turn.applyChanges(event.changes ?? []);
         break;
       case 'message_end': {
+        const id = entryIdOf(event.entry);
+        if (id && this.#seenEntries.has(id)) break;
+        if (id) this.#seenEntries.add(id);
         const message = entryAssistantMessage(event.entry);
-        if (!message) break;
+        if (!message) {
+          // 插话在步骤边界落进转录（它带 model 消息，harness 走的是 message_end）：这一刻客户端这条
+          // 助手气泡的 parts 已经定格，把边界下标告诉它，让它把插话气泡渲染在「这一段之前、下一段之后」
+          // 的位置，与刷新后转录投影的分段一致。
+          const entryId = steerEntryIdOf(event.entry);
+          if (entryId) {
+            this.turn.closeText();
+            this.channel.push({ type: 'data-steer', data: { id: entryId, index: this.turn.streamedParts } satisfies SteerLandedEvent, transient: true } as UiChunk);
+          }
+          break;
+        }
         const entryId = entryIdOf(event.entry);
         if (entryId !== null) this.anchor.record(entryId);
         this.turn.reconcile(message);
         this.turn.closeText();
+        for (const part of assistantPartsOf(message)) {
+          if (part.type === 'dynamic-tool') this.turn.toolStart(part.toolCallId, part.toolName, part.input);
+        }
         this.#chain = this.#chain.then(() => this.#recordAssistant(message)).catch(() => undefined);
         break;
       }
       case 'tool_execution_start':
-        if (event.toolCallId && event.toolName) {
+        if (event.toolCallId && event.toolName && !this.#endedTools.has(event.toolCallId)) {
           this.turn.toolStart(event.toolCallId, event.toolName, event.args);
           if (event.toolName === 'buildPreview') this.#startBuildWatch();
         }
@@ -637,7 +736,8 @@ class RunTranslator {
         if (event.toolCallId && event.details !== undefined) this.#toolDetails(event.toolCallId, event.details);
         break;
       case 'tool_execution_end': {
-        if (!event.toolCallId || !event.toolName) break;
+        if (!event.toolCallId || !event.toolName || this.#endedTools.has(event.toolCallId)) break;
+        this.#endedTools.add(event.toolCallId);
         this.turn.toolEnd(event.toolCallId, event.toolName, event.entry);
         this.#toolOutcomes.set(event.toolCallId, { ok: !toolResultOf(event.entry).isError, ms: null });
         const paths = writtenPathsOf(event.toolName, this.turn.tools.get(event.toolCallId)?.input);
@@ -699,9 +799,11 @@ class RunTranslator {
     await this.#flushPending();
     const parsed = assistantUsageSchema.safeParse(message);
     if (!parsed.success) return;
+    const stepNumber = this.turn.seenModelSteps++;
+    if (this.turn.recordedModelSteps.has(stepNumber)) return;
     const { provider, model, responseModel, stopReason, durationMs, usage } = parsed.data;
     this.#pending = {
-      stepNumber: this.#stepNumber++,
+      stepNumber,
       model: { alias: this.model.alias, providerId: this.model.providerId ?? provider ?? null, modelName: responseModel ?? model ?? this.model.modelName ?? null },
       upstreamProvider: provider ?? null,
       upstreamModelId: responseModel ?? model ?? null,
@@ -776,23 +878,35 @@ function writtenPathsOf(toolName: string, input: unknown): string[] {
 type SubmitContentBlock = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: ImageMediaType };
 
 const userEntryKind = 'app.user';
+/**
+ * 插话气泡的 id 前缀。服务端写转录、流里告知落地位置、客户端拿它当 key，三处用同一个 id：
+ * 刷新后转录取回的气泡 id 与流式期间乐观展示的完全一致。
+ */
+const steerEntryPrefix = 'steer-';
+const steerEntrySchema = z.object({ kind: z.literal(userEntryKind), data: z.object({ id: z.string(), metadata: z.object({ inputMode: chatInputModeSchema.optional() }).optional() }) });
 
-async function submitHarness(conversationId: number, content: string | SubmitContentBlock[], requestId: string | undefined, options: { whenBusy?: 'steer'; entry?: { kind: string; data: UIMessage }; binding?: string } = {}): Promise<void> {
-  await harnessJson('/submit', {
+/** 插话条目落进转录的 id；不是插话（普通用户消息）时返回 null。 */
+function steerEntryIdOf(entry: unknown): string | null {
+  const parsed = steerEntrySchema.safeParse(entry);
+  if (!parsed.success) return null;
+  const bubble = parsed.data.data;
+  return bubble.id.startsWith(steerEntryPrefix) || bubble.metadata?.inputMode ? bubble.id : null;
+}
+
+const harnessSubmissionSchema = z.object({ submissionId: z.number().int().positive(), status: z.enum(['queued', 'placed', 'done', 'unanswered']) });
+
+async function submitHarness(conversationId: number, content: string | SubmitContentBlock[], requestId: string | undefined, options: { whenBusy?: 'steer' | 'followUp'; entry?: { kind: string; data: UIMessage }; binding?: string } = {}): Promise<z.infer<typeof harnessSubmissionSchema>> {
+  return harnessSubmissionSchema.parse(await harnessJson('/submit', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ conversationId, content, requestId, whenBusy: options.whenBusy, entry: options.entry, binding: options.binding }),
-  });
+  }));
 }
 
-const harnessMessagesSchema = z.object({
-  messages: z.array(z.object({
-    id: z.number(),
-    kind: z.string(),
-    model: z.array(z.unknown()).optional(),
-    data: z.unknown().optional(),
-  })),
+const transcriptEntrySchema = z.object({
+  id: z.number(), kind: z.string(), model: z.array(z.unknown()).optional(), data: z.unknown().optional(),
 });
+const harnessMessagesSchema = z.object({ messages: z.array(transcriptEntrySchema) });
 type TranscriptEntry = z.infer<typeof harnessMessagesSchema>['messages'][number];
 
 const userBubbleSchema = z.object({ id: z.string(), role: z.literal('user'), parts: z.array(z.unknown()) }).passthrough();
@@ -852,24 +966,125 @@ function transcriptMessages(entries: readonly TranscriptEntry[]): UIMessage[] {
 
 /**
  * 一个应用的对话历史（`app/messages`）。转录在 harness 存储里（`pi.*` 是权威，产品只额外写用户气泡），
- * 所以这里经 `/messages` 读回条目再投影成 UI 消息；还没聊过（没有会话映射）时是空历史。
+ * 从同一份运行快照投影条目与进行中的内容；无结果而已结束的工具显示失败，避免刷新后仍然转圈。
  */
 export async function loadMessages(appId: string): Promise<UIMessage[]> {
   const conversationId = await conversationIdOf(appId);
   if (conversationId === undefined) return [];
-  const parsed = harnessMessagesSchema.safeParse(await harnessJson<unknown>(`/messages?conversationId=${conversationId}`));
-  if (!parsed.success) throw new Error('harness /messages 返回了预期之外的结构');
-  return transcriptMessages(parsed.data.messages);
+  return runtimeMessages(await harnessRuntime(conversationId));
 }
 
-async function waitForRunStart(conversationId: number, signal: AbortSignal): Promise<void> {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    signal.throwIfAborted();
-    if ((await harnessState(conversationId)).view.live.busy) return;
-    await delay(150);
+const harnessRuntimeSchema = harnessMessagesSchema.extend({
+  live: z.object({
+    run: z.object({ taskId: z.number(), inputs: z.array(z.number()) }).optional(),
+    generation: z.object({ message: z.unknown().optional() }).optional(),
+    tools: z.array(z.object({ callId: z.string(), name: z.string(), status: z.enum(['pending', 'running', 'done']), details: z.unknown().optional() })).optional(),
+  }),
+  inbox: z.object({ items: z.array(z.object({
+    id: z.number().int().positive(), mode: z.enum(['steer', 'followUp', 'write']),
+    entry: z.object({ kind: z.string(), data: z.unknown().optional() }).optional(),
+  })) }),
+});
+type HarnessRuntime = z.infer<typeof harnessRuntimeSchema>;
+
+async function harnessRuntime(conversationId: number): Promise<HarnessRuntime> {
+  return harnessRuntimeSchema.parse(await harnessJson<unknown>(`/runtime?conversationId=${conversationId}`));
+}
+
+function latestInputId(runtime: HarnessRuntime): number | null {
+  return runtime.messages.findLast(entry => entry.kind === userEntryKind)?.id ?? null;
+}
+
+function finalModelFailure(runtime: HarnessRuntime): string | null {
+  const final = runtime.messages.findLast(entry => entry.kind === 'pi.assistant');
+  const failure = z.object({ stopReason: z.enum(['error', 'aborted']), errorMessage: z.string().optional() }).safeParse(final && entryAssistantMessage(final));
+  return failure.success ? failure.data.errorMessage ?? '模型调用未完成' : null;
+}
+
+const queuedBubbleSchema = z.object({
+  id: z.string(), role: z.literal('user'), parts: z.array(textBlockSchema),
+  metadata: z.object({ attachments: attachmentPartsSchema.optional(), generationId: z.string().optional(), inputMode: chatInputModeSchema.optional() }).optional(),
+});
+
+function runtimeMessages(runtime: HarnessRuntime): ChatMessage[] {
+  const messages = transcriptMessages(runtime.messages) as ChatMessage[];
+  const partial = runtime.live.generation?.message;
+  const parts = assistantPartsOf(partial);
+  if (parts.length) {
+    const last = messages.at(-1);
+    if (last?.role === 'assistant') last.parts.push(...parts as ChatMessage['parts']);
+    else messages.push({ id: `live-${runtime.live.run?.taskId ?? 'assistant'}`, role: 'assistant', parts: parts as ChatMessage['parts'] });
   }
-  throw new Error('harness 没有在 30 秒内开始这次生成');
+  const done = new Set(runtime.live.tools?.filter(tool => tool.status === 'done').map(tool => tool.callId));
+  if (!runtime.live.run) {
+    // 任务异常退出可能没有产出结果条目；此时也不能继续显示“正在执行”。
+    for (const message of messages) {
+      message.parts = message.parts.map(part => part.type === 'dynamic-tool' && part.state === 'input-available'
+        ? { type: 'dynamic-tool', toolName: part.toolName, toolCallId: part.toolCallId, input: part.input, state: 'output-error', errorText: '工具执行已结束，未返回结果' }
+        : part);
+    }
+  } else if (done.size) {
+    for (const message of messages) {
+      message.parts = message.parts.map(part => part.type === 'dynamic-tool' && part.state === 'input-available' && done.has(part.toolCallId)
+        ? { type: 'dynamic-tool', toolName: part.toolName, toolCallId: part.toolCallId, input: part.input, state: 'output-error', errorText: '工具执行未完成，请查看后续回复' }
+        : part);
+    }
+  }
+  return messages;
+}
+
+export async function chatRuntime(appId: string, user: User): Promise<ChatRuntime> {
+  await getApp(appId, user, true, true);
+  const generation = await generationStatus(appId);
+  const conversationId = await conversationIdOf(appId);
+  if (conversationId === undefined) return { generation, busy: false, pending: [], messages: [] };
+  const runtime = await harnessRuntime(conversationId);
+  const pending: PendingChatInput[] = runtime.inbox.items.flatMap(item => {
+    if (item.mode === 'write' || item.entry?.kind !== userEntryKind) return [];
+    const parsed = queuedBubbleSchema.safeParse(item.entry.data);
+    return parsed.success ? [{
+      id: parsed.data.id, submissionId: item.id, mode: item.mode,
+      text: parsed.data.parts.map(part => part.text).join('\n'), attachments: parsed.data.metadata?.attachments ?? [],
+    }] : [];
+  });
+  return { generation, busy: runtime.live.run !== undefined, pending, messages: runtimeMessages(runtime) };
+}
+
+export async function harnessSubmitInput(raw: unknown, user: User): Promise<ChatInputReceipt> {
+  const input = chatInputSchema.parse(raw);
+  const app = await getApp(input.appId, user, true);
+  validatePrompt(input.text);
+  if (input.mode === 'steer' && input.attachments.length) throw new BusinessError(400, 40000, '插话只支持文字，请使用排队发送附图');
+  const task = await generationStatus(input.appId);
+  if (!task || (task.status !== 'generating' && task.status !== 'building')) throw new BusinessError(409, 40900, '当前任务已结束，请直接发送消息');
+  const conversationId = await conversationIdOf(input.appId);
+  if (conversationId === undefined) throw new BusinessError(409, 40900, '应用还没有运行中的会话');
+  if (input.attachments.length) {
+    const capability = z.object({ imageInput: z.boolean() }).parse(await harnessJson<unknown>(`/model?conversationId=${conversationId}`));
+    if (!capability.imageInput) throw new BusinessError(400, 40000, '当前生成模型不支持图片输入');
+  }
+  const images: AttachmentImage[] = await Promise.all(input.attachments.map(async part => ({
+    attachmentId: part.attachmentId,
+    ...await readAttachmentBytes({ attachmentId: part.attachmentId, userId: user.id, appId: app.id }),
+  })));
+  const bubble: ChatMessage = { id: input.id, role: 'user', parts: [{ type: 'text', text: input.text }], metadata: {
+    generationId: task.id, inputMode: input.mode, ...(input.attachments.length ? { attachments: input.attachments } : {}),
+  } };
+  const content: SubmitContentBlock[] = [{ type: 'text', text: input.text }, ...images.map(image => ({ type: 'image' as const, data: image.bytes.toString('base64'), mimeType: image.mediaType }))];
+  return withAppWriter<ChatInputReceipt>(app.id, async () => {
+    await uploadAttachmentImages(app, user, images);
+    const submission = await submitHarness(conversationId, content, input.id, { whenBusy: input.mode, entry: { kind: userEntryKind, data: bubble } });
+    if (submission.status === 'unanswered') throw new BusinessError(409, 40900, '消息已被撤回或未能进入上下文');
+    return { id: input.id, submissionId: submission.submissionId, generationId: task.id, state: submission.status === 'queued' ? 'queued' : 'placed' };
+  }, task.id, { lockTask: true });
+}
+
+export async function harnessCancelInput(appId: string, submissionId: number, user: User): Promise<{ state: 'aborted' | 'already_placed' | 'settled' }> {
+  await getApp(appId, user, true);
+  const conversationId = await conversationIdOf(appId);
+  if (conversationId === undefined) throw new BusinessError(404, 40400, '会话不存在');
+  const result = z.object({ state: z.enum(['aborted', 'already_placed', 'settled']) });
+  return result.parse(await harnessJson<unknown>('/input/cancel', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ conversationId, submissionId }) }));
 }
 
 class DetachedChannel extends ChunkChannel {
@@ -879,16 +1094,18 @@ class DetachedChannel extends ChunkChannel {
 async function adoptGeneration(row: { id: string; appId: string; conversationId: number | null }): Promise<void> {
   const { id, appId, conversationId } = row;
   if (conversationId === null) return;
-  if (!(await harnessState(conversationId)).view.live.busy) {
-    console.warn(`接管跳过：生成 ${id} 的租约已过期且会话 ${conversationId} 没有活跃运行，交给租约回收`);
-    return;
-  }
+  if (generationObservers.has(id)) return;
+  const state = await harnessRuntime(conversationId);
+  // 常驻 harness 可以先于 Next 恢复完成生成；此时仍接管最终验证，不能把完整转录判为进程中断。
+  const belongs = state.messages.some(entry => entry.kind === userEntryKind && userBubbleSchema.safeParse(entry.data).data?.id === `${id}-user`);
+  const queued = state.inbox.items.some(item => item.entry?.kind === userEntryKind && userBubbleSchema.safeParse(item.entry.data).data?.id === `${id}-user`);
+  if (!belongs && !queued) return;
   const app = await appForAdoption(appId);
   if (!app) return;
   if (!await adoptLease(id)) return;
   const model = await harnessModelIdentity(conversationId) ?? { alias: null, providerId: null, modelName: null };
-  void observeHarnessRun({ conversationId, requestId: id, app, model, channel: new DetachedChannel(), stop: new AbortController() });
-  console.warn(`接管重启前遗留的生成 ${id}（应用 ${appId}，会话 ${conversationId}）：等待运行结束后做最终验证`);
+  startHarnessObservation({ conversationId, requestId: id, app, model, channel: new DetachedChannel(), stop: new AbortController() });
+  console.warn(`接管重启前遗留的生成 ${id}（应用 ${appId}，会话 ${conversationId}）：恢复观察与最终验证`);
 }
 
 /**
@@ -896,7 +1113,7 @@ async function adoptGeneration(row: { id: string; appId: string; conversationId:
  *
  * 中途重启会丢掉观察线程：租约 30 秒后过期，下一次状态读取把它回收成 failed/interrupted，而 harness
  * 里的运行其实还在跑，于是「任务已失败」和「还在生成」分裂。启动时（`instrumentation.ts`）与每次状态
- * 读取都对账：租约已过期但会话仍有活跃运行的，重新 attach；没有活跃运行的交给 sweepStaleLeases 回收。
+ * 读取都对账：属于本次生成的输入已被受理就重新 attach；即使 pi 已完成，也恢复最终验证。
  */
 export async function adoptOrphanedGenerations(appId?: string): Promise<void> {
   for (const row of await staleActiveGenerations(appId)) {
@@ -939,7 +1156,11 @@ export async function harnessChatResponse(req: Request, raw: unknown, user: User
   const prompt = input.message.parts.filter(part => part.type === 'text').map(part => part.text).join('\n');
   validatePrompt(prompt);
   const attachmentParts = input.message.parts.filter(part => part.type === 'attachment');
-  const incoming = { ...input.message, id: `${input.requestId}-user` } as UIMessage;
+  const incoming: ChatMessage = {
+    id: `${input.requestId}-user`, role: 'user',
+    parts: input.message.parts.filter(part => part.type === 'text'),
+    metadata: { generationId: input.requestId, ...(attachmentParts.length ? { attachments: attachmentParts } : {}) },
+  };
   const admission = await admitGenerationModel();
   if (attachmentParts.length > 0 && !admission.imageInput) {
     throw new BusinessError(400, 40000, '当前生成模型不支持图片输入：请在模型管理里为别名开启「图片输入」，或换用支持视觉的模型');
@@ -978,7 +1199,7 @@ export async function harnessChatResponse(req: Request, raw: unknown, user: User
   }
 
   const channel = new ChunkChannel();
-  void observeHarnessRun({ conversationId, requestId: input.requestId, app, model, channel, stop });
+  startHarnessObservation({ conversationId, requestId: input.requestId, app, model, channel, stop });
 
   const stream = createUIMessageStream({
     onError: () => (stop.signal.aborted ? '生成已取消' : '生成失败，请查看任务状态'),
@@ -1004,7 +1225,10 @@ export async function harnessCancelGeneration(appId: string, user: User): Promis
   const task = await generationFor(appId);
   const active = task?.status === 'generating' || task?.status === 'building';
   const result = await cancelGeneration(appId, user);
-  if (active) await abortHarnessRun(appId).catch(problem => console.warn(`停止 harness 会话失败：${String(problem)}`));
+  if (active) {
+    generationObservers.get(task.id)?.abort(new Error('生成已取消'));
+    await abortHarnessRun(appId).catch(problem => console.warn(`停止 harness 会话失败：${String(problem)}`));
+  }
   return result;
 }
 
@@ -1015,14 +1239,10 @@ export async function harnessCancelGeneration(appId: string, user: User): Promis
  *
  * 插话自己的用户气泡也交给这次提交（`entry` 写 `app.user`）：pi 在边界处把它和模型消息一起写下，
  * 所以它在转录里天然落在两段助手条目之间，产品不再另写一条展示副本、也不需要在流式期间补写。
+ *
+ * 返回写进转录的气泡 id：调用方（前端）拿它当乐观气泡的标识，与运行中 `data-steer` 给的落地位置对上。
  */
-export async function harnessSteerGeneration(appId: string, user: User, text: string): Promise<boolean> {
-  await getApp(appId, user, true);
-  const task = await generationFor(appId);
-  const active = task?.status === 'generating' || task?.status === 'building';
-  const conversationId = active ? await conversationIdOf(appId) : undefined;
-  if (!task || !active || conversationId === undefined) throw new BusinessError(409, 40900, '当前没有正在生成的步骤，插话不适用');
-  const bubble: UIMessage = { id: `steer-${randomUUID()}`, role: 'user', parts: [{ type: 'text', text }] } as UIMessage;
-  await submitHarness(conversationId, text, undefined, { whenBusy: 'steer', entry: { kind: userEntryKind, data: bubble } });
-  return true;
+export async function harnessSteerGeneration(appId: string, user: User, text: string): Promise<string> {
+  const receipt = await harnessSubmitInput({ appId, id: `${steerEntryPrefix}${randomUUID()}`, mode: 'steer', text }, user);
+  return receipt.id;
 }

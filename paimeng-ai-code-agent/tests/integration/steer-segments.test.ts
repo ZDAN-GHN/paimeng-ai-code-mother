@@ -3,13 +3,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, getPool, now } from '@/server/db';
 import { withRateLimitRedis } from '@/server/redis';
 import { nextSnowflakeId } from '@/server/snowflake';
 import { apps, generations, generationSteps, leases, users } from '@/server/schema';
 import { publicUser } from '@/server/auth';
-import { harnessCancelGeneration, harnessChatResponse, harnessSteerGeneration, loadMessages } from '@/server/durable-engine';
+import { chatRuntime, generationStatus, harnessCancelGeneration, harnessCancelInput, harnessChatResponse, harnessSteerGeneration, harnessSubmitInput, loadMessages } from '@/server/durable-engine';
 import { generationFor } from '@/server/generation-store';
 import { workspace, writeProjectFile } from '@/server/workspace';
 import type { User } from '@/shared/contracts';
@@ -67,14 +67,19 @@ function waitUntil(check: () => Promise<boolean>, timeoutMs: number, label: stri
   })();
 }
 
-function chunksOf(sse: string): { type: string; delta?: string; toolName?: string }[] {
+function chunksOf(sse: string): { type: string; delta?: string; toolName?: string; data?: unknown }[] {
   return sse.split('\n')
     .filter(line => line.startsWith('data: '))
     .flatMap(line => {
       try {
-        const chunk = JSON.parse(line.slice(6)) as { type?: unknown; delta?: unknown; toolName?: unknown };
+        const chunk = JSON.parse(line.slice(6)) as { type?: unknown; delta?: unknown; toolName?: unknown; data?: unknown };
         return typeof chunk.type === 'string'
-          ? [{ type: chunk.type, ...(typeof chunk.delta === 'string' ? { delta: chunk.delta } : {}), ...(typeof chunk.toolName === 'string' ? { toolName: chunk.toolName } : {}) }]
+          ? [{
+              type: chunk.type,
+              ...(typeof chunk.delta === 'string' ? { delta: chunk.delta } : {}),
+              ...(typeof chunk.toolName === 'string' ? { toolName: chunk.toolName } : {}),
+              ...(chunk.data !== undefined ? { data: chunk.data } : {}),
+            }]
           : [];
       } catch {
         return [];
@@ -164,7 +169,8 @@ describe.skipIf(!harnessReady || !postgresReady)('插话后的转录与派生 UI
     const running = await startGeneration();
     const { actor, appId, base, conversationId, requestId } = running;
     try {
-      expect(await harnessSteerGeneration(appId, actor, steerText)).toBe(true);
+      const steerId = await harnessSteerGeneration(appId, actor, steerText);
+      expect(steerId).toMatch(/^steer-/);
       const task = await waitForTerminal(appId, requestId, 60_000);
       expect(task.status).toBe('ready');
 
@@ -172,6 +178,7 @@ describe.skipIf(!harnessReady || !postgresReady)('插话后的转录与派生 UI
       expect(transcript.map(bubble => bubble.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
       expect(transcript[0].parts).toEqual([{ type: 'text', text: prompt }]);
       expect(transcript[2].parts).toEqual([{ type: 'text', text: steerText }]);
+      expect(transcript[2].id).toBe(steerId);
 
       const [first, second] = [transcript[1], transcript[3]];
       expect(toolsOf(first).map(tool => tool.toolName)).toEqual(['m1_wait']);
@@ -208,6 +215,75 @@ describe.skipIf(!harnessReady || !postgresReady)('插话后的转录与派生 UI
       expect(streamedText).toContain(finalText);
       expect(streamedText).not.toContain('waited 3000');
       expect(textsOf(transcript[1])).toEqual([]);
+
+      // 客户端拿 `data-steer` 决定插话气泡落在哪一段：边界前只产出了 1 个 part（第一步的 m1_wait 工具调用，
+      // 第一步没有文字），所以 index 必须是 1，且事件落在工具条目之后、第二步文字之前。
+      const types = chunks.map(chunk => chunk.type);
+      expect(chunks.filter(chunk => chunk.type === 'data-steer').map(chunk => chunk.data)).toEqual([{ id: steerId, index: 1 }]);
+      expect(types.lastIndexOf('tool-input-available')).toBeLessThan(types.indexOf('data-steer'));
+      expect(types.indexOf('data-steer')).toBeLessThan(types.indexOf('text-delta'));
+    } finally {
+      await stopGeneration(running);
+    }
+  }, 120_000);
+
+  it('原生插话和 followUp 分别排队，只在 pi 接收后进入对话，连续 run 不提前构建收尾', async () => {
+    const running = await startGeneration();
+    try {
+      const steer = await harnessSubmitInput({ appId: running.appId, id: 'input-' + randomUUID(), mode: 'steer', text: 'NEXT_STEP_NOTE' }, running.actor);
+      const followUp = await harnessSubmitInput({ appId: running.appId, id: 'input-' + randomUUID(), mode: 'followUp', text: 'NEXT_RUN_NOTE' }, running.actor);
+      expect(steer.state).toBe('queued');
+      expect(followUp.state).toBe('queued');
+      const blocked = await chatRuntime(running.appId, running.actor);
+      expect(blocked.busy).toBe(true);
+      expect(blocked.pending.map(item => [item.id, item.mode])).toEqual([[steer.id, 'steer'], [followUp.id, 'followUp']]);
+      expect(blocked.messages.some(message => message.id === steer.id || message.id === followUp.id)).toBe(false);
+      const terminal = await waitForTerminal(running.appId, running.requestId, 60_000);
+      expect(terminal.status).toBe('ready');
+      const runtime = await chatRuntime(running.appId, running.actor);
+      expect(runtime.pending).toEqual([]);
+      expect(runtime.busy).toBe(false);
+      expect(runtime.messages.map(message => message.role)).toEqual(['user', 'assistant', 'user', 'assistant', 'user', 'assistant']);
+      expect(runtime.messages[2].id).toBe(steer.id);
+      expect(runtime.messages[4].id).toBe(followUp.id);
+      const events = chunksOf(await running.response.text());
+      const boundaries = events.filter(chunk => chunk.type === 'data-steer').map(chunk => chunk.data);
+      expect(boundaries).toEqual([{ id: steer.id, index: 1 }, { id: followUp.id, index: 2 }]);
+      expect(events.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.delta).join('')).toBe(finalText + finalText);
+    } finally {
+      await stopGeneration(running);
+    }
+  }, 120_000);
+
+  it('撤回未接收的原生排队消息，不会在后续上下文或转录中出现', async () => {
+    const running = await startGeneration();
+    try {
+      const receipt = await harnessSubmitInput({ appId: running.appId, id: 'input-' + randomUUID(), mode: 'followUp', text: 'WITHDRAW_ME' }, running.actor);
+      await expect(harnessCancelInput(running.appId, receipt.submissionId, { ...running.actor, id: '18446744073709551615', userRole: 'admin' })).rejects.toMatchObject({ status: 403 });
+      expect(await harnessCancelInput(running.appId, receipt.submissionId, running.actor)).toEqual({ state: 'aborted' });
+      expect((await chatRuntime(running.appId, running.actor)).pending).toEqual([]);
+      expect((await waitForTerminal(running.appId, running.requestId, 60_000)).status).toBe('ready');
+      expect((await loadMessages(running.appId)).some(message => message.id === receipt.id)).toBe(false);
+      await running.response.text();
+    } finally {
+      await stopGeneration(running);
+    }
+  }, 120_000);
+
+  it.each(['expired', 'missing', 'account-gap'])('Next 观察者丢失而 pi 已结束，恢复情形 %s 可完成最终验证', async leaseState => {
+    const running = await startGeneration();
+    try {
+      await running.response.text();
+      const accountedBefore = await db().select().from(generationSteps).where(eq(generationSteps.generationId, running.requestId));
+      if (leaseState === 'account-gap') await db().delete(generationSteps).where(and(eq(generationSteps.generationId, running.requestId), eq(generationSteps.kind, 'model'), eq(generationSteps.stepNumber, 0)));
+      await db().update(generations).set({ status: 'generating', stopReason: null, error: null }).where(eq(generations.id, running.requestId));
+      if (leaseState !== 'missing') await db().insert(leases).values({ appId: BigInt(running.appId), generationId: running.requestId, expiresAt: '2000-01-01 00:00:00.000' });
+      await generationStatus(running.appId);
+      expect((await waitForTerminal(running.appId, running.requestId, 60_000)).status).toBe('ready');
+      expect((await chatRuntime(running.appId, running.actor)).messages.flatMap(message => message.parts).some(part => part.type === 'dynamic-tool' && part.state === 'input-available')).toBe(false);
+      const accountedAfter = await db().select().from(generationSteps).where(eq(generationSteps.generationId, running.requestId));
+      expect(accountedAfter.filter(step => step.kind === 'model')).toHaveLength(accountedBefore.filter(step => step.kind === 'model').length);
+      expect(accountedAfter.filter(step => step.kind === 'model').map(step => step.stepNumber).sort()).toEqual([0, 1]);
     } finally {
       await stopGeneration(running);
     }

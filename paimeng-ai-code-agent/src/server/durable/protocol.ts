@@ -1,1 +1,1 @@
-export const harnessProtocol = 4;
+export const harnessProtocol = 6;

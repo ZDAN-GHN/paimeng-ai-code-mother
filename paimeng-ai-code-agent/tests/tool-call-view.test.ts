@@ -53,13 +53,22 @@ describe('工具调用展示模型', () => {
     expect(call?.view).toMatchObject({ kind: 'images-imported', images: [{ src: 'assets/a.jpg', license: 'CC0', bytes: 204800 }] });
   });
 
-  it('检索图片与联网搜索：候选/结果列表；空结果与失败不崩', () => {
+  it('检索图片与联网搜索：候选/结果列表；空结果与失败也要说清楚原因', () => {
     const search = toolCallOf(part('searchImages', { query: '猫' }, { status: 'ok', data: { query: '猫', candidates: [{ candidateId: 'c1', title: '小猫', sourcePage: 'https://example.com', sourceIsPage: true, license: null, licenseKnown: false }] } }));
     expect(search?.view).toMatchObject({ kind: 'images-searched', query: '猫' });
     const web = toolCallOf(part('webSearch', { query: '广州天气' }, { status: 'ok', data: { query: '广州天气', results: [{ title: '示例', url: 'https://example.com', snippet: '摘要' }] } }));
     expect(web?.view).toMatchObject({ kind: 'web-searched', query: '广州天气', results: [{ url: 'https://example.com' }] });
-    expect(toolCallOf(part('webSearch', { query: 'x' }, { status: 'empty', message: '没有搜索到结果' }))?.view.kind).toBe('unknown');
-    expect(toolCallOf(part('readWebPage', { url: 'https://example.com' }, { status: 'error', code: 'unavailable', message: '抓取失败' }))?.view.kind).toBe('unknown');
+
+    // 空结果与上游失败都是工具自己的结果：卡片要说原因，不能停在「正在联网搜索…」。
+    const empty = callOf(part('webSearch', { query: 'x' }, { status: 'empty', message: '没有搜索到结果，请调整关键词后重试' }));
+    expect(empty.view).toMatchObject({ kind: 'web-empty', label: '联网搜索', target: 'x', message: '没有搜索到结果，请调整关键词后重试' });
+    expect(toolCallFailed(empty)).toBe(false);
+    const failed = callOf(part('readWebPage', { url: 'https://example.com' }, { status: 'error', code: 'unavailable', message: '抓取失败' }));
+    expect(failed.view).toMatchObject({ kind: 'web-error', label: '读取网页', target: 'https://example.com', message: '抓取失败' });
+    expect(toolCallFailed(failed)).toBe(true);
+    // 搜索类工具失败时没有 data，但 message 仍然要能显示出来。
+    expect(callOf(part('searchImages', { query: '猫' }, { status: 'error', code: 'quota', message: '联网服务已达限额，请在 600 秒后重试' })).view)
+      .toMatchObject({ kind: 'web-error', message: '联网服务已达限额，请在 600 秒后重试' });
   });
 
   it('阶段构建：成功给出阶段耗时，失败按失败呈现并带诊断', () => {
@@ -91,5 +100,12 @@ describe('工具调用展示模型', () => {
     expect(toolCallOf(part('runShell', { command: 'ls' }))?.view).toMatchObject({ kind: 'unknown', name: 'runShell' });
     expect(toolCallOf({ type: 'text', text: '你好' })).toBeNull();
     expect(toolCallOf({ type: 'dynamic-tool', toolName: 'mysteryTool', state: 'input-available', input: {} })?.view).toMatchObject({ kind: 'unknown', name: 'mysteryTool' });
+    // 已经结束的未知工具留一份原始结果文本：卡片不能显示成永远「正在…」，也不能什么都不显示。
+    expect(callOf({ type: 'dynamic-tool', toolName: 'mysteryTool', state: 'output-available', input: { q: 'x' }, output: '原始结果' }).view)
+      .toMatchObject({ kind: 'unknown', name: 'mysteryTool', text: '原始结果' });
+    expect(callOf({ type: 'dynamic-tool', toolName: 'mysteryTool', state: 'output-available', input: {}, output: { ok: true } }).view)
+      .toMatchObject({ kind: 'unknown', text: '{"ok":true}' });
+    expect(callOf({ type: 'dynamic-tool', toolName: 'mysteryTool', state: 'output-available', input: {} }).view)
+      .toMatchObject({ kind: 'unknown', text: null });
   });
 });

@@ -118,20 +118,19 @@ describe('webSearch 的真实调用与限额', () => {
     await expect(limited.search('限流')).resolves.toMatchObject({ status: 'error', code: 'quota' });
   });
 
-  it('相同查询复用结果，超过本轮预算后不再请求', async () => {
+  it('相同查询复用结果，不同查询不受调用次数限制', async () => {
     const { calls, transport } = makeTransport(() => searchPayload([{ title: 'A', url: 'https://a.test/1', content: 'x' }]));
     const { search } = makeTools(transport);
     await search('同一查询');
     await search('同一查询');
     expect(calls).toHaveLength(1);
-    await search('查询二');
-    await search('查询三');
-    expect(calls).toHaveLength(3);
-    expect(await search('查询四')).toMatchObject({ status: 'error', code: 'budget-exceeded' });
-    expect(calls).toHaveLength(3);
+    for (const query of ['查询二', '查询三', '查询四', '查询五']) {
+      expect(await search(query)).toMatchObject({ status: 'ok' });
+    }
+    expect(calls).toHaveLength(5);
   });
 
-  it('结果按本轮返回预算裁剪，超出预算时提前停止', async () => {
+  it('单次结果返回量受裁剪，超出时提前停止', async () => {
     const many = Array.from({ length: 5 }, (_item, index) => ({ title: `T${index}`, url: `https://a.test/${index}`, content: 'y'.repeat(500) }));
     const { transport } = makeTransport(() => searchPayload(many));
     const { search } = makeTools(transport);
@@ -196,14 +195,15 @@ describe('readWebPage 的正文读取与回退', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it('相同地址复用结果并计入读取预算', async () => {
+  it('相同地址复用结果，不同地址不受调用次数限制', async () => {
     const { calls, transport } = makeTransport(() => extractPayload('内容'));
     const { read } = makeTools(transport);
     await read('https://a.test/1');
     await read('https://a.test/1');
     expect(calls).toHaveLength(1);
-    await read('https://a.test/2');
-    await read('https://a.test/3');
-    expect(await read('https://a.test/4')).toMatchObject({ status: 'error', code: 'budget-exceeded' });
+    for (const url of ['https://a.test/2', 'https://a.test/3', 'https://a.test/4', 'https://a.test/5']) {
+      expect(await read(url)).toMatchObject({ status: 'ok' });
+    }
+    expect(calls).toHaveLength(5);
   });
 });

@@ -29,6 +29,6 @@ export const uploadDirectory = (type: CodeGenType): string => isProjectCodeGenTy
 export async function cancelGeneration(appId: string, user: User) {
   await getApp(appId, user, true);
   const task = await generationFor(appId);
-  if (task?.status === 'generating') await setGeneration(task.id, 'cancelled', '生成已取消', 'cancelled');
+  if (task?.status === 'generating' || task?.status === 'building') await setGeneration(task.id, 'cancelled', '生成已取消', 'cancelled');
   return true;
 }

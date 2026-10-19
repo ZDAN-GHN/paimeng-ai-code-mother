@@ -9,6 +9,7 @@ import { users, apps, leases, generations } from '@/server/schema';
 import { chatRateLimitKey } from '@/server/rate-limit';
 import { closeRateLimitRedis, rateLimitRedis } from '@/server/redis';
 import { publicUser } from '@/server/auth';
+import { cancelGeneration } from '@/server/agent';
 import { beginGeneration, finishGeneration, generationFor, heartbeat, setGeneration, withAppWriter } from '@/server/generation-store';
 import { deleteApp, getApp, listApps, updateApp, download, publish } from '@/server/business';
 import type { User } from '@/shared/contracts';
@@ -59,7 +60,11 @@ describe('后端关键不变量（独立 Postgres 测试库）', () => {
     await finishGeneration(id, 'failed', '重复回调', `${id}-assistant`);
     expect(await db().select().from(leases).where(eq(leases.appId, BigInt(appId)))).toMatchObject([{ generationId: next }]);
     const tasks = await db().select().from(generations).where(eq(generations.appId, BigInt(appId)));
-    expect(tasks).toMatchObject([{ id, status: 'ready' }, { id: next, status: 'generating' }]);
+    expect(tasks).toHaveLength(2);
+    expect(tasks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id, status: 'ready' }),
+      expect.objectContaining({ id: next, status: 'generating' }),
+    ]));
   });
 
   it('取消状态不会被成功回调覆盖，清理完成前仍排除所有应用写入', async () => {
@@ -73,6 +78,28 @@ describe('后端关键不变量（独立 Postgres 测试库）', () => {
     await finishGeneration(id, 'ready', null, `${id}-assistant`);
     expect(await generationFor(appId)).toMatchObject({ status: 'cancelled' });
     expect(await withAppWriter(appId, async () => 'allowed')).toBe('allowed');
+  });
+
+  it.each(['ready', 'failed'] as const)('最终验证的接收守卫阻止过早 %s，保留租约直到新增输入被处理', async outcome => {
+    const id = randomUUID();
+    await beginGeneration(appId, id, actor);
+    await setGeneration(id, 'building');
+    expect(await finishGeneration(id, outcome, null, undefined, outcome === 'ready' ? 'completed' : 'verification-failed', async () => false)).toBe(false);
+    expect(await generationFor(appId)).toMatchObject({ status: 'building' });
+    expect(await db().select().from(leases).where(eq(leases.appId, BigInt(appId)))).toHaveLength(1);
+    expect(await finishGeneration(id, outcome, null, undefined, outcome === 'ready' ? 'completed' : 'verification-failed', async () => true)).toBe(true);
+    expect(await generationFor(appId)).toMatchObject({ status: outcome });
+  });
+
+  it('最终构建阶段也能取消，后续成功回调仍不能覆盖取消', async () => {
+    const id = randomUUID();
+    await beginGeneration(appId, id, actor);
+    await setGeneration(id, 'building');
+    await cancelGeneration(appId, actor);
+    expect(await generationFor(appId)).toMatchObject({ status: 'cancelled', stopReason: 'cancelled' });
+    await finishGeneration(id, 'ready', null);
+    expect(await generationFor(appId)).toMatchObject({ status: 'cancelled' });
+    expect(await db().select().from(leases).where(eq(leases.appId, BigInt(appId)))).toEqual([]);
   });
 
   it('过期的取消租约可回收，心跳不能复活过期租约，旧执行者不能写入新任务', async () => {

@@ -31,6 +31,11 @@ export type BuildProgressEvent =
  | {stage:'preview';version:number;at:number}
  | {stage:'source'|'install'|'typecheck'|'build';status:'started'|'ok'|'failed';ms:number;at:number}
  | {stage:'ready'|'failed'|'cancelled';at:number};
+/**
+ * 插话落地事件（`data-steer`，同样是瞬时事件）：模型在当前步骤结束后把这条插话写进了转录，
+ * `index` 是那一刻助手气泡已经产出的 part 数。
+ */
+export type SteerLandedEvent = {id:string;index:number};
 /** 注册表里的模型绑定标识（与上游实际响应的 provider/model 分开记）。 */
 export type ModelIdentity = {alias:string|null;providerId:string|null;modelName:string|null};
 export type AccountStepKind = 'model'|'build'|'summary';
