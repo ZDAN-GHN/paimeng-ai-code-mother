@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { Image, Spin, Tag } from 'antd';
 import { BuildOutlined, CloseCircleFilled, DownOutlined, FileTextOutlined, FolderOpenOutlined, LoadingOutlined, PictureOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons';
 import { z } from 'zod';
@@ -257,7 +257,9 @@ function ImportedImages({ images, assetUrl }: { images: z.infer<typeof importedI
 }
 
 /** 一条工具调用：标题行 + 可展开的明细。不显示工具调用 id、state 或原始 JSON。 */
-export function ToolCall({ call, assetUrl }: { call: ToolCall; assetUrl: (path: string) => string }) {
+// memo：卡片的可变状态只有展开与否（内部的 useState），轮询/秒表等无关 setState
+// 不再连带重渲染所有卡片；call 由 toolCallOf 纯函数产出，引用变化时才重渲染。
+export const ToolCall = memo(function ToolCall({ call, assetUrl }: { call: ToolCall; assetUrl: (path: string) => string }) {
   const [override, setOverride] = useState<boolean | null>(null);
   const view = call.view;
   const open = isOpen(override, call);
@@ -310,4 +312,4 @@ export function ToolCall({ call, assetUrl }: { call: ToolCall; assetUrl: (path: 
         : view.text === null ? <p className="tool-call-meta">没有可展示的明细</p> : <Code content={view.text} />)}
     </div>}
   </div>;
-}
+});

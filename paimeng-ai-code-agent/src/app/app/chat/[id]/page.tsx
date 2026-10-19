@@ -1,5 +1,5 @@
 'use client';
-import { Fragment, use, useState, useEffect, useMemo, useRef, useCallback, type ComponentRef } from 'react';
+import { Fragment, memo, use, useState, useEffect, useMemo, useRef, useCallback, type ComponentRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
@@ -43,14 +43,16 @@ function repairingOf(data: unknown): { attempt: number; maxAttempts: number } | 
 }
 
 /** 助手回复的内容块：文字、思考过程、工具调用。工具调用只渲染可读信息，不显示原始 JSON。 */
-function AssistantParts({ parts, assetUrl }: { parts: UIMessage['parts']; assetUrl: (path: string) => string }) {
+// memo：轮询/秒表等无关 setState 不再连带重渲染每条消息的全部工具卡片与文字块
+//（卡片的显示状态变化不受影响，那仍由 ToolCall 自己的 useState 管理）。
+const AssistantParts = memo(function AssistantParts({ parts, assetUrl }: { parts: UIMessage['parts']; assetUrl: (path: string) => string }) {
   return <>{parts.map((part, index) => {
     if (part.type === 'text') return <MarkdownMessage key={index} content={part.text} />;
     if (part.type === 'reasoning') return <details className="reasoning" key={index}><summary>思考过程</summary><div className="message-text">{part.text}</div></details>;
     const call = toolCallOf(part);
     return call ? <ToolCall key={index} call={call} assetUrl={assetUrl} /> : null;
   })}</>;
-}
+});
 
 /**
  * 一条已经进了 pi 上下文的输入气泡（插话或排队消息）。落点由服务端的步骤边界（`data-steer`）决定，
