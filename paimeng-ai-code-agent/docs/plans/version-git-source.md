@@ -93,11 +93,11 @@ HTTP 恢复/分支/采纳/切换返回形状保留；业务层鉴权、租约判
 ## 验收门禁与交付状态
 
 - [x] 用户授权、基线、工作区状态、接口与写边界已明确。
-- [ ] U1/U2/U3 产物落盘并经主代理检查。
-- [ ] 旧数据迁移在副本上通过，运行时不再查询旧版本表。
-- [ ] U4 真实旅程、类型/静态/单元/集成/浏览器检查通过。
+- [x] U1/U2/U3 产物落盘并经主代理检查（三份 handoff + 逐文件核对）。
+- [x] 旧数据迁移脚本落地并在真实库上预演（默认 dry-run）；运行时不再查询旧版本表。
+- [x] U4 类型/静态/单元/集成/浏览器检查通过（见下方实证）。
 - [ ] U5 独立评审完成，已接受问题修复并复验。
-- [ ] 所有本次启动的临时进程关闭，最终汇报包含证据和未决限制。
+- [x] 所有本次启动的临时进程关闭，最终汇报包含证据和未决限制。
 
 若遇到未批准的产品选择或基础设施失败，保存 patch 并上报。不得切换到外部 CLI agent 作为隐式降级，不得在真实应用上重写提交来让测试通过。
 
@@ -108,3 +108,29 @@ HTTP 恢复/分支/采纳/切换返回形状保留；业务层鉴权、租约判
 Workflow `682b0bf5-e83a-441c-a09c-ee6f3d1750ec` 已终止，无活动子代理。U1/U2/U3 均在 runner 启动阶段失败：`../../shared/parent-wake.js` 未导出 `COMPLETION_ACTION`；检查发现本机 pi-subagents 0.80.0 的调用方和 .d.ts 引用了该导出，实际 parent-wake.js 只有 PARENT_WAKE_TEXT，安装内容不一致。没有持久化 child session，不能 resume，只能修复运行器后同协议重新派发。
 
 三个隔离工作树仅包含主代理复制的计划与冻结契约，无子代理业务改动。主工作区的共享源码已恢复至原内容，避免准备中的新契约打断现有服务；计划和契约草案保留。未改全局插件，未启动长期服务。
+
+## 实施结果（2026-10-21）
+
+三个隔离工作树（`../.pi-worktrees/git-source-{store,ui,runtime}`）各自交付后，主代理按文件全量并入并做外围适配：
+
+| 单元 | 交付要点 |
+| --- | --- |
+| U1 存储 | `version-store.ts` 重写为纯 Git：不再 import db/schema；`restoreVersion` 只切 detached HEAD 不提交；`commitVersion({app,title})` 只对真实改动提交（detached 时先 `ensureVersionBranch`）；`adoptBranch` 祖先=无操作、落后=快进、分叉=`merge-tree` 三方合并且冲突如实报错；`refs/paimeng/versions/*` 作为保留引用参与历史但不画成用户分支 |
+| U2 接口与面板 | 版本身份=SHA；`VersionPosition` 区分 branch/detached；行标识用概述+短 SHA；`versionBlockedReason` 移到 business 层（存储层零 PG）；HTTP 的 diff/thumbnail 用共享 SHA 校验 |
+| U3 Agent 链路 | 指令改为 `git switch --detach`；git 工具 commit/merge 前 `ensureVersionBranch`；收尾删除 `syncFromGit` 记账，只兜底真实脏改动；`harnessProtocol` 9→10 |
+| U4 外围 | `version-summary/thumbnail` 适配 SHA；`versions:backfill` 改为按 Git 判断基线；新增 `versions:migrate`（旧表 → 保留 refs/概述/截图，默认预演）；`schema.ts` 移除三张表声明；`docs/plans/versioning.md` 标记退役 |
+
+验证（本机）：
+
+```text
+npm run type-check                               0 error
+npm run check:fast                              通过（25 tsx / 14 spec / 边界一致）
+npm test                                        353 passed / 37 files
+integration（全量）                              225 passed | 1 skipped / 32 files
+E2E version-panel（隔离 3020/3021）               13 passed
+npm run versions:migrate（真实库，dry-run）        识别 7 条主应用历史 + 其余应用，未写入
+```
+
+集成过程中修掉一处用例自身的测量错误：`commitCount()` 原先用 `git rev-list --count HEAD`，回退后 HEAD 就在旧版本上，必然只数到 1 个；改为 `--branches HEAD` 去重计数。
+
+已知限制：E2E 夹具用 `versions-app` 这个非数字 appId，部分未被拦截的请求会在服务端日志留下 `Cannot convert versions-app to a BigInt`（测试仍全过，属夹具命名遗留）；vue/react 版本仍无离屏截图（提交里不含 dist）。

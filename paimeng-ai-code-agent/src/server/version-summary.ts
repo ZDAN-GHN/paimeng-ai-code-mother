@@ -13,15 +13,14 @@ const systemPrompt = [
   '示例：加了深色模式、重做首页排版、修复表单校验、补充素材图片。只输出这一句话。',
 ].join('\n');
 
-/** 兜底标题：不拿用户原话，用「改了几处」这种可核对的事实，保证列表始终有可读文案。 */
-export function fallbackVersionTitle(version: Pick<AppVersion, 'kind' | 'changedFiles' | 'fileCount' | 'seq'>) {
-  if (version.kind === 'checkpoint') return '切版前的快照';
-  if (version.kind === 'restore') return '回到历史版本';
-  if (version.kind === 'branch') return '从历史版本分叉';
-  if (version.kind === 'adopt') return '采纳实验分支';
+/**
+ * 兜底标题：不拿用户原话，用「改了几个文件」这种可核对的事实。
+ * 提交信息本来就由模型的 commit 承载，这里只在没有缓存概述时给一个稳定文案。
+ */
+export function fallbackVersionTitle(version: Pick<AppVersion, 'changedFiles'>) {
   const changed = version.changedFiles.length;
-  if (changed === 0) return `第 ${version.seq} 版`;
-  if (changed === 1) return `改动 1 个文件`;
+  if (changed === 0) return '合并历史版本';
+  if (changed === 1) return '改动 1 个文件';
   return `改动 ${changed} 个文件`;
 }
 
@@ -58,7 +57,7 @@ async function summaryModel() {
 }
 
 /**
- * 给一版生成概述。失败就退回兜底标题——版本记录不该因为一次模型调用失败而没有标题。
+ * 给一版生成概述。失败就退回兜底标题——展示缓存不该因为一次模型调用失败而变空。
  */
 export async function summarizeVersion(input: { version: AppVersion; userPrompt: string | null }): Promise<string> {
   const fallback = fallbackVersionTitle(input.version);

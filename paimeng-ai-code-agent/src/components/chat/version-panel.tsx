@@ -8,14 +8,13 @@ import { api } from '@/client/api';
 import { parseStoredTime } from '@/shared/display';
 import { VersionTreeLegend, VersionTreeLines, treeGutterWidth, treeRowHeight } from './version-graph';
 import {
-  DEFAULT_BRANCH, versionKindLabels,
-  type AppVersion, type AppVersionOverview, type VersionDiff, type VersionKind,
+  DEFAULT_BRANCH, type AppVersion, type AppVersionOverview, type VersionDiff,
 } from '@/shared/versioning';
 import './version-panel.css';
 
 /**
- * 应用版本面板：只读时间线 + 三个可逆写操作（回到此版本 / 开分支 / 采纳分支）。
- * 所有写操作都靠二次确认，且不删除历史——回退是在当前分支追加一版，所以面板只做「新增」。
+ * 应用版本面板：只读的 Git 历史 + 四个可逆写操作（回到此版本 / 开分支 / 合并到主线 / 切换分支）。
+ * 回退只把工作区切到那次提交（detached HEAD），不新增版本，也不删除历史。
  */
 
 type OverviewState =
@@ -41,9 +40,6 @@ type SwitchResult = WriteResult & { branch: string; version: AppVersion | null }
 
 type VersionFileStatus = VersionDiff['files'][number]['status'];
 
-const kindColors: Record<VersionKind, string> = {
-  generate: 'blue', restore: 'orange', branch: 'purple', adopt: 'green', checkpoint: 'default',
-};
 const fileStatusLabels: Record<VersionFileStatus, string> = {
   added: '新增', modified: '修改', deleted: '删除', renamed: '重命名',
 };
@@ -51,9 +47,10 @@ const fileStatusColors: Record<VersionFileStatus, string> = {
   added: 'green', modified: 'blue', deleted: 'red', renamed: 'purple',
 };
 
-/** 数据库里的时间形如 `2026-10-19 10:00:00`（含 `T` 也认），没有时区，按本地时间解释。 */
-
 const pad = (value: number) => String(value).padStart(2, '0');
+
+/** 版本身份是完整 commit SHA：列表与确认框里都只显示前 7 位，完整值放 title 属性。 */
+const shortSha = (sha: string) => sha.slice(0, 7);
 
 /** 今天的版本只显示时分，更早的显示月日——时间线上留最多的宽度给标题。 */
 function formatVersionTime(value: string, now: Date): string {
@@ -65,13 +62,13 @@ function formatVersionTime(value: string, now: Date): string {
 
 const messageOf = (error: unknown) => error instanceof Error && error.message ? error.message : '请求失败';
 
-/** 时间线倒序；同一时刻的记录按分支内序号倒序，保证顺序稳定。 */
+/** 时间线倒序；同一时刻的提交保持接口给的顺序（Git 已按拓扑排好）。 */
 function sortedVersions(versions: AppVersion[]): AppVersion[] {
   const timeOf = (version: AppVersion) => parseStoredTime(version.createTime)?.getTime() ?? 0;
-  return [...versions].sort((left, right) => timeOf(right) - timeOf(left) || right.seq - left.seq);
+  return [...versions].sort((left, right) => timeOf(right) - timeOf(left));
 }
 
-/** 缩略图可能不存在（记录版本时构建缓存不是最新的）：先占位，加载成功才显示，避免破图。 */
+/** 缩略图按 commit SHA 缓存，可能还没截出来：先占位，加载成功才显示，避免破图。 */
 function VersionThumbnail({ appId, version }: { appId: string; version: AppVersion }) {
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
   const src = '/api/app/versions/thumbnail?appId=' + encodeURIComponent(appId) + '&versionId=' + encodeURIComponent(version.id);
@@ -82,7 +79,7 @@ function VersionThumbnail({ appId, version }: { appId: string; version: AppVersi
     </span>}
     {status !== 'failed' && <img
       className="version-panel-thumb-image"
-      alt={`v${version.seq} 的界面缩略图`}
+      alt={`「${version.title}」的界面缩略图`}
       src={src}
       onLoad={() => setStatus('ready')}
       onError={() => setStatus('failed')}
@@ -102,7 +99,7 @@ function VersionDiffView({ state, onClose }: { state: DiffState; onClose: () => 
   const target = state.status === 'ready' ? state.diff.target : state.target;
   return <section ref={sectionRef} className="version-panel-diff" aria-label="版本对比">
     <div className="version-panel-diff-head">
-      <span className="version-panel-diff-title">对比 v{base.seq} → v{target.seq}</span>
+      <span className="version-panel-diff-title">对比 {shortSha(base.id)} → {shortSha(target.id)}</span>
       <Button type="text" size="small" icon={<CloseOutlined aria-hidden="true" />} aria-label="关闭对比" onClick={onClose} />
     </div>
     {state.status === 'loading' && <div className="version-panel-diff-loading"><Spin size="small" />正在读取差异…</div>}
@@ -128,7 +125,7 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
   appId: string;
   open: boolean;
   onClose: () => void;
-  /** 版本内容已改变工作区（回退/开分支/采纳/切换）后调用，让页面刷新预览与消息。 */
+  /** 版本内容已改变工作区（回退/开分支/合并/切换）后调用，让页面刷新预览与消息。 */
   onWorkspaceChanged: () => void;
 }) {
   const { message, modal } = App.useApp();
@@ -181,19 +178,16 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
     const byId = new Map(versions.map(version => [version.id, version]));
     return overview.graph.nodes.map(node => byId.get(node.versionId)).filter((version): version is NonNullable<typeof version> => Boolean(version));
   }, [overview, versions]);
-  const currentVersion = overview?.current?.versionId
-    ? overview.versions.find(version => version.id === overview.current?.versionId) ?? null
+  const position = overview?.current ?? null;
+  const currentVersion = position?.versionId
+    ? overview?.versions.find(version => version.id === position.versionId) ?? null
     : null;
-  const currentBranch = overview?.current?.branch ?? DEFAULT_BRANCH;
+  const currentBranch = position?.kind === 'branch' ? position.branch : null;
+  const detached = position?.kind === 'detached';
   const canWrite = overview !== null && overview.blocked === null && busy === null;
 
-  const branchOptions = useMemo(() => {
-    const names = new Set<string>([DEFAULT_BRANCH]);
-    if (overview?.current) names.add(overview.current.branch);
-    for (const branch of overview?.branches ?? []) if (branch.status === 'open') names.add(branch.branch);
-    return [...names].map(name => ({ value: name, label: name }));
-  }, [overview]);
-  const openBranches = (overview?.branches ?? []).filter(branch => branch.status === 'open' && branch.branch !== DEFAULT_BRANCH);
+  const branchOptions = useMemo(() => (overview?.branches ?? []).map(branch => ({ value: branch.branch, label: branch.branch })), [overview]);
+  const openBranches = (overview?.branches ?? []).filter(branch => branch.branch !== DEFAULT_BRANCH && !branch.merged);
 
   const closeDiff = () => {
     diffRequest.current += 1;
@@ -217,16 +211,16 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
 
   const confirmRestore = (version: AppVersion) => {
     modal.confirm({
-      title: `回到 v${version.seq}「${version.title}」？`,
-      content: '回退会在当前分支追加一版新记录：先把工作区现有内容留成快照，再把文件恢复成这一版。历史版本不会被删除，之后还能回到更新的版本。',
+      title: `回到「${version.title}」（${shortSha(version.id)}）？`,
+      content: '回到旧版只把工作区切换到这一次 Git 提交，不会新增版本，也不会删除任何历史。之后可以从这里新建分支继续修改，或者切回 main 回到最新内容。',
       okText: '回到此版本',
       cancelText: '取消',
       onOk: () => runWrite(`restore:${version.id}`, async () => {
         const result = await api<RestoreResult>('app/versions/restore', { appId, versionId: version.id });
         return {
           text: result.status === 'unchanged'
-            ? `当前已经是 v${result.version.seq}`
-            : `当前版本已指向 v${result.version.seq}「${result.version.title}」`,
+            ? `当前已经是「${result.version.title}」（${shortSha(result.version.id)}）`
+            : `已回到「${result.version.title}」（${shortSha(result.version.id)}），没有新增版本`,
           changed: result.status !== 'unchanged',
           previewError: result.previewError,
         };
@@ -236,28 +230,32 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
 
   const confirmBranch = (version: AppVersion) => {
     modal.confirm({
-      title: `从 v${version.seq} 开一个新分支？`,
-      content: '平台会以这一版的内容新建分支并切过去，主线当前内容不受影响。分支内容采纳到主线之前不会进入主线历史，采纳后也可以继续保留分支。',
+      title: `从「${version.title}」（${shortSha(version.id)}）开一个新分支？`,
+      content: '平台会从这个提交新建分支并切过去，主线当前内容不受影响；之后在新分支上的提交以这一版为父提交。',
       okText: '开分支',
       cancelText: '取消',
       onOk: () => runWrite(`branch:${version.id}`, async () => {
         const result = await api<BranchResult>('app/versions/branch', { appId, versionId: version.id });
-        return { text: `已从 v${result.version.seq} 新建分支 ${result.branch} 并切过去`, changed: true, previewError: result.previewError };
+        return {
+          text: `已从「${result.version.title}」（${shortSha(result.version.id)}）新建分支 ${result.branch} 并切过去`,
+          changed: true,
+          previewError: result.previewError,
+        };
       }),
     });
   };
 
   const confirmAdopt = (branch: string) => {
     modal.confirm({
-      title: `把分支 ${branch} 采纳到主线？`,
-      content: '平台会把分支的最新内容写回主线，并在主线追加一版采纳记录。分支本身不会被删除，已有历史也不会丢。',
-      okText: '采纳到主线',
+      title: `把分支 ${branch} 合并到主线？`,
+      content: '平台会把该分支合并进主线，已有历史不会丢，分支本身也可以继续保留。',
+      okText: '合并到主线',
       cancelText: '取消',
       onOk: () => runWrite(`adopt:${branch}`, async () => {
         const result = await api<AdoptResult>('app/versions/adopt', { appId, branch });
         return result.version
-          ? { text: `已把分支 ${result.branch} 采纳到主线`, changed: true, previewError: result.previewError }
-          : { text: `分支 ${result.branch} 的内容与主线一致，没有产生新版本`, changed: false, previewError: result.previewError };
+          ? { text: `已把分支 ${result.branch} 合并到主线`, changed: true, previewError: result.previewError }
+          : { text: `分支 ${result.branch} 已经包含在主线里，没有产生新版本`, changed: false, previewError: result.previewError };
       }),
     });
   };
@@ -266,7 +264,7 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
     if (branch === currentBranch) return;
     modal.confirm({
       title: `切换到分支 ${branch}？`,
-      content: '工作区会变成该分支最新一版的内容，不会新增版本记录；切回原来的分支就能恢复。',
+      content: '工作区会变成该分支的最新提交，不会新增版本；切回 main 就能回到主线的最新内容。',
       okText: '切换',
       cancelText: '取消',
       onOk: () => runWrite(`switch:${branch}`, async () => {
@@ -299,19 +297,23 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
       </div>}
       {overview && <>
         <div className="version-panel-toolbar">
-          <span className="version-panel-toolbar-label">当前分支</span>
+          {detached
+            ? <Tag color="orange">历史版本</Tag>
+            : <span className="version-panel-toolbar-label">当前分支</span>}
           <Select
             size="small"
             className="version-panel-branch-select"
             value={currentBranch}
+            placeholder={detached ? '切换到分支' : undefined}
             options={branchOptions}
-            disabled={branchOptions.length < 2 || !canWrite}
+            disabled={!branchOptions.some(option => option.value !== currentBranch) || !canWrite}
             onChange={confirmSwitch}
           />
-          {currentVersion && <span className="version-panel-toolbar-version">当前版本 v{currentVersion.seq}</span>}
+          {position?.kind === 'detached' && <span className="version-panel-toolbar-sha" title={position.versionId}>{shortSha(position.versionId)}</span>}
+          {currentVersion && <span className="version-panel-toolbar-version">当前版本 {shortSha(currentVersion.id)}</span>}
         </div>
-        {openBranches.length > 0 && <section className="version-panel-branches" aria-label="未采纳分支">
-          <span className="version-panel-section-title">未采纳分支</span>
+        {openBranches.length > 0 && <section className="version-panel-branches" aria-label="未合并分支">
+          <span className="version-panel-section-title">未合并分支</span>
           {openBranches.map(branch => <div className="version-panel-branch-row" key={branch.branch}>
             <BranchesOutlined aria-hidden="true" className="version-panel-branch-icon" />
             <span className="version-panel-branch-name">{branch.branch}</span>
@@ -320,7 +322,7 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
               disabled={!canWrite}
               loading={busy === `adopt:${branch.branch}`}
               onClick={() => confirmAdopt(branch.branch)}
-            >采纳到主线</Button>
+            >合并到主线</Button>
           </div>)}
         </section>}
         <VersionDiffView state={diff} onClose={closeDiff} />
@@ -328,7 +330,7 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
           ? <div className="version-panel-empty">
             <HistoryOutlined aria-hidden="true" className="version-panel-empty-icon" />
             <p className="version-panel-empty-title">还没有版本记录。完成一次生成后，这里会出现第一个版本。</p>
-            <p className="version-panel-empty-note">回退只是把当前版本指回旧的那一版，不会删除任何记录，之后还能再跳回来。</p>
+            <p className="version-panel-empty-note">回到旧版只会把工作区切换到那次提交，不新增版本，也不删除历史，之后还能再切回来。</p>
           </div>
           : <div className="version-tree">
             {overview?.graph && <VersionTreeLegend graph={overview.graph} />}
@@ -337,13 +339,8 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
               {treeOrder.map(version => {
                 const isCurrent = version.id === currentVersion?.id;
                 const node = overview?.graph?.nodes.find(item => item.versionId === version.id);
-                const rowClass = [
-                  'version-tree-row',
-                  isCurrent && 'version-tree-row-current',
-                  version.superseded && !isCurrent && 'version-tree-row-superseded',
-                ].filter(Boolean).join(' ');
                 return <div
-                  className={rowClass}
+                  className={['version-tree-row', isCurrent && 'version-tree-row-current'].filter(Boolean).join(' ')}
                   key={version.id}
                   style={overview?.graph ? { height: treeRowHeight(overview.graph) } : undefined}
                   data-lane={node?.lane ?? 0}
@@ -351,11 +348,9 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
                   <VersionThumbnail appId={appId} version={version} />
                   <div className="version-tree-row-body">
                     <div className="version-tree-row-head">
-                      <span className="version-tree-row-version">v{version.seq}</span>
-                      <Tag color={kindColors[version.kind]}>{versionKindLabels[version.kind]}</Tag>
-                      {version.branch !== currentBranch && <Tag>{version.branch}</Tag>}
+                      <span className="version-tree-row-sha" title={version.id}>{shortSha(version.id)}</span>
+                      {version.heads.map(head => <Tag key={head} color={head === DEFAULT_BRANCH ? 'blue' : undefined}>{head}</Tag>)}
                       {isCurrent && <Tag color="green">当前</Tag>}
-                      {version.superseded && !isCurrent && <Tag color="default">已回退</Tag>}
                       <span className="version-tree-row-time">{formatVersionTime(version.createTime, now)}</span>
                     </div>
                     <div className="version-tree-row-title">{version.title}</div>

@@ -13,9 +13,9 @@ import { contentType } from './preview';
 import { listProjectFiles, readProjectFileBytes, workspace } from './workspace';
 import { routeCodeGenType } from './model';
 import { appTemplate, initializeTemplate } from './template-workspace';
-import { adoptBranch, branchFromVersion, diffVersions, listVersions, purgeVersions, restoreVersion, switchBranch, versionBlockedReason } from './version-store';
+import { adoptBranch, branchFromVersion, diffVersions, listVersions, purgeVersions, restoreVersion, switchBranch } from './version-store';
 import { versionThumbnail } from './version-thumbnail';
-import { versionAdoptSchema, versionBranchSchema, versionDiffSchema, versionFailureHint, versionSwitchSchema, versionTargetSchema } from '@/shared/versioning';
+import { versionAdoptSchema, versionBranchSchema, versionDiffSchema, versionSwitchSchema, versionTargetSchema } from '@/shared/versioning';
 import { defaultTemplateFor, resolveTemplate } from './templates';
 import { codeGenTypes, idSchema, isProjectCodeGenType, pageSchema, type User, type AppInfo, type PageQuery } from '@/shared/contracts';
 import type { TemplateInfo } from '@/shared/templates';
@@ -89,7 +89,14 @@ async function versionApp(id:string,user:User){
  return {id:app.id,codeGenType:app.codeGenType};
 }
 /**
- * HTTP 写操作要求应用空闲：生成中的版本切换统一由那次生成的 Agent 通过工具完成。
+ * 版本写操作要求应用空闲：生成中的版本切换统一由那次生成的 Agent 通过工具完成。
+ * 租约判断放在业务层而不是存储层——harness 的版本工具就跑在持有租约的那次生成里，它自己就是唯一写者。
+ */
+async function versionBlockedReason(app:{id:string}){
+ const [lease]=await db().select().from(leases).where(eq(leases.appId,BigInt(app.id))).limit(1);
+ return lease&&lease.expiresAt>now()?'应用正在生成，跑完或取消后才能切换版本':null;
+}
+/**
  * 这个函数同时被当成 guard 传进存储层，在锁内再跑一次，把「检查→上锁」之间的窗口收窄。
  */
 async function assertVersionWritable(app:{id:string;codeGenType:AppInfo['codeGenType']}){
@@ -104,15 +111,11 @@ async function rebuildAfterVersionChange(app:{id:string;codeGenType:AppInfo['cod
  try{await buildApp(app as Parameters<typeof buildApp>[0]);return null;}
  catch(error){return error instanceof Error?error.message.slice(0,300):'预览重建失败';}
 }
+/** 版本清单、当前位置与分支都来自 Git；存储层不查租约，blocked 在这里补上。 */
 export async function listAppVersions(raw:{appId:string;query?:string},user:User){
  const app=await versionApp(raw.appId,user);
- try{return await listVersions(app,{query:raw.query});}
- catch(error){
-  const raw=error instanceof Error?error.message:String(error);
-  const hint=versionFailureHint(raw);
-  if(hint)throw new BusinessError(500,50000,hint);
-  throw error;
- }
+ const overview=await listVersions(app,{query:raw.query});
+ return {...overview,blocked:await versionBlockedReason(app)};
 }
 export async function restoreAppVersion(raw:unknown,user:User){
  const input=versionTargetSchema.parse(raw);

@@ -113,12 +113,12 @@ export async function versionThumbnail(app: WorkspaceApp, versionId: string): Pr
   if (pending) return pending;
   const task = (async () => {
     try {
-      const png = await serial(() => shoot(app, version.commitSha));
+      const png = await serial(() => shoot(app, version.id));
       if (!png) return null;
       await saveVersionThumbnail(app, version.id, png);
       return png;
     } catch (problem) {
-      console.error(`版本截图失败（${app.id} v${version.seq}）：`, problem instanceof Error ? problem.message : problem);
+      console.error(`版本截图失败（${app.id} ${version.id.slice(0, 7)}）：`, problem instanceof Error ? problem.message : problem);
       return null;
     } finally {
       inFlight.delete(version.id);

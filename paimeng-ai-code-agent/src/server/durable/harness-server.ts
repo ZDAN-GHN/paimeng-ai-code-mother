@@ -19,7 +19,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync } from "node:fs";
-import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -47,9 +46,11 @@ import {
 	type WebAccessRuntime,
 	type WebAccessSession,
 } from "../web-access/tools";
+import { ensureVersionBranch, ensureVersionRepo } from "../version-store";
+import { workspace } from "../workspace";
 import { fauxFixtureEnabled } from "./faux-fixture";
 import { fauxModelEnabled } from "./faux-model";
-import { assertGitSubcommand } from "./git-args";
+import { assertGitSubcommand, gitCreatesCommit } from "./git-args";
 import { context, entryText, openPgHarness } from "./harness";
 import { webToolResult } from "./web-tool-result";
 import {
@@ -282,15 +283,6 @@ const gitEnv = {
 	GIT_COMMITTER_EMAIL: "version@paimeng.local",
 };
 
-async function gitWorkTree(directory: string): Promise<boolean> {
-	try {
-		await stat(join(directory, ".git"));
-		return true;
-	} catch {
-		return false;
-	}
-}
-
 function gitOutput(stdout: string, stderr: string): string {
 	const text = [stdout.trimEnd(), stderr.trimEnd()].filter((part) => part.length > 0).join("\n");
 	return text.length > gitOutputLimit ? text.slice(-gitOutputLimit) : text;
@@ -313,21 +305,17 @@ async function runGit(cwd: string, args: readonly string[]): Promise<{ text: str
 
 const gitTool = defineTool({
 	name: "git",
-	description: "在应用工作区内执行 git 命令（本地历史操作）。可用子命令：status log show diff add commit branch checkout switch merge restore stash rev-parse reflog tag describe blame shortlog ls-files cat-file。完成一组修改后要 git add -A 并 git commit -m \"不超过20字的中文概述\"（这就是版本历史，用户会看到）。历史只增：hook 会拒绝删除分支与非快进更新，要回到旧版本就用 git checkout <sha> -- . 把旧内容取出再提交。没有远端，push/pull 一律不可用。",
+	description: "在应用工作区内执行 git 命令（本地历史操作）。可用子命令：status log show diff add commit branch checkout switch merge restore stash rev-parse reflog tag describe blame shortlog ls-files cat-file。完成一组修改后要 git add -A 并 git commit -m \"不超过20字的中文概述\"：这条提交信息就是版本标题，用户会在版本面板看到。回到旧版本用 git switch --detach <提交>：它只切 HEAD，不产生新提交，版本数量不变。想在旧版基础上继续改，先 git switch -c <新分支名> 再提交，原主线保持不动。历史只增：hook 会拒绝删除分支与非快进更新。没有远端，push/pull 一律不可用。",
 	parameters: Type.Object({ args: Type.Array(Type.String({ maxLength: 200 }), { minItems: 1, maxItems: 16 }) }),
 	execute: async (args, api) => {
 		const app = await appRefFor(api.conversationId);
 		if (!app) throw new Error(`会话 ${api.conversationId} 没有关联应用，拒绝执行 git`);
-		const cwd = workspaces.get(api.conversationId);
-		if (!cwd) throw new Error(`会话 ${api.conversationId} 没有可用的工作区目录，拒绝执行 git`);
 		assertGitSubcommand(args.args);
-		if (!(await gitWorkTree(cwd))) {
-			return {
-				output: [{ type: "text", text: "工作区还不是 git 仓库（首次生成结束后会自动初始化）；本轮请继续用 read/write/edit 工具修改文件。" }],
-				details: { exitCode: 0 },
-			};
-		}
-		const outcome = await runGit(cwd, args.args);
+		// 第一次显式使用 git 时才初始化仓库：此前的文件就是仓库的初始内容。
+		await ensureVersionRepo(app);
+		// 游离 HEAD 上的提交没有分支引用，会从版本列表里消失：提交前先落回一条分支。
+		if (gitCreatesCommit(args.args)) await ensureVersionBranch(app);
+		const outcome = await runGit(workspace(app), args.args);
 		return {
 			output: [{ type: "text", text: outcome.exitCode === 0 ? outcome.text : `退出码 ${outcome.exitCode}\n${outcome.text}` }],
 			details: { exitCode: outcome.exitCode },
@@ -940,7 +928,7 @@ const server = createServer(async (request, response) => {
 		}
 
 		if (request.method === "GET" && url.pathname === "/conversations") {
-			sendJson(response, 200, { conversations: [...workspaces].map(([id, workspace]) => ({ conversationId: id, workspace })) });
+			sendJson(response, 200, { conversations: [...workspaces].map(([id, cwd]) => ({ conversationId: id, workspace: cwd })) });
 			return;
 		}
 

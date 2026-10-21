@@ -39,3 +39,10 @@ export function assertGitSubcommand(args: readonly string[]): string {
 	}
 	return subcommand;
 }
+
+/** 会在游离 HEAD 上造出新提交的子命令：提交前必须先落到一条分支，否则这些提交没有分支引用。 */
+const commitSubcommands = new Set(["commit", "merge"]);
+
+export function gitCreatesCommit(args: readonly string[]): boolean {
+	return commitSubcommands.has(args[0] ?? "");
+}

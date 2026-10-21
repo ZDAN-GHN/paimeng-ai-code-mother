@@ -37,6 +37,10 @@
 }
 .version-panel-toolbar-label { color: #867870; }
 .version-panel-branch-select { min-width: 140px; }
+.version-panel-toolbar-sha {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #867870;
+}
 .version-panel-toolbar-version { margin-left: auto; color: #867870; font-variant-numeric: tabular-nums; }
 
 .version-panel-section-title { color: #867870; font-size: 12px; font-weight: 600; }
@@ -129,10 +133,6 @@
   box-shadow: inset 3px 0 0 #cb573e;
 }
 
-.version-tree-row-superseded {
-  opacity: .62;
-}
-
 .version-tree-row-body {
   min-width: 0;
   flex: 1;
@@ -145,9 +145,10 @@
   flex-wrap: wrap;
 }
 
-.version-tree-row-version {
+.version-tree-row-sha {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-weight: 600;
-  font-size: 13px;
+  font-size: 12px;
   color: #2b3532;
 }
 

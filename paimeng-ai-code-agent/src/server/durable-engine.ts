@@ -18,8 +18,8 @@ import { db } from './db';
 import { adoptLease, beginGeneration, finishGeneration, generationFor, heartbeat, restoreGeneration, setGeneration, staleActiveGenerations, withAppWriter } from './generation-store';
 import { recordAssistantStep, recordBuildStep, type AccountToolCall, type EntryUsage, type GenerationStopReason, type ModelIdentity } from './generation-accounting';
 import { BusinessError } from './http';
-import { setVersionTitle, syncFromGit } from './version-store';
-import { fallbackVersionTitle, summarizeVersion } from './version-summary';
+import { commitVersion, listVersions, setVersionTitle } from './version-store';
+import { summarizeVersion } from './version-summary';
 import { versionThumbnail } from './version-thumbnail';
 import { clientIp } from './rate-limit';
 import { apps, generationSteps } from './schema';
@@ -668,7 +668,7 @@ async function observeHarnessRun(options: {
   }
 }
 
-/** 用户输入是版本标题最自然的来源：取最后一条用户条目的首行文本。 */
+/** 概述模型的上下文取最后一条用户输入的首行：让标题描述改动而不是复述原话。 */
 function versionPromptOf(messages: TranscriptEntry[]): string | null {
   const entry = messages.findLast(item => item.kind === userEntryKind);
   const bubble = entry ? userBubbleSchema.safeParse(entry.data) : null;
@@ -681,28 +681,30 @@ function versionPromptOf(messages: TranscriptEntry[]): string | null {
   return first ? (first.length > 80 ? `${first.slice(0, 80)}…` : first) : null;
 }
 
+/** 平台兜底提交用的占位标题；落库后立刻被异步概述替换成「改了什么」。 */
+const generationFallbackTitle = '生成完成';
+
 /**
- * 生成成功后在当前分支记一版：历史只增不减，回退与分支都建立在这条记录上。
- * 记版失败不能影响生成结果；缩略图异步截取，不拖慢收尾。
+ * 生成成功收尾只兜底「模型忘了提交」的真实改动：git 是版本唯一的事实源。
+ * 模型已经自己提交、或这一轮没改文件时 commitVersion 返回 null，不产生版本，也不把工作区接回别的分支。
+ * 记版失败不能影响生成结果；截图与概述都是展示缓存，不拖慢收尾。
  */
 async function recordGenerationVersion(app: AppInfo, requestId: string, conversationId: number) {
   try {
     const runtime = await harnessRuntime(conversationId).catch(() => null);
     const prompt = versionPromptOf(runtime?.messages ?? []);
-    // AI 可能已用 git 工具自己提交（那种提交的标题就是版本名）；
-    // 没提交的部分由平台兜底。两者都走 syncFromGit，kind 只有平台兜底的那次是 generate。
-    const version = await syncFromGit({ app, kind: 'generate', title: '新版本', prompt, generationId: requestId });
-    if (!version) return;
-    // AI 自己提交的（标题来自提交信息）不用兜底名；平台兜底的才需要。
-    if (version.kind === 'generate') {
-      const fallback = fallbackVersionTitle(version);
-      await setVersionTitle(app, version.id, fallback);
-      void summarizeVersion({ version: { ...version, title: fallback }, userPrompt: prompt })
-        .then(summary => setVersionTitle(app, version.id, summary))
+    const committed = await commitVersion({ app, title: generationFallbackTitle });
+    // 模型自己提交时当前 HEAD 就是这一轮的版本；没有提交也没有改动时没有可截的版本。
+    const sha = committed?.id ?? (await listVersions(app, { limit: 1 })).current?.versionId ?? null;
+    if (!sha) return;
+    // 截图按提交 SHA 存：面板打开时直接读这一版的图。
+    void versionThumbnail(app, sha).catch(() => undefined);
+    // 兜底提交的标题是平台起的占位符，异步换成模型写的概述；模型自己的提交信息原样保留。
+    if (committed) {
+      void summarizeVersion({ version: committed, userPrompt: prompt })
+        .then(summary => setVersionTitle(app, sha, summary))
         .catch(() => undefined);
     }
-    // 生成刚结束，这一版就是工作区当前内容：顺手把截图存下来，面板打开时不用再等。
-    void versionThumbnail(app, version.id).catch(() => undefined);
   } catch (problem) {
     console.error(`版本记录失败（生成 ${requestId}）：`, problem);
   }

@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import type { VersionGraph } from '@/shared/versioning';
+import { DEFAULT_BRANCH, type VersionGraph } from '@/shared/versioning';
 
 /** 分支配色：main 固定蓝色，其余按分支首次出现的顺序取色，同一分支永远同一颜色。 */
 const branchPalette = ['#3f7fd6', '#cb573e', '#2f9e6f', '#a061c9', '#c08a2e'];
@@ -8,7 +8,7 @@ export function createBranchColors(graph: VersionGraph) {
   const names: string[] = [];
   for (const lane of graph.lanes) if (!names.includes(lane.branch)) names.push(lane.branch);
   for (const node of graph.nodes) if (!names.includes(node.branch)) names.push(node.branch);
-  const preferred = ['main', ...names.filter(name => name !== 'main')];
+  const preferred = [DEFAULT_BRANCH, ...names.filter(name => name !== DEFAULT_BRANCH)];
   const colors = new Map<string, string>();
   preferred.forEach((name, index) => colors.set(name, branchPalette[index % branchPalette.length]!));
   return colors;
@@ -22,7 +22,7 @@ export const VersionTreeLegend = memo(function VersionTreeLegend({ graph }: { gr
     {branches.map(lane => <span key={lane.branch} className="version-tree-legend-item">
       <i style={{ background: colors.get(lane.branch) }} aria-hidden="true" />
       {lane.branch}
-      {lane.status !== 'open' && <span className="version-tree-legend-note">{lane.status === 'adopted' ? '已采纳' : '已废弃'}</span>}
+      {lane.branch !== DEFAULT_BRANCH && lane.merged && <span className="version-tree-legend-note">已合并</span>}
     </span>)}
   </div>;
 });
@@ -78,10 +78,9 @@ export const VersionTreeLines = memo(function VersionTreeLines({ graph }: { grap
       <circle
         cx={node.x} cy={node.y}
         r={node.state === 'head' ? 5.5 : 4.5}
-        fill={node.state === 'normal' ? '#fff' : color(node.branch)}
+        fill={node.state === 'head' ? color(node.branch) : '#fff'}
         stroke={color(node.branch)}
         strokeWidth={2.5}
-        opacity={node.state === 'stale' ? 0.5 : 1}
       />
     </g>)}
   </svg>;
@@ -89,4 +88,3 @@ export const VersionTreeLines = memo(function VersionTreeLines({ graph }: { grap
 
 export const treeGutterWidth = (graph: VersionGraph) => graph.geometry.width;
 export const treeRowHeight = (graph: VersionGraph) => graph.geometry.rowHeight;
-export const treeBranchColor = (graph: VersionGraph, branch: string) => createBranchColors(graph).get(branch) ?? branchPalette[0]!;

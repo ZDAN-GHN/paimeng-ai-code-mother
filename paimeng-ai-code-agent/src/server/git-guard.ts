@@ -6,7 +6,8 @@ import { join } from 'node:path';
  * 安装 reference-transaction hook：历史只增的强制闸。
  * - 禁止删除 refs/heads/*
  * - 禁止对 refs/heads/* 的非快进更新（改写历史）
- * 提交、开分支、快进合并、--no-ff 合并全部放行。
+ * 提交、开分支、快进合并、--no-ff 合并、切换 detached HEAD 全部放行；
+ * refs/paimeng/versions/* 是平台保留的历史引用，不受用户分支规则限制。
  * 用 bash 而不是 sh：`<<<`/`[[` 不在 POSIX sh 里。
  */
 export async function installGitGuard(repoWorkTree: string) {
@@ -25,7 +26,7 @@ while read -r old new ref; do
   fi
   if [ -n "$old" ] && [ "$old" != "$zero" ]; then
     if ! git merge-base --is-ancestor "$old" "$new" 2>/dev/null; then
-      echo "禁止非快进更新 $ref（应用历史只增，不能改写；要回到旧版本请提交新内容而不是移动分支指针）" >&2
+      echo "禁止非快进更新 $ref（应用历史只增，不能改写；回到旧版本请切到该提交，不要移动分支指针）" >&2
       exit 1
     fi
   fi

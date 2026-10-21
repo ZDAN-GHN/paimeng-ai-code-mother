@@ -3,9 +3,9 @@ import { fallbackVersionTitle, normalizeVersionSummary, versionSummaryLimit } fr
 import type { AppVersion } from '@/shared/versioning';
 
 const base: AppVersion = {
-  id: 'v', appId: '1', branch: 'main', seq: 3, commitSha: 'a', kind: 'generate', sourceVersionId: null,
-  title: '', prompt: '把页面改得更加酷炫一点，现在的ai味太浓了', changedFiles: ['index.html', 'assets/a.jpg'],
-  fileCount: 6, bytes: 1, thumbnailKey: null, generationId: null, createTime: '2026-10-20 10:00:00', superseded: false,
+  id: '0'.repeat(40), title: '', createTime: '2026-10-20 10:00:00',
+  parents: [], heads: ['main'], changedFiles: ['index.html', 'assets/a.jpg'],
+  fileCount: 6, bytes: 1, thumbnailKey: null,
 };
 
 describe('版本概述', () => {
@@ -25,13 +25,11 @@ describe('版本概述', () => {
   it('兜底标题用改动数量，不照抄用户原话', () => {
     expect(fallbackVersionTitle(base)).toBe('改动 2 个文件');
     expect(fallbackVersionTitle({ ...base, changedFiles: ['index.html'] })).toBe('改动 1 个文件');
-    expect(fallbackVersionTitle({ ...base, changedFiles: [], seq: 7 })).toBe('第 7 版');
-    expect(fallbackVersionTitle({ ...base, kind: 'checkpoint' })).toBe('切版前的快照');
-    expect(fallbackVersionTitle({ ...base, kind: 'restore' })).toBe('回到历史版本');
-    for (const kind of ['generate', 'checkpoint', 'restore', 'branch', 'adopt'] as const) {
-      const title = fallbackVersionTitle({ ...base, kind });
+    // 合并提交相对第一个父提交可能没有文件差异，用「合并」而不是假装第几版。
+    expect(fallbackVersionTitle({ ...base, changedFiles: [] })).toBe('合并历史版本');
+    for (const changedFiles of [['a'], ['a', 'b'], []]) {
+      const title = fallbackVersionTitle({ ...base, changedFiles });
       expect([...title].length).toBeLessThanOrEqual(versionSummaryLimit);
-      expect(title).not.toBe(base.prompt);
     }
   });
 });

@@ -53,6 +53,7 @@ npm run durable:inspect -- --conversations          # 列出 harness 已打开�
 | Postgres 存储（pi-durable 的 Storage 实现） | `src/server/durable/storage-pg.ts` |
 | 一条命令起全套 / 数据库 | `npm run dev`、`npm run durable:pg` |
 | 当前运行与模型配置 | `docs/plans/pi-durable-deployment.md`、`docs/plans/provider-convergence.md` |
+| 版本历史（Git 是唯一事实源：HEAD/refs/commit） | `docs/plans/version-git-source.md`；写入口 `src/server/version-store.ts`；`npm run versions:migrate`（旧表迁移，默认预演） |
 | 历史设计与迁移过程 | `docs/plans/archive/README.md` |
 
 git 钩子：`pre-commit` 跑 `check:fast`，`pre-push` 跑 `type-check`；紧急时用 `git commit --no-verify` 绕过。

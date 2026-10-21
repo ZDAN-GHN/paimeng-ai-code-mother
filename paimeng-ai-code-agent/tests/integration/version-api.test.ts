@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadEnvFile } from 'node:process';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -7,7 +9,7 @@ import { eq } from 'drizzle-orm';
 import { testDatabaseUrl } from '../test-database-url';
 import { GET, POST } from '@/app/api/[...path]/route';
 import { db } from '@/server/db';
-import { apps, appVersions, leases, users } from '@/server/schema';
+import { apps, leases, users } from '@/server/schema';
 import { ensureWorkspace, workspace } from '@/server/workspace';
 import { commitVersion, purgeVersions, versionRepo, versionRoot } from '@/server/version-store';
 import type { AppVersion, AppVersionOverview, VersionDiff } from '@/shared/versioning';
@@ -15,8 +17,10 @@ import type { AppVersion, AppVersionOverview, VersionDiff } from '@/shared/versi
 loadEnvFile('.env');
 process.env.DATABASE_URL = testDatabaseUrl(process.env.DATABASE_URL ?? '');
 
+const run = promisify(execFile);
 const origin = 'http://localhost:3000';
 const prefix = `ts_version_api_${Date.now()}`;
+const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', LC_ALL: 'C' };
 
 async function post(path: string, data: unknown, session?: string) {
   const headers: Record<string, string> = { origin, 'content-type': 'application/json' };
@@ -51,15 +55,38 @@ async function createApp(cookie: string, initPrompt: string) {
   return created.data;
 }
 
-async function writeProject(appId: string, path: string, content: string) {
-  const app = { id: appId, codeGenType: 'html' as const };
-  const file = join(workspace(app), path);
+const appRef = () => ({ id: appId, codeGenType: 'html' as const });
+
+async function writeProject(path: string, content: string) {
+  const file = join(workspace(appRef()), path);
   await mkdir(join(file, '..'), { recursive: true });
   await writeFile(file, content);
 }
 
-async function readProject(appId: string, path: string) {
-  return readFile(join(workspace({ id: appId, codeGenType: 'html' }), path), 'utf8');
+async function readProject(path: string) {
+  return readFile(join(workspace(appRef()), path), 'utf8');
+}
+
+/** 版本事实全在 Git 里：断言直接读工作区的真实 HEAD/refs，而不是任何镜像表。 */
+async function git(args: string[]) {
+  const { stdout } = await run('git', ['-C', workspace(appRef()), ...args], { env: gitEnv });
+  return stdout.trim();
+}
+
+async function gitOrNull(args: string[]) {
+  return git(args).catch(() => null);
+}
+
+async function mainHead() {
+  return git(['rev-parse', 'refs/heads/main']);
+}
+
+/**
+ * 历史里的提交总数：必须同时数分支与 HEAD，不能只数 HEAD——
+ * 回退只切 HEAD，那份历史并没有消失（这正是「回退不新增版本」的另一半）。
+ */
+async function commitCount() {
+  return Number(await git(['rev-list', '--count', '--branches', 'HEAD']));
 }
 
 let owner: { id: string; cookie: string };
@@ -71,22 +98,20 @@ beforeAll(async () => {
   owner = await createUser(`${prefix}_owner`);
   stranger = await createUser(`${prefix}_stranger`);
   appId = await createApp(owner.cookie, '版本接口回归测试');
-  const app = { id: appId, codeGenType: 'html' as const };
-  await rm(workspace(app), { recursive: true, force: true });
-  await rm(versionRepo(app), { recursive: true, force: true });
-  await purgeVersions(app);
-  await ensureWorkspace(app);
-  await writeProject(appId, 'index.html', '<html><body>第一版</body></html>');
-  const recorded = await commitVersion({ app, kind: 'generate', title: '第一版', prompt: '做一个首页' });
-  if (!recorded) throw new Error('用例初始化没有产生版本');
+  await rm(workspace(appRef()), { recursive: true, force: true });
+  await rm(versionRepo(appRef()), { recursive: true, force: true });
+  await purgeVersions(appRef());
+  await ensureWorkspace(appRef());
+  await writeProject('index.html', '<html><body>第一版</body></html>');
+  const recorded = await commitVersion({ app: appRef(), title: '第一版' });
+  if (!recorded) throw new Error('用例初始化没有产生提交');
   first = recorded;
 });
 
 afterAll(async () => {
-  const app = { id: appId, codeGenType: 'html' as const };
-  await purgeVersions(app).catch(() => undefined);
-  await rm(workspace(app), { recursive: true, force: true });
-  await rm(versionRepo(app), { recursive: true, force: true });
+  await purgeVersions(appRef()).catch(() => undefined);
+  await rm(workspace(appRef()), { recursive: true, force: true });
+  await rm(versionRepo(appRef()), { recursive: true, force: true });
   await db().delete(apps).where(eq(apps.id, BigInt(appId)));
   await db().delete(users).where(eq(users.id, BigInt(owner.id)));
   await db().delete(users).where(eq(users.id, BigInt(stranger.id)));
@@ -94,13 +119,18 @@ afterAll(async () => {
 });
 
 describe('版本接口', () => {
-  it('列表返回当前分支、版本与分支登记', async () => {
+  it('版本身份就是 Git 提交：列表的当前位置与节点数来自真实 HEAD', async () => {
+    expect(first.id).toMatch(/^[0-9a-f]{40}$/);
+    expect(await git(['rev-parse', 'HEAD'])).toBe(first.id);
+
     const response = await get('app/versions', { appId }, owner.cookie);
     expect(response.status).toBe(200);
     const body = await json<AppVersionOverview>(response);
-    expect(body.data.current?.versionId).toBe(first.id);
-    expect(body.data.versions[0]?.id).toBe(first.id);
-    expect(body.data.branches[0]?.branch).toBe('main');
+    expect(body.data.current).toEqual({ kind: 'branch', branch: 'main', versionId: first.id });
+    expect(body.data.versions.map(version => version.id)).toEqual([first.id]);
+    expect(body.data.versions).toHaveLength(await commitCount());
+    expect(body.data.graph?.nodes.map(node => node.versionId)).toEqual([first.id]);
+    expect(body.data.branches.map(branch => branch.branch)).toContain('main');
     expect(body.data.blocked).toBeNull();
   });
 
@@ -112,59 +142,107 @@ describe('版本接口', () => {
     expect(miss.data.versions).toHaveLength(0);
   });
 
-  it('回退把工作区恢复成目标内容，并新增一条 restore 版本', async () => {
-    await writeProject(appId, 'index.html', '<html><body>第二版</body></html>');
-    const second = await commitVersion({ app: { id: appId, codeGenType: 'html' }, kind: 'generate', title: '第二版', prompt: '改文案' });
+  it('回退只把工作区切到目标提交（detached HEAD），不新增提交也不动分支头', async () => {
+    await writeProject('index.html', '<html><body>第二版</body></html>');
+    const second = await commitVersion({ app: appRef(), title: '第二版' });
     expect(second).not.toBeNull();
-    expect(await readProject(appId, 'index.html')).toContain('第二版');
+    const headsBefore = await git(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads']);
+    const commitsBefore = await commitCount();
+    expect(commitsBefore).toBe(2);
 
-    const restored = await json<{ status: string; version: AppVersion }>(await post('app/versions/restore', { appId, versionId: first.id }, owner.cookie));
+    const restored = await json<{ status: string; version: AppVersion; previewError: string | null }>(
+      await post('app/versions/restore', { appId, versionId: first.id }, owner.cookie),
+    );
     expect(restored.code).toBe(0);
     expect(restored.data.status).toBe('restored');
-    // 新语义：产生一条新的 restore 版本，内容等于目标版。
-    expect(restored.data.version.kind).toBe('restore');
-    expect(restored.data.version.sourceVersionId).toBe(first.id);
-    expect(await readProject(appId, 'index.html')).toContain('第一版');
+    expect(restored.data.version.id).toBe(first.id);
+    expect(restored.data.previewError).toBeNull();
+
+    // Git 事实：HEAD 就是目标提交，detached（没有分支指向它），提交数与分支头一个都没变。
+    expect(await git(['rev-parse', 'HEAD'])).toBe(first.id);
+    expect(await gitOrNull(['symbolic-ref', '-q', 'HEAD'])).toBeNull();
+    expect(await git(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads'])).toBe(headsBefore);
+    expect(await commitCount()).toBe(commitsBefore);
+    expect(await mainHead()).toBe(second!.id);
+    expect(await readProject('index.html')).toContain('第一版');
 
     const overview = await json<AppVersionOverview>(await get('app/versions', { appId }, owner.cookie));
-    expect(overview.data.current?.versionId).toBe(restored.data.version.id);
-    // 一条都没少：旧版本（含第二版）都还在，历史只增。
-    expect(overview.data.versions.some(version => version.id === first.id)).toBe(true);
-    expect(overview.data.versions.some(version => version.id === second!.id)).toBe(true);
-    expect(overview.data.versions.some(version => version.kind === 'restore')).toBe(true);
+    expect(overview.data.current).toEqual({ kind: 'detached', versionId: first.id });
+    expect(overview.data.versions).toHaveLength(commitsBefore);
   });
 
-  it('开分支后主线当前指针不动，采纳后回到主线', async () => {
-    const branched = await json<{ branch: string }>(await post('app/versions/branch', { appId, versionId: first.id, label: 'plan-x' }, owner.cookie));
+  it('从历史提交开分支不新增提交，主线不动', async () => {
+    const mainBefore = await mainHead();
+    const commitsBefore = await commitCount();
+    const branchesBefore = await git(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads']);
+
+    const branched = await json<{ branch: string; version: AppVersion }>(
+      await post('app/versions/branch', { appId, versionId: first.id, label: 'plan-x' }, owner.cookie),
+    );
     expect(branched.code).toBe(0);
     expect(branched.data.branch).toBe('plan-x');
-    let overview = await json<AppVersionOverview>(await get('app/versions', { appId }, owner.cookie));
-    expect(overview.data.current?.branch).toBe('plan-x');
-    expect(overview.data.branches.find(branch => branch.branch === 'plan-x')?.status).toBe('open');
+    expect(branched.data.version.id).toBe(first.id);
 
-    const adopted = await json<{ version: AppVersion | null }>(await post('app/versions/adopt', { appId, branch: 'plan-x' }, owner.cookie));
-    expect(adopted.code).toBe(0);
-    overview = await json<AppVersionOverview>(await get('app/versions', { appId }, owner.cookie));
-    expect(overview.data.current?.branch).toBe('main');
-    expect(overview.data.branches.find(branch => branch.branch === 'plan-x')?.status).toBe('adopted');
+    expect(await git(['symbolic-ref', 'HEAD'])).toBe('refs/heads/plan-x');
+    expect(await git(['rev-parse', 'HEAD'])).toBe(first.id);
+    expect(await git(['rev-parse', 'refs/heads/plan-x'])).toBe(first.id);
+    expect(await commitCount()).toBe(commitsBefore);
+    // 主干那条 ref 与其他分支头保持原样，只多了 plan-x。
+    expect(await mainHead()).toBe(mainBefore);
+    expect(await git(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads']))
+      .toBe(`${branchesBefore}\nrefs/heads/plan-x ${first.id}`);
+
+    const overview = await json<AppVersionOverview>(await get('app/versions', { appId }, owner.cookie));
+    expect(overview.data.current).toEqual({ kind: 'branch', branch: 'plan-x', versionId: first.id });
   });
 
-  it('切换分支后当前指针跟着走，且返回预览重建结果', async () => {
-    const switched = await json<{ branch: string; previewError: string | null }>(await post('app/versions/switch', { appId, branch: 'plan-x' }, owner.cookie));
+  it('把落后于主线的分支合并回主线是无操作，并被标为已合并', async () => {
+    const mainBefore = await mainHead();
+    const adopted = await json<{ branch: string; version: AppVersion | null; previewError: string | null }>(
+      await post('app/versions/adopt', { appId, branch: 'plan-x' }, owner.cookie),
+    );
+    expect(adopted.code).toBe(0);
+    expect(adopted.data.version).toBeNull();
+    expect(await mainHead()).toBe(mainBefore);
+
+    const overview = await json<AppVersionOverview>(await get('app/versions', { appId }, owner.cookie));
+    expect(overview.data.branches.find(branch => branch.branch === 'plan-x')?.merged).toBe(true);
+  });
+
+  it('切换分支只换 HEAD 与工作区，返回预览重建结果', async () => {
+    const commitsBefore = await commitCount();
+    const switched = await json<{ branch: string; previewError: string | null }>(
+      await post('app/versions/switch', { appId, branch: 'main' }, owner.cookie),
+    );
     expect(switched.code).toBe(0);
-    expect(switched.data.branch).toBe('plan-x');
+    expect(switched.data.branch).toBe('main');
     // 预览重建必须被触发：切换只换了源码，dist 还是旧的。html 类型重建很轻，正常应为 null。
     expect(switched.data.previewError).toBeNull();
-    const back = await post('app/versions/switch', { appId, branch: 'main' }, owner.cookie);
-    expect(back.status).toBe(200);
+    expect(await git(['symbolic-ref', 'HEAD'])).toBe('refs/heads/main');
+    expect(await commitCount()).toBe(commitsBefore);
+    expect(await readProject('index.html')).toContain('第二版');
+  });
+
+  it('在分支上提交后合并回主线，主线快进到分支头', async () => {
+    const second = await mainHead();
+    await post('app/versions/branch', { appId, versionId: second, label: 'plan-y' }, owner.cookie);
+    await writeProject('index.html', '<html><body>第三版</body></html>');
+    const third = await commitVersion({ app: appRef(), title: '第三版' });
+    expect(third).not.toBeNull();
+    expect(await git(['rev-parse', 'refs/heads/plan-y'])).toBe(third!.id);
+    expect(await mainHead()).toBe(second);
+
+    expect((await post('app/versions/adopt', { appId, branch: 'plan-y' }, owner.cookie)).status).toBe(200);
+    expect(await mainHead()).toBe(third!.id);
+    expect(await readProject('index.html')).toContain('第三版');
   });
 
   it('回退后会真的重建预览：内容不合法时 previewError 带出构建失败，而不是静默假装成功', async () => {
-    const app = { id: appId, codeGenType: 'html' as const };
     // 造一版内容不合法的版本（没有 <html> 标签），用来证明重建确实被执行、失败也确实被报出来。
-    await writeProject(appId, 'index.html', '这不是一个页面');
-    const broken = await commitVersion({ app, kind: 'generate', title: '不合法的页面' });
+    await writeProject('index.html', '这不是一个页面');
+    const broken = await commitVersion({ app: appRef(), title: '不合法的页面' });
     expect(broken).not.toBeNull();
+    expect(await git(['rev-parse', 'HEAD'])).toBe(broken!.id);
 
     const restored = await json<{ status: string; previewError: string | null }>(
       await post('app/versions/restore', { appId, versionId: broken!.id }, owner.cookie),
@@ -174,30 +252,31 @@ describe('版本接口', () => {
     expect(restored.data.previewError).toMatch(/index\.html|HTML/i);
   });
 
-  it('差异接口返回改动文件与补丁', async () => {
+  it('差异接口按 SHA 返回改动文件与补丁', async () => {
     const overview = await json<AppVersionOverview>(await get('app/versions', { appId }, owner.cookie));
     const head = overview.data.versions[0]!;
     const diff = await json<VersionDiff>(await get('app/versions/diff', { appId, base: first.id, target: head.id }, owner.cookie));
     expect(diff.code).toBe(0);
-    expect(Array.isArray(diff.data.files)).toBe(true);
+    expect(diff.data.base.id).toBe(first.id);
+    expect(diff.data.target.id).toBe(head.id);
+    expect(diff.data.files.some(file => file.path === 'index.html')).toBe(true);
     expect(typeof diff.data.patch).toBe('string');
   });
 
   it('这一版没有可渲染页面时返回 404 而不是错误 JSON', async () => {
     // 造一个只有文档、没有入口页面的版本：截图无从下手，接口必须干净地返回 404。
-    const app = { id: appId, codeGenType: 'html' as const };
-    const saved = await readFile(join(workspace(app), 'index.html'), 'utf8');
-    await rm(join(workspace(app), 'index.html'));
-    await writeProject(appId, 'README.md', '# 只有说明文件');
-    const bare = await commitVersion({ app, kind: 'generate', title: '没有入口页面的一版' });
+    const saved = await readProject('index.html');
+    await rm(join(workspace(appRef()), 'index.html'));
+    await writeProject('README.md', '# 只有说明文件');
+    const bare = await commitVersion({ app: appRef(), title: '没有入口页面的一版' });
     expect(bare).not.toBeNull();
 
     const response = await get('app/versions/thumbnail', { appId, versionId: bare!.id }, owner.cookie);
     expect(response.status).toBe(404);
 
     // 还原工作区，后面的用例照常跑。
-    await writeProject(appId, 'index.html', saved);
-    await rm(join(workspace(app), 'README.md'), { force: true });
+    await writeProject('index.html', saved);
+    await rm(join(workspace(appRef()), 'README.md'), { force: true });
   });
 
   it('生成占用应用时 HTTP 写操作被拒绝，但面板能看到原因', async () => {
@@ -218,17 +297,19 @@ describe('版本接口', () => {
     expect(write.status).toBe(403);
   });
 
-  it('非法入参被拒绝', async () => {
-    const response = await post('app/versions/restore', { appId, versionId: 'not-a-uuid' }, owner.cookie);
-    expect(response.status).toBeGreaterThanOrEqual(400);
+  it('截图、差异与回退的参数都必须是完整 SHA', async () => {
+    const restore = await post('app/versions/restore', { appId, versionId: 'not-a-sha' }, owner.cookie);
+    expect(restore.status).toBe(400);
+    const thumbnail = await get('app/versions/thumbnail', { appId, versionId: 'not-a-sha' }, owner.cookie);
+    expect(thumbnail.status).toBe(400);
+    const diff = await get('app/versions/diff', { appId, base: 'not-a-sha', target: first.id }, owner.cookie);
+    expect(diff.status).toBe(400);
   });
 
-  it('删除应用会连版本库与元数据一起回收（走真实 deleteApp，不是只调 purgeVersions）', async () => {
-    const app = { id: appId, codeGenType: 'html' as const };
-    expect(await db().select().from(appVersions).where(eq(appVersions.appId, BigInt(appId)))).not.toHaveLength(0);
+  it('删除应用会连版本库一起回收（走真实 deleteApp，不是只调 purgeVersions）', async () => {
+    expect(await stat(versionRepo(appRef())).then(() => true, () => false)).toBe(true);
     const removed = await post('app/delete', { id: appId }, owner.cookie);
     expect(removed.status).toBe(200);
-    expect(await db().select().from(appVersions).where(eq(appVersions.appId, BigInt(appId)))).toHaveLength(0);
-    expect(await stat(versionRepo(app)).then(() => true, () => false)).toBe(false);
+    expect(await stat(versionRepo(appRef())).then(() => true, () => false)).toBe(false);
   });
 });

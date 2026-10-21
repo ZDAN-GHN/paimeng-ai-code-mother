@@ -1,59 +1,70 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { appOrigin } from './support/app-origin';
+import type { AppVersion, AppVersionOverview, VersionBranch, VersionGraph, VersionPosition } from '@/shared/versioning';
 
 const origin = appOrigin();
 const prompt = '版本面板回归测试';
 const appIdPlaceholder = 'versions-app';
 const idleRuntime = { generation: { id: 'versions-existing-task', status: 'cancelled' }, busy: false, pending: [], messages: [] };
 
-type Version = {
-  id: string; appId: string; branch: string; seq: number; commitSha: string; kind: 'generate' | 'restore' | 'branch' | 'adopt' | 'checkpoint';
-  sourceVersionId: string | null; title: string; prompt: string | null; changedFiles: string[]; fileCount: number; bytes: number;
-  thumbnailKey: string | null; generationId: string | null; createTime: string; superseded: boolean;
-};
+const sha1 = '1'.repeat(40);
+const sha2 = '2'.repeat(40);
+const short1 = '1111111';
+const short2 = '2222222';
 
-const v1: Version = {
-  id: '11111111-1111-4111-8111-111111111111', appId: appIdPlaceholder, branch: 'main', seq: 1, commitSha: 'a'.repeat(40), kind: 'generate',
-  sourceVersionId: null, title: '首版首页', prompt: '做一个首页', changedFiles: ['index.html', 'assets/style.css'], fileCount: 4, bytes: 4096,
-  thumbnailKey: null, generationId: 'g1', createTime: '2026-10-18 09:12:00', superseded: false,
+const v1: AppVersion = {
+  id: sha1, title: '首版首页', createTime: '2026-10-18 09:12:00', parents: [], heads: [],
+  changedFiles: ['index.html', 'assets/style.css'], fileCount: 4, bytes: 4096, thumbnailKey: null,
 };
-const v2: Version = {
-  id: '22222222-2222-4222-8222-222222222222', appId: appIdPlaceholder, branch: 'main', seq: 2, commitSha: 'b'.repeat(40), kind: 'generate',
-  sourceVersionId: null, title: '把卡片改成圆角', prompt: '卡片改成圆角', changedFiles: ['assets/style.css'], fileCount: 4, bytes: 4120,
-  thumbnailKey: null, generationId: 'g2', createTime: '2026-10-19 10:30:00', superseded: false,
+const v2: AppVersion = {
+  id: sha2, title: '把卡片改成圆角', createTime: '2026-10-19 10:30:00', parents: [sha1], heads: ['main'],
+  changedFiles: ['assets/style.css'], fileCount: 4, bytes: 4120, thumbnailKey: null,
 };
+const mainBranch: VersionBranch = { branch: 'main', headVersionId: v2.id, merged: false };
 
-/** 面板用函数式谓词拦截，避免 `?` 通配把 thumbnail / diff 一起吃掉。 */
-function graphOf(versions: Version[]) {
-  const version0Branch = versions[0]?.branch ?? 'main';
-  // 与服务端同构的最小几何：一行一个节点，父提交在下一行；真实服务端算法见 versionGraph()。
+/** 最小图：一行一个节点、父提交在下一行；真实几何由服务端 versionGraph() 算好下发。 */
+function graphOf(versions: AppVersion[]): VersionGraph {
   const rowHeight = 76;
   const laneGap = 22;
   const gutterPadding = 12;
   const nodes = versions.map((version, index) => ({
-    versionId: version.id, seq: version.seq, commitSha: version.commitSha, lane: 0, row: index,
-    parents: index + 1 < versions.length ? [versions[index + 1]!.commitSha] : [],
-    headOf: index === 0 ? ['main'] : [], superseded: version.superseded,
-    kind: version.kind, title: version.title, branch: version.branch, createTime: version.createTime,
+    versionId: version.id,
+    lane: 0,
+    row: index,
+    parents: version.parents,
+    headOf: version.heads,
+    title: version.title,
+    branch: 'main',
+    createTime: version.createTime,
   }));
   return {
-    lanes: [{ lane: 0, branch: 'main', status: 'open' }],
+    lanes: [{ branch: 'main', lane: 0, merged: false }],
     nodes,
     geometry: {
-      rowHeight, laneGap, gutterPadding, width: laneGap + gutterPadding, height: Math.max(1, nodes.length) * rowHeight,
-      edges: nodes.slice(0, -1).map(node => ({ lane: 0, rowFrom: node.row, rowTo: node.row + 1, branch: version0Branch })),
+      rowHeight, laneGap, gutterPadding,
+      width: laneGap + gutterPadding,
+      height: Math.max(1, nodes.length) * rowHeight,
+      edges: nodes.slice(0, -1).map(node => ({ lane: 0, rowFrom: node.row, rowTo: node.row + 1, branch: 'main' })),
       curves: [],
-      nodes: nodes.map(node => ({ lane: 0, row: node.row, x: gutterPadding + laneGap / 2, y: node.row * rowHeight + rowHeight / 2, branch: version0Branch, state: node.headOf.length > 0 ? 'head' as const : 'normal' as const })),
+      nodes: nodes.map(node => ({
+        lane: 0, row: node.row,
+        x: gutterPadding + laneGap / 2,
+        y: node.row * rowHeight + rowHeight / 2,
+        branch: 'main',
+        state: node.headOf.length > 0 ? 'head' : 'normal',
+      })),
     },
   };
 }
 
-async function mockVersions(page: Page, overview: unknown, options: { diff?: unknown } = {}) {
-  const withGraph = overview && typeof overview === 'object' && 'versions' in overview && !('graph' in overview)
-    ? { ...(overview as object), graph: graphOf((overview as { versions: Version[] }).versions) }
-    : overview;
-  await page.route(url => url.pathname === '/api/app/versions', route => route.fulfill({ json: { code: 0, data: withGraph } }));
+function overviewOf(versions: AppVersion[], current: VersionPosition, branches: VersionBranch[] = [mainBranch], blocked: string | null = null): AppVersionOverview {
+  return { current, versions, branches, graph: graphOf(versions), blocked };
+}
+
+/** 面板用函数式谓词拦截，避免 `?` 通配把 thumbnail / diff 一起吃掉。 */
+async function mockVersions(page: Page, data: AppVersionOverview, options: { diff?: unknown } = {}) {
+  await page.route(url => url.pathname === '/api/app/versions', route => route.fulfill({ json: { code: 0, data } }));
   await page.route(url => url.pathname === '/api/app/versions/thumbnail', route => route.fulfill({ status: 404 }));
   if (options.diff) await page.route(url => url.pathname === '/api/app/versions/diff', route => route.fulfill({ json: { code: 0, data: options.diff } }));
 }
@@ -87,20 +98,19 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('版本面板显示时间线、当前版本标记与无缩略图占位', async ({ page }) => {
-  await mockVersions(page, {
-    current: { branch: 'main', versionId: v2.id },
-    versions: [v2, v1],
-    branches: [{ branch: 'main', baseVersionId: null, status: 'open', createTime: '2026-10-18 09:00:00' }],
-    blocked: null,
-  });
+  await mockVersions(page, overviewOf([v2, v1], { kind: 'branch', branch: 'main', versionId: v2.id }));
   await openPanel(page);
   await expect(page.getByText('把卡片改成圆角')).toBeVisible();
   await expect(page.getByText('首版首页')).toBeVisible();
+  // 行标识是概述 + 短 SHA，不再有 vN 序号。
+  const shas = page.locator('.version-tree-row-sha');
+  await expect(shas).toHaveCount(2);
+  await expect(shas.first()).toHaveText(short2);
   await expect(page.locator('.version-tree-row-current')).toHaveCount(1);
   await expect(page.locator('.version-tree-row-current').getByText('当前', { exact: true })).toBeVisible();
-  await expect(page.getByText('当前版本 v2')).toBeVisible();
+  await expect(page.getByText(`当前版本 ${short2}`)).toBeVisible();
   await expect(page.getByText('无缩略图').first()).toBeVisible();
-  // 当前版本既不能和自己对比，也不需要「回到」——点它只是原地物化同一份内容。
+  // 当前版本既不能和自己对比，也不需要「回到」——它就是当前内容。
   await expect(page.locator('.version-tree-row-current').getByRole('button', { name: /对\s*比/ })).toBeDisabled();
   await expect(page.locator('.version-tree-row-current').getByRole('button', { name: /回到此版本/ })).toBeDisabled();
   // 旧版本仍然可以回退，别把整列按钮都禁掉。
@@ -108,10 +118,7 @@ test('版本面板显示时间线、当前版本标记与无缩略图占位', as
 });
 
 test('版本卡片显示该版本的页面截图，加载失败才退回占位', async ({ page }) => {
-  await mockVersions(page, {
-    current: { branch: 'main', versionId: v2.id }, versions: [v2, v1],
-    branches: [{ branch: 'main', baseVersionId: null, status: 'open', createTime: '2026-10-18 09:00:00' }], blocked: null,
-  });
+  await mockVersions(page, overviewOf([v2, v1], { kind: 'branch', branch: 'main', versionId: v2.id }));
   // 后注册的路由先生效：覆盖 mockVersions 里的 404，返回一张真实 PNG。
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
   await page.route(url => url.pathname === '/api/app/versions/thumbnail', route => route.fulfill({ status: 200, contentType: 'image/png', body: png }));
@@ -121,30 +128,27 @@ test('版本卡片显示该版本的页面截图，加载失败才退回占位',
   await expect(page.locator('.version-panel-thumb-ready')).toHaveCount(2);
   await expect(page.getByText('无缩略图')).toHaveCount(0);
   const image = thumbs.first().locator('img');
-  await expect(image).toHaveAttribute('alt', /v2 的界面缩略图/);
+  await expect(image).toHaveAttribute('alt', '「把卡片改成圆角」的界面缩略图');
   await expect(image).toHaveJSProperty('naturalWidth', 1);
 });
 
-test('被回退的版本显示「已回退」标签，但仍能再跳回去', async ({ page }) => {
-  await mockVersions(page, {
-    current: { branch: 'main', versionId: v1.id },
-    versions: [{ ...v2, superseded: true }, v1],
-    branches: [{ branch: 'main', baseVersionId: null, status: 'open', createTime: '2026-10-18 09:00:00' }], blocked: null,
-  });
+test('回到历史提交后明确显示「历史版本」，不把当前位置伪装成 main', async ({ page }) => {
+  await mockVersions(page, overviewOf([v2, v1], { kind: 'detached', versionId: v1.id }));
   await openPanel(page);
-  const rewound = page.locator('.version-tree-row', { hasText: '把卡片改成圆角' });
-  await expect(rewound.getByText('已回退', { exact: true })).toBeVisible();
-  await expect(rewound).toHaveClass(/version-tree-row-superseded/);
-  await expect(rewound.getByRole('button', { name: /回到此版本/ })).toBeEnabled();
-  // 当前版本是 v1，它的「回到此版本」应当禁用。
+  await expect(page.getByText('历史版本', { exact: true })).toBeVisible();
+  await expect(page.locator('.version-panel-toolbar-sha')).toHaveText(short1);
+  // 分支选择器不再显示 main：detached 时只显示「切换到分支」。
+  const select = page.locator('.version-panel-branch-select');
+  await expect(select).toContainText('切换到分支');
+  await expect(select).not.toContainText('main');
+  await expect(page.getByText(`当前版本 ${short1}`)).toBeVisible();
+  // 当前停在 v1：它自己不能再「回到」，更新的 v2 仍可回退。
   await expect(page.locator('.version-tree-row-current').getByRole('button', { name: /回到此版本/ })).toBeDisabled();
+  await expect(page.locator('.version-tree-row', { hasText: '把卡片改成圆角' }).getByRole('button', { name: /回到此版本/ })).toBeEnabled();
 });
 
 test('版本历史按树状渲染：没有卡片组件，连线画满整棵树', async ({ page }) => {
-  await mockVersions(page, {
-    current: { branch: 'main', versionId: v2.id }, versions: [v2, v1],
-    branches: [{ branch: 'main', baseVersionId: null, status: 'open', createTime: '2026-10-18 09:00:00' }], blocked: null,
-  });
+  await mockVersions(page, overviewOf([v2, v1], { kind: 'branch', branch: 'main', versionId: v2.id }));
   await openPanel(page);
   // 卡片样式已经不存在：历史就是树。
   await expect(page.locator('.version-panel-item')).toHaveCount(0);
@@ -157,29 +161,24 @@ test('版本历史按树状渲染：没有卡片组件，连线画满整棵树',
   expect(box?.height).toBeGreaterThan(100);
 });
 
-test('没有版本时显示空态说明回退不删历史', async ({ page }) => {
-  await mockVersions(page, {
-    current: { branch: 'main', versionId: null }, versions: [], branches: [], blocked: null,
-  });
+test('没有版本时显示空态，并说明回到旧版不新增版本', async ({ page }) => {
+  await mockVersions(page, overviewOf([], { kind: 'branch', branch: 'main', versionId: null }, []));
   await openPanel(page);
   await expect(page.getByText('还没有版本记录。完成一次生成后，这里会出现第一个版本。')).toBeVisible();
-  await expect(page.getByText(/回退只是把当前版本指回旧的那一版/)).toBeVisible();
+  await expect(page.getByText(/不新增版本/)).toBeVisible();
 });
 
-test('回到旧版本需要二次确认，确认后按版本 id 提交', async ({ page }) => {
-  await mockVersions(page, {
-    current: { branch: 'main', versionId: v2.id }, versions: [v2, v1],
-    branches: [{ branch: 'main', baseVersionId: null, status: 'open', createTime: '2026-10-18 09:00:00' }], blocked: null,
-  });
+test('回到旧版本需要二次确认，确认后按 commit SHA 提交', async ({ page }) => {
+  await mockVersions(page, overviewOf([v2, v1], { kind: 'branch', branch: 'main', versionId: v2.id }));
   const writes = captureWrite(page, '/api/app/versions/restore', { status: 'restored', version: v1, previewError: null });
   await openPanel(page);
   await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /回到此版本/ }).click();
   const dialog = page.locator('.ant-modal-confirm');
-  await expect(dialog).toContainText('历史版本不会被删除');
+  await expect(dialog).toContainText('不会新增版本');
   await dialog.getByRole('button', { name: '回到此版本' }).click();
   await expect.poll(() => writes.length).toBe(1);
   expect(writes[0]).toMatchObject({ versionId: v1.id });
-  await expect(page.getByText('当前版本已指向 v1「首版首页」')).toBeVisible();
+  await expect(page.getByText(`已回到「首版首页」（${short1}），没有新增版本`)).toBeVisible();
 });
 
 test('回退成功后页面会刷新预览（iframe 换成新地址，不是停在旧画面）', async ({ page }) => {
@@ -199,15 +198,12 @@ test('回退成功后页面会刷新预览（iframe 换成新地址，不是停�
   expect(before).toContain('/preview/html_versions/');
   const readsBefore = appReads;
 
-  await mockVersions(page, {
-    current: { branch: 'main', versionId: v2.id }, versions: [v2, v1],
-    branches: [{ branch: 'main', baseVersionId: null, status: 'open', createTime: '2026-10-18 09:00:00' }], blocked: null,
-  });
+  await mockVersions(page, overviewOf([v2, v1], { kind: 'branch', branch: 'main', versionId: v2.id }));
   captureWrite(page, '/api/app/versions/restore', { status: 'restored', version: v1, previewError: null });
   await openPanel(page);
   await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /回到此版本/ }).click();
   await page.locator('.ant-modal-confirm').getByRole('button', { name: '回到此版本' }).click();
-  await expect(page.getByText('当前版本已指向 v1「首版首页」')).toBeVisible();
+  await expect(page.getByText(`已回到「首版首页」（${short1}），没有新增版本`)).toBeVisible();
   // 用户真正会看到的：预览地址换了（pv 递增），并且页面重新读了应用信息。
   await expect(frame).not.toHaveAttribute('src', before ?? '');
   await expect(frame).toHaveAttribute('src', /pv=\d+/);
@@ -215,10 +211,7 @@ test('回退成功后页面会刷新预览（iframe 换成新地址，不是停�
 });
 
 test('预览重建失败时明确告诉用户「画面没变」的原因', async ({ page }) => {
-  await mockVersions(page, {
-    current: { branch: 'main', versionId: v2.id }, versions: [v2, v1],
-    branches: [{ branch: 'main', baseVersionId: null, status: 'open', createTime: '2026-10-18 09:00:00' }], blocked: null,
-  });
+  await mockVersions(page, overviewOf([v2, v1], { kind: 'branch', branch: 'main', versionId: v2.id }));
   captureWrite(page, '/api/app/versions/restore', {
     status: 'restored',
     version: v1,
@@ -231,11 +224,7 @@ test('预览重建失败时明确告诉用户「画面没变」的原因', async
 });
 
 test('生成占用应用时写操作全部禁用并说明原因', async ({ page }) => {
-  await mockVersions(page, {
-    current: { branch: 'main', versionId: v2.id }, versions: [v2, v1],
-    branches: [{ branch: 'main', baseVersionId: null, status: 'open', createTime: '2026-10-18 09:00:00' }],
-    blocked: '应用正在生成，跑完或取消后才能切换版本',
-  });
+  await mockVersions(page, overviewOf([v2, v1], { kind: 'branch', branch: 'main', versionId: v2.id }, [mainBranch], '应用正在生成，跑完或取消后才能切换版本'));
   await openPanel(page);
   await expect(page.getByText('应用正在生成，跑完或取消后才能切换版本')).toBeVisible();
   const item = page.locator('.version-tree-row', { hasText: '首版首页' });
@@ -243,11 +232,27 @@ test('生成占用应用时写操作全部禁用并说明原因', async ({ page 
   await expect(item.getByRole('button', { name: /从此版开分支/ })).toBeDisabled();
 });
 
+test('未合并的分支可以合并到主线，已合并的不再列出来', async ({ page }) => {
+  const branches: VersionBranch[] = [
+    { branch: 'main', headVersionId: v2.id, merged: false },
+    { branch: 'done-feature', headVersionId: v2.id, merged: true },
+    { branch: 'plan-x', headVersionId: v2.id, merged: false },
+  ];
+  await mockVersions(page, overviewOf([v2, v1], { kind: 'branch', branch: 'main', versionId: v2.id }, branches));
+  const writes = captureWrite(page, '/api/app/versions/adopt', { branch: 'plan-x', version: v1, previewError: null });
+  await openPanel(page);
+  const panel = page.getByRole('region', { name: '未合并分支' });
+  await expect(panel.getByText('plan-x')).toBeVisible();
+  await expect(panel.getByText('done-feature')).toHaveCount(0);
+  await panel.getByRole('button', { name: '合并到主线' }).click();
+  await page.locator('.ant-modal-confirm').getByRole('button', { name: '合并到主线' }).click();
+  await expect.poll(() => writes.length).toBe(1);
+  expect(writes[0]).toMatchObject({ branch: 'plan-x' });
+  await expect(page.getByText('已把分支 plan-x 合并到主线')).toBeVisible();
+});
+
 test('对比显示改动文件与补丁', async ({ page }) => {
-  await mockVersions(page, {
-    current: { branch: 'main', versionId: v2.id }, versions: [v2, v1],
-    branches: [{ branch: 'main', baseVersionId: null, status: 'open', createTime: '2026-10-18 09:00:00' }], blocked: null,
-  }, {
+  await mockVersions(page, overviewOf([v2, v1], { kind: 'branch', branch: 'main', versionId: v2.id }), {
     diff: {
       base: v1, target: v2,
       files: [{ path: 'assets/style.css', status: 'modified', added: 1, removed: 1 }],
@@ -258,7 +263,7 @@ test('对比显示改动文件与补丁', async ({ page }) => {
   await openPanel(page);
   await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /对\s*比/ }).click();
   const diff = page.getByRole('region', { name: '版本对比' });
-  await expect(diff).toContainText('对比 v1 → v2');
+  await expect(diff).toContainText(`对比 ${short1} → ${short2}`);
   await expect(diff.locator('.version-panel-diff-path').getByText('assets/style.css')).toBeVisible();
   await expect(diff.locator('pre')).toContainText('body{color:blue}');
 });
@@ -275,12 +280,10 @@ test('版本记录与差异加载时没有 HTML 嵌套或 hydration 错误', asy
 
   const overviewResponse = Promise.withResolvers<void>();
   const diffResponse = Promise.withResolvers<void>();
+  const pending: AppVersionOverview = { current: { kind: 'branch', branch: 'main', versionId: v2.id }, versions: [v2, v1], branches: [], blocked: null };
   await page.route(url => url.pathname === '/api/app/versions', async route => {
     await overviewResponse.promise;
-    await route.fulfill({ json: { code: 0, data: {
-      current: { branch: 'main', versionId: v2.id }, versions: [v2, v1],
-      branches: [], blocked: null,
-    } } });
+    await route.fulfill({ json: { code: 0, data: pending } });
   });
   await page.route(url => url.pathname === '/api/app/versions/thumbnail', route => route.fulfill({ status: 404 }));
   await page.route(url => url.pathname === '/api/app/versions/diff', async route => {
@@ -308,7 +311,7 @@ test('读取失败时可以重试', async ({ page }) => {
     attempts += 1;
     return attempts === 1
       ? route.fulfill({ json: { code: 50000, message: '版本库暂时不可用', data: null } })
-      : route.fulfill({ json: { code: 0, data: { current: { branch: 'main', versionId: null }, versions: [], branches: [], blocked: null } } });
+      : route.fulfill({ json: { code: 0, data: overviewOf([], { kind: 'branch', branch: 'main', versionId: null }, []) } });
   });
   await openPanel(page);
   await expect(page.getByText('读取版本记录失败：版本库暂时不可用')).toBeVisible();

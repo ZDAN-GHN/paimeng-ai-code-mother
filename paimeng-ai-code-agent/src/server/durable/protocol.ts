@@ -7,5 +7,8 @@
  *    表现为用户点回退后时间线多一条记录；语义变更必须靠版本号挡住。
  * 9：版本包装工具退役，新增 git 工具（模型直接管理版本）；指令更新。
  *    旧 harness 仍暴露 restoreVersion 等包装工具且缺 git 工具。
+ * 10：版本以 git 为唯一事实源——回退只切游离 HEAD 不产生提交，提交前先落到分支，
+ *    生成收尾只在真有未提交改动时兜底。旧 harness 仍教模型「复制旧内容再提交」，
+ *    会把一次回退记成新版本，必须重启换掉。
  */
-export const harnessProtocol = 9;
+export const harnessProtocol = 10;

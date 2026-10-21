@@ -1,21 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { loadEnvFile } from 'node:process';
-import { rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { testDatabaseUrl } from '../test-database-url';
-import { db } from '@/server/db';
-import { eq } from 'drizzle-orm';
-import { apps } from '@/server/schema';
+import { installGitGuard } from '@/server/git-guard';
 import { ensureWorkspace, workspace, type WorkspaceApp } from '@/server/workspace';
-import { nextSnowflakeId } from '@/server/snowflake';
 
 const run = promisify(execFile);
-loadEnvFile('.env');
-process.env.DATABASE_URL = testDatabaseUrl(process.env.DATABASE_URL ?? '');
-
-const app: WorkspaceApp = { id: String(Date.now()) + '31', codeGenType: 'html' };
+const app: WorkspaceApp = { id: `${Date.now()}31`, codeGenType: 'html' };
 const tree = workspace(app);
 
 async function git(args: string[], options: { allowFailure?: boolean } = {}) {
@@ -28,73 +20,109 @@ async function git(args: string[], options: { allowFailure?: boolean } = {}) {
   }
 }
 
-let appIdValue = 0n;
+async function write(path: string, content: string) {
+  const file = join(tree, path);
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, content);
+}
+
+async function commit(message: string) {
+  await git(['add', '.']);
+  await git(['commit', '-qm', message]);
+  return (await git(['rev-parse', 'HEAD'])).stdout.trim();
+}
 
 beforeAll(async () => {
   await rm(tree, { recursive: true, force: true });
   await ensureWorkspace(app);
-  appIdValue = await nextSnowflakeId();
-  await db().insert(apps).values({ id: appIdValue, initPrompt: 'hook 测试', codeGenType: 'html', userId: 1n, createTime: new Date().toISOString(), updateTime: new Date().toISOString() });
+  await git(['init', '-q', '-b', 'main']);
+  await git(['config', 'user.name', 'paimeng']);
+  await git(['config', 'user.email', 'version@paimeng.local']);
+  await installGitGuard(tree);
+  await write('a.txt', 'v1');
+  await commit('v1');
+  await write('b.txt', 'v2');
+  await commit('v2');
 });
 
 afterAll(async () => {
-  await db().delete(apps).where(eq(apps.id, appIdValue)).catch(() => undefined);
   await rm(tree, { recursive: true, force: true });
 });
 
 describe('git 安全闸（reference-transaction hook）', () => {
-  it('正常提交、开分支、合并全部放行', async () => {
-    await git(['init', '-q', '-b', 'main']);
-    await git(['config', 'user.name', 'paimeng']);
-    await git(['config', 'user.email', 'version@paimeng.local']);
-    await (await import('@/server/git-guard')).installGitGuard(tree);
-    await run('bash', ['-c', `echo v1 > ${join(tree, 'a.txt')}`]);
-    await git(['add', '.']);
-    await git(['commit', '-qm', 'v1']);
-    await run('bash', ['-c', `echo v2 > ${join(tree, 'b.txt')}`]);
-    await git(['add', '.']);
-    await git(['commit', '-qm', 'v2']);
+  it('正常提交、开分支、--no-ff 合并全部放行', async () => {
     await git(['branch', 'side']);
     await git(['checkout', '-q', 'side']);
-    await run('bash', ['-c', `echo v3 > ${join(tree, 'c.txt')}`]);
-    await git(['add', '.']);
-    await git(['commit', '-qm', 'v3-side']);
+    await write('c.txt', 'v3');
+    await commit('v3-side');
     await git(['checkout', '-q', 'main']);
     await git(['merge', '-q', '--no-ff', 'side', '-m', 'merge side']);
     const parents = (await git(['log', '-1', '--format=%P'])).stdout.trim().split(' ');
     expect(parents).toHaveLength(2);
   });
 
-  it('删除分支被拒绝，refs 不变', async () => {
+  it('切换 detached HEAD 合法，分支引用不动', async () => {
+    const target = (await git(['rev-parse', 'HEAD~1'])).stdout.trim();
+    const refsBefore = (await git(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/'])).stdout;
+
+    await git(['switch', '-q', '--detach', target]);
+
+    expect((await git(['rev-parse', 'HEAD'])).stdout.trim()).toBe(target);
+    expect((await git(['symbolic-ref', '--quiet', '--short', 'HEAD'], { allowFailure: true })).ok).toBe(false);
+    expect((await git(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/'])).stdout).toBe(refsBefore);
+  });
+
+  it('detached HEAD 上提交与开分支都放行，主线不动', async () => {
+    const detached = (await git(['rev-parse', 'HEAD'])).stdout.trim();
+    const main = (await git(['rev-parse', 'refs/heads/main'])).stdout.trim();
+    await write('detached.txt', 'from detached');
+    // 提交前先落到分支上：hook 允许新建分支，也允许该分支的快进提交
+    await git(['switch', '-q', '-c', 'from-detached']);
+    const committed = await commit('detached work');
+    expect((await git(['rev-parse', 'HEAD'])).stdout.trim()).toBe(committed);
+    expect((await git(['rev-parse', `refs/heads/from-detached`])).stdout.trim()).toBe(committed);
+    expect((await git(['rev-parse', 'refs/heads/main'])).stdout.trim()).toBe(main);
+    expect((await git(['rev-parse', 'HEAD~1'])).stdout.trim()).toBe(detached);
+  });
+
+  it('删除分支被拒绝，引用还在', async () => {
     const outcome = await git(['branch', '-D', 'side'], { allowFailure: true });
     expect(outcome.ok).toBe(false);
     expect(outcome.stderr).toContain('禁止删除分支');
-    expect((await git(['rev-parse', '--verify', 'refs/heads/side'])).ok ?? true).toBeTruthy();
+    expect((await git(['rev-parse', '--verify', 'refs/heads/side'])).stdout.trim()).toHaveLength(40);
   });
 
   it('非快进更新被拒绝（移到非祖先提交）', async () => {
-    // main 在 merge 提交上；other 从 v1 分叉且多一个提交，不是 main 的祖先
-    const mainHead = (await git(['rev-parse', 'HEAD'])).stdout.trim();
+    const main = (await git(['rev-parse', 'refs/heads/main'])).stdout.trim();
+    await git(['checkout', '-q', 'main']);
     await git(['branch', 'other', 'HEAD~2']);
-    await run('bash', ['-c', `echo v4 > ${join(tree, 'd.txt')}`]);
-    await git(['add', '.']);
-    await git(['commit', '-qm', 'v4']);
-    const otherHead = (await git(['rev-parse', 'other'])).stdout.trim();
-    // other 的提交不是 main 的祖先 → 必须被拒绝
-    await git(['checkout', 'main']);
-    const outcome = await git(['reset', '--hard', otherHead], { allowFailure: true });
+    const other = (await git(['rev-parse', 'refs/heads/other'])).stdout.trim();
+
+    const outcome = await git(['reset', '--hard', other], { allowFailure: true });
     expect(outcome.ok).toBe(false);
     expect(outcome.stderr).toContain('禁止非快进更新');
-    const after = (await git(['rev-parse', 'refs/heads/main'])).stdout.trim();
-    expect(after).not.toBe(otherHead);
-    expect(after).not.toBe(mainHead); // 也不是原始 mainHead（说明发生了中间移动）
+    expect((await git(['rev-parse', 'refs/heads/main'])).stdout.trim()).toBe(main);
   });
 
-  it('reset --hard 不会改写历史（工作区可回，refs 不动）', async () => {
+  it('reset --hard 不会改写历史（refs 不动）', async () => {
     const head = (await git(['rev-parse', 'HEAD'])).stdout.trim();
-    // reset --hard 移动的是当前分支 ref：hook 会拦下这个移动本身。
     const outcome = await git(['reset', '--hard', 'HEAD~1'], { allowFailure: true });
     expect(outcome.ok).toBe(false);
     expect((await git(['rev-parse', 'refs/heads/main'])).stdout.trim()).toBe(head);
+  });
+
+  it('refs/paimeng/versions/* 是保留引用：可创建也可强制指向老提交', async () => {
+    const head = (await git(['rev-parse', 'HEAD'])).stdout.trim();
+    const older = (await git(['rev-parse', 'HEAD~2'])).stdout.trim();
+    const ref = `refs/paimeng/versions/${head}`;
+
+    await git(['update-ref', ref, head]);
+    expect((await git(['rev-parse', ref])).stdout.trim()).toBe(head);
+
+    const outcome = await git(['update-ref', ref, older], { allowFailure: true });
+    expect(outcome.ok).toBe(true);
+    expect((await git(['rev-parse', ref])).stdout.trim()).toBe(older);
+    // 保留引用不进用户分支列表
+    expect((await git(['for-each-ref', '--format=%(refname)', 'refs/heads/'])).stdout).not.toContain('refs/paimeng/versions');
   });
 });
