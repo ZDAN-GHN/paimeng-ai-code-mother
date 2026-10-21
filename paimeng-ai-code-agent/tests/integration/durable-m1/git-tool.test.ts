@@ -221,6 +221,30 @@ describe.skipIf(!harnessReady || !postgresReady)('durable M1：git 工具', () =
 		}
 	}, 180_000);
 
+	it('游离 HEAD 上没有产生提交时不留空分支（空提交、dry-run 都不算）', async () => {
+		const v1 = initRepo();
+		git(['switch', '--detach', v1]);
+		const branchesBefore = git(['for-each-ref', '--format=%(refname:short)', 'refs/heads']).trim();
+		const headsBefore = git(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads']).trim();
+		const runDir = mkdtempSync(join(tmpdir(), 'durable-git-empty-'));
+		// 干净工作区上提交：git 自己会拒绝（nothing to commit），平台也不能先建一条空分支。
+		const { base, harness } = await startGitHarness({ runDir, args: ['commit', '-m', '什么也没改'], finalText: 'GIT_EMPTY_DONE' });
+		try {
+			const conversationId = await createAppConversation(base);
+			await submitTurn(base, conversationId, 'git-empty-commit');
+			const result = await settledGitResult(base, conversationId, 'GIT_EMPTY_DONE');
+			expect(result.exitCode).not.toBe(0);
+			expect(git(['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('HEAD');
+			expect(git(['for-each-ref', '--format=%(refname:short)', 'refs/heads']).trim()).toBe(branchesBefore);
+			expect(git(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads']).trim()).toBe(headsBefore);
+			expect(commitCount()).toBe(1);
+		} finally {
+			await stopHarness(harness);
+			rmSync(runDir, { recursive: true, force: true });
+			rmSync(appWorkspace, { recursive: true, force: true });
+		}
+	}, 180_000);
+
 	it('游离 HEAD 上的提交先落到新分支，主线不动', async () => {
 		const v1 = initRepo();
 		writeFileSync(join(appWorkspace, 'index.html'), '<!doctype html><html><body>v2</body></html>');

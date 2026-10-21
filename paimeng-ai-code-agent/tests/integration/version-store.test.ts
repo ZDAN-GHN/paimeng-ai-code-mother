@@ -24,6 +24,7 @@ import {
   versionRoot,
   versionThumbnailPath,
 } from '@/server/version-store';
+import { versionThumbnail } from '@/server/version-thumbnail';
 import { formatStoredTime, parseStoredTime } from '@/shared/display';
 import type { AppVersion } from '@/shared/versioning';
 
@@ -203,6 +204,19 @@ describe('回退（detached HEAD）', () => {
 
     await expect(restoreVersion({ app, versionId: withExtra.id })).rejects.toThrow(/extra\.html/);
     expect(await read(app, 'extra.html')).toBe('<p>用户新写的内容</p>');
+  });
+
+  it('被忽略的文件占了目标树里的路径时拒绝回退（status 看不见它，但物化会覆盖）', async () => {
+    const { app } = await twoVersions();
+    // 老版本跟踪 assets/photo.png；之后删掉它并把 assets/ 加入忽略规则；用户又在同路径放了新素材。
+    const withAsset = await commit(app, '加上素材', { 'assets/photo.png': 'old-asset' });
+    await commit(app, '删掉素材并忽略', { 'assets/photo.png': null, '.gitignore': 'assets/\n' });
+    await write(app, 'assets/photo.png', 'NEW-ASSET-NOT-COMMITTED');
+    // 前提确认：这个文件对 git 完全不可见（ignored + untracked），status 不会报它。
+    expect((await git(app, ['status', '--porcelain'])).trim()).toBe('');
+
+    await expect(restoreVersion({ app, versionId: withAsset.id })).rejects.toThrow(/assets\/photo\.png/);
+    expect(await read(app, 'assets/photo.png')).toBe('NEW-ASSET-NOT-COMMITTED');
   });
 
   it('被 .gitignore 排除的素材与依赖、构建产物不阻塞回退，也不会被删掉', async () => {
@@ -526,6 +540,27 @@ describe('展示缓存', () => {
     expect((await getVersion(app, first.id)).thumbnailKey).toBe(key);
     expect((await getVersion(app, second.id)).thumbnailKey).toBe(null);
   });
+
+  it('截图来自那一版提交的内容，不受当前工作区影响', async () => {
+    // 工作区永远只有当前版本，所以截图必须能从提交里离屏还原；
+    // 只测 saveVersionThumbnail 读写字节是测不到这条的。
+    const app = await newApp();
+    const first = await commit(app, '第一版', { 'index.html': '<html><body style="background:#fff"><h1>VERSION ONE</h1></body></html>' });
+    const second = await commit(app, '第二版', { 'index.html': '<html><body style="background:#123"><h1>VERSION TWO</h1></body></html>' });
+    // 工作区再改成完全不同的第三种内容。
+    await write(app, 'index.html', '<html><body style="background:#f00"><h1>CURRENT</h1></body></html>');
+
+    const [a, b] = [await versionThumbnail(app, first.id), await versionThumbnail(app, second.id)];
+    const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    expect(a?.subarray(0, 8)).toEqual(pngHeader);
+    expect(b?.subarray(0, 8)).toEqual(pngHeader);
+    // 两版内容不同 → 截出来的画面不同；如果截的是当前工作区，两张会一模一样。
+    expect(a!.equals(b!)).toBe(false);
+
+    // 第二次直接读缓存，不再重新截图。
+    expect((await versionThumbnail(app, first.id))!.equals(a!)).toBe(true);
+    expect((await listVersions(app)).versions.find(version => version.id === first.id)?.thumbnailKey).toBeTruthy();
+  }, 120_000);
 
   it('提交时间按 UTC 朴素时间输出，展示层能按同一约定解析', async () => {
     const { app, first } = await twoVersions();

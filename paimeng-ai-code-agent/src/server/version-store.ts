@@ -307,7 +307,13 @@ async function readChangedFiles(repo: string, commits: Commit[]) {
   if (commits.length === 0) return changed;
   const known = new Set(commits.map(commit => commit.sha));
   const batch = await gitStdin(repo, ['diff-tree', '--stdin', '--root', '-r', '--name-only', '-z'], `${commits.map(commit => commit.sha).join('\n')}\n`);
-  if (batch.code !== 0) throw new GitCommandError(batch.args, batch.stderr, batch.code);
+  if (batch.code !== 0) {
+    // 坏对象（tree 丢了）不该让整个面板打不开：逐提交降级，读不到的按「没有改动信息」处理。
+    return new Map(await Promise.all(commits.map(async commit => [
+      commit.sha,
+      await changedFilesOf(repo, commit).catch(() => [] as string[]),
+    ] as const)));
+  }
   let current: string | null = null;
   for (const token of batch.stdout.split('\0')) {
     if (known.has(token)) {
@@ -383,7 +389,7 @@ async function fillSizes(source: VersionSource, commits: Commit[]) {
   const worker = async () => {
     while (next < trees.length) {
       const tree = trees[next++]!;
-      const listing = await git(source.repo, null, ['ls-tree', '-r', '-l', tree]);
+      const listing = await git(source.repo, null, ['ls-tree', '-r', '-l', tree]).catch(() => '');
       let bytes = 0;
       let fileCount = 0;
       for (const line of listing.split('\n').filter(Boolean)) {
@@ -468,31 +474,45 @@ async function restoreEmptyDirectories(app: WorkspaceApp) {
 }
 
 /**
- * 切版会覆盖工作区：只要目标树会写到某个路径，那一路径上的未提交内容就保不住，直接拒绝。
+ * 切版会覆盖工作区：目标树要写到的每一个路径，只要工作区里现在的内容不是「已提交」的，就拒绝。
  *
- * 判定必须精确到「会不会被覆盖」，两种误判都不可接受：
- * - 把已跟踪文件的改动放过 → 用户正在编辑的内容被 read-tree 抹掉
- * - 把与目标树无关的未跟踪素材也算脏 → 工作区里多一张截图就永远不能切版
- *   （素材进版本库之前正是这种状态，见「git clean 删掉 assets」那次事故）
+ * 三处必须都覆盖，少一处就会丢内容：
+ * - 已跟踪文件的改动（staged/unstaged）→ read-tree 直接覆盖
+ * - 未跟踪文件占用目标路径 → 同样被覆盖
+ * - 被 .gitignore 忽略的文件占用目标路径 → status 根本不报它，最容易漏
+ *   （素材曾经被忽略，之后又被重新跟踪，回退就会把用户新放的图覆盖掉）
  *
- * 构建产物、依赖与平台元数据在 info/exclude 里，status 不会报它们。
+ * 反过来，与目标树无关的未跟踪/忽略内容（依赖、构建产物、其它素材）一律放行：
+ * read-tree 不碰它们，`git clean` 也不会跑。
  */
 async function assertCleanSource(repo: string, tree: string, commit: string) {
+  const blocking = new Set<string>();
   const status = await git(repo, tree, ['status', '--porcelain', '-z', '--untracked-files=normal']);
-  const blocking: string[] = [];
+  const untracked: string[] = [];
   for (const entry of status.split('\0').filter(Boolean)) {
     const code = entry.slice(0, 2);
     const path = entry.slice(3);
-    if (code !== '??') {
-      // 已跟踪的改动：read-tree --reset -u 会覆盖或删除它，必须拒绝。
-      blocking.push(path);
-      continue;
-    }
-    // 未跟踪文件只会在「目标树里也有这个路径」时被覆盖，否则原样留在工作区。
-    if ((await gitRaw(repo, null, ['cat-file', '-e', `${commit}:${path}`])).code === 0) blocking.push(path);
+    if (code === '??') { untracked.push(path); continue; }
+    blocking.add(path);
   }
-  if (blocking.length === 0) return;
-  throw new Error(`工作区有未提交的源码改动（${blocking.slice(0, 3).join('、')}），请先提交或暂存后再切换版本`);
+  const targetPaths = (await git(repo, null, ['ls-tree', '-r', '-z', '--name-only', commit]))
+    .split('\0').filter(Boolean);
+  const target = new Set(targetPaths);
+  // 未跟踪文件只在目标树里也有同名路径时才危险（会被覆盖）。
+  for (const path of untracked) if (target.has(path)) blocking.add(path);
+  // 目标树里、当前索引里没有的路径：只要磁盘上已经有东西（ignored 文件、目录占位），
+  // 物化就会覆盖它，而 status 看不见它。
+  if (targetPaths.length > 0) {
+    const indexPaths = new Set((await git(repo, null, ['ls-files', '-z'])).split('\0').filter(Boolean));
+    const workTree = tree;
+    const risky = targetPaths.filter(path => !indexPaths.has(path));
+    if (risky.length > 0) {
+      const hits = await Promise.all(risky.map(async path => (await exists(join(workTree, path))) ? path : null));
+      for (const path of hits) if (path) blocking.add(path);
+    }
+  }
+  if (blocking.size === 0) return;
+  throw new Error(`工作区有未提交的源码改动（${[...blocking].slice(0, 3).join('、')}），请先提交或暂存后再切换版本`);
 }
 
 async function hasStagedChanges(repo: string, tree: string) {

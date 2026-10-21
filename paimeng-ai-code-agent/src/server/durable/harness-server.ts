@@ -313,9 +313,20 @@ const gitTool = defineTool({
 		assertGitSubcommand(args.args);
 		// 第一次显式使用 git 时才初始化仓库：此前的文件就是仓库的初始内容。
 		await ensureVersionRepo(app);
-		// 游离 HEAD 上的提交没有分支引用，会从版本列表里消失：提交前先落回一条分支。
-		if (gitCreatesCommit(args.args)) await ensureVersionBranch(app);
-		const outcome = await runGit(workspace(app), args.args);
+		const tree = workspace(app);
+		const before = gitCreatesCommit(args.args) ? await runGit(tree, ["rev-parse", "HEAD"]) : null;
+		const headBefore = before?.exitCode === 0 ? before.text.trim() : "";
+		const outcome = await runGit(tree, args.args);
+		// 游离 HEAD 上产生的新提交没有分支引用，会从版本列表里消失。
+		// 只在这个命令真的移动了 HEAD 之后才建分支：空提交、commit --dry-run、
+		// 已经是最新的 merge 都不该留下一条没有提交的分支。
+		if (headBefore) {
+			const after = await runGit(tree, ["rev-parse", "HEAD"]);
+			const headAfter = after.exitCode === 0 ? after.text.trim() : "";
+			if (outcome.exitCode === 0 && headAfter && headAfter !== headBefore) {
+				await ensureVersionBranch(app).catch(() => undefined);
+			}
+		}
 		return {
 			output: [{ type: "text", text: outcome.exitCode === 0 ? outcome.text : `退出码 ${outcome.exitCode}\n${outcome.text}` }],
 			details: { exitCode: outcome.exitCode },
