@@ -468,15 +468,31 @@ async function restoreEmptyDirectories(app: WorkspaceApp) {
 }
 
 /**
- * 切版会覆盖工作区：有未提交的源码改动就拒绝，由用户先提交。
- * 构建产物、依赖与平台元数据在 info/exclude 里，不算源码改动；未跟踪的素材同样受保护，不会被清掉。
+ * 切版会覆盖工作区：只要目标树会写到某个路径，那一路径上的未提交内容就保不住，直接拒绝。
+ *
+ * 判定必须精确到「会不会被覆盖」，两种误判都不可接受：
+ * - 把已跟踪文件的改动放过 → 用户正在编辑的内容被 read-tree 抹掉
+ * - 把与目标树无关的未跟踪素材也算脏 → 工作区里多一张截图就永远不能切版
+ *   （素材进版本库之前正是这种状态，见「git clean 删掉 assets」那次事故）
+ *
+ * 构建产物、依赖与平台元数据在 info/exclude 里，status 不会报它们。
  */
-async function assertCleanSource(repo: string, tree: string) {
+async function assertCleanSource(repo: string, tree: string, commit: string) {
   const status = await git(repo, tree, ['status', '--porcelain', '-z', '--untracked-files=normal']);
-  const entries = status.split('\0').filter(Boolean);
-  if (entries.length === 0) return;
-  const paths = entries.slice(0, 3).map(entry => entry.length > 3 ? entry.slice(3) : entry).join('、');
-  throw new Error(`工作区有未提交的源码改动（${paths}），请先提交或暂存后再切换版本`);
+  const blocking: string[] = [];
+  for (const entry of status.split('\0').filter(Boolean)) {
+    const code = entry.slice(0, 2);
+    const path = entry.slice(3);
+    if (code !== '??') {
+      // 已跟踪的改动：read-tree --reset -u 会覆盖或删除它，必须拒绝。
+      blocking.push(path);
+      continue;
+    }
+    // 未跟踪文件只会在「目标树里也有这个路径」时被覆盖，否则原样留在工作区。
+    if ((await gitRaw(repo, null, ['cat-file', '-e', `${commit}:${path}`])).code === 0) blocking.push(path);
+  }
+  if (blocking.length === 0) return;
+  throw new Error(`工作区有未提交的源码改动（${blocking.slice(0, 3).join('、')}），请先提交或暂存后再切换版本`);
 }
 
 async function hasStagedChanges(repo: string, tree: string) {
@@ -545,7 +561,7 @@ export async function restoreVersion(input: { app: WorkspaceApp; versionId: stri
     const repo = await ensureVersionRepo(app);
     const tree = workspace(app);
     const commit = await resolveCommit(repo, target);
-    await assertCleanSource(repo, tree);
+    await assertCleanSource(repo, tree, commit.sha);
     if (await headSha(repo) === commit.sha) {
       return { status: 'unchanged' as const, version: await readVersion(app, commit.sha) };
     }
@@ -565,7 +581,7 @@ export async function branchFromVersion(input: { app: WorkspaceApp; versionId: s
     const repo = await ensureVersionRepo(app);
     const tree = workspace(app);
     const commit = await resolveCommit(repo, target);
-    await assertCleanSource(repo, tree);
+    await assertCleanSource(repo, tree, commit.sha);
     if (await branchSha(repo, label)) throw new Error(`分支 ${label} 已存在`);
     await git(repo, null, ['update-ref', `refs/heads/${label}`, commit.sha]);
     await materialize(app, repo, tree, commit.sha);
@@ -584,8 +600,8 @@ export async function switchBranch(input: { app: WorkspaceApp; branch: string; g
     const tree = workspace(app);
     const sha = await branchSha(repo, branch);
     if (!sha) throw new Error(`分支 ${branch} 不存在`);
-    await assertCleanSource(repo, tree);
     if (await currentBranch(repo) === branch) return { branch, version: await readVersion(app, sha) };
+    await assertCleanSource(repo, tree, sha);
     await materialize(app, repo, tree, sha);
     await git(repo, null, ['symbolic-ref', 'HEAD', `refs/heads/${branch}`]);
     return { branch, version: await readVersion(app, sha) };
@@ -613,13 +629,13 @@ export async function adoptBranch(input: { app: WorkspaceApp; branch: string; gu
     await input.guard?.();
     const repo = await ensureVersionRepo(app);
     const tree = workspace(app);
-    await assertCleanSource(repo, tree);
     const merged = await branchSha(repo, branch);
     if (!merged) throw new Error(`分支 ${branch} 不存在`);
     const main = await branchSha(repo, DEFAULT_BRANCH);
     const position = await currentBranch(repo);
     if (main && await isAncestor(repo, merged, main)) return { branch, version: null };
     if (!main || await isAncestor(repo, main, merged)) {
+      if (position === DEFAULT_BRANCH) await assertCleanSource(repo, tree, merged);
       await git(repo, null, ['update-ref', `refs/heads/${DEFAULT_BRANCH}`, merged]);
       if (position === DEFAULT_BRANCH) await materialize(app, repo, tree, merged);
       return { branch, version: await readVersion(app, merged) };
@@ -632,6 +648,7 @@ export async function adoptBranch(input: { app: WorkspaceApp; branch: string; gu
     const mergeTree = merged3.stdout.split('\n')[0]?.trim() ?? '';
     const message = `采纳分支 ${branch}`;
     const sha = (await gitCommit(repo, null, ['commit-tree', mergeTree, '-p', main, '-p', merged, '-m', message])).trim();
+    if (position === DEFAULT_BRANCH) await assertCleanSource(repo, tree, sha);
     await git(repo, null, ['update-ref', `refs/heads/${DEFAULT_BRANCH}`, sha]);
     if (position === DEFAULT_BRANCH) await materialize(app, repo, tree, sha);
     return { branch, version: await readVersion(app, sha) };

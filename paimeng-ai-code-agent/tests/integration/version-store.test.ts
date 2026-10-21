@@ -179,13 +179,30 @@ describe('回退（detached HEAD）', () => {
     expect(await refs(app)).toEqual(refsBefore);
   });
 
-  it('未跟踪的新文件同样被拒绝且不被删除', async () => {
-    const { app, first } = await twoVersions();
+  it('与目标树无关的未跟踪素材不阻塞回退，也不会被删掉', async () => {
+    // 素材曾经长期处于未跟踪状态（版本化上线前就存在）；那时候必须能切版，否则永远回不去。
+    const { app, first, second } = await twoVersions();
+    await write(app, 'assets/photo.jpg', 'binary-payload');
     await write(app, 'notes.md', '还没提交的笔记');
 
-    await expect(restoreVersion({ app, versionId: first.id })).rejects.toThrow(/notes\.md/);
+    const outcome = await restoreVersion({ app, versionId: first.id });
 
+    expect(outcome.status).toBe('restored');
+    expect(await read(app, 'assets/photo.jpg')).toBe('binary-payload');
     expect(await read(app, 'notes.md')).toBe('还没提交的笔记');
+    expect(await headOf(app)).toBe(first.id);
+    expect(second.id).not.toBe(first.id);
+  });
+
+  it('未跟踪文件占用了目标树里的路径时拒绝回退，避免覆盖用户内容', async () => {
+    const { app } = await twoVersions();
+    // 老版本里有 extra.html，之后被删掉；用户又在同路径写了一个未跟踪的新文件。
+    const withExtra = await commit(app, '加上 extra.html', { 'extra.html': '<p>老版本的文件</p>' });
+    await commit(app, '删掉 extra.html', { 'extra.html': null });
+    await write(app, 'extra.html', '<p>用户新写的内容</p>');
+
+    await expect(restoreVersion({ app, versionId: withExtra.id })).rejects.toThrow(/extra\.html/);
+    expect(await read(app, 'extra.html')).toBe('<p>用户新写的内容</p>');
   });
 
   it('被 .gitignore 排除的素材与依赖、构建产物不阻塞回退，也不会被删掉', async () => {
