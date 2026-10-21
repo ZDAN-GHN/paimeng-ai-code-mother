@@ -12,11 +12,13 @@ import {
   branchFromVersion,
   commitVersion,
   diffVersions,
+  getVersion,
   listVersions,
   purgeVersions,
   restoreVersion,
   saveVersionThumbnail,
   switchBranch,
+  versionGraph,
   versionRepo,
   versionThumbnailPath,
   versionRoot,
@@ -418,6 +420,35 @@ describe('差异', () => {
     expect(diff.files.some(file => file.path === 'index.html')).toBe(true);
     expect(diff.patch).toContain('plan-a');
     expect(diff.truncated).toBe(false);
+  });
+});
+
+describe('读路径不写仓库', () => {
+  it('仓库被删后读版本不重建 .git（回归：后台截图/面板读与删除并发重建孤儿仓库，撞出 ENOTEMPTY）', async () => {
+    const app = { id: String(Date.now()) + '31', codeGenType: 'html' as const };
+    await rm(workspace(app), { recursive: true, force: true });
+    await rm(versionRepo(app), { recursive: true, force: true });
+    await ensureWorkspace(app);
+    const file = join(workspace(app), 'index.html');
+    await mkdir(join(file, '..'), { recursive: true });
+    await writeFile(file, '<html><body>read-path</body></html>');
+    const version = await commitVersion({ app, kind: 'generate', title: '第一版' });
+    expect(version).not.toBeNull();
+
+    // 模拟「应用正在被删除」：仓库目录整个消失。
+    await rm(versionRepo(app), { recursive: true, force: true });
+
+    // 四条读路径都必须降级而不是自愈重建。
+    const overview = await listVersions(app);
+    expect(overview.versions.length).toBeGreaterThan(0);
+    await expect(getVersion(app, version!.id)).resolves.toMatchObject({ id: version!.id });
+    await expect(versionGraph(app)).resolves.toBeTruthy();
+    await expect(diffVersions(app, version!.id, version!.id)).rejects.toThrow('版本仓库不存在');
+
+    expect(await stat(versionRepo(app)).then(() => true, () => false)).toBe(false);
+
+    await purgeVersions(app).catch(() => undefined);
+    await rm(workspace(app), { recursive: true, force: true });
   });
 });
 

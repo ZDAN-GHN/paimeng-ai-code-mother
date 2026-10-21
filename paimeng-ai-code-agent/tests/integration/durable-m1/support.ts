@@ -50,6 +50,13 @@ const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
 export type HarnessProcess = { child: ChildProcess; output: () => string };
 
+/**
+ * 端口 → 该端口上最近一次启动的 harness 输出。
+ * waitHealthy 只拿到 base URL，靠这张表把「起不来」的真实原因（数据库 advisory lock、端口占用、
+ * 缺失配置）带进超时错误里；没有它，所有 durable-m1 用例只报一句 did not become healthy。
+ */
+const startedHarnesses = new Map<number, () => string>();
+
 export function startHarness(options: { port: number; runDir: string; reset: boolean; waitMs: number; finalText: string; thinking?: string; workspace?: string; tool?: string; args?: unknown; env?: Record<string, string> }): HarnessProcess {
   let output = '';
   const env = {
@@ -69,6 +76,9 @@ export function startHarness(options: { port: number; runDir: string; reset: boo
     ...options.env,
   };
   const child = spawn(process.execPath, ['--import', 'tsx', '--conditions=react-server', harnessEntry], { cwd: productRoot, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  // 不因进程退出而删除：启动失败的 harness 往往在几秒内就死了，而错误信息正是它留下的。
+  // 同一端口再次启动时会覆盖。
+  startedHarnesses.set(options.port, () => output);
   child.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString(); });
   child.stderr?.on('data', (chunk: Buffer) => { output += chunk.toString(); });
   return { child, output: () => output };
@@ -96,6 +106,8 @@ export function baseUrl(port: number): string {
   return `http://127.0.0.1:${port}`;
 }
 
+const outputTail = (text: string, lines = 20) => text.trim().split('\n').slice(-lines).join('\n');
+
 export async function waitHealthy(base: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -105,7 +117,16 @@ export async function waitHealthy(base: string, timeoutMs: number): Promise<void
     }
     await delay(200);
   }
-  throw new Error(`harness did not become healthy within ${timeoutMs}ms`);
+  const port = Number(new URL(base).port);
+  const output = startedHarnesses.get(port)?.() ?? '';
+  const details = output.trim()
+    ? `harness 输出（末尾 20 行）：\n${outputTail(output)}`
+    : '这个 harness 没有输出任何内容（进程可能根本没启动，或已经被上一次中断的 vitest 留在后台占用端口）。';
+  throw new Error(
+    `harness 在 ${timeoutMs}ms 内没有通过健康检查（${base}）。\n${details}\n`
+    + '如果是「advisory lock」或「storage is already open」：上一次被中断的 vitest 留下了孤儿 harness 进程，'
+    + '先用 pgrep -af harness-server 找到它（DURABLE_HARNESS_RUN_DIR 指向 /tmp/durable-*），kill 后重跑。',
+  );
 }
 
 export async function submit(base: string, content: string, requestId: string): Promise<void> {

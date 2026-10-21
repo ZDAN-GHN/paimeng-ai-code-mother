@@ -114,6 +114,12 @@ async function gitCommit(repo: string, workTree: string | null, args: string[]) 
   return git(repo, workTree, ['-c', 'user.name=paimeng', '-c', 'user.email=version@paimeng.local', ...args]);
 }
 
+/** 读路径用：只回答「仓库现在在不在」，不创建、不迁移、不补写 config。 */
+async function existingVersionRepo(app: WorkspaceApp): Promise<string | null> {
+  const repo = versionRepo(app);
+  return await stat(join(repo, 'HEAD')).then(() => repo, () => null);
+}
+
 export async function ensureVersionRepo(app: WorkspaceApp) {
   const repo = versionRepo(app);
   const tree = workspace(app);
@@ -372,8 +378,8 @@ async function reachableShas(app: WorkspaceApp): Promise<Set<string> | null> {
     // 读路径绝不 ensure：ensureVersionRepo 每次都会补写 .git/config 与 hooks，
     // 与删除工作区并发（生成收尾后的后台截图、面板读）会撞出 ENOTEMPTY 并重建孤儿 .git。
     // 仓库不在（应用未生成过或正在删除）就当全部不可达，由调用方降级。
-    const repo = versionRepo(app);
-    if (!(await stat(join(repo, 'HEAD')).catch(() => null))) return null;
+    const repo = await existingVersionRepo(app);
+    if (!repo) return null;
     const branch = (await currentState(app, db())).branch;
     const list = await git(repo, null, ['rev-list', `refs/heads/${branch}`]);
     return new Set(list.split('\n').filter(Boolean));
@@ -743,7 +749,9 @@ export async function getVersion(app: WorkspaceApp, versionId: string) {
 export async function diffVersions(app: WorkspaceApp, baseId: string, targetId: string): Promise<VersionDiff> {
   const base = await versionRow(app, baseId);
   const target = await versionRow(app, targetId);
-  const repo = await ensureVersionRepo(app);
+  // 读路径绝不 ensure：撞上删除或还没生成过的工作区时，ensure 会重建一个只含 config 的孤儿 .git。
+  const repo = await existingVersionRepo(app);
+  if (!repo) throw new Error('这个应用的版本仓库不存在（可能正在删除，或还没生成过）');
   const numstat = new Map<string, { added: number; removed: number }>();
   for (const line of (await git(repo, null, ['diff', '--numstat', '-M', base.commitSha, target.commitSha])).split('\n').filter(Boolean)) {
     const [added, removed, ...rest] = line.split('\t');
