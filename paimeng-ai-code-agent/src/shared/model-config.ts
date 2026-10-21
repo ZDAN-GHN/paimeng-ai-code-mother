@@ -9,6 +9,11 @@ export type RequiredModelAlias = typeof requiredModelAliases[number];
  * 管理端据此在别名列表里标注用途、并提供预填了名字与能力的新建入口。
  */
 export const optionalModelAliases = {
+  'version.summary': {
+    label: '版本概述',
+    purpose: '给每个应用版本起一句 20 字以内的中文概括（版本历史里显示）；未配置时用「改动 N 个文件」这类兜底文案',
+    capabilities: { streaming: false, toolCalling: false, structuredOutput: false, imageInput: false },
+  },
   'speech.transcribe': {
     label: '语音输入转写',
     purpose: '浏览器录音转文字，需要提供商提供 OpenAI 兼容的 /audio/transcriptions 接口；未配置时聊天页禁用麦克风按钮',

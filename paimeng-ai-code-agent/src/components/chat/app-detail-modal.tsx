@@ -2,6 +2,7 @@
 import { Modal, Button, Tag, Space, Avatar, Popconfirm } from 'antd';
 import { EditOutlined, DeleteOutlined, UserOutlined } from '@ant-design/icons';
 import type { AppInfo } from '@/shared/contracts';
+import { formatStoredTime } from '@/shared/display';
 
 const codeGenTypeLabels: Record<string, string> = {
   html: '原生 HTML 模式',
@@ -16,11 +17,8 @@ export function formatCodeGenType(type?: string | null) {
 }
 
 export function formatCreateTime(value?: string | null) {
-  if (!value) return '';
-  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
-  if (match) return `${match[1]}-${match[2]}-${match[3]} ${match[4]}:${match[5]}:${match[6]}`;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN');
+  // 库里是 UTC 的朴素时间：按 UTC 解释再转本地，否则会显示成早 8 小时。
+  return formatStoredTime(value);
 }
 
 export function AppDetailModal({ open, app, showActions, onClose, onEdit, onDelete }: {

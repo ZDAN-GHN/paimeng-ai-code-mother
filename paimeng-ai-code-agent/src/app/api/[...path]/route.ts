@@ -34,6 +34,9 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/chat/transcribe'){await requireUser(req);return success({enabled:await transcribeEnabled()});}
    if(path==='app/asset'){const user=await requireUser(req);const id=idSchema.parse(query.get('appId'));const asset=await business.readAppAsset(id,z.string().min(1).max(512).parse(query.get('path')),user);return new Response(new Uint8Array(asset.bytes),{headers:{'content-type':asset.mime,'content-length':String(asset.bytes.length),'cache-control':'private, max-age=300','x-content-type-options':'nosniff'}});}
    if(path==='app/attachment'){const user=await requireUser(req);const appId=idSchema.parse(query.get('appId'));const attachmentId=z.uuid().parse(query.get('id'));await business.getApp(appId,user,true);const file=await readAttachmentOriginal({attachmentId,userId:user.id,appId});return new Response(new Uint8Array(file.bytes),{headers:{'content-type':file.mediaType,'content-length':String(file.bytes.length),'cache-control':'private, max-age=300','x-content-type-options':'nosniff'}});}
+   if(path==='app/versions'){const user=await requireUser(req);return success(await business.listAppVersions({appId:idSchema.parse(query.get('appId')),query:z.string().max(200).optional().parse(query.get('query')??undefined)},user));}
+   if(path==='app/versions/diff'){const user=await requireUser(req);return success(await business.diffAppVersions({appId:idSchema.parse(query.get('appId')),base:z.string().uuid().parse(query.get('base')),target:z.string().uuid().parse(query.get('target'))},user));}
+   if(path==='app/versions/thumbnail'){const user=await requireUser(req);const png=await business.readAppVersionThumbnail({appId:idSchema.parse(query.get('appId')),versionId:z.string().uuid().parse(query.get('versionId'))},user);if(!png)return new Response(null,{status:404});return new Response(new Uint8Array(png),{headers:{'content-type':'image/png','content-length':String(png.length),'cache-control':'private, max-age=3600','x-content-type-options':'nosniff'}});}
    if(path.startsWith('app/download/')){const user=await requireUser(req);const id=idSchema.parse(path.slice('app/download/'.length));return await business.download(id,user);}
   }
   if(method==='POST'){
@@ -48,6 +51,10 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/delete')return success(await business.deleteApp(value,user));
    if(path==='app/deploy')return withHeartbeat(async()=>success(await business.publish(value,user)));
    if(path==='app/build')return withHeartbeat(async()=>success(await business.rebuildPreview(value,user)));
+   if(path==='app/versions/restore')return withHeartbeat(async()=>success(await business.restoreAppVersion(value,user)));
+   if(path==='app/versions/branch')return withHeartbeat(async()=>success(await business.branchAppVersion(value,user)));
+   if(path==='app/versions/adopt')return withHeartbeat(async()=>success(await business.adoptAppVersion(value,user)));
+   if(path==='app/versions/switch')return withHeartbeat(async()=>success(await business.switchAppVersion(value,user)));
    if(path==='app/chat/gen/code')return await harnessChatResponse(req,value,user);
    if(path==='app/generation/cancel'){const appId=z.object({appId:idSchema}).parse(value).appId;return success(await harnessCancelGeneration(appId,user));}
    if(path==='app/chat/input')return success(await harnessSubmitInput(value,user));

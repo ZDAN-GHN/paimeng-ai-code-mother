@@ -296,6 +296,10 @@ export async function downloadApp(app: WorkspaceApp) {
   return new Response(Readable.toWeb(output) as ReadableStream<Uint8Array>, { headers: { 'Content-Type': 'application/zip', 'Content-Disposition': `attachment; filename="${app.id}.zip"`, 'Cache-Control': 'no-store' } });
 }
 
+/**
+ * 版本缩略图：截当前预览的一帧。只在构建缓存已是最新（生成收尾刚完成最终验证）时调用，
+ * 不为了截图额外触发构建；失败一律返回 null，版本记录不因截图失败而降级。
+ */
 export async function captureCover(key: string) {
   const { chromium } = await import('playwright');
   const url = deployedUrl(key);

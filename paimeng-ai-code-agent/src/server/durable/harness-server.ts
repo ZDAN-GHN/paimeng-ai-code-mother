@@ -51,6 +51,14 @@ import { fauxModelEnabled } from "./faux-model";
 import { context, entryText, openPgHarness } from "./harness";
 import { webToolResult } from "./web-tool-result";
 import {
+	adoptBranch as adoptVersionBranch,
+	branchFromVersion,
+	getVersion as readVersion,
+	listVersions as readVersions,
+	restoreVersion,
+} from "../version-store";
+import { WORKSPACE_CHANGED_NOTE } from "@/shared/versioning";
+import {
 	admitGenerationModel,
 	identityOfDescriptor,
 	rebuildRunModel,
@@ -264,8 +272,108 @@ const buildPreviewTool = defineTool({
 	},
 });
 
-const webSessions = new Map<number, { session: WebAccessSession; operations: WebAccessOperations }>();
+function versionSummary(version: { id: string; seq: number; title: string; kind: string; branch: string; createTime: string; changedFiles: string[] }) {
+	const when = version.createTime.slice(0, 16);
+	const files = version.changedFiles.slice(0, 6).join(", ") || "（无文件变化）";
+	const more = version.changedFiles.length > 6 ? ` 等 ${version.changedFiles.length} 个文件` : "";
+	return `id=${version.id} | ${version.branch} v${version.seq} | ${version.kind} | ${when} | ${version.title} | 改动：${files}${more}`;
+}
 
+/** 版本操作改了工作区之后刷新预览：预览必须与磁盘内容一致，否则用户看到的还是回退前的画面。 */
+async function refreshPreviewAfterVersionChange(app: AppRef, signal: AbortSignal | undefined) {
+	try {
+		await buildApp(app, signal);
+		return "预览已按当前工作区重新构建";
+	} catch (problem) {
+		return `预览重建失败（${problem instanceof Error ? problem.message.slice(0, 200) : "未知原因"}），磁盘内容已经是目标版本，可调用 buildPreview 重试`;
+	}
+}
+
+const versionTools: ToolRegistration[] = [
+	defineTool({
+		name: "listVersions",
+		description: "列出这个应用的历史版本（按时间倒序）。用户用模糊描述指代某个版本时，先用它筛候选，再用 getVersion 看改动文件确认，最后才调用 restoreVersion。query 会在标题、当时的用户输入和改动文件路径上做关键词匹配。",
+		parameters: Type.Object({ query: Type.Optional(Type.String({ maxLength: 200 })), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })) }),
+		replay: "safe",
+		execute: async (args, api) => {
+			const app = await appRefFor(api.conversationId);
+			if (!app) throw new Error(`会话 ${api.conversationId} 没有关联应用，读不到版本`);
+			const overview = await readVersions(app, { query: args.query, limit: args.limit ?? 30 });
+			if (overview.versions.length === 0) {
+				return { output: [{ type: "text", text: "还没有版本记录：完成一次生成后才会产生第一个版本。" }], details: { current: overview.current, versions: [] } };
+			}
+			const current = overview.current ? `${overview.current.branch}${overview.current.versionId ? `（当前版本 ${overview.current.versionId}）` : ""}` : "未记录";
+			const head = `当前分支：${current}。共 ${overview.versions.length} 个版本：`;
+			const body = overview.versions.map(version => versionSummary(version)).join("\n");
+			const hint = "\n要回退用 restoreVersion(id)（只移动当前版本指针，不新增记录）；要从某一版起另开一条线用 branchFromVersion(id)。两者都不会删除历史。";
+			return { output: [{ type: "text", text: `${head}\n${body}${hint}` }], details: { current: overview.current, versions: overview.versions } };
+		},
+	}),
+	defineTool({
+		name: "getVersion",
+		description: "看单个版本的详情：当时用户说了什么、改了哪些文件、有多少文件。用途是在回退前确认这一版到底是哪一版。",
+		parameters: Type.Object({ versionId: Type.String({ minLength: 8 }) }),
+		replay: "safe",
+		execute: async (args, api) => {
+			const app = await appRefFor(api.conversationId);
+			if (!app) throw new Error(`会话 ${api.conversationId} 没有关联应用，读不到版本`);
+			const version = await readVersion(app, args.versionId);
+			const lines = [
+				`${version.branch} v${version.seq}（${version.kind}）· ${version.createTime.slice(0, 16)}`,
+				`标题：${version.title}`,
+				version.prompt ? `当时的用户输入：${version.prompt}` : "当时的用户输入：未记录",
+				`改动文件（${version.changedFiles.length}）：${version.changedFiles.join(", ") || "无"}`,
+				`工程规模：${version.fileCount} 个文件，${Math.round(version.bytes / 1024)} KB`,
+				version.thumbnailKey ? "有该版本的界面缩略图（产品界面里可看）" : "没有该版本的界面缩略图",
+			];
+			return { output: [{ type: "text", text: lines.join("\n") }], details: version };
+		},
+	}),
+	defineTool({
+		name: "restoreVersion",
+		description: "把当前版本指回某个历史版本：工作区换成它的内容，当前指针也指向它，不新增版本记录（被甩下的版本保留，随时能再跳回来）。用户说“回到刚才那个样子”“那个带素材的版本”时用它。执行后必须重新读取你要改的文件，不要凭记忆继续编辑。",
+		parameters: Type.Object({ versionId: Type.String({ minLength: 8 }), reason: Type.Optional(Type.String({ maxLength: 300 })) }),
+		replay: "unsafe",
+		execute: async (args, api, toolContext) => {
+			const app = await appRefFor(api.conversationId);
+			if (!app) throw new Error(`会话 ${api.conversationId} 没有关联应用，不能回退`);
+			const outcome = await restoreVersion({ app, versionId: args.versionId, reason: args.reason });
+			const preview = await refreshPreviewAfterVersionChange(app, toolContext.abortSignal);
+			const head = outcome.status === "restored"
+				? `当前版本已指回 ${outcome.version.branch} v${outcome.version.seq}「${outcome.version.title}」。原来的后续版本保留在列表里，标为已回退。`
+				: `当前本来就是「${outcome.version.title}」这一版。`;
+			return { output: [{ type: "text", text: `${head}${preview}。${WORKSPACE_CHANGED_NOTE}` }], details: { status: outcome.status, version: outcome.version } };
+		},
+	}),
+	defineTool({
+		name: "branchFromVersion",
+		description: "以某个历史版本为起点开一条新分支并切过去：之后的改动只影响这条分支，主线保持原样。用户说“从那个版本试试另一种做法”时用它。",
+		parameters: Type.Object({ versionId: Type.String({ minLength: 8 }), label: Type.Optional(Type.String({ maxLength: 63 })) }),
+		replay: "unsafe",
+		execute: async (args, api, toolContext) => {
+			const app = await appRefFor(api.conversationId);
+			if (!app) throw new Error(`会话 ${api.conversationId} 没有关联应用，不能开分支`);
+			const result = await branchFromVersion({ app, versionId: args.versionId, label: args.label });
+			const preview = await refreshPreviewAfterVersionChange(app, toolContext.abortSignal);
+			return { output: [{ type: "text", text: `已从 v${result.version.seq}「${result.version.title}」开出分支 ${result.branch} 并切换过去。${preview}。${WORKSPACE_CHANGED_NOTE}` }], details: result };
+		},
+	}),
+	defineTool({
+		name: "adoptBranch",
+		description: "把一条实验分支的内容采纳到主线：主线新增一版等于该分支的内容，分支保留不删除。",
+		parameters: Type.Object({ branch: Type.String({ minLength: 1, maxLength: 63 }) }),
+		replay: "unsafe",
+		execute: async (args, api, toolContext) => {
+			const app = await appRefFor(api.conversationId);
+			if (!app) throw new Error(`会话 ${api.conversationId} 没有关联应用，不能采纳分支`);
+			const result = await adoptVersionBranch({ app, branch: args.branch });
+			const preview = await refreshPreviewAfterVersionChange(app, toolContext.abortSignal);
+			return { output: [{ type: "text", text: `已把分支 ${result.branch} 采纳到主线。${preview}。${WORKSPACE_CHANGED_NOTE}` }], details: result };
+		},
+	}),
+];
+
+const webSessions = new Map<number, { session: WebAccessSession; operations: WebAccessOperations }>();
 function resetWebSession(conversationId: number) {
 	webSessions.delete(conversationId);
 }
@@ -407,7 +515,7 @@ if (process.env.DURABLE_HARNESS_RESET === "1") {
 // 脚本桩（DURABLE_FAUX_*）需要一次可写脚本、可被中途打断的工具调用；真实模型不提供 m1_wait。
 const stubTools: ToolRegistration[] = fauxModelEnabled() || fauxFixtureEnabled() ? [waitTool] : [];
 
-const productTools = [...fileTools, listFilesTool, buildPreviewTool, ...stubTools, ...webToolsForConfig()];
+const productTools = [...fileTools, listFilesTool, buildPreviewTool, ...versionTools, ...stubTools, ...webToolsForConfig()];
 
 const { harness, models } = await openPgHarness({
 	codingTools: false,

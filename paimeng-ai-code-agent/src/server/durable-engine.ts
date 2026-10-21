@@ -18,6 +18,9 @@ import { db } from './db';
 import { adoptLease, beginGeneration, finishGeneration, generationFor, heartbeat, restoreGeneration, setGeneration, staleActiveGenerations, withAppWriter } from './generation-store';
 import { recordAssistantStep, recordBuildStep, type AccountToolCall, type EntryUsage, type GenerationStopReason, type ModelIdentity } from './generation-accounting';
 import { BusinessError } from './http';
+import { commitVersion, setVersionTitle } from './version-store';
+import { fallbackVersionTitle, summarizeVersion } from './version-summary';
+import { versionThumbnail } from './version-thumbnail';
 import { clientIp } from './rate-limit';
 import { apps, generationSteps } from './schema';
 import { validatePrompt } from './prompt-safety';
@@ -603,7 +606,10 @@ async function observeHarnessRun(options: {
         continue;
       }
       if (verdict.ok) {
-        if (await finishChecked('ready', null, 'completed')) break;
+        if (await finishChecked('ready', null, 'completed')) {
+          await recordGenerationVersion(app, requestId, conversationId);
+          break;
+        }
         continue;
       }
       if (stop.signal.aborted) {
@@ -659,6 +665,42 @@ async function observeHarnessRun(options: {
       channel.push({ type: 'error', errorText: '生成结果落库失败' } as UiChunk);
     }
     channel.finish();
+  }
+}
+
+/** 用户输入是版本标题最自然的来源：取最后一条用户条目的首行文本。 */
+function versionPromptOf(messages: TranscriptEntry[]): string | null {
+  const entry = messages.findLast(item => item.kind === userEntryKind);
+  const bubble = entry ? userBubbleSchema.safeParse(entry.data) : null;
+  if (!bubble?.success) return null;
+  const lines = bubble.data.parts.flatMap(part => {
+    const block = z.object({ type: z.literal('text'), text: z.string() }).safeParse(part);
+    return block.success ? block.data.text.split('\n') : [];
+  });
+  const first = lines.map(line => line.trim()).find(Boolean);
+  return first ? (first.length > 80 ? `${first.slice(0, 80)}…` : first) : null;
+}
+
+/**
+ * 生成成功后在当前分支记一版：历史只增不减，回退与分支都建立在这条记录上。
+ * 记版失败不能影响生成结果；缩略图异步截取，不拖慢收尾。
+ */
+async function recordGenerationVersion(app: AppInfo, requestId: string, conversationId: number) {
+  try {
+    const runtime = await harnessRuntime(conversationId).catch(() => null);
+    const prompt = versionPromptOf(runtime?.messages ?? []);
+    // 先落一个「改了什么」的兜底标题，绝不用用户原话当版本名；概述随后由模型补上。
+    const version = await commitVersion({ app, kind: 'generate', title: '新版本', prompt, generationId: requestId });
+    if (!version) return;
+    const fallback = fallbackVersionTitle(version);
+    await setVersionTitle(app, version.id, fallback);
+    // 生成刚结束，这一版就是工作区当前内容：顺手把截图存下来，面板打开时不用再等。
+    void versionThumbnail(app, version.id).catch(() => undefined);
+    void summarizeVersion({ version: { ...version, title: fallback }, userPrompt: prompt })
+      .then(summary => setVersionTitle(app, version.id, summary))
+      .catch(() => undefined);
+  } catch (problem) {
+    console.error(`版本记录失败（生成 ${requestId}）：`, problem);
   }
 }
 

@@ -1,0 +1,295 @@
+/* 版本面板：配色、边界与字号对齐 chat.css 的工具卡片（暖白底 + 浅绿灰分隔线 + indianred 强调）。
+   面板挂在 Drawer 里（portal 到 body），所以所有选择器自带 .version-panel 前缀，不依赖 .chat-page。 */
+.version-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* 标题在 Drawer 头部，不在 .version-panel 里，所以单独一条不带前缀作用域的选择器。 */
+.version-panel-drawer-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.version-panel-blocked { margin: 0; }
+.version-panel-loading,
+.version-panel-diff-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #98877b;
+  font-size: 13px;
+}
+.version-panel-loading { justify-content: center; padding: 24px 0; }
+.version-panel-error { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+
+.version-panel-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #eee4dd;
+  border-radius: 8px;
+  background: #faf7f5;
+  font-size: 12px;
+}
+.version-panel-toolbar-label { color: #867870; }
+.version-panel-branch-select { min-width: 140px; }
+.version-panel-toolbar-version { margin-left: auto; color: #867870; font-variant-numeric: tabular-nums; }
+
+.version-panel-section-title { color: #867870; font-size: 12px; font-weight: 600; }
+.version-panel-branches { display: flex; flex-direction: column; gap: 6px; }
+.version-panel-branch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px dashed #e6d3c6;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+}
+.version-panel-branch-icon { color: #7d8c86; }
+.version-panel-branch-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.version-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.version-tree-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 11px;
+  color: #7b8783;
+  padding: 0 4px 4px;
+}
+
+.version-tree-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.version-tree-legend-item i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.version-tree-legend-note {
+  color: #a5b0ac;
+}
+
+.version-tree-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 连线层铺满整列并压在行的下面：行本身不画线，树才能连续 */
+.version-tree-gutter {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+.version-tree-lines {
+  display: block;
+}
+
+.version-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  border-bottom: 1px solid #f0f3f1;
+  background: transparent;
+  overflow: hidden;
+}
+
+.version-tree-row:last-child {
+  border-bottom: none;
+}
+
+.version-tree-row-current {
+  background: #fff8f5;
+  box-shadow: inset 3px 0 0 #cb573e;
+}
+
+.version-tree-row-superseded {
+  opacity: .62;
+}
+
+.version-tree-row-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.version-tree-row-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.version-tree-row-version {
+  font-weight: 600;
+  font-size: 13px;
+  color: #2b3532;
+}
+
+.version-tree-row-time {
+  margin-left: auto;
+  font-size: 11px;
+  color: #9aa5a1;
+}
+
+.version-tree-row-title {
+  margin-top: 2px;
+  font-size: 13px;
+  color: #3d4844;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version-tree-row-foot {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.version-tree-row-meta {
+  font-size: 11px;
+  color: #8b9692;
+  margin-right: 6px;
+}
+
+.version-panel-thumb {
+  position: relative;
+  flex: 0 0 auto;
+  width: 104px;
+  height: 68px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid #e6ece9;
+  border-radius: 6px;
+  background: #f7faf9;
+}
+.version-panel-thumb-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: #b8a89c;
+  font-size: 12px;
+}
+.version-panel-thumb-fallback .anticon { font-size: 18px; }
+.version-panel-thumb-note { font-size: 11px; }
+.version-panel-thumb-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.version-panel-thumb-ready .version-panel-thumb-image { opacity: 1; }
+
+.version-panel-diff {
+  padding: 10px;
+  border: 1px solid #eee4dd;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+}
+.version-panel-diff-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.version-panel-diff-title {
+  flex: 1 1 auto;
+  color: #1a1a1a;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.version-panel-diff-files {
+  max-height: 160px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.version-panel-diff-file {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+}
+.version-panel-diff-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+.version-panel-diff-count {
+  display: inline-flex;
+  gap: 6px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.version-panel-diff-added { color: #237804; }
+.version-panel-diff-removed { color: #a8071a; }
+.version-panel-diff-empty { margin: 0; color: #867870; }
+.version-panel-diff-patch {
+  max-height: 320px;
+  margin: 8px 0 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 6px;
+  background: #f7faf9;
+  color: #1a1a1a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}
+.version-panel-diff-truncated { margin: 6px 0 0; color: #a08c80; }
+
+.version-panel-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 12px;
+  color: #98877b;
+  text-align: center;
+}
+.version-panel-empty-icon { color: #c0b1a6; font-size: 28px; }
+.version-panel-empty-title { margin: 0; color: #6f6259; font-size: 13px; }
+.version-panel-empty-note { margin: 0; font-size: 12px; }
+
+@media (max-width: 600px) {
+  .version-panel-thumb { width: 72px; height: 48px; }
+  .version-panel-toolbar-version { margin-left: 0; }
+}

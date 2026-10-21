@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
 import { App, Button, Input, Alert, Tag, Space, Spin, Tooltip } from 'antd';
-import { SendOutlined, DownloadOutlined, CloudUploadOutlined, EditOutlined, StopOutlined, InfoCircleOutlined, ExportOutlined, PictureOutlined } from '@ant-design/icons';
+import { SendOutlined, DownloadOutlined, CloudUploadOutlined, EditOutlined, StopOutlined, InfoCircleOutlined, ExportOutlined, PictureOutlined, HistoryOutlined } from '@ant-design/icons';
 import { api } from '@/client/api';
 import { useAuth } from '@/components/providers';
 import { type AppInfo, type Generation, type GenerationAccount, isProjectCodeGenType } from '@/shared/contracts';
@@ -21,6 +21,7 @@ import { composerAction, initialProgress, interruptedStreamMessage, parseProgres
 import { adoptPending, adoptTranscript, admitInput, applyBoundary, dropShownInputs, emptySentInputs, forgetInput, messageSegments, placeInput, placedInputs, queuedInputs, transcriptSignature, unresolvedInputs, type InputEntry, type LostInput, type PlacedInput, type QueuedInput, type SentInputs } from '@/components/chat/chat-inputs';
 import { ToolCall, toolCallOf } from '@/components/chat/tool-call';
 import { AppDetailModal, formatCodeGenType } from '@/components/chat/app-detail-modal';
+import { VersionPanel } from '@/components/chat/version-panel';
 import { DeploySuccessModal } from '@/components/chat/deploy-success-modal';
 import './chat.css';
 
@@ -121,6 +122,7 @@ function Chat({ id }: { id: string }) {
   const [visibleHistory, setVisibleHistory] = useState(historyPageSize);
   const [stickToBottom, setStickToBottom] = useState(true);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [versionOpen, setVersionOpen] = useState(false);
   const [deployModal, setDeployModal] = useState<{ open: boolean; url: string }>({ open: false, url: '' });
   const [memoryBusy, setMemoryBusy] = useState(false);
   const [progress, setProgress] = useState<ProgressState>(initialProgress);
@@ -691,6 +693,7 @@ function Chat({ id }: { id: string }) {
       {task && statusLabel && <Tag color={statusColor}>{statusLabel}</Tag>}
       <Space wrap>
         <Button icon={<InfoCircleOutlined aria-hidden="true" />} disabled={!app} onClick={() => setDetailOpen(true)}>应用详情</Button>
+        <Button icon={<HistoryOutlined aria-hidden="true" />} disabled={!app} onClick={() => setVersionOpen(true)}>版本</Button>
         <Button href={canEdit ? '/app/edit/' + id : undefined} icon={<EditOutlined aria-hidden="true" />} disabled={!canEdit}>编辑应用</Button>
         <Button href={canDownload ? '/api/app/download/' + encodeURIComponent(id) : undefined} icon={<DownloadOutlined aria-hidden="true" />} disabled={!canDownload}>下载代码</Button>
         <Button type="primary" icon={<CloudUploadOutlined aria-hidden="true" />} loading={publishing} disabled={!canDeploy} onClick={() => { void deploy(); }}>{publishing ? '部署中…' : '部署'}</Button>
@@ -829,6 +832,8 @@ function Chat({ id }: { id: string }) {
     </div>
     <AppDetailModal open={detailOpen} app={app} showActions={canEdit || !!isAdmin} onClose={() => setDetailOpen(false)}
       onEdit={() => { setDetailOpen(false); router.push('/app/edit/' + id); }} onDelete={() => { void removeApp(); }} />
+    <VersionPanel appId={id} open={versionOpen} onClose={() => setVersionOpen(false)}
+      onWorkspaceChanged={() => { setPreviewVersion(current => (current ?? 0) + 1); void refresh(); }} />
     <DeploySuccessModal open={deployModal.open} deployUrl={deployModal.url} onClose={() => setDeployModal(current => ({ ...current, open: false }))}
       onOpenSite={() => { if (deployModal.url) window.open(deployModal.url, '_blank', 'noopener'); }} />
   </main>;

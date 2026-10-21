@@ -13,6 +13,9 @@ import { contentType } from './preview';
 import { listProjectFiles, readProjectFileBytes, workspace } from './workspace';
 import { routeCodeGenType } from './model';
 import { appTemplate, initializeTemplate } from './template-workspace';
+import { adoptBranch, branchFromVersion, diffVersions, listVersions, purgeVersions, restoreVersion, switchBranch, versionBlockedReason } from './version-store';
+import { versionThumbnail } from './version-thumbnail';
+import { versionAdoptSchema, versionBranchSchema, versionDiffSchema, versionFailureHint, versionSwitchSchema, versionTargetSchema } from '@/shared/versioning';
 import { defaultTemplateFor, resolveTemplate } from './templates';
 import { codeGenTypes, idSchema, isProjectCodeGenType, pageSchema, type User, type AppInfo, type PageQuery } from '@/shared/contracts';
 import type { TemplateInfo } from '@/shared/templates';
@@ -73,8 +76,81 @@ export async function updateApp(raw:unknown,user:User,admin=false){
  await db().update(apps).set({appName:value.appName,...(admin?{cover:value.cover,priority:value.priority}:{}),editTime:now(),updateTime:now()}).where(and(eq(apps.id,BigInt(value.id)),eq(apps.isDelete,0)));return true;
 }
 export async function deleteApp(raw:unknown,user:User){
- const {id}=z.object({id:idSchema}).parse(raw);await getApp(id,user,true,true);
- await withAppWriter(id,async(tx,row)=>{if(String(row.userId)!==user.id&&user.userRole!=='admin')throw new BusinessError(403,40300,'无权限删除该应用');await tx.update(apps).set({isDelete:1,updateTime:now()}).where(eq(apps.id,row.id));await tx.delete(generations).where(eq(generations.appId,row.id));});return true;
+ const {id}=z.object({id:idSchema}).parse(raw);const target=await getApp(id,user,true,true);
+ await withAppWriter(id,async(tx,row)=>{if(String(row.userId)!==user.id&&user.userRole!=='admin')throw new BusinessError(403,40300,'无权限删除该应用');await tx.update(apps).set({isDelete:1,updateTime:now()}).where(eq(apps.id,row.id));await tx.delete(generations).where(eq(generations.appId,row.id));});
+ // 版本历史随应用一起回收：裸库、缩略图与元数据表都不能留成孤儿。应用行已软删，codeGenType 取自删除前的快照。
+ await purgeVersions({id:target.id,codeGenType:target.codeGenType}).catch(problem=>{console.error(`应用 ${target.id} 的版本历史回收失败：`,problem);});
+ return true;
+}
+
+/** 版本面板与版本工具共用的一条读路径：鉴权后只传工作区标识，不把完整应用信息漏给调用方。 */
+async function versionApp(id:string,user:User){
+ const app=await getApp(id,user,true,true);
+ return {id:app.id,codeGenType:app.codeGenType};
+}
+/**
+ * HTTP 写操作要求应用空闲：生成中的版本切换统一由那次生成的 Agent 通过工具完成。
+ * 这个函数同时被当成 guard 传进存储层，在锁内再跑一次，把「检查→上锁」之间的窗口收窄。
+ */
+async function assertVersionWritable(app:{id:string;codeGenType:AppInfo['codeGenType']}){
+ const blocked=await versionBlockedReason(app);
+ if(blocked)throw new BusinessError(409,40900,blocked);
+}
+/**
+ * 切版只换了磁盘上的源码，构建产物还是旧的：不重建的话预览仍显示回退前的画面。
+ * 重建失败不吞掉结果（回退本身已经成功），但要让调用方与用户知道预览没跟上。
+ */
+async function rebuildAfterVersionChange(app:{id:string;codeGenType:AppInfo['codeGenType']}){
+ try{await buildApp(app as Parameters<typeof buildApp>[0]);return null;}
+ catch(error){return error instanceof Error?error.message.slice(0,300):'预览重建失败';}
+}
+export async function listAppVersions(raw:{appId:string;query?:string},user:User){
+ const app=await versionApp(raw.appId,user);
+ try{return await listVersions(app,{query:raw.query});}
+ catch(error){
+  const raw=error instanceof Error?error.message:String(error);
+  const hint=versionFailureHint(raw);
+  if(hint)throw new BusinessError(500,50000,hint);
+  throw error;
+ }
+}
+export async function restoreAppVersion(raw:unknown,user:User){
+ const input=versionTargetSchema.parse(raw);
+ const app=await versionApp(input.appId,user);
+ await assertVersionWritable(app);
+ const outcome=await restoreVersion({app,versionId:input.versionId,guard:()=>assertVersionWritable(app)});
+ return {...outcome,previewError:await rebuildAfterVersionChange(app)};
+}
+export async function branchAppVersion(raw:unknown,user:User){
+ const input=versionBranchSchema.parse(raw);
+ const app=await versionApp(input.appId,user);
+ await assertVersionWritable(app);
+ const outcome=await branchFromVersion({app,versionId:input.versionId,label:input.label,guard:()=>assertVersionWritable(app)});
+ return {...outcome,previewError:await rebuildAfterVersionChange(app)};
+}
+export async function adoptAppVersion(raw:unknown,user:User){
+ const input=versionAdoptSchema.parse(raw);
+ const app=await versionApp(input.appId,user);
+ await assertVersionWritable(app);
+ const outcome=await adoptBranch({app,branch:input.branch,guard:()=>assertVersionWritable(app)});
+ return {...outcome,previewError:await rebuildAfterVersionChange(app)};
+}
+export async function switchAppVersion(raw:unknown,user:User){
+ const input=versionSwitchSchema.parse(raw);
+ const app=await versionApp(input.appId,user);
+ await assertVersionWritable(app);
+ const outcome=await switchBranch({app,branch:input.branch,guard:()=>assertVersionWritable(app)});
+ return {...outcome,previewError:await rebuildAfterVersionChange(app)};
+}
+export async function diffAppVersions(raw:{appId:string;base:string;target:string},user:User){
+ const input=versionDiffSchema.parse(raw);
+ return diffVersions(await versionApp(input.appId,user),input.base,input.target);
+}
+/** 缩略图不是必需的：没有就返回 null，让前端显示占位而不是破图。 */
+export async function readAppVersionThumbnail(raw:{appId:string;versionId:string},user:User){
+ const app=await versionApp(raw.appId,user);
+ // 没有截图就现截：版本卡片必须能看出那一版长什么样，不能长期停在占位图。
+ return versionThumbnail(app,raw.versionId);
 }
 export async function assertIdle(id:string){const [lease]=await db().select().from(leases).where(eq(leases.appId,BigInt(id))).limit(1);if(lease&&lease.expiresAt>now())throw new BusinessError(409,40900,'应用正在生成，请先取消或等待完成');}
 /** 生成对话里要显示的图片素材：只放行图片类型，路径仍走 workspace 的安全解析。 */
