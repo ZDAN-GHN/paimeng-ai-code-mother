@@ -18,7 +18,7 @@ import { db } from './db';
 import { adoptLease, beginGeneration, finishGeneration, generationFor, heartbeat, restoreGeneration, setGeneration, staleActiveGenerations, withAppWriter } from './generation-store';
 import { recordAssistantStep, recordBuildStep, type AccountToolCall, type EntryUsage, type GenerationStopReason, type ModelIdentity } from './generation-accounting';
 import { BusinessError } from './http';
-import { commitVersion, setVersionTitle } from './version-store';
+import { setVersionTitle, syncFromGit } from './version-store';
 import { fallbackVersionTitle, summarizeVersion } from './version-summary';
 import { versionThumbnail } from './version-thumbnail';
 import { clientIp } from './rate-limit';
@@ -689,16 +689,20 @@ async function recordGenerationVersion(app: AppInfo, requestId: string, conversa
   try {
     const runtime = await harnessRuntime(conversationId).catch(() => null);
     const prompt = versionPromptOf(runtime?.messages ?? []);
-    // 先落一个「改了什么」的兜底标题，绝不用用户原话当版本名；概述随后由模型补上。
-    const version = await commitVersion({ app, kind: 'generate', title: '新版本', prompt, generationId: requestId });
+    // AI 可能已用 git 工具自己提交（那种提交的标题就是版本名）；
+    // 没提交的部分由平台兜底。两者都走 syncFromGit，kind 只有平台兜底的那次是 generate。
+    const version = await syncFromGit({ app, kind: 'generate', title: '新版本', prompt, generationId: requestId });
     if (!version) return;
-    const fallback = fallbackVersionTitle(version);
-    await setVersionTitle(app, version.id, fallback);
+    // AI 自己提交的（标题来自提交信息）不用兜底名；平台兜底的才需要。
+    if (version.kind === 'generate') {
+      const fallback = fallbackVersionTitle(version);
+      await setVersionTitle(app, version.id, fallback);
+      void summarizeVersion({ version: { ...version, title: fallback }, userPrompt: prompt })
+        .then(summary => setVersionTitle(app, version.id, summary))
+        .catch(() => undefined);
+    }
     // 生成刚结束，这一版就是工作区当前内容：顺手把截图存下来，面板打开时不用再等。
     void versionThumbnail(app, version.id).catch(() => undefined);
-    void summarizeVersion({ version: { ...version, title: fallback }, userPrompt: prompt })
-      .then(summary => setVersionTitle(app, version.id, summary))
-      .catch(() => undefined);
   } catch (problem) {
     console.error(`版本记录失败（生成 ${requestId}）：`, problem);
   }

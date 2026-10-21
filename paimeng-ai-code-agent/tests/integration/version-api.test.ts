@@ -112,7 +112,7 @@ describe('版本接口', () => {
     expect(miss.data.versions).toHaveLength(0);
   });
 
-  it('回退把工作区恢复成目标版本，指针指回去，不新增版本', async () => {
+  it('回退把工作区恢复成目标内容，并新增一条 restore 版本', async () => {
     await writeProject(appId, 'index.html', '<html><body>第二版</body></html>');
     const second = await commitVersion({ app: { id: appId, codeGenType: 'html' }, kind: 'generate', title: '第二版', prompt: '改文案' });
     expect(second).not.toBeNull();
@@ -121,15 +121,17 @@ describe('版本接口', () => {
     const restored = await json<{ status: string; version: AppVersion }>(await post('app/versions/restore', { appId, versionId: first.id }, owner.cookie));
     expect(restored.code).toBe(0);
     expect(restored.data.status).toBe('restored');
-    expect(restored.data.version.id).toBe(first.id);
+    // 新语义：产生一条新的 restore 版本，内容等于目标版。
+    expect(restored.data.version.kind).toBe('restore');
+    expect(restored.data.version.sourceVersionId).toBe(first.id);
     expect(await readProject(appId, 'index.html')).toContain('第一版');
 
     const overview = await json<AppVersionOverview>(await get('app/versions', { appId }, owner.cookie));
-    expect(overview.data.current?.versionId).toBe(first.id);
-    // 一条都没少：被甩下的第二版还在，只是标成已回退。
+    expect(overview.data.current?.versionId).toBe(restored.data.version.id);
+    // 一条都没少：旧版本（含第二版）都还在，历史只增。
     expect(overview.data.versions.some(version => version.id === first.id)).toBe(true);
-    expect(overview.data.versions.find(version => version.id === second!.id)?.superseded).toBe(true);
-    expect(overview.data.versions.some(version => version.kind === 'restore')).toBe(false);
+    expect(overview.data.versions.some(version => version.id === second!.id)).toBe(true);
+    expect(overview.data.versions.some(version => version.kind === 'restore')).toBe(true);
   });
 
   it('开分支后主线当前指针不动，采纳后回到主线', async () => {

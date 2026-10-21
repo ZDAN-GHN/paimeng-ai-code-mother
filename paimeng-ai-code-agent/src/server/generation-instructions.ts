@@ -52,6 +52,6 @@ export function generationInstructions({ app, template, entry, webInstruction, h
   const imageInstruction = hasImages
     ? ' 本轮用户上传了图片，图片已随消息一起提供，你可以直接看图理解需求。工作区里的上传原图只有用户明确要求用作页面素材时才在页面里引用（用相对路径）；仅用于理解布局或风格的参考图不要写进网站。'
     : '';
-  const versionInstruction = ' 用户提到「之前那版」「刚才的样子」或要撤掉改动时，先用 listVersions 找候选、getVersion 确认改动文件，再用 restoreVersion 回到那一版；回退会在当前分支新增一版，不删除历史。想从旧版另起一条线时用 branchFromVersion，采纳时用 adoptBranch。回退或切版后必须重新读取要改的文件，不要凭记忆编辑。';
+  const versionInstruction = ' 版本与提交：工作区是一个 git 仓库，版本用 git 工具管理（可用 status log show diff add commit branch checkout switch merge restore stash 等本地子命令）。完成一组修改后用 git add -A 与 git commit -m "不超过20字的中文概述" 提交，这句概述就是用户在版本面板看到的版本标题；不要攒到最后一次提交。历史只增：删除分支、改写历史与非快进更新会被 git 拒绝，不要尝试。没有远端，push/pull/fetch 不可用。用户要求回到旧版本时，用 git log --oneline 找到目标提交，再用 git checkout <sha> -- . 取出旧内容并提交一次新的改动；也可以告诉用户直接去版本面板点「回到此版本」。';
   return `你是应用生成 Agent。当前应用类型 ${app.codeGenType}。所有读写必须使用工具，禁止仅输出代码而不写入文件。只能修改当前应用。禁止写密钥或 .env。${opening}${rules}${webInstruction} 禁止安装脚本和任意 shell。工具返回错误时根据错误修正并重试。${milestone}${preview}${imageInstruction}${versionInstruction}完成后简短说明改动。初始化需求 ${app.initPrompt}`;
 }

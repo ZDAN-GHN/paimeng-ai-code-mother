@@ -23,7 +23,7 @@ describe.skipIf(!harnessReady || !postgresReady)('durable M2b：harness 里的 b
       await waitHealthy(base, 60_000);
       const body = (await (await fetch(`${base}/tools`)).json()) as { tools: { name: string }[] };
       const names = body.tools.map((tool) => tool.name).sort();
-      expect(names).toEqual(['adoptBranch', 'branchFromVersion', 'buildPreview', 'edit', 'getVersion', 'listFiles', 'listVersions', 'read', 'restoreVersion', 'write']);
+      expect(names).toEqual(['buildPreview', 'edit', 'git', 'listFiles', 'read', 'write']);
       expect(names).not.toContain('m1_wait');
       expect(names).not.toContain('bash');
     } finally {
@@ -46,10 +46,9 @@ describe.skipIf(!harnessReady || !postgresReady)('durable M2b：harness 里的 b
       await waitHealthy(base, 60_000);
       const body = (await (await fetch(`${base}/tools`)).json()) as { tools: { name: string; replay: string }[] };
       const replay = Object.fromEntries(body.tools.map((tool) => [tool.name, tool.replay]));
-      expect(Object.keys(replay).sort()).toEqual(['adoptBranch', 'branchFromVersion', 'buildPreview', 'edit', 'getVersion', 'listFiles', 'listVersions', 'm1_wait', 'read', 'restoreVersion', 'write']);
+      expect(Object.keys(replay).sort()).toEqual(['buildPreview', 'edit', 'git', 'listFiles', 'm1_wait', 'read', 'write']);
       expect(replay).toMatchObject({
-        read: 'safe', listFiles: 'safe', write: 'safe', buildPreview: 'safe', edit: 'unsafe', m1_wait: 'unsafe',
-        listVersions: 'safe', getVersion: 'safe', restoreVersion: 'unsafe', branchFromVersion: 'unsafe', adoptBranch: 'unsafe',
+        read: 'safe', listFiles: 'safe', write: 'safe', buildPreview: 'safe', edit: 'unsafe', m1_wait: 'unsafe', git: 'unsafe',
       });
 
       const created = await fetch(`${base}/conversations`, {

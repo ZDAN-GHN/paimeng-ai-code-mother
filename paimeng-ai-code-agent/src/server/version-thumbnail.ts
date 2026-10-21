@@ -1,6 +1,6 @@
 import 'server-only';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -98,6 +98,11 @@ async function shoot(app: WorkspaceApp, sha: string): Promise<Buffer | null> {
  * 截图失败只返回 null（界面显示占位），不影响版本面板本身。
  */
 export async function versionThumbnail(app: WorkspaceApp, versionId: string): Promise<Buffer | null> {
+  // 后台截图绝不能把仓库重建出来：这是生成收尾后 fire-and-forget 的任务，
+  // 应用可能正在被删除——ensureVersionRepo 见到 .git 缺失会 git init 重建，
+  // 与工作区的 rm 并发会撞出 ENOTEMPTY 并留下孤儿 .git。仓库不在就放弃截图。
+  const repoHead = await stat(join(versionRepo(app), 'HEAD')).catch(() => null);
+  if (!repoHead) return null;
   const version = await getVersion(app, versionId);
   if (version.thumbnailKey) {
     const existing = await readFile(versionThumbnailPath(app, version.id)).catch(() => null);

@@ -23,7 +23,10 @@ async function copySafeTree(source: string, destination: string, depth = 0, budg
   await ensureSafeDirectory(source);
   await ensureSafeDirectory(destination);
   for (const item of await readdir(source, { withFileTypes: true })) {
-    if (item.name.startsWith('.env') || item.name.startsWith('.paimeng-') || ['node_modules', '.git', '.npmrc', '.ssh'].includes(item.name)) throw new Error('产物含有不允许公开的文件');
+    // .git 是平台放的工作区仓库（版本历史），不属于产物：跳过而不是拒绝。
+    // 构建上下文不背历史，发布产物也不该含仓库数据。
+    if (item.name === '.git') continue;
+    if (item.name.startsWith('.env') || item.name.startsWith('.paimeng-') || ['node_modules', '.npmrc', '.ssh'].includes(item.name)) throw new Error('产物含有不允许公开的文件');
     const src = join(source, item.name);
     const info = await lstat(src);
     if (info.isSymbolicLink()) throw new Error('产物不能包含符号链接');

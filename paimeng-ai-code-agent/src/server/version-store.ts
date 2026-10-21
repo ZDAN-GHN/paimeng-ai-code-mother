@@ -1,7 +1,7 @@
 import 'server-only';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { and, desc, eq, sql } from 'drizzle-orm';
@@ -18,6 +18,7 @@ import {
 import { getConfig } from './config';
 import { db, now, type Transaction } from './db';
 import { appVersionBranches, appVersionState, appVersions, leases } from './schema';
+import { installGitGuard } from './git-guard';
 import { workspace, type WorkspaceApp } from './workspace';
 
 const run = promisify(execFile);
@@ -46,12 +47,25 @@ export class GitCommandError extends Error {
   }
 }
 
-/** 版本库根：与工作区同处运行时根下，但不在工作区内部（工作区的 .git 仍在 blocked 集合里）。 */
+/**
+ * 平台数据根：只放跨应用的东西（版本缩略图、跨进程锁）。
+ * 应用历史不再放这里——见 versionRepo。
+ */
 export function versionRoot() {
   return join(getConfig().runtimeRoot, 'versionstore');
 }
 
+/**
+ * 应用的 git 仓库就是工作区里的 .git（普通仓库）。
+ * 模型经 git 工具直接操作它；文件工具碰不到它（workspace 的 blocked 集合挡 .git）。
+ * 一阶段的历史放在工作区外的裸库，ensureVersionRepo 负责一次性搬进来。
+ */
 export function versionRepo(app: WorkspaceApp) {
+  return join(workspace(app), '.git');
+}
+
+/** 一阶段裸库的位置：只在惰性迁移时读取。 */
+function legacyBareRepo(app: WorkspaceApp) {
   return join(versionRoot(), `${app.codeGenType}_${app.id}.git`);
 }
 
@@ -102,17 +116,52 @@ async function gitCommit(repo: string, workTree: string | null, args: string[]) 
 
 export async function ensureVersionRepo(app: WorkspaceApp) {
   const repo = versionRepo(app);
-  await mkdir(versionRoot(), { recursive: true });
+  const tree = workspace(app);
+  let migrated = false;
   try {
     await stat(join(repo, 'HEAD'));
   } catch {
-    await run('git', ['init', '--bare', '--quiet', repo]);
-    await git(repo, null, ['config', 'core.autocrlf', 'false']);
-    await git(repo, null, ['config', 'core.fileMode', 'false']);
-    await git(repo, null, ['config', 'core.quotepath', 'false']);
-    await git(repo, null, ['config', 'gc.auto', '0']);
+    await mkdir(versionRoot(), { recursive: true });
+    try {
+      // 一阶段的历史在工作区外的裸库里：整个目录搬进工作区（对象、引用、索引原样保留）。
+      await stat(join(legacyBareRepo(app), 'HEAD'));
+      await rename(legacyBareRepo(app), repo);
+      migrated = true;
+    } catch {
+      await run('git', ['init', '--quiet', '-b', DEFAULT_BRANCH, tree]);
+    }
   }
+  await configureRepo(app, tree, repo);
+  if (migrated) await git(repo, null, ['config', 'core.bare', 'false']);
   return repo;
+}
+
+/** 仓库配置与安全闸：幂等，每次 ensure 都补一遍（hook 被删掉也会自动恢复）。 */
+async function configureRepo(app: WorkspaceApp, tree: string, repo: string) {
+  await run('git', ['-C', tree, 'config', 'core.bare', 'false']);
+  await run('git', ['-C', tree, 'config', 'core.autocrlf', 'false']);
+  await run('git', ['-C', tree, 'config', 'core.fileMode', 'false']);
+  await run('git', ['-C', tree, 'config', 'core.quotepath', 'false']);
+  await run('git', ['-C', tree, 'config', 'gc.auto', '0']);
+  await run('git', ['-C', tree, 'config', 'user.name', 'paimeng']);
+  await run('git', ['-C', tree, 'config', 'user.email', 'version@paimeng.local']);
+  // 忽略规则由平台补进 info/exclude：模板不一定自带 .gitignore，
+  // 有它之后模型直接 git add -A 也不会把依赖、构建产物和密钥提交进历史。
+  const exclude = [
+    'node_modules/', 'dist/', '.next/', '.nuxt/', '.cache/', '.ssh/',
+    '.npmrc', '.yarnrc', '.yarnrc.yml', '.env*', '.paimeng-*',
+  ];
+  const excludeFile = join(repo, 'info', 'exclude');
+  await mkdir(dirname(excludeFile), { recursive: true });
+  await writeFile(excludeFile, `${exclude.join('\n')}\n`);
+  // 历史只增的强制闸：删除分支与非快进更新由 git 自己拒绝。
+  await installGitGuard(tree);
+}
+
+/** 当前 HEAD 所在分支；游离 HEAD 或空仓库返回 null。 */
+async function currentGitBranch(repo: string): Promise<string | null> {
+  const branch = (await git(repo, null, ['symbolic-ref', '--short', 'HEAD']).catch(() => '')).trim();
+  return branch || null;
 }
 
 /**
@@ -236,11 +285,13 @@ type RecordInput = {
   prompt: string | null;
   sourceVersionId: string | null;
   generationId: string | null;
+  /** 要记账的提交；默认 HEAD。syncFromGit 给历史链逐个补账时必须显式传。 */
+  sha?: string;
 };
 
 async function recordCommit(app: WorkspaceApp, repo: string, branch: string, input: RecordInput): Promise<AppVersion> {
-  const sha = (await git(repo, null, ['rev-parse', 'HEAD'])).trim();
-  const parent = (await git(repo, null, ['rev-parse', '--verify', '--quiet', 'HEAD^']).catch(() => '')).trim();
+  const sha = input.sha ?? (await git(repo, null, ['rev-parse', 'HEAD'])).trim();
+  const parent = (await git(repo, null, ['rev-list', '--parents', '-n', '1', sha]).catch(() => '')).trim().split(' ').slice(1)[0] ?? '';
   const names = parent
     ? await git(repo, null, ['diff', '--name-only', '-z', parent, sha])
     : await git(repo, null, ['ls-tree', '-r', '--name-only', '-z', sha]);
@@ -270,6 +321,9 @@ async function recordCommit(app: WorkspaceApp, repo: string, branch: string, inp
       bytes,
       generationId: input.generationId,
       createTime,
+    }).onConflictDoUpdate({
+      target: [appVersions.appId, appVersions.commitSha],
+      set: { title: input.title, kind: input.kind, prompt: input.prompt, changedFiles, fileCount: listing.length, bytes, generationId: input.generationId },
     });
     await tx.insert(appVersionState)
       .values({ appId: BigInt(app.id), branch, headVersionId: id, versionSeq: next, updateTime: createTime })
@@ -315,7 +369,11 @@ async function versionRow(app: WorkspaceApp, versionId: string) {
  */
 async function reachableShas(app: WorkspaceApp): Promise<Set<string> | null> {
   try {
-    const repo = await ensureVersionRepo(app);
+    // 读路径绝不 ensure：ensureVersionRepo 每次都会补写 .git/config 与 hooks，
+    // 与删除工作区并发（生成收尾后的后台截图、面板读）会撞出 ENOTEMPTY 并重建孤儿 .git。
+    // 仓库不在（应用未生成过或正在删除）就当全部不可达，由调用方降级。
+    const repo = versionRepo(app);
+    if (!(await stat(join(repo, 'HEAD')).catch(() => null))) return null;
     const branch = (await currentState(app, db())).branch;
     const list = await git(repo, null, ['rev-list', `refs/heads/${branch}`]);
     return new Set(list.split('\n').filter(Boolean));
@@ -367,19 +425,29 @@ export async function restoreVersion(input: { app: WorkspaceApp; versionId: stri
     const stateRow = await currentState(app, db());
     await git(repo, null, ['symbolic-ref', 'HEAD', `refs/heads/${stateRow.branch}`]);
     const branchHead = await branchSha(repo, stateRow.branch);
-    // 先留快照再判断：即使指针已经在目标上，工作区里的未提交改动也会被物化覆盖掉。
+    // 先留快照再判断：即使指针已经在目标上，工作区里的未提交改动也会被检出覆盖掉。
     await snapshotDirtyLocked(app, repo, tree, stateRow.branch);
     if (branchHead === target.commitSha && stateRow.headVersionId === target.id) {
       await materializeLocked(app, target.commitSha);
       return { status: 'unchanged' as const, version: toVersion(target, false) };
     }
+    // 「回到旧版本」= 把旧内容检出成一次新提交。不移动分支指针：
+    // 安全闸禁止非快进更新，而且保留「主线历史上真实发生过什么」的可读性。
+    // 检出必须是「等于」语义（多出的文件删掉），checkout -- . 只覆盖不删除。
     await materializeLocked(app, target.commitSha);
-    // 指针回退而不是叠加提交：分支指向目标提交，当前版本就是它。
-    await git(repo, null, ['update-ref', `refs/heads/${stateRow.branch}`, target.commitSha]);
-    await db().update(appVersionState)
-      .set({ headVersionId: target.id, updateTime: now() })
-      .where(eq(appVersionState.appId, BigInt(app.id)));
-    return { status: 'restored' as const, version: toVersion(target, false) };
+    const title = input.title ?? `回到「${target.title}」的内容`;
+    const kind: VersionKind = 'restore';
+    const committed = await commitVersionLocked({
+      app,
+      kind,
+      title,
+      prompt: input.reason ?? null,
+      sourceVersionId: versionId,
+    });
+    if (!committed) {
+      return { status: 'unchanged' as const, version: toVersion(target, false) };
+    }
+    return { status: 'restored' as const, version: committed };
   });
   return outcome;
 }
@@ -701,6 +769,76 @@ export async function diffVersions(app: WorkspaceApp, baseId: string, targetId: 
 }
 
 /** 版本概述是异步补上的：生成收尾不该等一次模型调用。 */
+/**
+ * 收尾同步：AI 用 git 工具自己提交的部分只是还没进版本表；这里补齐。
+ * - 工作区有未提交改动（AI 忘了 commit）：按原逻辑 add -A + commit 兜底
+ * - 表里缺的提交：逐个补元数据行（标题取提交信息；kind=checkpoint）
+ * - 表里多出来的行（理论上不该有）：交给 listVersions 的 join 处理，不删
+ * 返回本次收尾产生的新版本（可能为 null：AI 已提交且无脏改动）。
+ */
+export async function syncFromGit(input: {
+  app: WorkspaceApp;
+  kind?: VersionKind;
+  title?: string;
+  prompt?: string | null;
+  generationId?: string | null;
+}): Promise<AppVersion | null> {
+  const { app } = input;
+  return withLock(app, async () => {
+    const repo = await ensureVersionRepo(app);
+    const tree = workspace(app);
+    const stateRow = await currentState(app, db());
+    const branch = (await currentGitBranch(repo)) ?? stateRow.branch;
+    await git(repo, null, ['symbolic-ref', 'HEAD', `refs/heads/${branch}`]);
+    const branchHead = await branchSha(repo, branch);
+    if (!branchHead) {
+      // 空仓库（首次生成还没结束过）：按老路走 commitVersion。
+      return commitVersionLocked({
+        app,
+        kind: input.kind ?? 'generate',
+        title: input.title ?? '新版本',
+        prompt: input.prompt ?? null,
+        generationId: input.generationId ?? null,
+      });
+    }
+    // 工作区相对 HEAD 的脏改动：AI 忘了 commit 就由平台兜底提交。
+    await git(repo, tree, ['add', '-A', '-f', '--', '.', ...addExcludes]);
+    let newHead = branchHead;
+    if (await hasStagedChanges(repo, tree)) {
+      await gitCommit(repo, tree, ['commit', '--quiet', '-m', input.title ?? '生成完成']);
+      newHead = (await git(repo, null, ['rev-parse', 'HEAD'])).trim();
+    }
+    // 表里缺的提交补元数据（AI 自己 commit 的走这里）。
+    const known = new Set((await db().select({ sha: appVersions.commitSha }).from(appVersions)
+      .where(eq(appVersions.appId, BigInt(app.id)))).map(row => row.sha));
+    let last: AppVersion | null = null;
+    const walk = (await git(repo, null, ['rev-list', '--first-parent', `refs/heads/${branch}`])).trim().split('\n').filter(Boolean);
+    for (const sha of walk) {
+      if (known.has(sha)) continue;
+      const subject = (await git(repo, null, ['log', '-1', '--pretty=%s', sha])).trim().slice(0, 200) || '未命名的提交';
+      const parents = (await git(repo, null, ['rev-list', '--parents', '-n', '1', sha])).trim().split(' ').slice(1);
+      last = await recordCommit(app, repo, branch, {
+        kind: parents.length > 1 ? 'adopt' : 'checkpoint',
+        title: subject,
+        prompt: input.prompt ?? null,
+        sourceVersionId: null,
+        generationId: input.generationId ?? null,
+        sha,
+      });
+    }
+    // 头没变也没缺行：无新版本。
+    if (newHead === branchHead && !last) return null;
+    return last ?? (await currentHeadForSha(app, branch, newHead));
+  });
+}
+
+async function currentHeadForSha(app: WorkspaceApp, branch: string, sha: string): Promise<AppVersion | null> {
+  const [row] = await db().select().from(appVersions)
+    .where(and(eq(appVersions.appId, BigInt(app.id)), eq(appVersions.branch, branch), eq(appVersions.commitSha, sha)))
+    .orderBy(desc(appVersions.seq)).limit(1);
+  return row ? toVersion(row) : null;
+}
+
 export async function setVersionTitle(app: WorkspaceApp, versionId: string, title: string) {
   await db().update(appVersions).set({ title }).where(and(eq(appVersions.id, versionId), eq(appVersions.appId, BigInt(app.id))));
 }

@@ -116,14 +116,19 @@ describe('版本库提交', () => {
 
 describe('回退', () => {
   it('让工作区等于目标版本：新增文件被删掉、修改被还原、依赖与构建产物不受影响', async () => {
+    // 前面的用例把 head 停在了「内容等于 v1」的版本上；回退要有意义，先把 head 前进到内容不同的一版。
+    await commit('加一个关于页', async () => {
+      await writeProject('about.html', '<html>about</html>');
+    });
     await writeProject('scratch/extra.html', 'leftover');
     await writeProject('index.html', '<html><body>broken</body></html>');
 
     const outcome = await restoreVersion({ app, versionId: v1.id });
 
     expect(outcome.status).toBe('restored');
-    // 回退不新增记录：返回的就是目标那一版本身。
-    expect(outcome.version.id).toBe(v1.id);
+    // 新语义：回退=把目标内容检出成一次新提交（restore 版），历史只增。
+    expect(outcome.version.kind).toBe('restore');
+    expect(outcome.version.sourceVersionId).toBe(v1.id);
     expect(await readProject('index.html')).toBe('<html><body>v1</body></html>');
     expect(await exists('scratch/extra.html')).toBe(false);
     expect(await readProject('dist/bundle.js')).toBe('generated');
@@ -131,17 +136,19 @@ describe('回退', () => {
     expect(await exists('assets/uploads')).toBe(true);
   });
 
-  it('回退会删掉「上一版被跟踪、目标版本没有」的文件（read-tree 的删除语义，不是只覆盖）', async () => {
-    const before = await listVersions(app);
-    const head = before.current?.versionId;
-    expect(head).toBeTruthy();
-    // 先在当前版本里新增一个被 git 跟踪的文件，再回到那个没有它的版本。
+  it('回退会删掉「上一版被跟踪、目标版本没有」的文件（检出 + 清理，不是只覆盖）', async () => {
+    // 前一用例的 restore 版是当前 head（内容=v1）；先前进一版再回退，目标内容才不同。
+    const vBefore = await commit('回退删除语义的前置版', async () => {
+      await writeProject('index.html', '<html><body>before-delete-check</body></html>');
+    });
+    // 在 vBefore 之上新增一个被 git 跟踪的文件，然后回到 vBefore（它没有这个文件）。
     await writeProject('tracked-only-later.html', '<html>later</html>');
     const withFile = await commitVersion({ app, kind: 'generate', title: '新增一个文件' });
     expect(withFile?.changedFiles).toContain('tracked-only-later.html');
     expect(await exists('tracked-only-later.html')).toBe(true);
 
-    await restoreVersion({ app, versionId: head! });
+    const outcome = await restoreVersion({ app, versionId: vBefore.id });
+    expect(outcome.status).toBe('restored');
     expect(await exists('tracked-only-later.html')).toBe(false);
   });
 
@@ -159,8 +166,8 @@ describe('回退', () => {
     await switchBranch({ app, branch: 'main' });
   });
 
-  it('回退是指针移动：不新增版本记录，当前版本直接指向目标那一版', async () => {
-    // 先往前走一版，确保当前不在 v1 上，这样「指针移动」才有可观察的位移。
+  it('回退是新增一版：目标内容成为新提交，主线历史只增不减', async () => {
+    // 先往前走一版，确保当前不在 v1 上，这样回退才有可观察的位移。
     await commit('回退前的更新', async () => {
       await writeProject('index.html', '<html><body>before-rewind</body></html>');
     });
@@ -168,34 +175,33 @@ describe('回退', () => {
     const countBefore = before.versions.length;
     const outcome = await restoreVersion({ app, versionId: v1.id });
     expect(outcome.status).toBe('restored');
-    expect(outcome.version.id).toBe(v1.id);
-    expect(outcome.version.seq).toBe(v1.seq);
+    // 回退产生新的 restore 版本（内容=v1），而不是把指针拨回去。
+    expect(outcome.version.kind).toBe('restore');
+    expect(outcome.version.sourceVersionId).toBe(v1.id);
+    expect(await readProject('index.html')).toBe('<html><body>v1</body></html>');
 
     const after = await listVersions(app);
-    expect(after.versions.length).toBe(countBefore);
-    expect(after.current?.versionId).toBe(v1.id);
-    expect(after.versions.some(version => version.kind === 'restore')).toBe(false);
+    expect(after.versions.length).toBe(countBefore + 1);
+    expect(after.current?.versionId).toBe(outcome.version.id);
+    expect(after.versions.some(version => version.id === v1.id)).toBe(true);
   });
 
-  it('被回退甩下的版本留在列表里、标成 superseded，再跳回去就恢复成当前', async () => {
+  it('历史只增：回退后旧版本全部保留，再跳回任何一版都产生新提交', async () => {
+    await commit('跳回检查的前置版', async () => {
+      await writeProject('index.html', '<html><body>before-jump-back</body></html>');
+    });
     const before = await listVersions(app);
-    expect(before.current?.versionId).toBe(v1.id);
-    // 回退到 v1 把主线往回拨了，之前线性推进的那些版本已经不在历史线上。
-    const currentBranch = before.current!.branch;
-    const rewound = before.versions.filter(version => version.branch === currentBranch && version.superseded);
-    expect(rewound.length).toBeGreaterThan(0);
-    // 当前版本自己永远不是「已回退」。
-    expect(before.versions.find(version => version.id === v1.id)?.superseded).toBe(false);
+    const countBefore = before.versions.length;
+    expect(countBefore).toBeGreaterThan(1);
+    const target = before.versions[before.versions.length - 1]!; // 最老的一版
 
-    // 跳到被甩下的那一版：它重新成为当前，v1 变成祖先（仍在历史线上），所以不会被标成已回退。
-    const forward = await restoreVersion({ app, versionId: rewound[0]!.id });
+    const forward = await restoreVersion({ app, versionId: target.id });
     expect(forward.status).toBe('restored');
     const after = await listVersions(app);
-    expect(after.current?.versionId).toBe(rewound[0]!.id);
-    expect(after.versions.find(version => version.id === rewound[0]!.id)?.superseded).toBe(false);
-    expect(after.versions.find(version => version.id === v1.id)?.superseded).toBe(false);
-    // 回到 v1 收尾，后面的用例从干净状态开始。
-    await restoreVersion({ app, versionId: v1.id });
+    // 旧版本一条不少，还多了一条新的 restore。
+    expect(after.versions.length).toBe(countBefore + 1);
+    expect(after.versions.every(version => before.versions.some(old => old.id === version.id) || version.kind === 'restore')).toBe(true);
+    expect(after.current?.versionId).toBe(forward.version.id);
   });
 
   it('回退不删除历史：旧版本仍在列表里，且序号继续递增', async () => {
@@ -209,7 +215,7 @@ describe('回退', () => {
 
   it('未提交的脏改动先被记成快照，回退本身也可撤', async () => {
     await writeProject('dirty.html', '<html>dirty</html>');
-    // 上一条用例已经停在 v1：这时回退的语义是「指针不动，但先把脏改动留成快照」。
+    // 脏改动先留快照（切版/回退都会覆盖工作区，不快照就丢内容）。
     const outcome = await restoreVersion({ app, versionId: v1.id });
     const overview = await listVersions(app);
     // 快照可能不止一条（前面的用例也留过），取最新那条看这次的内容。

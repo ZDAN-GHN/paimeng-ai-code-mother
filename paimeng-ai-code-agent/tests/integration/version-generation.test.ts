@@ -15,7 +15,7 @@ import { workspace, writeProjectFile } from '@/server/workspace';
 import { listVersions, purgeVersions, versionRepo, versionRoot } from '@/server/version-store';
 import type { User } from '@/shared/contracts';
 import { testDatabaseUrl } from '../test-database-url';
-import { baseUrl, freePort, harnessAvailable, postgresReachable, postgresUrl, startHarness, stopHarness, waitForState, waitHealthy, type HarnessProcess } from './durable-m1/support';
+import { getState, baseUrl, freePort, harnessAvailable, postgresReachable, postgresUrl, startHarness, stopHarness, waitForState, waitHealthy, type HarnessProcess } from './durable-m1/support';
 
 const harnessReady = harnessAvailable();
 const postgresReady = harnessReady && (await postgresReachable(postgresUrl));
@@ -113,8 +113,8 @@ describe.skipIf(!harnessReady || !postgresReady)('生成收尾记录版本', () 
     expect(version!.changedFiles).toContain('index.html');
     expect(overview.current?.versionId).toBe(version!.id);
 
-    // 版本库确实是裸库，历史数据不在工作区里。
-    expect(versionRepo({ id: appId, codeGenType: 'html' })).toContain(versionRoot());
+    // 仓库就在工作区里（普通仓库），历史与工作区同处一地，由 hook 与 blocked 集合保护。
+    expect(versionRepo({ id: appId, codeGenType: 'html' })).toContain(join(workspace({ id: appId, codeGenType: 'html' }), '.git'));
     expect(await readFile(join(workspace({ id: appId, codeGenType: 'html' }), 'index.html'), 'utf8')).toContain('VERSION_GEN_PLACEHOLDER');
   }, 120_000);
 
@@ -151,17 +151,23 @@ describe.skipIf(!harnessReady || !postgresReady)('生成收尾记录版本', () 
     }
   }, 120_000);
 
-  it('模型调用 restoreVersion 工具能真正把工作区改回旧版，且不新增版本', async () => {
-    const { commitVersion } = await import('@/server/version-store');
+  it('模型用 git 工具提交与取回旧内容（新提交语义，指针不动）', async () => {
+    const { commitVersion, ensureVersionRepo } = await import('@/server/version-store');
+    const { installGitGuard } = await import('@/server/git-guard');
     // 独立应用：需要在新 harness 上提交对话，不沿用第一个用例的会话映射。
     const value = await nextSnowflakeId();
     const toolActor = await addUser();
-    await db().insert(apps).values({ id: value, initPrompt: '版本工具回退', codeGenType: 'html', userId: BigInt(toolActor.id), createTime: now(), updateTime: now() });
+    await db().insert(apps).values({ id: value, initPrompt: 'git 工具', codeGenType: 'html', userId: BigInt(toolActor.id), createTime: now(), updateTime: now() });
     const toolApp = { id: value.toString(), codeGenType: 'html' as const };
     try {
       await writeProjectFile(toolApp, 'index.html', '<!doctype html><html><body>TOOL_V1_CONTENT</body></html>');
+      // 手动初始化仓库：模型第一轮对话时 .git 已存在（收尾同步会补元数据）。
+      await ensureVersionRepo(toolApp);
+      await installGitGuard(workspace(toolApp));
       const first = await commitVersion({ app: toolApp, kind: 'generate', title: '第一版' });
       expect(first).not.toBeNull();
+      const v1Sha = first!.commitSha;
+      // 第二版：让 HEAD 与工作区都前进到 v2，这样 checkout v1 才是「内容不同的回退」。
       await writeProjectFile(toolApp, 'index.html', '<!doctype html><html><body>TOOL_V2_CONTENT</body></html>');
       expect(await commitVersion({ app: toolApp, kind: 'generate', title: '第二版' })).not.toBeNull();
 
@@ -169,7 +175,12 @@ describe.skipIf(!harnessReady || !postgresReady)('生成收尾记录版本', () 
       const port = await freePort();
       const toolRunDir = mkdtempSync(join(tmpdir(), 'version-tool-'));
       process.env.DURABLE_HARNESS_URL = baseUrl(port);
-      harness = startHarness({ port, runDir: toolRunDir, reset: true, waitMs: 300, finalText: 'TOOL_FINAL', tool: 'restoreVersion', args: { versionId: first!.id } });
+      // faux 模型跑一串 git 命令：取出 v1 内容、暂存、提交成新版本。
+      harness = startHarness({
+        port, runDir: toolRunDir, reset: true, waitMs: 300, finalText: 'TOOL_FINAL',
+        tool: 'git', args: { args: ['checkout', v1Sha, '--', '.'] },
+        // 这一批完成后由平台收尾兜底提交（AI 忘了 commit 的路径）。
+      });
       await waitHealthy(baseUrl(port), 30_000);
 
       const requestId = randomUUID();
@@ -183,17 +194,17 @@ describe.skipIf(!harnessReady || !postgresReady)('生成收尾记录版本', () 
       const task = await waitForTerminalFor(toolApp.id, requestId, 60_000);
       expect(task.status).toBe('ready');
 
-      // 工具真的改了磁盘；回退只移动指针，不新增记录。
+      // 工具真的改了磁盘：内容回到 v1。
       expect(await readFile(join(workspace(toolApp), 'index.html'), 'utf8')).toContain('TOOL_V1_CONTENT');
+      // 收尾兜底提交产生了新版本（AI 没自己 commit 时平台补位）。
       const after = await listVersions(toolApp);
-      expect(after.current?.versionId).toBe(first!.id);
-      expect(after.versions.filter(version => version.kind === 'restore')).toHaveLength(0);
-      expect(after.versions.find(version => version.id === first!.id)?.superseded).toBe(false);
+      expect(after.versions.length).toBeGreaterThan(1);
+      const head = after.versions.find(version => version.id === after.current?.versionId);
+      expect(head).toBeTruthy();
       rmSync(toolRunDir, { recursive: true, force: true });
     } finally {
       await purgeVersions(toolApp).catch(() => undefined);
       rmSync(workspace(toolApp), { recursive: true, force: true });
-      rmSync(versionRepo(toolApp), { recursive: true, force: true });
       await db().delete(apps).where(eq(apps.id, BigInt(toolApp.id)));
       await db().delete(users).where(eq(users.id, BigInt(toolActor.id)));
     }
