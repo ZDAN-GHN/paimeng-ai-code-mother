@@ -317,6 +317,7 @@ const gitTool = defineTool({
 		const before = gitCreatesCommit(args.args) ? await runGit(tree, ["rev-parse", "HEAD"]) : null;
 		const headBefore = before?.exitCode === 0 ? before.text.trim() : "";
 		const outcome = await runGit(tree, args.args);
+		let text = outcome.exitCode === 0 ? outcome.text : `退出码 ${outcome.exitCode}\n${outcome.text}`;
 		// 游离 HEAD 上产生的新提交没有分支引用，会从版本列表里消失。
 		// 只在这个命令真的移动了 HEAD 之后才建分支：空提交、commit --dry-run、
 		// 已经是最新的 merge 都不该留下一条没有提交的分支。
@@ -324,11 +325,19 @@ const gitTool = defineTool({
 			const after = await runGit(tree, ["rev-parse", "HEAD"]);
 			const headAfter = after.exitCode === 0 ? after.text.trim() : "";
 			if (outcome.exitCode === 0 && headAfter && headAfter !== headBefore) {
-				await ensureVersionBranch(app).catch(() => undefined);
+				// 提交已经产生了：万一挂分支失败，也不能让这条提交变成「只在 reflog 里」。
+				// 先按保留引用兜底（版本列表会读 refs/paimeng/versions/*），再如实告诉用户怎么接回分支。
+				await ensureVersionBranch(app).catch(async (problem: unknown) => {
+					const fallback = await runGit(tree, ["update-ref", `refs/paimeng/versions/${headAfter}`, headAfter]);
+					const reason = problem instanceof Error ? problem.message : String(problem);
+					text += fallback.exitCode === 0
+						? `\n\n注意：新提交 ${headAfter.slice(0, 7)} 没能落到分支（${reason}），已保留为历史引用，版本面板仍能看到它。要接着在它上面改，先 git switch -c <分支名> ${headAfter.slice(0, 7)}。`
+						: `\n\n警告：新提交 ${headAfter.slice(0, 7)} 既没落到分支也没能保留为历史引用（${reason}）；请立即执行 git branch <分支名> ${headAfter}，否则这条提交可能在清理后消失。`;
+				});
 			}
 		}
 		return {
-			output: [{ type: "text", text: outcome.exitCode === 0 ? outcome.text : `退出码 ${outcome.exitCode}\n${outcome.text}` }],
+			output: [{ type: "text", text }],
 			details: { exitCode: outcome.exitCode },
 		};
 	},

@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { ensureWorkspace, workspace, type WorkspaceApp } from '@/server/workspace';
@@ -137,6 +137,24 @@ describe('旧版本表迁移', () => {
     const result = await applyLegacyVersions(app, [{ commitSha: ghost, title: '只剩记录', legacyThumbnailId: null }]);
     expect(result.missing).toBe(1);
     expect(result.pinned).toBe(0);
+  }, 60_000);
+
+  it('仓库读不了时记为「无法确认」，不冒充「提交不存在」', async () => {
+    const app = await newApp();
+    const only = await commit(app, '唯一一版', { 'index.html': '<html><body>v1</body></html>' });
+    // 把对象文件改成不可读：cat-file 会失败，但原因不是「无效对象名」。
+    const object = join(versionRepo(app), 'objects', only.id.slice(0, 2), only.id.slice(2));
+    await chmod(object, 0o000);
+    const rows: LegacyVersionRow[] = [{ commitSha: only.id, title: '唯一一版', legacyThumbnailId: null }];
+    try {
+      const plan = await planLegacyVersions(app, rows);
+      expect(plan[0]).toMatchObject({ missing: false, unverified: true });
+      const result = await applyLegacyVersions(app, rows);
+      expect(result).toMatchObject({ unverified: 1, missing: 0, pinned: 0 });
+      expect(result.problems.join(' ')).toContain('无法确认');
+    } finally {
+      await chmod(object, 0o644);
+    }
   }, 60_000);
 
   it('仓库还没建（新应用）时预演不创建 .git', async () => {

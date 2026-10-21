@@ -355,7 +355,9 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
                     </div>
                     <div className="version-tree-row-title">{version.title}</div>
                     <div className="version-tree-row-foot">
-                      <span className="version-tree-row-meta">{version.fileCount} 个文件</span>
+                      <span className="version-tree-row-meta" title={version.statsKnown ? undefined : '这一版的树读不出来，统计不可用'}>
+                        {version.statsKnown ? `${version.fileCount} 个文件` : '统计不可用'}
+                      </span>
                       <Button
                         size="small"
                         type="text"

@@ -63,23 +63,29 @@ for (const [appId, rows] of byApp) {
     // 预演也走同一套判断：会去仓库里确认提交在不在，而不是只数行数。
     const plan = await planLegacyVersions(app, legacyRows);
     const missing = plan.filter(item => item.missing).length;
+    const unverified = plan.filter(item => item.unverified).length;
     const pin = plan.filter(item => item.pin).length;
     const title = plan.filter(item => item.title).length;
     const shot = plan.filter(item => item.thumbnail).length;
     planned += pin + title + shot;
-    console.log(`  - ${nameOf.get(appId) ?? appId}（${codeGenType}）：${rows.length} 条 → 待补引用 ${pin}、概述 ${title}、截图 ${shot}${missing ? `，缺失提交 ${missing}` : ''}`);
+    if (unverified > 0) failures += unverified;
+    console.log(`  - ${nameOf.get(appId) ?? appId}（${codeGenType}）：${rows.length} 条 → 待补引用 ${pin}、概述 ${title}、截图 ${shot}${missing ? `，缺失提交 ${missing}` : ''}${unverified ? `，无法确认 ${unverified}` : ''}`);
     continue;
   }
 
   const result = await applyLegacyVersions(app, legacyRows);
   planned += result.pinned + result.titled + result.shots;
   if (result.problems.length > 0) failures += result.problems.length;
-  console.log(`  ✓ ${nameOf.get(appId) ?? appId}（${codeGenType}）：新增引用 ${result.pinned}、概述 ${result.titled}、截图 ${result.shots}${result.missing ? `，缺失提交 ${result.missing}` : ''}`);
+  console.log(`  ✓ ${nameOf.get(appId) ?? appId}（${codeGenType}）：新增引用 ${result.pinned}、概述 ${result.titled}、截图 ${result.shots}${result.missing ? `，缺失提交 ${result.missing}` : ''}${result.unverified ? `，无法确认 ${result.unverified}` : ''}`);
   for (const problem of result.problems) console.error(`    ! ${problem}`);
 }
 
 if (!apply) {
   console.log(`\n这是预演，共 ${planned} 项待处理。加 --apply 真正写入（会创建/迁移仓库、写 refs 与缓存，不改任何提交）。`);
+  if (failures > 0) {
+    console.error(`有 ${failures} 条记录无法确认，预演结果不完整：先解决仓库读取问题再迁移。`);
+    process.exit(1);
+  }
   process.exit(0);
 }
 if (failures > 0) {

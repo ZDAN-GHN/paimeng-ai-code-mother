@@ -15,6 +15,8 @@ export type AppVersion = {
   changedFiles: string[];
   fileCount: number;
   bytes: number;
+  /** false 表示这一版的树读不出来（对象损坏/丢失）：界面显示「统计不可用」而不是 0 个文件。 */
+  statsKnown: boolean;
   thumbnailKey: string | null;
 };
 

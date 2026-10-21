@@ -27,8 +27,10 @@ export type LegacyVersionRow = {
 
 export type MigrationPlan = {
   versionId: string;
-  /** 提交对象不在仓库里（只存在一行记录）：什么都补不了。 */
+  /** 提交对象确实不在仓库里（只存在一行记录）：什么都补不了。 */
   missing: boolean;
+  /** 仓库读不了、无法判断：既不能当成「缺失」也不能当成「完成」，必须上报。 */
+  unverified: boolean;
   pin: boolean;
   title: boolean;
   thumbnail: boolean;
@@ -39,18 +41,37 @@ export type MigrationResult = {
   titled: number;
   shots: number;
   missing: number;
+  unverified: number;
   problems: string[];
 };
 
 const exists = (path: string) => stat(path).then(() => true, () => false);
 
-async function git(repo: string, args: string[]) {
+type GitRun = { ok: boolean; out: string; error: string };
+
+async function git(repo: string, args: string[]): Promise<GitRun> {
   try {
     const { stdout } = await run('git', ['--git-dir', repo, ...args], { env: gitEnv });
-    return stdout.trim();
-  } catch {
-    return null;
+    return { ok: true, out: stdout.trim(), error: '' };
+  } catch (problem) {
+    const failure = problem as { stdout?: string; stderr?: string; message?: string };
+    return { ok: false, out: (failure.stdout ?? '').trim(), error: `${failure.stderr ?? ''} ${failure.message ?? ''}`.trim() };
   }
+}
+
+/**
+ * 三态判断提交对象是否存在。
+ * `git cat-file -e` 成功时没有任何输出，失败时也可能因为权限/损坏而失败——
+ * 把「读不了」当成「不存在」会让迁移静默跳过全部数据，所以必须分开。
+ */
+async function objectState(repo: string, sha: string): Promise<'present' | 'missing' | 'unverified'> {
+  const result = await git(repo, ['cat-file', '-e', `${sha}^{commit}`]);
+  if (result.ok) return 'present';
+  // 读不了（权限、损坏、IO）优先判定：这类失败的最后一行也会是
+  // 「fatal: Not a valid object name」，先匹配「不存在」就会把读错误当成缺失。
+  if (/permission denied|unable to open|corrupt|failed to inflate|input\/output error|read error/i.test(result.error)) return 'unverified';
+  if (/not a valid object name|does not exist|bad object|invalid object name/i.test(result.error)) return 'missing';
+  return 'unverified';
 }
 
 function cachedTitles(app: WorkspaceApp): Promise<Record<string, string>> {
@@ -82,9 +103,10 @@ export async function planLegacyVersions(app: WorkspaceApp, rows: LegacyVersionR
   const [repo, titles] = await Promise.all([readableRepo(app), cachedTitles(app)]);
   return Promise.all(rows.map(async (row): Promise<MigrationPlan> => {
     const versionId = row.commitSha;
-    if (!repo || (await git(repo, ['cat-file', '-e', `${versionId}^{commit}`])) === null) {
-      return { versionId, missing: true, pin: false, title: false, thumbnail: false };
-    }
+    if (!repo) return { versionId, missing: true, unverified: false, pin: false, title: false, thumbnail: false };
+    const state = await objectState(repo, versionId);
+    if (state === 'unverified') return { versionId, missing: false, unverified: true, pin: false, title: false, thumbnail: false };
+    if (state === 'missing') return { versionId, missing: true, unverified: false, pin: false, title: false, thumbnail: false };
     const ref = `refs/paimeng/versions/${versionId}`;
     const [pinned, hasShot] = await Promise.all([
       git(repo, ['rev-parse', '--verify', '--quiet', ref]),
@@ -93,7 +115,8 @@ export async function planLegacyVersions(app: WorkspaceApp, rows: LegacyVersionR
     return {
       versionId,
       missing: false,
-      pin: pinned !== versionId,
+      unverified: false,
+      pin: pinned.out !== versionId,
       title: Boolean(row.title) && !titles[versionId],
       thumbnail: Boolean(row.legacyThumbnailId) && !hasShot,
     };
@@ -107,18 +130,25 @@ export async function planLegacyVersions(app: WorkspaceApp, rows: LegacyVersionR
 export async function applyLegacyVersions(app: WorkspaceApp, rows: LegacyVersionRow[]): Promise<MigrationResult> {
   const repo = await ensureVersionRepo(app);
   const titles = await cachedTitles(app);
-  const result: MigrationResult = { pinned: 0, titled: 0, shots: 0, missing: 0, problems: [] };
+  const result: MigrationResult = { pinned: 0, titled: 0, shots: 0, missing: 0, unverified: 0, problems: [] };
   for (const row of rows) {
     const versionId = row.commitSha;
-    if ((await git(repo, ['cat-file', '-e', `${versionId}^{commit}`])) === null) {
+    const state = await objectState(repo, versionId);
+    if (state === 'missing') {
       result.missing += 1;
+      continue;
+    }
+    if (state === 'unverified') {
+      result.unverified += 1;
+      result.problems.push(`${versionId.slice(0, 7)} 无法确认提交是否存在（仓库读取失败），已跳过`);
       continue;
     }
     // 保留引用：让「被回退掉但表里记着」的提交永远可达，gc 不会回收。
     const ref = `refs/paimeng/versions/${versionId}`;
-    if ((await git(repo, ['rev-parse', '--verify', '--quiet', ref])) !== versionId) {
+    if ((await git(repo, ['rev-parse', '--verify', '--quiet', ref])).out !== versionId) {
       // 写 ref 失败必须如实上报：否则「历史保住了」是假的。
-      if ((await git(repo, ['update-ref', ref, versionId])) === null) result.problems.push(`${versionId.slice(0, 7)} 保留引用写入失败`);
+      const written = await git(repo, ['update-ref', ref, versionId]);
+      if (!written.ok) result.problems.push(`${versionId.slice(0, 7)} 保留引用写入失败：${written.error.split('\n')[0] ?? ''}`);
       else result.pinned += 1;
     }
     if (row.title && !titles[versionId]) {

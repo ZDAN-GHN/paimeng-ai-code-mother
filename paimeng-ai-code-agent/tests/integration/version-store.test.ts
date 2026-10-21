@@ -206,6 +206,19 @@ describe('回退（detached HEAD）', () => {
     expect(await read(app, 'extra.html')).toBe('<p>用户新写的内容</p>');
   });
 
+  it('目标路径的父目录被普通文件占住时也拒绝回退（stat 只会报 ENOTDIR，容易被当不存在）', async () => {
+    const { app } = await twoVersions();
+    const withDir = await commit(app, '加一个子目录页面', { 'section/index.html': '<p>子页面</p>' });
+    await commit(app, '删掉整个子目录', { 'section/index.html': null });
+    // 用户在原来的目录位置放了一个同名普通文件（先清掉留下的空目录）。
+    await rm(join(workspace(app), 'section'), { recursive: true, force: true });
+    await write(app, 'section', 'user-file-content');
+    expect((await git(app, ['status', '--porcelain'])).trim()).toContain('section');
+
+    await expect(restoreVersion({ app, versionId: withDir.id })).rejects.toThrow(/section/);
+    expect(await read(app, 'section')).toBe('user-file-content');
+  });
+
   it('被忽略的文件占了目标树里的路径时拒绝回退（status 看不见它，但物化会覆盖）', async () => {
     const { app } = await twoVersions();
     // 老版本跟踪 assets/photo.png；之后删掉它并把 assets/ 加入忽略规则；用户又在同路径放了新素材。

@@ -1,7 +1,7 @@
 import 'server-only';
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { cp, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
@@ -127,6 +127,28 @@ async function gitCommit(repo: string, workTree: string | null, args: string[]) 
 }
 
 const exists = (path: string) => stat(path).then(() => true, () => false);
+
+/**
+ * 目标路径在磁盘上是否已经「占着位置」——自己存在，或某一级父目录被普通文件占住。
+ * 后一种最容易漏：目标 `section/index.html`，用户在工作区建了个名为 `section` 的文件，
+ * `stat('section/index.html')` 只会报 ENOTDIR，当成「不存在」就会让 read-tree 覆盖掉用户的文件。
+ * 读不出来的情况（EACCES 等）按冲突处理：宁可拒绝切版，也不要猜。
+ */
+async function pathOccupation(workTree: string, path: string): Promise<string | null> {
+  const parts = path.split('/').filter(Boolean);
+  let current = workTree;
+  for (const [index, part] of parts.entries()) {
+    current = join(current, part);
+    const info = await lstat(current).then(stats => stats, (error: unknown) => error as NodeJS.ErrnoException);
+    if (info instanceof Error) {
+      if (info.code === 'ENOENT') return null;
+      if (info.code === 'ENOTDIR') return parts.slice(0, index).join('/') || null;
+      return parts.slice(0, index + 1).join('/');
+    }
+    if (index < parts.length - 1 && !info.isDirectory()) return parts.slice(0, index + 1).join('/');
+  }
+  return parts.join('/');
+}
 
 function parseVersionId(value: string) {
   const parsed = versionIdSchema.safeParse(value);
@@ -358,7 +380,7 @@ type VersionSource = {
   changed: Map<string, string[]>;
   titles: Record<string, string>;
   thumbnails: Set<string>;
-  sizes: Map<string, { fileCount: number; bytes: number }>;
+  sizes: Map<string, { fileCount: number; bytes: number; known: boolean }>;
 };
 
 /** 纯读：仓库不在（未生成过或正在删除）就返回 null，绝不初始化或补写 .git。 */
@@ -389,7 +411,12 @@ async function fillSizes(source: VersionSource, commits: Commit[]) {
   const worker = async () => {
     while (next < trees.length) {
       const tree = trees[next++]!;
-      const listing = await git(source.repo, null, ['ls-tree', '-r', '-l', tree]).catch(() => '');
+      const listing = await git(source.repo, null, ['ls-tree', '-r', '-l', tree]).catch(() => null);
+      // 读不出来就是读不出来：不能报成 0 个文件，那会让人以为这一版是空的。
+      if (listing === null) {
+        source.sizes.set(tree, { fileCount: 0, bytes: 0, known: false });
+        continue;
+      }
       let bytes = 0;
       let fileCount = 0;
       for (const line of listing.split('\n').filter(Boolean)) {
@@ -397,7 +424,7 @@ async function fillSizes(source: VersionSource, commits: Commit[]) {
         fileCount += 1;
         bytes += Number(columns?.[3]) || 0;
       }
-      source.sizes.set(tree, { fileCount, bytes });
+      source.sizes.set(tree, { fileCount, bytes, known: true });
     }
   };
   await Promise.all(Array.from({ length: Math.min(8, trees.length) }, worker));
@@ -419,6 +446,7 @@ async function versionOf(source: VersionSource, commit: Commit): Promise<AppVers
     changedFiles: source.changed.get(commit.sha) ?? [],
     fileCount: size.fileCount,
     bytes: size.bytes,
+    statsKnown: size.known,
     thumbnailKey: source.thumbnails.has(commit.sha) ? thumbnailKey(source.app, commit.sha) : null,
   };
 }
@@ -504,10 +532,9 @@ async function assertCleanSource(repo: string, tree: string, commit: string) {
   // 物化就会覆盖它，而 status 看不见它。
   if (targetPaths.length > 0) {
     const indexPaths = new Set((await git(repo, null, ['ls-files', '-z'])).split('\0').filter(Boolean));
-    const workTree = tree;
     const risky = targetPaths.filter(path => !indexPaths.has(path));
     if (risky.length > 0) {
-      const hits = await Promise.all(risky.map(async path => (await exists(join(workTree, path))) ? path : null));
+      const hits = await Promise.all(risky.map(path => pathOccupation(tree, path)));
       for (const path of hits) if (path) blocking.add(path);
     }
   }

@@ -15,11 +15,11 @@ const short2 = '2222222';
 
 const v1: AppVersion = {
   id: sha1, title: '首版首页', createTime: '2026-10-18 09:12:00', parents: [], heads: [],
-  changedFiles: ['index.html', 'assets/style.css'], fileCount: 4, bytes: 4096, thumbnailKey: null,
+  changedFiles: ['index.html', 'assets/style.css'], fileCount: 4, bytes: 4096, thumbnailKey: null, statsKnown: true,
 };
 const v2: AppVersion = {
   id: sha2, title: '把卡片改成圆角', createTime: '2026-10-19 10:30:00', parents: [sha1], heads: ['main'],
-  changedFiles: ['assets/style.css'], fileCount: 4, bytes: 4120, thumbnailKey: null,
+  changedFiles: ['assets/style.css'], fileCount: 4, bytes: 4120, thumbnailKey: null, statsKnown: true,
 };
 const mainBranch: VersionBranch = { branch: 'main', headVersionId: v2.id, merged: false };
 

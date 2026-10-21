@@ -5,7 +5,7 @@ import type { AppVersion } from '@/shared/versioning';
 const base: AppVersion = {
   id: '0'.repeat(40), title: '', createTime: '2026-10-20 10:00:00',
   parents: [], heads: ['main'], changedFiles: ['index.html', 'assets/a.jpg'],
-  fileCount: 6, bytes: 1, thumbnailKey: null,
+  fileCount: 6, bytes: 1, thumbnailKey: null, statsKnown: true,
 };
 
 describe('版本概述', () => {
