@@ -86,13 +86,23 @@ function legacyThumbnailPath(app: WorkspaceApp, legacyId: string) {
   return join(versionRoot(), 'versions', `${app.codeGenType}_${app.id}`, `${legacyId}.png`);
 }
 
-/** 预演读哪个仓库：工作区的 .git，或还没搬进去的旧裸库；都不在就没有可读的历史。 */
-async function readableRepo(app: WorkspaceApp) {
-  const inWorkspace = versionRepo(app);
-  if (await exists(join(inWorkspace, 'HEAD'))) return inWorkspace;
-  const legacy = join(versionRoot(), `${app.codeGenType}_${app.id}.git`);
-  if (await exists(join(legacy, 'HEAD'))) return legacy;
-  return null;
+/**
+ * 预演读哪个仓库：工作区的 .git，或还没搬进去的旧裸库。
+ * 必须分清「压根没有仓库」和「有仓库但读不了」——后者报告成「提交不存在」会把
+ * 权限/IO 故障伪装成正常结果，用户以为迁移做完了。
+ */
+type RepoSource =
+  | { kind: 'ok'; repo: string }
+  | { kind: 'absent' }
+  | { kind: 'unreadable'; reason: string };
+
+async function readableRepo(app: WorkspaceApp): Promise<RepoSource> {
+  for (const candidate of [versionRepo(app), join(versionRoot(), `${app.codeGenType}_${app.id}.git`)]) {
+    const head = await stat(join(candidate, 'HEAD')).then(() => 'ok' as const, (error: NodeJS.ErrnoException) => error.code ?? 'UNKNOWN');
+    if (head === 'ok') return { kind: 'ok', repo: candidate };
+    if (head !== 'ENOENT') return { kind: 'unreadable', reason: `${candidate} 读不了（${head}）` };
+  }
+  return { kind: 'absent' };
 }
 
 /**
@@ -100,10 +110,15 @@ async function readableRepo(app: WorkspaceApp) {
  * 预演与真正写入共用同一套判断，避免「预演说会改 3 个、实际改 5 个」。
  */
 export async function planLegacyVersions(app: WorkspaceApp, rows: LegacyVersionRow[]): Promise<MigrationPlan[]> {
-  const [repo, titles] = await Promise.all([readableRepo(app), cachedTitles(app)]);
+  const [source, titles] = await Promise.all([readableRepo(app), cachedTitles(app)]);
+  // 没有仓库 = 无法核对任何一条；读不了同样无法核对。两种情况都必须标成「无法确认」，
+  // 否则预演会报告「全部缺失」然后退 0，看起来像迁移顺利完成。
+  if (source.kind !== 'ok') {
+    return rows.map(row => ({ versionId: row.commitSha, missing: false, unverified: true, pin: false, title: false, thumbnail: false }));
+  }
+  const repo = source.repo;
   return Promise.all(rows.map(async (row): Promise<MigrationPlan> => {
     const versionId = row.commitSha;
-    if (!repo) return { versionId, missing: true, unverified: false, pin: false, title: false, thumbnail: false };
     const state = await objectState(repo, versionId);
     if (state === 'unverified') return { versionId, missing: false, unverified: true, pin: false, title: false, thumbnail: false };
     if (state === 'missing') return { versionId, missing: true, unverified: false, pin: false, title: false, thumbnail: false };
@@ -128,6 +143,15 @@ export async function planLegacyVersions(app: WorkspaceApp, rows: LegacyVersionR
  * 失败原样返回，由调用方如实报出——迁移脚本不该把失败吞成「完成」。
  */
 export async function applyLegacyVersions(app: WorkspaceApp, rows: LegacyVersionRow[]): Promise<MigrationResult> {
+  const source = await readableRepo(app);
+  if (source.kind !== 'ok') {
+    // 不调用 ensureVersionRepo：给一个历史已经消失的应用凭空建仓库，
+    // 只会让「迁移完成」这个结论更可疑。
+    return {
+      pinned: 0, titled: 0, shots: 0, missing: 0, unverified: rows.length,
+      problems: [source.kind === 'absent' ? '找不到版本仓库，无法迁移这些记录' : source.reason],
+    };
+  }
   const repo = await ensureVersionRepo(app);
   const titles = await cachedTitles(app);
   const result: MigrationResult = { pinned: 0, titled: 0, shots: 0, missing: 0, unverified: 0, problems: [] };

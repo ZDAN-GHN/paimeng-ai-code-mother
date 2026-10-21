@@ -96,7 +96,7 @@ HTTP 恢复/分支/采纳/切换返回形状保留；业务层鉴权、租约判
 - [x] U1/U2/U3 产物落盘并经主代理检查（三份 handoff + 逐文件核对）。
 - [x] 旧数据迁移脚本落地并在真实库上预演（默认 dry-run）；运行时不再查询旧版本表。
 - [x] U4 类型/静态/单元/集成/浏览器检查通过（见下方实证）。
-- [ ] U5 独立评审完成，已接受问题修复并复验。
+- [x] U5 独立评审完成（另一模型家族，两轮共 9 条），已修复并复验。
 - [x] 所有本次启动的临时进程关闭，最终汇报包含证据和未决限制。
 
 若遇到未批准的产品选择或基础设施失败，保存 patch 并上报。不得切换到外部 CLI agent 作为隐式降级，不得在真实应用上重写提交来让测试通过。
@@ -134,3 +134,39 @@ npm run versions:migrate（真实库，dry-run）        识别 7 条主应用�
 集成过程中修掉一处用例自身的测量错误：`commitCount()` 原先用 `git rev-list --count HEAD`，回退后 HEAD 就在旧版本上，必然只数到 1 个；改为 `--branches HEAD` 去重计数。
 
 已知限制：E2E 夹具用 `versions-app` 这个非数字 appId，部分未被拦截的请求会在服务端日志留下 `Cannot convert versions-app to a BigInt`（测试仍全过，属夹具命名遗留）；vue/react 版本仍无离屏截图（提交里不含 dist）。
+
+## 独立评审与修复（两轮）
+
+评审在另一模型家族上跑，只读、无 shell，我给的是 `git diff` 文件而不是让它在仓库里跑命令。
+
+第一轮（对 e52d17a）判 BLOCK，5 条：
+
+| 级别 | 发现 | 修复 |
+| --- | --- | --- |
+| P1 | `git status` 不报 ignored 文件，`read-tree --reset -u` 却会覆盖它们 | 切版前逐路径核对目标树：已跟踪改动、未跟踪同名、ignored 同名、目录占位都算冲突；与目标树无关的依赖/产物放行 |
+| P1 | 迁移脚本用 `cat-file -e` 的 stdout 判真假，成功时输出为空 → 每个有效提交都被判缺失 | 迁移逻辑抽成 `version-migration.ts`，用失败返回区分；预演也做真实存在性核对；写入失败非零退出 |
+| P1 | git 工具按子命令名无条件建分支，空提交/dry-run 会留下空分支 | 改为先执行，只有「成功且 HEAD 真的移动」才建分支 |
+| P2 | 单个坏提交的批量 `diff-tree` 失败会让整个面板打不开 | 逐提交降级，`ls-tree` 统计失败不再抛 |
+| P2 | 「截图来自指定提交」的行为用例被删且无替代 | 按 SHA 恢复：两版截图字节不同、工作区第三种内容不影响、二次命中缓存 |
+
+第二轮（对 d9050e8）仍有 2 P1 + 2 P2，全部修复：
+
+- **父目录被普通文件占住**：`stat('section/index.html')` 只报 ENOTDIR，被当成不存在。改为 `pathOccupation` 逐级核对每个路径组件，读不出来的错误一律按冲突拒绝。
+- **提交后挂分支失败被吞**：改用保留引用兜底（`refs/paimeng/versions/<sha>`，面板会读），并把「已保留 / 没保住」如实写进工具输出。
+- **迁移混淆「读不了」与「不存在」**：`cat-file` 权限失败的最后一行同样是 `Not a valid object name`；改成 present/missing/unverified 三态，unverified 计入失败并非零退出。用 `chmod 000` 对象文件实测才发现这个分类错误。
+- **未知统计显示成 0**：`AppVersion.statsKnown`，读不出来的树显示「统计不可用」而不是「0 个文件」。
+
+两处修复都做了反向验证（改回旧实现用例即红），避免「测试通过但没测到东西」。
+
+## 最终验证（c001dcc）
+
+```text
+npm run type-check                        0 error
+npm run check:fast                        通过
+npm test                                  353 passed / 37 files
+integration（全量）                        234 passed | 1 skipped / 33 files
+E2E version-panel（隔离 3020/3021）         13 passed
+npm run versions:migrate（真实库，预演）     234 项待处理，0 条无法确认
+git-tool（真实 harness + faux 模型）        13 passed
+version-migration（真实 git 仓库）          4 passed（孤儿提交/幂等/缺失/unverified）
+```

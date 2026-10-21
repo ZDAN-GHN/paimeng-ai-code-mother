@@ -157,11 +157,19 @@ describe('旧版本表迁移', () => {
     }
   }, 60_000);
 
-  it('仓库还没建（新应用）时预演不创建 .git', async () => {
+  it('仓库还没建（新应用）时预演既不建仓库也不谎称「提交缺失」', async () => {
     const app = await newApp();
     expect(await exists(join(versionRepo(app), 'HEAD'))).toBe(false);
-    const plan = await planLegacyVersions(app, [{ commitSha: 'a'.repeat(40), title: 'x', legacyThumbnailId: null }]);
-    expect(plan[0].missing).toBe(true);
+    const rows: LegacyVersionRow[] = [{ commitSha: 'a'.repeat(40), title: 'x', legacyThumbnailId: null }];
+    const plan = await planLegacyVersions(app, rows);
+    // 没有仓库 = 无法核对，必须报「无法确认」；报成 missing 会被当成正常结论。
+    expect(plan[0]).toMatchObject({ missing: false, unverified: true });
+    expect(await exists(join(versionRepo(app), 'HEAD'))).toBe(false);
+
+    const result = await applyLegacyVersions(app, rows);
+    expect(result).toMatchObject({ unverified: 1, missing: 0 });
+    expect(result.problems.join(' ')).toContain('找不到版本仓库');
+    // 写入路径同样不该为一个历史已经消失的应用凭空建仓库。
     expect(await exists(join(versionRepo(app), 'HEAD'))).toBe(false);
   });
 });

@@ -348,7 +348,8 @@ async function readChangedFiles(repo: string, commits: Commit[]) {
   }
   for (const commit of commits) {
     if (commit.parents.length < 2) continue;
-    changed.set(commit.sha, await changedFilesOf(repo, commit));
+    // 与批量失败同样的降级策略：单个合并提交读不出来，只让这一条缺少改动信息。
+    changed.set(commit.sha, await changedFilesOf(repo, commit).catch(() => [] as string[]));
   }
   for (const files of changed.values()) files.sort();
   return changed;
