@@ -460,16 +460,18 @@ describe('只读路径', () => {
   });
 
   it('列表 limit 不丢已知提交，历史图仍然完整', async () => {
-    const { app, first } = await twoVersions();
+    const { app, first, second } = await twoVersions();
     await commit(app, '第三版', { 'index.html': '<html><body>v3</body></html>' });
 
     const overview = await listVersions(app, { limit: 1 });
     expect(overview.versions).toHaveLength(1);
     expect(overview.graph?.nodes).toHaveLength(3);
-    expect(await getVersion(app, first.id)).toMatchObject({ id: first.id, title: '第一版' });
+    // 标题是「这一版改了什么」，不是提交信息：概述缓存没有时按改动文件兜底。
+    expect(await getVersion(app, first.id)).toMatchObject({ id: first.id, title: '改 style.css 等 2 个文件' });
 
+    // 搜索仍然按文件与提交信息命中，但结果里的标题还是改动描述。
     const filtered = await listVersions(app, { query: 'about' });
-    expect(filtered.versions.map(version => version.title)).toEqual(['第二版']);
+    expect(filtered.versions.map(version => version.id)).toEqual([second.id]);
     expect(filtered.graph).toBe(undefined);
   });
 
@@ -494,7 +496,8 @@ describe('只读路径', () => {
 
     const overview = await listVersions(app);
 
-    expect(overview.versions.some(version => version.id === orphan && version.title === '保留的历史')).toBe(true);
+    // 孤儿提交与父提交同一棵树：没有文件差异，标题也不能拿提交信息冒充改动。
+    expect(overview.versions.some(version => version.id === orphan && version.title === '合并已有版本')).toBe(true);
     expect(overview.branches.map(branch => branch.branch)).toEqual(['main']);
     expect(overview.current).toEqual({ kind: 'branch', branch: 'main', versionId: second.id });
     expect(overview.graph?.nodes.some(node => node.versionId === orphan)).toBe(true);
@@ -526,7 +529,7 @@ describe('只读路径', () => {
 });
 
 describe('展示缓存', () => {
-  it('概述只覆盖展示标题，删除缓存后回落到 commit message，Git 历史不受影响', async () => {
+  it('概述只覆盖展示标题，删除缓存后回落到改动文件，Git 历史不受影响', async () => {
     const { app, first } = await twoVersions();
     const commitsBefore = await commitSet(app);
 
@@ -538,7 +541,7 @@ describe('展示缓存', () => {
     expect(await commitSet(app)).toEqual(commitsBefore);
 
     await rm(join(versionRoot(), 'titles', `${app.codeGenType}_${app.id}.json`));
-    expect((await getVersion(app, first.id)).title).toBe('第一版');
+    expect((await getVersion(app, first.id)).title).toBe('改 style.css 等 2 个文件');
   });
 
   it('截图按 commit SHA 落盘并反映到 thumbnailKey', async () => {
@@ -606,7 +609,8 @@ describe('旧裸库迁移', () => {
       expect(await read(app, 'index.html')).toBe('current-content');
       const overview = await listVersions(app);
       expect(overview.current).toEqual({ kind: 'branch', branch: 'main', versionId: legacyHead });
-      expect(overview.versions[0]?.title).toBe('旧版');
+      // 迁移过来的提交同样不带提交信息当标题。
+      expect(overview.versions[0]?.title).toMatch(/^改 /);
       // 工作区与旧库 HEAD 不同 → 切版前必须先提交，不会被静默覆盖
       await expect(restoreVersion({ app, versionId: legacyHead })).rejects.toThrow(/未提交的源码改动/);
       expect(await read(app, 'index.html')).toBe('current-content');

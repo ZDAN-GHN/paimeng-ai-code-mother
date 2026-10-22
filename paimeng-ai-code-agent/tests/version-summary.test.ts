@@ -22,12 +22,12 @@ describe('版本概述', () => {
     expect(result).toBe([...long].slice(0, versionSummaryLimit).join(''));
   });
 
-  it('兜底标题用改动数量，不照抄用户原话', () => {
-    expect(fallbackVersionTitle(base)).toBe('改动 2 个文件');
-    expect(fallbackVersionTitle({ ...base, changedFiles: ['index.html'] })).toBe('改动 1 个文件');
+  it('兜底标题直接说改了哪个文件，不照抄用户原话', () => {
+    expect(fallbackVersionTitle(base)).toBe('改 index.html 等 2 个文件');
+    expect(fallbackVersionTitle({ ...base, changedFiles: ['index.html'] })).toBe('改 index.html');
     // 合并提交相对第一个父提交可能没有文件差异，用「合并」而不是假装第几版。
-    expect(fallbackVersionTitle({ ...base, changedFiles: [] })).toBe('合并历史版本');
-    for (const changedFiles of [['a'], ['a', 'b'], []]) {
+    expect(fallbackVersionTitle({ ...base, changedFiles: [] })).toBe('合并已有版本');
+    for (const changedFiles of [['a'], ['a', 'b'], [], ['a/very/long/directory/name/index.html', 'b.css']]) {
       const title = fallbackVersionTitle({ ...base, changedFiles });
       expect([...title].length).toBeLessThanOrEqual(versionSummaryLimit);
     }

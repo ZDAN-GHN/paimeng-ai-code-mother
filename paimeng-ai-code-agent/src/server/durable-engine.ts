@@ -18,7 +18,7 @@ import { db } from './db';
 import { adoptLease, beginGeneration, finishGeneration, generationFor, heartbeat, restoreGeneration, setGeneration, staleActiveGenerations, withAppWriter } from './generation-store';
 import { recordAssistantStep, recordBuildStep, type AccountToolCall, type EntryUsage, type GenerationStopReason, type ModelIdentity } from './generation-accounting';
 import { BusinessError } from './http';
-import { commitVersion, listVersions, setVersionTitle } from './version-store';
+import { changeStats, commitVersion, getVersion, listVersions, setVersionTitle } from './version-store';
 import { summarizeVersion } from './version-summary';
 import { versionThumbnail } from './version-thumbnail';
 import { clientIp } from './rate-limit';
@@ -699,12 +699,13 @@ async function recordGenerationVersion(app: AppInfo, requestId: string, conversa
     if (!sha) return;
     // 截图按提交 SHA 存：面板打开时直接读这一版的图。
     void versionThumbnail(app, sha).catch(() => undefined);
-    // 兜底提交的标题是平台起的占位符，异步换成模型写的概述；模型自己的提交信息原样保留。
-    if (committed) {
-      void summarizeVersion({ version: committed, userPrompt: prompt })
-        .then(summary => setVersionTitle(app, sha, summary))
-        .catch(() => undefined);
-    }
+    // 面板标题必须是「这一版实际改了什么」：提交信息常是用户那句话（「继续」），不能拿来当标题。
+    // 每版都按文件改动重新概括，失败就退回文件级兜底，绝不影响生成结果。
+    void (async () => {
+      const version = committed ?? await getVersion(app, sha);
+      const stats = await changeStats(app, sha).catch(() => []);
+      await setVersionTitle(app, sha, await summarizeVersion({ version, userPrompt: prompt, stats }));
+    })().catch(() => undefined);
   } catch (problem) {
     console.error(`版本记录失败（生成 ${requestId}）：`, problem);
   }

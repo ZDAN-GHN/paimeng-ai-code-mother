@@ -2,7 +2,7 @@ import 'server-only';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { db } from '@/server/db';
 import { apps } from '@/server/schema';
-import { listVersions, setVersionTitle } from '@/server/version-store';
+import { changeStats, listVersions, setVersionTitle, versionTitles } from '@/server/version-store';
 import { summarizeVersion } from '@/server/version-summary';
 import { codeGenTypes, type CodeGenType } from '@/shared/contracts';
 
@@ -33,11 +33,13 @@ for (const row of rows) {
   const app = { id: String(row.id), codeGenType };
   // 纯读仓库；没有 Git 提交就等于没有版本可取名。
   const overview = await listVersions(app, { limit: 200 });
+  const titles = await versionTitles(app);
   for (const version of overview.versions) {
     scanned += 1;
-    // 用户写过的提交信息就是这一版的意图，不必再让模型猜一遍。
-    if (version.title && version.title !== '生成完成') continue;
-    const summary = await summarizeVersion({ userPrompt: null, version });
+    // 提交信息不是概述：以前把提交信息当标题，于是「继续」这种话进了面板。只有缓存的概述才算已有。
+    if (titles[version.id]) continue;
+    const stats = await changeStats(app, version.id).catch(() => []);
+    const summary = await summarizeVersion({ userPrompt: null, version, stats });
     if (summary === version.title) continue;
     changed += 1;
     console.log(`  ${String(row.appName ?? row.id).slice(0, 14)} ${version.id.slice(0, 7)}: ${version.title.slice(0, 30)} → ${summary}`);

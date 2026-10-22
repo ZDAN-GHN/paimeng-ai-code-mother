@@ -169,6 +169,15 @@ npm run versions:migrate（真实库，dry-run）        识别 7 条主应用�
 底层不变：还是 Git 提交、detached 切版、零新增。「根据这版修改」只多做一件事：收起面板并把光标交回输入框，用户直接说下一句需求。
 焦点必须等抽屉关闭动画结束后再抢（`Drawer` 的 `afterOpenChange`），并且要重试几帧：antd 关闭确认框与抽屉时会各自把焦点还给触发按钮。
 
+## 版本标题：只描述改动，不复述用户
+
+面板上每一行的标题回答的是「这一版实际改了什么」，不是「用户当时说了什么」。
+- 优先用按 diff 生成的概述（`src/server/version-summary.ts`，输入是文件级 `+/-` 行数与文件列表，用户原话只作意图参考）；
+- 没有概述缓存时按改动文件兜底（`src/shared/versioning.ts` 的 `fallbackVersionTitle`：`改 index.html 等 2 个文件`）；
+- 提交信息**不进标题**：模型常把用户那句「继续」写成 commit message。它仍可用于搜索命中，也仍在 Git 历史里。
+- 生成收尾会给每一版补概述（不只是平台兜底提交），`npm run versions:titles` 给历史版本补缓存（先预演，`--apply` 才写）。
+- 模型返回「继续」「好的」这类空话、或等于用户原话时，直接退回文件级兜底。
+
 ## 最终验证（ddea0bf）
 
 ```text

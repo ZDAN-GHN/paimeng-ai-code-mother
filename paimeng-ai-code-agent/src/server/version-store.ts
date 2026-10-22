@@ -8,6 +8,7 @@ import { z } from 'zod';
 import {
   DEFAULT_BRANCH,
   branchNameSchema,
+  fallbackVersionTitle,
   versionIdSchema,
   type AppVersion,
   type AppVersionOverview,
@@ -441,7 +442,8 @@ async function versionOf(source: VersionSource, commit: Commit): Promise<AppVers
   const size = source.sizes.get(commit.tree)!;
   return {
     id: commit.sha,
-    title: source.titles[commit.sha] ?? (commit.subject || commit.sha.slice(0, 7)),
+    // 标题只讲「这一版改了什么」：概述缓存优先，没有就按改动文件兜底；提交信息只用于搜索。
+    title: source.titles[commit.sha] ?? fallbackVersionTitle({ changedFiles: source.changed.get(commit.sha) ?? [] }),
     createTime: storedTime(commit.time),
     parents: commit.parents,
     heads: headsOf(source, commit.sha),
@@ -803,7 +805,7 @@ async function buildGraph(source: VersionSource): Promise<VersionGraph> {
     row,
     parents: commit.parents,
     headOf: headsOf(source, commit.sha),
-    title: source.titles[commit.sha] ?? (commit.subject || commit.sha.slice(0, 7)),
+    title: source.titles[commit.sha] ?? fallbackVersionTitle({ changedFiles: source.changed.get(commit.sha) ?? [] }),
     branch: branchOf.get(commit.sha) ?? DEFAULT_BRANCH,
     createTime: storedTime(commit.time),
   }));
@@ -868,6 +870,24 @@ export async function diffVersions(app: WorkspaceApp, baseId: string, targetId: 
     patch: truncated ? `${fullPatch.slice(0, maxPatchBytes)}\n…（补丁过长，已截断）` : fullPatch,
     truncated,
   };
+}
+
+/** 已有概述缓存（版本 SHA → 展示标题）。概述与提交信息是两回事，需要它判断要不要重算。 */
+export async function versionTitles(app: WorkspaceApp): Promise<Record<string, string>> {
+  return readTitles(app);
+}
+
+/**
+ * 单个提交相对父提交的文件级改动量，给版本概述当事实依据。
+ * 概述要写「这一版实际改了什么」，光有文件名不够——`+42/-8` 才能说明是重做还是微调。
+ */
+export async function changeStats(app: WorkspaceApp, versionId: string): Promise<Array<{ path: string; added: number; removed: number }>> {
+  const sha = parseVersionId(versionId);
+  const out = await git(versionRepo(app), null, ['diff-tree', '--root', '-r', '--no-commit-id', '-m', '--first-parent', '--numstat', '-M', sha]);
+  return out.split('\n').filter(Boolean).map(line => {
+    const [added, removed, ...rest] = line.split('\t');
+    return { path: rest[rest.length - 1] ?? '', added: Number(added) || 0, removed: Number(removed) || 0 };
+  }).filter(stat => stat.path);
 }
 
 /** 概述缓存：只影响展示标题，不动 Git 历史。临时文件 + rename 保证并发读到的是完整 JSON。 */

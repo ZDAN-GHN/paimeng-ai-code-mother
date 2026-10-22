@@ -79,3 +79,20 @@ export type VersionDiff = {
 };
 
 export const WORKSPACE_CHANGED_NOTE = '工作区已切换到所选 Git 提交；继续编辑前请重新读取相关文件。从历史版本继续修改时先新建分支，再提交实际改动。';
+
+/** 版本标题的硬上限：界面一行显示，超过就换行，所以由服务端截断而不是靠 CSS。 */
+export const versionSummaryLimit = 20;
+
+/**
+ * 没有概述缓存时的展示标题：直接说改了哪个文件。
+ * 不能退回提交信息——提交信息经常就是用户那句「继续」，标题必须描述这一版实际改了什么。
+ */
+export function fallbackVersionTitle(version: Pick<AppVersion, 'changedFiles'>) {
+  const files = version.changedFiles;
+  if (files.length === 0) return '合并已有版本';
+  // 路径太长会挤掉「等 N 个文件」，只留文件名。
+  const first = files[0]!.split('/').pop() || files[0]!;
+  const title = files.length === 1 ? `改 ${first}` : `改 ${first} 等 ${files.length} 个文件`;
+  const chars = [...title];
+  return chars.length <= versionSummaryLimit ? title : `${chars.slice(0, versionSummaryLimit - 1).join('')}…`;
+}
