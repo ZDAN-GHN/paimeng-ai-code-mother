@@ -60,14 +60,28 @@ const manifestSchema = z.object({ version: z.literal(1), images: z.array(storedA
 type Manifest = z.infer<typeof manifestSchema>;
 type StoredAsset = z.infer<typeof storedAssetSchema>;
 
+/**
+ * 读工程素材清单。文件不存在（ENOENT）返回空清单；文件存在但解析失败必须抛错：
+ * persistImport 会用读到的清单覆盖写回 sources.json 与 credits.html，把损坏当空清单
+ * 会抹掉全部历史素材的署名与许可记录，且没有任何报错。
+ */
 async function loadManifest(app: WorkspaceApp): Promise<Manifest> {
+  let text: string;
   try {
-    const parsed: unknown = JSON.parse(await readProjectFile(app, `${assetsDirectory(app)}/sources.json`));
-    const result = manifestSchema.safeParse(parsed);
-    return result.success ? result.data : { version: 1, images: [] };
-  } catch {
-    return { version: 1, images: [] };
+    text = await readProjectFile(app, `${assetsDirectory(app)}/sources.json`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, images: [] };
+    throw error;
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new WebAccessError('invalid-response', '素材清单无法解析，已拒绝写入以保护现有署名与许可记录');
+  }
+  const result = manifestSchema.safeParse(parsed);
+  if (!result.success) throw new WebAccessError('invalid-response', '素材清单格式无法识别，已拒绝写入以保护现有署名与许可记录');
+  return result.data;
 }
 
 function escapeHtml(value: string) {

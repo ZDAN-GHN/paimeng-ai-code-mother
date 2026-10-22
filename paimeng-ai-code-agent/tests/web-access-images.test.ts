@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { rm } from 'node:fs/promises';
 import { sourceDigest } from '@/server/artifacts';
-import { listProjectFiles, readProjectFile, readProjectFileBytes, workspace, writeProjectFile } from '@/server/workspace';
+import { listProjectFiles, readProjectFile, readProjectFileBytes, workspace, writePlatformAssetFile, writeProjectFile } from '@/server/workspace';
 import { assetsDirectory, importImageCandidate, persistImport, prepareImport } from '@/server/web-access/import';
 import { sniffImageFormat } from '@/server/binary';
 import { candidateIdFor, isAllowedLicense, licenseUrlFor, openverseImages, searchImageCandidates, webImages, type ImageCandidate } from '@/server/web-access/images';
@@ -10,7 +10,8 @@ import type { Transport, TransportResponse } from '@/server/web-access/http';
 const htmlApp = { id: String(Date.now()), codeGenType: 'html' as const };
 const vueApp = { id: String(Date.now() + 1), codeGenType: 'vue_project' as const };
 const bigApp = { id: String(Date.now() + 2), codeGenType: 'html' as const };
-const apps = [htmlApp, vueApp, bigApp];
+const corruptApp = { id: String(Date.now() + 3), codeGenType: 'html' as const };
+const apps = [htmlApp, vueApp, bigApp, corruptApp];
 
 afterAll(async () => {
   for (const app of apps) await rm(workspace(app), { recursive: true, force: true });
@@ -194,6 +195,18 @@ describe('图片落进工程', () => {
     const again = await importImageCandidate(vueApp, candidate, { deps: { transport: second.transport, lookup } });
     expect(again.path).toBe(imported.path);
     expect(second.calls).toHaveLength(0);
+  });
+
+  it('清单损坏时拒绝导入并保住原文件，不再当空清单覆盖', async () => {
+    await writePlatformAssetFile(corruptApp, 'assets/sources.json', 'not json at all');
+    const candidate = candidateFor('https://img.test/corrupt.png');
+    const { transport } = makeTransport(() => reply(200, 'image/png', png));
+    await expect(importImageCandidate(corruptApp, candidate, { deps: { transport, lookup } })).rejects.toMatchObject({ code: 'invalid-response' });
+    expect(await readProjectFile(corruptApp, 'assets/sources.json')).toBe('not json at all');
+
+    await writePlatformAssetFile(corruptApp, 'assets/sources.json', '{"version": 1, "images": "not a list"}');
+    await expect(importImageCandidate(corruptApp, candidate, { deps: { transport, lookup } })).rejects.toMatchObject({ code: 'invalid-response' });
+    expect(await readProjectFile(corruptApp, 'assets/sources.json')).toBe('{"version": 1, "images": "not a list"}');
   });
 
   it('拒绝网页内容与超大图片', async () => {
