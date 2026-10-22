@@ -74,6 +74,12 @@ async function openPanel(page: Page) {
   await expect(page.getByRole('dialog', { name: /版本历史/ })).toBeVisible();
 }
 
+/** 分支、SHA、树状路径、对比都收在「修改路径与分支（高级）」里；需要它们的用例先展开。 */
+async function openAdvanced(page: Page) {
+  await page.getByRole('button', { name: /修改路径与分支/ }).click();
+  await expect(page.getByRole('button', { name: /收起修改路径与分支/ })).toBeVisible();
+}
+
 function captureWrite(page: Page, path: string, body: unknown) {
   const seen: unknown[] = [];
   void page.route((url: URL) => url.pathname === path, async (route: Route) => {
@@ -97,24 +103,26 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByLabel('对话消息')).toHaveValue(prompt);
 });
 
-test('版本面板显示时间线、当前版本标记与无缩略图占位', async ({ page }) => {
+test('版本面板默认只讲人话：一版一行、正在使用标记、用这一版/根据这版修改', async ({ page }) => {
   await mockVersions(page, overviewOf([v2, v1], { kind: 'branch', branch: 'main', versionId: v2.id }));
   await openPanel(page);
   await expect(page.getByText('把卡片改成圆角')).toBeVisible();
   await expect(page.getByText('首版首页')).toBeVisible();
-  // 行标识是概述 + 短 SHA，不再有 vN 序号。
-  const shas = page.locator('.version-tree-row-sha');
-  await expect(shas).toHaveCount(2);
-  await expect(shas.first()).toHaveText(short2);
-  await expect(page.locator('.version-tree-row-current')).toHaveCount(1);
-  await expect(page.locator('.version-tree-row-current').getByText('当前', { exact: true })).toBeVisible();
-  await expect(page.getByText(`当前版本 ${short2}`)).toBeVisible();
+  // 默认视图不出现 SHA、分支选择器、树状连线——这些是 Git 的说法。
+  await expect(page.locator('.version-tree-row-sha')).toHaveCount(0);
+  await expect(page.locator('.version-panel-branch-select')).toHaveCount(0);
+  await expect(page.locator('.version-tree-lines')).toHaveCount(0);
+  // 当前那一版标「正在使用」，并且不能再用一次；旧版可以。
+  const current = page.locator('.version-tree-row-current');
+  await expect(current).toHaveCount(1);
+  await expect(current.getByText('正在使用', { exact: true })).toBeVisible();
+  await expect(current.getByRole('button', { name: /使用这个版本/ })).toBeDisabled();
+  await expect(page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /使用这个版本/ })).toBeEnabled();
+  // 每一版都能「根据这版修改」，当前这一版就是直接回到输入框。
+  await expect(page.locator('.version-tree-row')).toHaveCount(2);
+  await expect(page.getByRole('button', { name: /根据这版修改/ })).toHaveCount(2);
+  await expect(page.getByText('当前使用的是最新版本')).toBeVisible();
   await expect(page.getByText('无缩略图').first()).toBeVisible();
-  // 当前版本既不能和自己对比，也不需要「回到」——它就是当前内容。
-  await expect(page.locator('.version-tree-row-current').getByRole('button', { name: /对\s*比/ })).toBeDisabled();
-  await expect(page.locator('.version-tree-row-current').getByRole('button', { name: /回到此版本/ })).toBeDisabled();
-  // 旧版本仍然可以回退，别把整列按钮都禁掉。
-  await expect(page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /回到此版本/ })).toBeEnabled();
 });
 
 test('版本卡片显示该版本的页面截图，加载失败才退回占位', async ({ page }) => {
@@ -132,24 +140,22 @@ test('版本卡片显示该版本的页面截图，加载失败才退回占位',
   await expect(image).toHaveJSProperty('naturalWidth', 1);
 });
 
-test('回到历史提交后明确显示「历史版本」，不把当前位置伪装成 main', async ({ page }) => {
+test('停在旧版本时明确提示「旧版本」，并提供一键回到最新', async ({ page }) => {
   await mockVersions(page, overviewOf([v2, v1], { kind: 'detached', versionId: v1.id }));
   await openPanel(page);
-  await expect(page.getByText('历史版本', { exact: true })).toBeVisible();
-  await expect(page.locator('.version-panel-toolbar-sha')).toHaveText(short1);
-  // 分支选择器不再显示 main：detached 时只显示「切换到分支」。
-  const select = page.locator('.version-panel-branch-select');
-  await expect(select).toContainText('切换到分支');
-  await expect(select).not.toContainText('main');
-  await expect(page.getByText(`当前版本 ${short1}`)).toBeVisible();
-  // 当前停在 v1：它自己不能再「回到」，更新的 v2 仍可回退。
-  await expect(page.locator('.version-tree-row-current').getByRole('button', { name: /回到此版本/ })).toBeDisabled();
-  await expect(page.locator('.version-tree-row', { hasText: '把卡片改成圆角' }).getByRole('button', { name: /回到此版本/ })).toBeEnabled();
+  await expect(page.getByText('旧版本', { exact: true })).toBeVisible();
+  await expect(page.getByText('你正在看一个旧版本，新的修改会从这里开始。')).toBeVisible();
+  await expect(page.getByRole('button', { name: '回到最新' })).toBeEnabled();
+  // 当前停在这一版：它自己不能再「使用」，更新的 v2 仍然可以。
+  await expect(page.locator('.version-tree-row-current').getByRole('button', { name: /使用这个版本/ })).toBeDisabled();
+  await expect(page.locator('.version-tree-row', { hasText: '把卡片改成圆角' }).getByRole('button', { name: /使用这个版本/ })).toBeEnabled();
 });
 
-test('版本历史按树状渲染：没有卡片组件，连线画满整棵树', async ({ page }) => {
+test('展开「修改路径与分支」后才显示树状路径与连线', async ({ page }) => {
   await mockVersions(page, overviewOf([v2, v1], { kind: 'branch', branch: 'main', versionId: v2.id }));
   await openPanel(page);
+  await expect(page.locator('.version-tree-lines')).toHaveCount(0);
+  await openAdvanced(page);
   // 卡片样式已经不存在：历史就是树。
   await expect(page.locator('.version-panel-item')).toHaveCount(0);
   await expect(page.locator('.version-tree-legend-item')).toHaveCount(1);
@@ -165,20 +171,34 @@ test('没有版本时显示空态，并说明回到旧版不新增版本', async
   await mockVersions(page, overviewOf([], { kind: 'branch', branch: 'main', versionId: null }, []));
   await openPanel(page);
   await expect(page.getByText('还没有版本记录。完成一次生成后，这里会出现第一个版本。')).toBeVisible();
-  await expect(page.getByText(/不新增版本/)).toBeVisible();
+  await expect(page.getByText('使用旧版本只会把页面换回去，不会删掉任何一版。')).toBeVisible();
 });
 
-test('回到旧版本需要二次确认，确认后按 commit SHA 提交', async ({ page }) => {
+test('使用旧版本要二次确认，确认后按这一版的提交恢复', async ({ page }) => {
   await mockVersions(page, overviewOf([v2, v1], { kind: 'branch', branch: 'main', versionId: v2.id }));
   const writes = captureWrite(page, '/api/app/versions/restore', { status: 'restored', version: v1, previewError: null });
   await openPanel(page);
-  await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /回到此版本/ }).click();
+  await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /使用这个版本/ }).click();
   const dialog = page.locator('.ant-modal-confirm');
-  await expect(dialog).toContainText('不会新增版本');
-  await dialog.getByRole('button', { name: '回到此版本' }).click();
+  await expect(dialog).toContainText('其他版本都还留着');
+  await dialog.getByRole('button', { name: '使用这一版' }).click();
   await expect.poll(() => writes.length).toBe(1);
   expect(writes[0]).toMatchObject({ versionId: v1.id });
-  await expect(page.getByText(`已回到「首版首页」（${short1}），没有新增版本`)).toBeVisible();
+  await expect(page.getByText('已换成「首版首页」这一版')).toBeVisible();
+});
+
+test('「根据这版修改」恢复该版本后收起面板，把光标交回输入框', async ({ page }) => {
+  await mockVersions(page, overviewOf([v2, v1], { kind: 'branch', branch: 'main', versionId: v2.id }));
+  const writes = captureWrite(page, '/api/app/versions/restore', { status: 'restored', version: v1, previewError: null });
+  await openPanel(page);
+  await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /根据这版修改/ }).click();
+  await page.locator('.ant-modal-confirm').getByRole('button', { name: '从这版接着改' }).click();
+  await expect.poll(() => writes.length).toBe(1);
+  expect(writes[0]).toMatchObject({ versionId: v1.id });
+  await expect(page.getByText('已回到「首版首页」，接着说要改成什么样')).toBeVisible();
+  // 面板收起，焦点在输入框：用户下一句就是接着描述需求。
+  await expect(page.getByRole('dialog', { name: /版本历史/ })).toBeHidden();
+  await expect(page.getByLabel('对话消息')).toBeFocused();
 });
 
 test('回退成功后页面会刷新预览（iframe 换成新地址，不是停在旧画面）', async ({ page }) => {
@@ -201,9 +221,9 @@ test('回退成功后页面会刷新预览（iframe 换成新地址，不是停�
   await mockVersions(page, overviewOf([v2, v1], { kind: 'branch', branch: 'main', versionId: v2.id }));
   captureWrite(page, '/api/app/versions/restore', { status: 'restored', version: v1, previewError: null });
   await openPanel(page);
-  await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /回到此版本/ }).click();
-  await page.locator('.ant-modal-confirm').getByRole('button', { name: '回到此版本' }).click();
-  await expect(page.getByText(`已回到「首版首页」（${short1}），没有新增版本`)).toBeVisible();
+  await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /使用这个版本/ }).click();
+  await page.locator('.ant-modal-confirm').getByRole('button', { name: '使用这一版' }).click();
+  await expect(page.getByText('已换成「首版首页」这一版')).toBeVisible();
   // 用户真正会看到的：预览地址换了（pv 递增），并且页面重新读了应用信息。
   await expect(frame).not.toHaveAttribute('src', before ?? '');
   await expect(frame).toHaveAttribute('src', /pv=\d+/);
@@ -218,8 +238,8 @@ test('预览重建失败时明确告诉用户「画面没变」的原因', async
     previewError: '生成结果缺少 index.html',
   });
   await openPanel(page);
-  await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /回到此版本/ }).click();
-  await page.locator('.ant-modal-confirm').getByRole('button', { name: '回到此版本' }).click();
+  await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /使用这个版本/ }).click();
+  await page.locator('.ant-modal-confirm').getByRole('button', { name: '使用这一版' }).click();
   await expect(page.getByText('预览没能重建：生成结果缺少 index.html')).toBeVisible();
 });
 
@@ -228,8 +248,8 @@ test('生成占用应用时写操作全部禁用并说明原因', async ({ page 
   await openPanel(page);
   await expect(page.getByText('应用正在生成，跑完或取消后才能切换版本')).toBeVisible();
   const item = page.locator('.version-tree-row', { hasText: '首版首页' });
-  await expect(item.getByRole('button', { name: /回到此版本/ })).toBeDisabled();
-  await expect(item.getByRole('button', { name: /从此版开分支/ })).toBeDisabled();
+  await expect(item.getByRole('button', { name: /使用这个版本/ })).toBeDisabled();
+  await expect(item.getByRole('button', { name: /根据这版修改/ })).toBeDisabled();
 });
 
 test('未合并的分支可以合并到主线，已合并的不再列出来', async ({ page }) => {
@@ -241,14 +261,15 @@ test('未合并的分支可以合并到主线，已合并的不再列出来', as
   await mockVersions(page, overviewOf([v2, v1], { kind: 'branch', branch: 'main', versionId: v2.id }, branches));
   const writes = captureWrite(page, '/api/app/versions/adopt', { branch: 'plan-x', version: v1, previewError: null });
   await openPanel(page);
+  await openAdvanced(page);
   const panel = page.getByRole('region', { name: '未合并分支' });
   await expect(panel.getByText('plan-x')).toBeVisible();
   await expect(panel.getByText('done-feature')).toHaveCount(0);
-  await panel.getByRole('button', { name: '合并到主线' }).click();
-  await page.locator('.ant-modal-confirm').getByRole('button', { name: '合并到主线' }).click();
+  await panel.getByRole('button', { name: '合并回主线' }).click();
+  await page.locator('.ant-modal-confirm').getByRole('button', { name: '合并回来' }).click();
   await expect.poll(() => writes.length).toBe(1);
   expect(writes[0]).toMatchObject({ branch: 'plan-x' });
-  await expect(page.getByText('已把分支 plan-x 合并到主线')).toBeVisible();
+  await expect(page.getByText('已把「plan-x」合并回主线')).toBeVisible();
 });
 
 test('对比显示改动文件与补丁', async ({ page }) => {
@@ -261,9 +282,10 @@ test('对比显示改动文件与补丁', async ({ page }) => {
     },
   });
   await openPanel(page);
+  await openAdvanced(page);
   await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /对\s*比/ }).click();
   const diff = page.getByRole('region', { name: '版本对比' });
-  await expect(diff).toContainText(`对比 ${short1} → ${short2}`);
+  await expect(diff).toContainText('对比「首版首页」→「把卡片改成圆角」');
   await expect(diff.locator('.version-panel-diff-path').getByText('assets/style.css')).toBeVisible();
   await expect(diff.locator('pre')).toContainText('body{color:blue}');
 });
@@ -297,6 +319,7 @@ test('版本记录与差异加载时没有 HTML 嵌套或 hydration 错误', asy
   await expect(page.getByText('正在读取版本记录…')).toBeVisible();
   await expect(page.locator('.version-panel p div')).toHaveCount(0);
   overviewResponse.resolve();
+  await openAdvanced(page);
   await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /对\s*比/ }).click();
   await expect(page.getByText('正在读取差异…')).toBeVisible();
   await expect(page.locator('.version-panel p div')).toHaveCount(0);

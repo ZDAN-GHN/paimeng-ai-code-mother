@@ -146,6 +146,7 @@ function Chat({ id }: { id: string }) {
   const initialPromptHandled = useRef(false);
   const imageInput = useRef<HTMLInputElement>(null);
   const voiceInput = useRef<ComponentRef<typeof Input.TextArea>>(null);
+  const focusComposerOnClose = useRef(false);
   const loadingOlder = useRef(false);
   const inputsRef = useRef(inputs);
   const lostRef = useRef(lostInputs);
@@ -182,6 +183,24 @@ function Chat({ id }: { id: string }) {
       element.focus();
       element.setSelectionRange(element.value.length, element.value.length);
     });
+  }, []);
+
+  /**
+   * 把光标交回输入框。antd 关闭确认框和抽屉时都会把焦点还给各自的触发按钮，
+   * 顺序和动画时长都不受我们控制，所以这里重试几帧，直到焦点真的落在输入框上。
+   */
+  const focusComposer = useCallback(() => {
+    const element = voiceInput.current?.resizableTextArea?.textArea;
+    if (!element) return;
+    let attempts = 0;
+    const tick = () => {
+      if (!element.isConnected) return;
+      element.focus();
+      element.scrollIntoView({ block: 'center' });
+      attempts += 1;
+      if (document.activeElement !== element && attempts < 10) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -833,7 +852,13 @@ function Chat({ id }: { id: string }) {
     <AppDetailModal open={detailOpen} app={app} showActions={canEdit || !!isAdmin} onClose={() => setDetailOpen(false)}
       onEdit={() => { setDetailOpen(false); router.push('/app/edit/' + id); }} onDelete={() => { void removeApp(); }} />
     <VersionPanel appId={id} open={versionOpen} onClose={() => setVersionOpen(false)}
-      onWorkspaceChanged={() => { setPreviewVersion(current => (current ?? 0) + 1); void refresh(); }} />
+      onWorkspaceChanged={() => { setPreviewVersion(current => (current ?? 0) + 1); void refresh(); }}
+      onStartFromVersion={() => { focusComposerOnClose.current = true; setVersionOpen(false); }}
+      onAfterClose={() => {
+        if (!focusComposerOnClose.current) return;
+        focusComposerOnClose.current = false;
+        focusComposer();
+      }} />
     <DeploySuccessModal open={deployModal.open} deployUrl={deployModal.url} onClose={() => setDeployModal(current => ({ ...current, open: false }))}
       onOpenSite={() => { if (deployModal.url) window.open(deployModal.url, '_blank', 'noopener'); }} />
   </main>;

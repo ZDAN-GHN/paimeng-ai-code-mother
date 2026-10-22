@@ -7,14 +7,16 @@ import {
 import { api } from '@/client/api';
 import { parseStoredTime } from '@/shared/display';
 import { VersionTreeLegend, VersionTreeLines, treeGutterWidth, treeRowHeight } from './version-graph';
-import {
-  DEFAULT_BRANCH, type AppVersion, type AppVersionOverview, type VersionDiff,
-} from '@/shared/versioning';
+import { DEFAULT_BRANCH, type AppVersion, type AppVersionOverview, type VersionDiff } from '@/shared/versioning';
 import './version-panel.css';
 
 /**
- * 应用版本面板：只读的 Git 历史 + 四个可逆写操作（回到此版本 / 开分支 / 合并到主线 / 切换分支）。
- * 回退只把工作区切到那次提交（detached HEAD），不新增版本，也不删除历史。
+ * 版本历史面板。
+ *
+ * 默认只讲一件人话：<这个版本长什么样> + <用这一版> + <从这版接着改>。
+ * 「分支 / 合并 / 提交 SHA / 树状路径」是 Git 的说法，收在「修改路径与分支」里按需展开——
+ * 非技术用户不需要理解它们，也能完成「找回喜欢的那一版」和「在那版上继续改」。
+ * 底层仍然是 Git：切版只把工作区切到那次提交（detached HEAD），不新增版本，也不删历史。
  */
 
 type OverviewState =
@@ -28,8 +30,7 @@ type DiffState =
   | { status: 'failed'; base: AppVersion; target: AppVersion; message: string }
   | { status: 'ready'; diff: VersionDiff };
 
-/** 写操作成功后要不要通知页面刷新：内容没变（例如本来就等于目标版本）就不该触发预览重建。 */
-/** previewError 来自服务端：回退成功后预览重建失败时，不能只报成功，得让用户知道画面为什么没变。 */
+/** previewError 来自服务端：切版成功后预览重建失败时，不能只报成功，得让用户知道画面为什么没变。 */
 type WriteOutcome = { text: string; changed: boolean; previewError?: string | null };
 
 type WriteResult = { previewError: string | null };
@@ -49,7 +50,7 @@ const fileStatusColors: Record<VersionFileStatus, string> = {
 
 const pad = (value: number) => String(value).padStart(2, '0');
 
-/** 版本身份是完整 commit SHA：列表与确认框里都只显示前 7 位，完整值放 title 属性。 */
+/** 提交 SHA 只给排障用：界面上不再展示，需要时放在 title 属性里。 */
 const shortSha = (sha: string) => sha.slice(0, 7);
 
 /** 今天的版本只显示时分，更早的显示月日——时间线上留最多的宽度给标题。 */
@@ -99,7 +100,9 @@ function VersionDiffView({ state, onClose }: { state: DiffState; onClose: () => 
   const target = state.status === 'ready' ? state.diff.target : state.target;
   return <section ref={sectionRef} className="version-panel-diff" aria-label="版本对比">
     <div className="version-panel-diff-head">
-      <span className="version-panel-diff-title">对比 {shortSha(base.id)} → {shortSha(target.id)}</span>
+      <span className="version-panel-diff-title" title={`${shortSha(base.id)} → ${shortSha(target.id)}`}>
+        对比「{base.title}」→「{target.title}」
+      </span>
       <Button type="text" size="small" icon={<CloseOutlined aria-hidden="true" />} aria-label="关闭对比" onClick={onClose} />
     </div>
     {state.status === 'loading' && <div className="version-panel-diff-loading"><Spin size="small" />正在读取差异…</div>}
@@ -121,17 +124,22 @@ function VersionDiffView({ state, onClose }: { state: DiffState; onClose: () => 
   </section>;
 }
 
-export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
+export function VersionPanel({ appId, open, onClose, onWorkspaceChanged, onStartFromVersion, onAfterClose }: {
   appId: string;
   open: boolean;
   onClose: () => void;
-  /** 版本内容已改变工作区（回退/开分支/合并/切换）后调用，让页面刷新预览与消息。 */
+  /** 版本内容已改变工作区（使用旧版/开分支/合并/切换）后调用，让页面刷新预览与消息。 */
   onWorkspaceChanged: () => void;
+  /** 「从这版接着改」：面板收起并把光标放回输入框，用户直接说下一句需求。 */
+  onStartFromVersion?: () => void;
+  /** 抽屉关闭动画结束后触发：antd 会把焦点还给触发按钮，页面得等这一刻才能把焦点交给输入框。 */
+  onAfterClose?: () => void;
 }) {
   const { message, modal } = App.useApp();
   const [state, setState] = useState<OverviewState>({ status: 'loading' });
   const [diff, setDiff] = useState<DiffState>({ status: 'idle' });
   const [busy, setBusy] = useState<string | null>(null);
+  const [advanced, setAdvanced] = useState(false);
   const overviewRequest = useRef(0);
   const diffRequest = useRef(0);
 
@@ -152,6 +160,7 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
     if (!open) return;
     setState({ status: 'loading' });
     setDiff({ status: 'idle' });
+    setAdvanced(false);
     void loadOverview();
   }, [open, loadOverview]);
 
@@ -160,7 +169,7 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
     try {
       const outcome = await action();
       message.success(outcome.text);
-      // 源码回去了但预览重建失败：用户看到画面没变会以为回退没生效，必须当场说明。
+      // 源码回去了但预览重建失败：用户看到画面没变会以为没生效，必须当场说明。
       if (outcome.previewError) message.warning(`预览没能重建：${outcome.previewError}`);
       if (outcome.changed) onWorkspaceChanged();
       await loadOverview();
@@ -184,7 +193,9 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
     : null;
   const currentBranch = position?.kind === 'branch' ? position.branch : null;
   const detached = position?.kind === 'detached';
+  const onSideBranch = currentBranch !== null && currentBranch !== DEFAULT_BRANCH;
   const canWrite = overview !== null && overview.blocked === null && busy === null;
+  const withTree = advanced && Boolean(overview?.graph);
 
   const branchOptions = useMemo(() => (overview?.branches ?? []).map(branch => ({ value: branch.branch, label: branch.branch })), [overview]);
   const openBranches = (overview?.branches ?? []).filter(branch => branch.branch !== DEFAULT_BRANCH && !branch.merged);
@@ -209,53 +220,69 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
     }
   };
 
-  const confirmRestore = (version: AppVersion) => {
+  const restoreTo = async (version: AppVersion) => {
+    const result = await api<RestoreResult>('app/versions/restore', { appId, versionId: version.id });
+    return {
+      text: result.status === 'unchanged'
+        ? `「${result.version.title}」就是现在这一版`
+        : `已换成「${result.version.title}」这一版`,
+      changed: result.status !== 'unchanged',
+      previewError: result.previewError,
+    };
+  };
+
+  const confirmUse = (version: AppVersion) => {
     modal.confirm({
-      title: `回到「${version.title}」（${shortSha(version.id)}）？`,
-      content: '回到旧版只把工作区切换到这一次 Git 提交，不会新增版本，也不会删除任何历史。之后可以从这里新建分支继续修改，或者切回 main 回到最新内容。',
-      okText: '回到此版本',
+      title: `换成「${version.title}」这一版？`,
+      content: '页面会换成这一版的样子。其他版本都还留着，之后随时能再切回来，也不会新增版本。',
+      okText: '使用这一版',
       cancelText: '取消',
-      onOk: () => runWrite(`restore:${version.id}`, async () => {
-        const result = await api<RestoreResult>('app/versions/restore', { appId, versionId: version.id });
-        return {
-          text: result.status === 'unchanged'
-            ? `当前已经是「${result.version.title}」（${shortSha(result.version.id)}）`
-            : `已回到「${result.version.title}」（${shortSha(result.version.id)}），没有新增版本`,
-          changed: result.status !== 'unchanged',
-          previewError: result.previewError,
-        };
+      onOk: () => runWrite(`restore:${version.id}`, () => restoreTo(version)),
+    });
+  };
+
+  const confirmContinue = (version: AppVersion) => {
+    if (version.id === currentVersion?.id) {
+      onStartFromVersion?.();
+      return;
+    }
+    modal.confirm({
+      title: `从「${version.title}」接着改？`,
+      content: '页面会先换成这一版，接下来你说的话都从它开始改。现在最新的内容不会丢，之后还能切回来。',
+      okText: '从这版接着改',
+      cancelText: '取消',
+      onOk: () => runWrite(`continue:${version.id}`, async () => {
+        const outcome = await restoreTo(version);
+        onStartFromVersion?.();
+        return { ...outcome, text: `已回到「${version.title}」，接着说要改成什么样` };
       }),
     });
   };
 
   const confirmBranch = (version: AppVersion) => {
     modal.confirm({
-      title: `从「${version.title}」（${shortSha(version.id)}）开一个新分支？`,
-      content: '平台会从这个提交新建分支并切过去，主线当前内容不受影响；之后在新分支上的提交以这一版为父提交。',
-      okText: '开分支',
+      title: `从「${version.title}」单独开一条修改路径？`,
+      content: '平台会从这一版另起一条路径并切过去，主线当前内容不受影响；之后在这条路径上的改动以这一版为起点。',
+      okText: '开始新路径',
       cancelText: '取消',
       onOk: () => runWrite(`branch:${version.id}`, async () => {
         const result = await api<BranchResult>('app/versions/branch', { appId, versionId: version.id });
-        return {
-          text: `已从「${result.version.title}」（${shortSha(result.version.id)}）新建分支 ${result.branch} 并切过去`,
-          changed: true,
-          previewError: result.previewError,
-        };
+        return { text: `已从「${result.version.title}」开始新的修改路径`, changed: true, previewError: result.previewError };
       }),
     });
   };
 
   const confirmAdopt = (branch: string) => {
     modal.confirm({
-      title: `把分支 ${branch} 合并到主线？`,
-      content: '平台会把该分支合并进主线，已有历史不会丢，分支本身也可以继续保留。',
-      okText: '合并到主线',
+      title: `把「${branch}」这条路径合并回来？`,
+      content: '平台会把这条路径上的改动并进主线，已有历史不会丢，这条路径也可以继续保留。',
+      okText: '合并回来',
       cancelText: '取消',
       onOk: () => runWrite(`adopt:${branch}`, async () => {
         const result = await api<AdoptResult>('app/versions/adopt', { appId, branch });
         return result.version
-          ? { text: `已把分支 ${result.branch} 合并到主线`, changed: true, previewError: result.previewError }
-          : { text: `分支 ${result.branch} 已经包含在主线里，没有产生新版本`, changed: false, previewError: result.previewError };
+          ? { text: `已把「${result.branch}」合并回主线`, changed: true, previewError: result.previewError }
+          : { text: `「${result.branch}」已经包含在主线里，没有产生新版本`, changed: false, previewError: result.previewError };
       }),
     });
   };
@@ -263,13 +290,13 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
   const confirmSwitch = (branch: string) => {
     if (branch === currentBranch) return;
     modal.confirm({
-      title: `切换到分支 ${branch}？`,
-      content: '工作区会变成该分支的最新提交，不会新增版本；切回 main 就能回到主线的最新内容。',
+      title: `切换到「${branch}」？`,
+      content: '页面会换成这条路径上的最新内容，不会新增版本；切回 main 就回到主线。',
       okText: '切换',
       cancelText: '取消',
       onOk: () => runWrite(`switch:${branch}`, async () => {
         const result = await api<SwitchResult>('app/versions/switch', { appId, branch });
-        return { text: `已切换到分支 ${result.branch}`, changed: true, previewError: result.previewError };
+        return { text: `已切换到「${result.branch}」`, changed: true, previewError: result.previewError };
       }),
     });
   };
@@ -281,6 +308,7 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
     onClose={onClose}
     placement="right"
     size={640}
+    afterOpenChange={(visible) => { if (!visible) onAfterClose?.(); }}
     title={<span className="version-panel-drawer-title"><HistoryOutlined aria-hidden="true" />版本历史</span>}
   >
     <div className="version-panel">
@@ -288,7 +316,7 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
         className="version-panel-blocked"
         type="warning"
         title={overview.blocked}
-        description="写操作暂时不可用，等这次生成或部署结束后再试。"
+        description="现在还不能切换版本，等这次生成或部署结束后再试。"
       />}
       {state.status === 'loading' && <div className="version-panel-loading"><Spin size="small" />正在读取版本记录…</div>}
       {state.status === 'failed' && <div className="version-panel-error">
@@ -296,66 +324,69 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
         <Button icon={<ReloadOutlined aria-hidden="true" />} onClick={() => { setState({ status: 'loading' }); void loadOverview(); }}>重试</Button>
       </div>}
       {overview && <>
-        <div className="version-panel-toolbar">
+        <div className="version-panel-status">
           {detached
-            ? <Tag color="orange">历史版本</Tag>
-            : <span className="version-panel-toolbar-label">当前分支</span>}
-          <Select
-            size="small"
-            className="version-panel-branch-select"
-            value={currentBranch}
-            placeholder={detached ? '切换到分支' : undefined}
-            options={branchOptions}
-            disabled={!branchOptions.some(option => option.value !== currentBranch) || !canWrite}
-            onChange={confirmSwitch}
-          />
-          {position?.kind === 'detached' && <span className="version-panel-toolbar-sha" title={position.versionId}>{shortSha(position.versionId)}</span>}
-          {currentVersion && <span className="version-panel-toolbar-version">当前版本 {shortSha(currentVersion.id)}</span>}
+            ? <>
+              <Tag color="orange">旧版本</Tag>
+              <span className="version-panel-status-text">你正在看一个旧版本，新的修改会从这里开始。</span>
+              <Button size="small" disabled={!canWrite} loading={busy === 'switch:main'} onClick={() => confirmSwitch(DEFAULT_BRANCH)}>回到最新</Button>
+            </>
+            : onSideBranch
+              ? <>
+                <Tag color="purple">另一条修改路径</Tag>
+                <span className="version-panel-status-text">{currentBranch}</span>
+                <Button size="small" disabled={!canWrite} loading={busy === `switch:${DEFAULT_BRANCH}`} onClick={() => confirmSwitch(DEFAULT_BRANCH)}>回到主线</Button>
+              </>
+              : <span className="version-panel-status-text">当前使用的是最新版本</span>}
         </div>
-        {openBranches.length > 0 && <section className="version-panel-branches" aria-label="未合并分支">
-          <span className="version-panel-section-title">未合并分支</span>
-          {openBranches.map(branch => <div className="version-panel-branch-row" key={branch.branch}>
-            <BranchesOutlined aria-hidden="true" className="version-panel-branch-icon" />
-            <span className="version-panel-branch-name">{branch.branch}</span>
-            <Button
-              size="small"
-              disabled={!canWrite}
-              loading={busy === `adopt:${branch.branch}`}
-              onClick={() => confirmAdopt(branch.branch)}
-            >合并到主线</Button>
-          </div>)}
-        </section>}
         <VersionDiffView state={diff} onClose={closeDiff} />
         {versions.length === 0
           ? <div className="version-panel-empty">
             <HistoryOutlined aria-hidden="true" className="version-panel-empty-icon" />
             <p className="version-panel-empty-title">还没有版本记录。完成一次生成后，这里会出现第一个版本。</p>
-            <p className="version-panel-empty-note">回到旧版只会把工作区切换到那次提交，不新增版本，也不删除历史，之后还能再切回来。</p>
+            <p className="version-panel-empty-note">使用旧版本只会把页面换回去，不会删掉任何一版。</p>
           </div>
-          : <div className="version-tree">
-            {overview?.graph && <VersionTreeLegend graph={overview.graph} />}
-            <div className="version-tree-body" style={overview?.graph ? { paddingLeft: treeGutterWidth(overview.graph) } : undefined}>
-              {overview?.graph && <div className="version-tree-gutter"><VersionTreeLines graph={overview.graph} /></div>}
+          : <div className={withTree ? 'version-tree' : 'version-list'}>
+            {withTree && overview?.graph && <VersionTreeLegend graph={overview.graph} />}
+            <div className={withTree ? 'version-tree-body' : 'version-list-body'} style={withTree && overview?.graph ? { paddingLeft: treeGutterWidth(overview.graph) } : undefined}>
+              {withTree && overview?.graph && <div className="version-tree-gutter"><VersionTreeLines graph={overview.graph} /></div>}
               {treeOrder.map(version => {
                 const isCurrent = version.id === currentVersion?.id;
                 const node = overview?.graph?.nodes.find(item => item.versionId === version.id);
                 return <div
                   className={['version-tree-row', isCurrent && 'version-tree-row-current'].filter(Boolean).join(' ')}
                   key={version.id}
-                  style={overview?.graph ? { height: treeRowHeight(overview.graph) } : undefined}
+                  style={withTree && overview?.graph ? { height: treeRowHeight(overview.graph) } : undefined}
                   data-lane={node?.lane ?? 0}
                 >
                   <VersionThumbnail appId={appId} version={version} />
                   <div className="version-tree-row-body">
                     <div className="version-tree-row-head">
-                      <span className="version-tree-row-sha" title={version.id}>{shortSha(version.id)}</span>
-                      {version.heads.map(head => <Tag key={head} color={head === DEFAULT_BRANCH ? 'blue' : undefined}>{head}</Tag>)}
-                      {isCurrent && <Tag color="green">当前</Tag>}
+                      <span className="version-tree-row-title">{version.title}</span>
+                      {isCurrent && <Tag color="green">正在使用</Tag>}
                       <span className="version-tree-row-time">{formatVersionTime(version.createTime, now)}</span>
                     </div>
-                    <div className="version-tree-row-title">{version.title}</div>
-                    <div className="version-tree-row-foot">
-                      <span className="version-tree-row-meta" title={version.statsKnown ? undefined : '这一版的树读不出来，统计不可用'}>
+                    <div className="version-row-actions">
+                      <Button
+                        size="small"
+                        type={isCurrent ? 'text' : 'primary'}
+                        icon={<UndoOutlined aria-hidden="true" />}
+                        disabled={!canWrite || isCurrent}
+                        title={isCurrent ? '这已经是正在使用的版本' : undefined}
+                        loading={busy === `restore:${version.id}`}
+                        onClick={() => confirmUse(version)}
+                      >使用这个版本</Button>
+                      <Button
+                        size="small"
+                        type="text"
+                        disabled={!canWrite}
+                        loading={busy === `continue:${version.id}`}
+                        onClick={() => confirmContinue(version)}
+                      >根据这版修改</Button>
+                    </div>
+                    {advanced && <div className="version-row-advanced">
+                      <span className="version-row-sha" title={version.id}>{shortSha(version.id)}</span>
+                      <span className="version-row-meta" title={version.statsKnown ? undefined : '这一版的内容读不出来，统计不可用'}>
                         {version.statsKnown ? `${version.fileCount} 个文件` : '统计不可用'}
                       </span>
                       <Button
@@ -369,26 +400,53 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged }: {
                       <Button
                         size="small"
                         type="text"
-                        icon={<UndoOutlined aria-hidden="true" />}
-                        disabled={!canWrite || isCurrent}
-                        title={isCurrent ? '这已经是当前版本' : undefined}
-                        loading={busy === `restore:${version.id}`}
-                        onClick={() => confirmRestore(version)}
-                      >回到此版本</Button>
-                      <Button
-                        size="small"
-                        type="text"
                         icon={<BranchesOutlined aria-hidden="true" />}
                         disabled={!canWrite}
                         loading={busy === `branch:${version.id}`}
                         onClick={() => confirmBranch(version)}
-                      >从此版开分支</Button>
-                    </div>
+                      >从此版另起一条路径</Button>
+                    </div>}
                   </div>
                 </div>;
               })}
             </div>
           </div>}
+        <div className="version-panel-advanced">
+          <Button
+            type="link"
+            size="small"
+            aria-expanded={advanced}
+            onClick={() => setAdvanced(value => !value)}
+          >{advanced ? '收起修改路径与分支' : '修改路径与分支（高级）'}</Button>
+          {advanced && <>
+            <p className="version-panel-advanced-note">每一版都是 Git 里的一个提交。这里能看到它们在 Git 里的编号、比较两版差异，也可以把一条修改路径合并回主线。</p>
+            <div className="version-panel-branches">
+              <span className="version-panel-section-title">当前所在分支</span>
+              <Select
+                size="small"
+                className="version-panel-branch-select"
+                value={currentBranch}
+                placeholder={detached ? '切换回某个分支' : undefined}
+                options={branchOptions}
+                disabled={!branchOptions.some(option => option.value !== currentBranch) || !canWrite}
+                onChange={confirmSwitch}
+              />
+            </div>
+            {openBranches.length > 0 && <section className="version-panel-branches" aria-label="未合并分支">
+              <span className="version-panel-section-title">还没合并回主线的路径</span>
+              {openBranches.map(branch => <div className="version-panel-branch-row" key={branch.branch}>
+                <BranchesOutlined aria-hidden="true" className="version-panel-branch-icon" />
+                <span className="version-panel-branch-name">{branch.branch}</span>
+                <Button
+                  size="small"
+                  disabled={!canWrite}
+                  loading={busy === `adopt:${branch.branch}`}
+                  onClick={() => confirmAdopt(branch.branch)}
+                >合并回主线</Button>
+              </div>)}
+            </section>}
+          </>}
+        </div>
       </>}
     </div>
   </Drawer>;

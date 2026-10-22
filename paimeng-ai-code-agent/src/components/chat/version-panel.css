@@ -294,3 +294,39 @@
   .version-panel-thumb { width: 72px; height: 48px; }
   .version-panel-toolbar-version { margin-left: 0; }
 }
+
+/* 默认视图只讲人话：一个版本一行，一个「使用」按钮。分支/合并/SHA 收在「修改路径与分支」里。 */
+.version-list { display: flex; flex-direction: column; gap: 4px; }
+.version-list-body { display: flex; flex-direction: column; }
+
+.version-panel-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #eee4dd;
+  border-radius: 8px;
+  background: #faf7f5;
+}
+.version-panel-status-text { color: #867870; }
+
+.version-row-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.version-row-advanced {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed #f0f3f1;
+}
+.version-row-sha {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: #867870;
+}
+.version-row-meta { font-size: 11px; color: #8b9692; margin-right: 6px; }
+
+.version-panel-advanced { border-top: 1px dashed #eee4dd; margin-top: 10px; padding-top: 4px; }
+.version-panel-advanced-note { margin: 0 0 8px; font-size: 12px; line-height: 1.6; color: #9aa5a1; }
