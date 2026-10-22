@@ -32,6 +32,15 @@ export type HttpRequestOptions = {
 
 export type HttpPayload = { status: number; url: string; contentType: string; body: Buffer };
 
+/** 解析服务商返回的 JSON 正文；解析失败统一成 invalid-response，不向调用方暴露原始报文。 */
+export function readJson(payload: Buffer, label: string): unknown {
+  try {
+    return JSON.parse(payload.toString('utf8'));
+  } catch {
+    throw new WebAccessError('invalid-response', `${label}返回了无法解析的内容`);
+  }
+}
+
 const undiciTransport: Transport = async (target, init) => {
   const response = await request(target.href, {
     method: init.method,

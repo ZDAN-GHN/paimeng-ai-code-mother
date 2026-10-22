@@ -1,7 +1,7 @@
 import 'server-only';
 import { z } from 'zod';
 import { webAccessEndpoints, webAccessLimits, webAccessSettings } from './config';
-import { httpPostJson, type HttpDeps } from './http';
+import { httpPostJson, readJson, type HttpDeps } from './http';
 import { WebAccessError } from './types';
 
 const imageSchema = z.object({ url: z.string().nullish(), title: z.string().nullish(), description: z.string().nullish() });
@@ -27,14 +27,6 @@ const extractResponseSchema = z.object({
 function authHeaders(): Record<string, string> {
   const { tavilyApiKey } = webAccessSettings();
   return tavilyApiKey ? { authorization: `Bearer ${tavilyApiKey}` } : { 'x-tavily-access-mode': 'keyless' };
-}
-
-function readJson(payload: Buffer, label: string): unknown {
-  try {
-    return JSON.parse(payload.toString('utf8'));
-  } catch {
-    throw new WebAccessError('invalid-response', `${label}返回了无法解析的内容`);
-  }
 }
 
 /** title 是图片所在页面的名字（如「Konata Izumi | Lucky Star Wiki」），description 多为服务商生成的机器翻译描述。 */

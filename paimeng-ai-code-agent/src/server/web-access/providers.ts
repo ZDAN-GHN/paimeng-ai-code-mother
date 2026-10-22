@@ -1,7 +1,8 @@
 import 'server-only';
 import { z } from 'zod';
 import { webAccessEndpoints, webAccessLimits, webAccessSettings } from './config';
-import { httpGet, httpPostJson, type HttpDeps } from './http';
+import { httpGet, httpPostJson, readJson, type HttpDeps } from './http';
+import { tavilySearch } from './tavily';
 import { WebAccessError } from './types';
 
 /**
@@ -12,7 +13,6 @@ import { WebAccessError } from './types';
  */
 
 export type SearchHit = { title: string; url: string; snippet: string };
-export type ProviderSearchOutcome = { provider: string; results: SearchHit[] } | null;
 
 export type SearchProviderId = 'tavily' | 'brave' | 'searxng';
 
@@ -21,14 +21,6 @@ type ProviderImplementation = {
   available(): boolean;
   search(query: string, options: { maxResults: number; signal?: AbortSignal; deps?: HttpDeps }): Promise<SearchHit[]>;
 };
-
-function readJson(payload: Buffer, label: string): unknown {
-  try {
-    return JSON.parse(payload.toString('utf8'));
-  } catch {
-    throw new WebAccessError('invalid-response', `${label}返回了无法解析的内容`);
-  }
-}
 
 /** 展示给用户的限额时长来自上游响应，不让模型看到原始错误正文。 */
 function providerHttpError(provider: string, label: string, status: number): WebAccessError {
@@ -47,31 +39,12 @@ const httpOptions = (options: { signal?: AbortSignal; deps?: HttpDeps }) => ({
   deps: options.deps,
 });
 
-const tavilyResult = z.object({ title: z.string().nullish(), url: z.string(), content: z.string().nullish() });
-
+/** tavily 的请求、鉴权与归一化只保留在 tavily.ts 一份，这里只收窄成降级链需要的形状。 */
 const tavily: ProviderImplementation = {
   available: () => true, // 官方免密钥模式总是可用
   async search(query, options) {
-    const { tavilyApiKey } = webAccessSettings();
-    const payload = await httpPostJson(`${webAccessEndpoints.tavily}/search`, {
-      query,
-      search_depth: 'basic',
-      max_results: options.maxResults,
-      include_answer: false,
-      include_raw_content: false,
-      include_images: false,
-      auto_parameters: false,
-    }, {
-      ...httpOptions(options),
-      headers: tavilyApiKey ? { authorization: `Bearer ${tavilyApiKey}` } : { 'x-tavily-access-mode': 'keyless' },
-    });
-    if (payload.status !== 200) throw providerHttpError('tavily', '搜索服务', payload.status);
-    const parsed = z.object({ results: z.array(tavilyResult).default([]) }).safeParse(readJson(payload.body, '搜索服务'));
-    if (!parsed.success) throw new WebAccessError('invalid-response', '搜索服务返回了无法解析的结果');
-    return parsed.data.results.flatMap(result => {
-      if (!result.url || !/^https?:\/\//i.test(result.url)) return [];
-      return [{ title: (result.title ?? result.url).trim().slice(0, 200), url: result.url, snippet: (result.content ?? '').replace(/\s+/g, ' ').trim() }];
-    });
+    const { results } = await tavilySearch({ query, maxResults: options.maxResults, includeImages: false, signal: options.signal, deps: options.deps });
+    return results.map(({ title, url, snippet }) => ({ title, url, snippet }));
   },
 };
 
@@ -140,9 +113,11 @@ export async function searchWithFallback(query: string, options: { maxResults: n
       if (results.length) return { provider: id, results };
       firstEmpty ??= { provider: id, results };
     } catch (error) {
-      if (error instanceof WebAccessError && (error.code === 'auth' || error.code === 'invalid-response')) throw error;
+      // 非 WebAccessError 是适配层自身的缺陷，吞掉它会伪装成「这个源没搜到」，必须如实抛出。
+      if (!(error instanceof WebAccessError)) throw error;
+      if (error.code === 'auth' || error.code === 'invalid-response') throw error;
       // quota / unavailable / timeout：降级到下一个源；记住最后一个配额错，链尾无空结果可回时如实上报。
-      if (error instanceof WebAccessError && error.code === 'quota') quota ??= error;
+      if (error.code === 'quota') quota ??= error;
     }
   }
   if (firstEmpty) return firstEmpty;

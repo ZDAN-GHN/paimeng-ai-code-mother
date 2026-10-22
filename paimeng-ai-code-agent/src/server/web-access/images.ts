@@ -2,8 +2,8 @@ import 'server-only';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { webAccessEndpoints, webAccessLimits, webAccessSettings } from './config';
-import { httpGet, type HttpDeps } from './http';
-import { tavilySearch } from './tavily';
+import { httpGet, readJson, type HttpDeps } from './http';
+import { tavilySearch, type TavilyImage, type TavilyResult } from './tavily';
 import { WebAccessError } from './types';
 
 export type ImageCandidate = {
@@ -64,21 +64,15 @@ export async function openverseImages(query: string, options: { signal?: AbortSi
   const payload = await httpGet(url, {
     signal: options.signal,
     timeoutMs: webAccessLimits.images.timeoutMs,
-    maxBytes: webAccessLimits.search.maxBytes,
+    maxBytes: webAccessLimits.images.maxBytes,
     networks: webAccessSettings().allowNetworks,
     proxy: webAccessSettings().proxy,
     trustedHost: true,
     deps: options.deps,
   });
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(payload.body.toString('utf8'));
-  } catch {
-    throw new WebAccessError('invalid-response', '图片服务返回了无法解析的内容');
-  }
-  const result = openverseSchema.safeParse(parsed);
-  if (!result.success) throw new WebAccessError('invalid-response', '图片服务返回了无法解析的结果');
-  return result.data.results.flatMap(entry => {
+  const parsed = openverseSchema.safeParse(readJson(payload.body, '图片服务'));
+  if (!parsed.success) throw new WebAccessError('invalid-response', '图片服务返回了无法解析的结果');
+  return parsed.data.results.flatMap(entry => {
     const imageUrl = entry.url ?? '';
     const license = entry.license ?? null;
     if (!/^https?:\/\//i.test(imageUrl) || !isAllowedLicense(license)) return [];
@@ -99,17 +93,8 @@ export async function openverseImages(query: string, options: { signal?: AbortSi
   });
 }
 
-const tavilyImageSchema = z.array(z.union([
-  z.string(),
-  z.object({ url: z.string().nullish(), title: z.string().nullish(), description: z.string().nullish() }),
-]));
-
-function toTavilyCandidates(payload: unknown): ImageCandidate[] {
-  const parsed = z.object({
-    results: z.array(z.object({ title: z.string().nullish(), url: z.string(), images: tavilyImageSchema.nullish() })).default([]),
-    images: tavilyImageSchema.nullish(),
-  }).safeParse(payload);
-  if (!parsed.success) throw new WebAccessError('invalid-response', '搜索服务返回了无法解析的图片结果');
+/** 消费 tavily.ts 已归一化的结果：类型直接传入，不再拿 schema 把同一份数据重解析一遍。 */
+function toTavilyCandidates(results: TavilyResult[], images: TavilyImage[]): ImageCandidate[] {
   const found: ImageCandidate[] = [];
   const push = (rawUrl: string, sourcePage: string, pageTitle: string, description: string | null) => {
     if (!/^https?:\/\//i.test(rawUrl)) return;
@@ -131,15 +116,9 @@ function toTavilyCandidates(payload: unknown): ImageCandidate[] {
       attribution: null,
     });
   };
-  for (const entry of parsed.data.images ?? []) {
-    if (typeof entry === 'string') push(entry, '', '', null);
-    else if (entry.url) push(entry.url, '', entry.title?.trim() ?? '', entry.description?.trim() || null);
-  }
-  for (const result of parsed.data.results) {
-    for (const entry of result.images ?? []) {
-      if (typeof entry === 'string') push(entry, result.url, result.title?.trim() ?? '', null);
-      else if (entry.url) push(entry.url, result.url, entry.title?.trim() || result.title?.trim() || '', entry.description?.trim() || null);
-    }
+  for (const entry of images) push(entry.url, '', entry.title ?? '', entry.description);
+  for (const result of results) {
+    for (const entry of result.images) push(entry.url, result.url, entry.title || result.title, entry.description);
   }
   return found.slice(0, webAccessLimits.images.results);
 }
@@ -150,7 +129,7 @@ function toTavilyCandidates(payload: unknown): ImageCandidate[] {
  */
 export async function webImages(query: string, options: { signal?: AbortSignal; deps?: HttpDeps }): Promise<{ provider: string; candidates: ImageCandidate[] }> {
   const response = await tavilySearch({ query, maxResults: 3, includeImages: true, signal: options.signal, deps: options.deps });
-  const candidates = toTavilyCandidates({ results: response.results, images: response.images });
+  const candidates = toTavilyCandidates(response.results, response.images);
   if (candidates.length) return { provider: 'tavily', candidates };
   return { provider: 'openverse', candidates: await openverseImages(query, options) };
 }
