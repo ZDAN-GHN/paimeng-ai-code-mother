@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, App, Button, Drawer, Select, Spin, Tag } from 'antd';
+import { Alert, App, Button, Drawer, Dropdown, Select, Spin, Tag } from 'antd';
 import {
   BranchesOutlined, CloseOutlined, DiffOutlined, HistoryOutlined, PictureOutlined, ReloadOutlined, UndoOutlined,
 } from '@ant-design/icons';
@@ -195,7 +195,7 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged, onStart
   const detached = position?.kind === 'detached';
   const onSideBranch = currentBranch !== null && currentBranch !== DEFAULT_BRANCH;
   const canWrite = overview !== null && overview.blocked === null && busy === null;
-  const withTree = advanced && Boolean(overview?.graph);
+  const graph = overview?.graph ?? null;
 
   const branchOptions = useMemo(() => (overview?.branches ?? []).map(branch => ({ value: branch.branch, label: branch.branch })), [overview]);
   const openBranches = (overview?.branches ?? []).filter(branch => branch.branch !== DEFAULT_BRANCH && !branch.merged);
@@ -346,17 +346,17 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged, onStart
             <p className="version-panel-empty-title">还没有版本记录。完成一次生成后，这里会出现第一个版本。</p>
             <p className="version-panel-empty-note">使用旧版本只会把页面换回去，不会删掉任何一版。</p>
           </div>
-          : <div className={withTree ? 'version-tree' : 'version-list'}>
-            {withTree && overview?.graph && <VersionTreeLegend graph={overview.graph} />}
-            <div className={withTree ? 'version-tree-body' : 'version-list-body'} style={withTree && overview?.graph ? { paddingLeft: treeGutterWidth(overview.graph) } : undefined}>
-              {withTree && overview?.graph && <div className="version-tree-gutter"><VersionTreeLines graph={overview.graph} /></div>}
+          : <div className="version-tree">
+            {advanced && graph && <VersionTreeLegend graph={graph} />}
+            <div className="version-tree-body" style={graph ? { paddingLeft: treeGutterWidth(graph) } : undefined}>
+              {graph && <div className="version-tree-gutter"><VersionTreeLines graph={graph} /></div>}
               {treeOrder.map(version => {
                 const isCurrent = version.id === currentVersion?.id;
                 const node = overview?.graph?.nodes.find(item => item.versionId === version.id);
                 return <div
                   className={['version-tree-row', isCurrent && 'version-tree-row-current'].filter(Boolean).join(' ')}
                   key={version.id}
-                  style={withTree && overview?.graph ? { height: treeRowHeight(overview.graph) } : undefined}
+                  style={graph ? { height: treeRowHeight(graph) } : undefined}
                   data-lane={node?.lane ?? 0}
                 >
                   <VersionThumbnail appId={appId} version={version} />
@@ -364,6 +364,7 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged, onStart
                     <div className="version-tree-row-head">
                       <span className="version-tree-row-title">{version.title}</span>
                       {isCurrent && <Tag color="green">正在使用</Tag>}
+                      {advanced && <span className="version-row-sha" title={version.id}>{shortSha(version.id)}</span>}
                       <span className="version-tree-row-time">{formatVersionTime(version.createTime, now)}</span>
                     </div>
                     <div className="version-row-actions">
@@ -383,29 +384,23 @@ export function VersionPanel({ appId, open, onClose, onWorkspaceChanged, onStart
                         loading={busy === `continue:${version.id}`}
                         onClick={() => confirmContinue(version)}
                       >根据这版修改</Button>
+                      {advanced && <Dropdown
+                        trigger={['click']}
+                        menu={{
+                          items: [
+                            { key: 'diff', label: '和现在这版对比', disabled: currentVersion === null || isCurrent },
+                            { key: 'branch', label: '从这版另起一条路径' },
+                            { key: 'sha', label: `编号 ${shortSha(version.id)}`, disabled: true },
+                          ],
+                          onClick: ({ key }) => {
+                            if (key === 'diff' && currentVersion) void loadDiff(version, currentVersion);
+                            if (key === 'branch') confirmBranch(version);
+                          },
+                        }}
+                      >
+                        <Button size="small" type="text" aria-label={`「${version.title}」的更多操作`} disabled={!canWrite}>…</Button>
+                      </Dropdown>}
                     </div>
-                    {advanced && <div className="version-row-advanced">
-                      <span className="version-row-sha" title={version.id}>{shortSha(version.id)}</span>
-                      <span className="version-row-meta" title={version.statsKnown ? undefined : '这一版的内容读不出来，统计不可用'}>
-                        {version.statsKnown ? `${version.fileCount} 个文件` : '统计不可用'}
-                      </span>
-                      <Button
-                        size="small"
-                        type="text"
-                        icon={<DiffOutlined aria-hidden="true" />}
-                        disabled={currentVersion === null || isCurrent}
-                        loading={diff.status === 'loading' && diff.base.id === version.id}
-                        onClick={() => { if (currentVersion) void loadDiff(version, currentVersion); }}
-                      >对比</Button>
-                      <Button
-                        size="small"
-                        type="text"
-                        icon={<BranchesOutlined aria-hidden="true" />}
-                        disabled={!canWrite}
-                        loading={busy === `branch:${version.id}`}
-                        onClick={() => confirmBranch(version)}
-                      >从此版另起一条路径</Button>
-                    </div>}
                   </div>
                 </div>;
               })}

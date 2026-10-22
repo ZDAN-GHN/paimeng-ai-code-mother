@@ -34,7 +34,8 @@ const maxPatchBytes = 96 * 1024;
 const maxTitleLength = 200;
 const lockTimeoutMs = 30_000;
 const lockStaleMs = 60_000;
-const rowHeight = 76;
+// 行高要装得下一行「截图 + 标题 + 两个按钮」：树状连线按这个值画，改小会把行内容裁掉。
+const rowHeight = 96;
 const laneGap = 22;
 const gutterPadding = 12;
 

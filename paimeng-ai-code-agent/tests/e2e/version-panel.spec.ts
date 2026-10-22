@@ -25,7 +25,7 @@ const mainBranch: VersionBranch = { branch: 'main', headVersionId: v2.id, merged
 
 /** 最小图：一行一个节点、父提交在下一行；真实几何由服务端 versionGraph() 算好下发。 */
 function graphOf(versions: AppVersion[]): VersionGraph {
-  const rowHeight = 76;
+  const rowHeight = 96;
   const laneGap = 22;
   const gutterPadding = 12;
   const nodes = versions.map((version, index) => ({
@@ -55,6 +55,56 @@ function graphOf(versions: AppVersion[]): VersionGraph {
         state: node.headOf.length > 0 ? 'head' : 'normal',
       })),
     },
+  };
+}
+
+const sha3 = '3'.repeat(40);
+const v3: AppVersion = {
+  id: sha3, title: '侧边栏那一版', createTime: '2026-10-20 11:00:00', parents: [sha1], heads: ['plan-x'],
+  changedFiles: ['index.html'], fileCount: 5, bytes: 4300, thumbnailKey: null, statsKnown: true,
+};
+
+/** 真正的分叉：main 走 v1 → v2，另一条路径从 v1 分出去走到 v3（两条泳道 + 一段曲线）。 */
+function forkOverview(): AppVersionOverview {
+  const rowHeight = 96;
+  const laneGap = 22;
+  const gutterPadding = 12;
+  const nodes = [
+    { versionId: v2.id, lane: 0, row: 0, parents: [sha1], headOf: ['main'], title: v2.title, branch: 'main', createTime: v2.createTime },
+    { versionId: v3.id, lane: 1, row: 1, parents: [sha1], headOf: ['plan-x'], title: v3.title, branch: 'plan-x', createTime: v3.createTime },
+    { versionId: v1.id, lane: 0, row: 2, parents: [], headOf: [], title: v1.title, branch: 'main', createTime: v1.createTime },
+  ];
+  const x = (lane: number) => gutterPadding + lane * laneGap + laneGap / 2;
+  const y = (row: number) => row * rowHeight + rowHeight / 2;
+  return {
+    current: { kind: 'branch', branch: 'main', versionId: v2.id },
+    versions: [v2, v3, v1],
+    branches: [
+      { branch: 'main', headVersionId: v2.id, merged: false },
+      { branch: 'plan-x', headVersionId: v3.id, merged: false },
+    ],
+    graph: {
+      lanes: [
+        { branch: 'main', lane: 0, merged: false },
+        { branch: 'plan-x', lane: 1, merged: false },
+      ],
+      nodes,
+      geometry: {
+        rowHeight, laneGap, gutterPadding,
+        width: laneGap * 2 + gutterPadding,
+        height: nodes.length * rowHeight,
+        edges: [
+          { lane: 0, rowFrom: 0, rowTo: 2, branch: 'main' },
+          { lane: 1, rowFrom: 1, rowTo: 2, branch: 'plan-x' },
+        ],
+        curves: [{ laneFrom: 1, laneTo: 0, rowFrom: 2, rowTo: 2, branch: 'plan-x' }],
+        nodes: nodes.map(node => ({
+          lane: node.lane, row: node.row, x: x(node.lane), y: y(node.row),
+          branch: node.branch, state: node.headOf.length > 0 ? 'head' : 'normal',
+        })),
+      },
+    },
+    blocked: null,
   };
 }
 
@@ -108,10 +158,11 @@ test('版本面板默认只讲人话：一版一行、正在使用标记、用�
   await openPanel(page);
   await expect(page.getByText('把卡片改成圆角')).toBeVisible();
   await expect(page.getByText('首版首页')).toBeVisible();
-  // 默认视图不出现 SHA、分支选择器、树状连线——这些是 Git 的说法。
-  await expect(page.locator('.version-tree-row-sha')).toHaveCount(0);
+  // 树形关系默认可见，但分支名、图例、SHA、分支选择器这些 Git 说法不出现。
+  await expect(page.locator('.version-tree-lines')).toHaveCount(1);
+  await expect(page.locator('.version-tree-legend')).toHaveCount(0);
+  await expect(page.locator('.version-row-sha')).toHaveCount(0);
   await expect(page.locator('.version-panel-branch-select')).toHaveCount(0);
-  await expect(page.locator('.version-tree-lines')).toHaveCount(0);
   // 当前那一版标「正在使用」，并且不能再用一次；旧版可以。
   const current = page.locator('.version-tree-row-current');
   await expect(current).toHaveCount(1);
@@ -151,20 +202,38 @@ test('停在旧版本时明确提示「旧版本」，并提供一键回到最�
   await expect(page.locator('.version-tree-row', { hasText: '把卡片改成圆角' }).getByRole('button', { name: /使用这个版本/ })).toBeEnabled();
 });
 
-test('展开「修改路径与分支」后才显示树状路径与连线', async ({ page }) => {
+test('版本历史一直是树：默认只画线，展开高级才出现分支名与编号', async ({ page }) => {
   await mockVersions(page, overviewOf([v2, v1], { kind: 'branch', branch: 'main', versionId: v2.id }));
   await openPanel(page);
-  await expect(page.locator('.version-tree-lines')).toHaveCount(0);
-  await openAdvanced(page);
   // 卡片样式已经不存在：历史就是树。
   await expect(page.locator('.version-panel-item')).toHaveCount(0);
-  await expect(page.locator('.version-tree-legend-item')).toHaveCount(1);
+  await expect(page.locator('.version-tree-lines')).toHaveCount(1);
+  await expect(page.locator('.version-tree-legend-item')).toHaveCount(0);
   await expect(page.locator('.version-tree-row')).toHaveCount(2);
+  await openAdvanced(page);
+  await expect(page.locator('.version-tree-legend-item')).toHaveCount(1);
+  await expect(page.locator('.version-row-sha')).toHaveCount(2);
   // 一张 SVG 画完整棵树：每个节点是「白底外环 + 彩色圆点」两个 circle，两个节点共 4 个；竖线一段。
   await expect(page.locator('.version-tree-lines circle')).toHaveCount(4);
   await expect(page.locator('.version-tree-lines line')).toHaveCount(1);
   const box = await page.locator('.version-tree-lines').boundingBox();
   expect(box?.height).toBeGreaterThan(100);
+});
+
+test('分叉的两条路径也会画出来：两条泳道 + 汇合曲线', async ({ page }) => {
+  await mockVersions(page, forkOverview());
+  await openPanel(page);
+  await expect(page.locator('.version-tree-row')).toHaveCount(3);
+  // 默认就能看到分叉：两条竖线 + 一条汇合曲线，但看不到分支名。
+  await expect(page.locator('.version-tree-lines line')).toHaveCount(2);
+  await expect(page.locator('.version-tree-lines path')).toHaveCount(1);
+  await expect(page.locator('.version-tree-legend')).toHaveCount(0);
+  const lanes = await page.locator('.version-tree-row').evaluateAll(rows => rows.map(row => row.getAttribute('data-lane')));
+  expect(lanes).toEqual(['0', '1', '0']);
+  // 展开高级才把两条路径的名字列出来。
+  await openAdvanced(page);
+  await expect(page.locator('.version-tree-legend-item')).toHaveCount(2);
+  await expect(page.locator('.version-tree-legend')).toContainText('plan-x');
 });
 
 test('没有版本时显示空态，并说明回到旧版不新增版本', async ({ page }) => {
@@ -283,7 +352,8 @@ test('对比显示改动文件与补丁', async ({ page }) => {
   });
   await openPanel(page);
   await openAdvanced(page);
-  await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /对\s*比/ }).click();
+  await page.getByRole('button', { name: '「首版首页」的更多操作' }).click();
+  await page.locator('.ant-dropdown:not(.ant-dropdown-hidden)').getByText('和现在这版对比').click();
   const diff = page.getByRole('region', { name: '版本对比' });
   await expect(diff).toContainText('对比「首版首页」→「把卡片改成圆角」');
   await expect(diff.locator('.version-panel-diff-path').getByText('assets/style.css')).toBeVisible();
@@ -320,7 +390,8 @@ test('版本记录与差异加载时没有 HTML 嵌套或 hydration 错误', asy
   await expect(page.locator('.version-panel p div')).toHaveCount(0);
   overviewResponse.resolve();
   await openAdvanced(page);
-  await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /对\s*比/ }).click();
+  await page.getByRole('button', { name: '「首版首页」的更多操作' }).click();
+  await page.locator('.ant-dropdown:not(.ant-dropdown-hidden)').getByText('和现在这版对比').click();
   await expect(page.getByText('正在读取差异…')).toBeVisible();
   await expect(page.locator('.version-panel p div')).toHaveCount(0);
   diffResponse.resolve();
