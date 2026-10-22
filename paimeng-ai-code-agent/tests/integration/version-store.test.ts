@@ -1,50 +1,67 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import { loadEnvFile } from 'node:process';
 import { ensureWorkspace, workspace, type WorkspaceApp } from '@/server/workspace';
 import {
-  adoptBranch,
-  branchFromVersion,
   commitVersion,
   diffVersions,
-  ensureVersionBranch,
   ensureVersionRepo,
   getVersion,
   listVersions,
   purgeVersions,
   restoreVersion,
   saveVersionThumbnail,
-  setVersionTitle,
-  switchBranch,
-  versionGraph,
   versionRepo,
   versionRoot,
   versionThumbnailPath,
 } from '@/server/version-store';
+import { setVersionTitle, versionRowOf } from '@/server/version-ledger';
 import { versionThumbnail } from '@/server/version-thumbnail';
 import { formatStoredTime, parseStoredTime } from '@/shared/display';
+import { eq } from 'drizzle-orm';
+import { db, getPool, now } from '@/server/db';
+import { apps, users } from '@/server/schema';
+import { nextSnowflakeId } from '@/server/snowflake';
 import type { AppVersion } from '@/shared/versioning';
+import { testDatabaseUrl } from '../test-database-url';
+
+loadEnvFile('.env');
+process.env.DATABASE_URL = testDatabaseUrl(process.env.DATABASE_URL ?? '');
 
 const run = promisify(execFile);
 
 let counter = 0;
+let owner: bigint;
 const created: WorkspaceApp[] = [];
 
+/** 台账有 app 外键：仓库测试也必须有一个真实应用行，否则提交与插行都会失败。 */
 async function newApp(): Promise<WorkspaceApp> {
-  const app: WorkspaceApp = { id: `${Date.now()}${String(counter++).padStart(2, '0')}`, codeGenType: 'html' };
+  const id = await nextSnowflakeId();
+  await db().insert(apps).values({ id, appName: `版本存储 ${counter}`, initPrompt: '版本存储测试', codeGenType: 'html', userId: owner, createTime: now(), updateTime: now() });
+  const app: WorkspaceApp = { id: String(id), codeGenType: 'html' };
+  counter += 1;
   await ensureWorkspace(app);
   created.push(app);
   return app;
 }
 
+beforeAll(async () => {
+  owner = await nextSnowflakeId();
+  await db().insert(users).values({ id: owner, userAccount: `ts_version_store_${Date.now()}`, userPassword: 'unused', userRole: 'user', createTime: now(), updateTime: now() });
+});
+
 afterAll(async () => {
   for (const app of created) {
     await purgeVersions(app).catch(() => undefined);
     await rm(workspace(app), { recursive: true, force: true });
+    await db().delete(apps).where(eq(apps.id, BigInt(app.id))).catch(() => undefined);
   }
+  await db().delete(users).where(eq(users.id, owner)).catch(() => undefined);
+  await getPool().end().catch(() => undefined);
 });
 
 async function git(app: WorkspaceApp, args: string[], options: { allowFailure?: boolean } = {}) {
@@ -141,7 +158,7 @@ describe('回退（detached HEAD）', () => {
     // 目标提交里不存在的跟踪文件必须被删掉（read-tree 的「等于」语义，不是只覆盖）
     expect(await fileExists(app, 'about.html')).toBe(false);
     const overview = await listVersions(app);
-    expect(overview.current).toEqual({ kind: 'detached', versionId: first.id });
+    expect(overview.current).toEqual({ versionId: first.id });
     expect(overview.versions).toHaveLength(2);
     expect(await currentBranchName(app)).toBe(null);
   });
@@ -268,181 +285,32 @@ describe('提交', () => {
     expect(await commitSet(app)).toEqual(commitsBefore);
   });
 
-  it('detached HEAD 上的真实提交先建分支：父提交是目标版本，main 不动', async () => {
+  it('回退到旧版后提交：父提交是那一版，主线不动，钉子保住可达性', async () => {
     const { app, first, second } = await twoVersions();
     await restoreVersion({ app, versionId: first.id });
-    const branchesBefore = (await refs(app)).filter(line => line.startsWith('refs/heads/'));
 
     const created = await commit(app, '从旧版继续改', { 'index.html': '<html><body>v1-fix</body></html>' });
 
-    expect(created.parents).toEqual([first.id]);
-    expect(created.heads).toHaveLength(1);
-    expect(created.heads[0]).toMatch(/^from-[0-9a-f]{7}$/);
-    expect(await currentBranchName(app)).toBe(created.heads[0]);
+    expect(await git(app, ['rev-parse', 'HEAD^'])).toBe(`${first.id}\n`);
+    // 游离 HEAD 上提交不移动任何分支：清单只按时间排，不需要分支记住「从哪一版接着改」。
     expect(await git(app, ['rev-parse', 'refs/heads/main'])).toBe(`${second.id}\n`);
-    expect((await refs(app)).filter(line => line.startsWith('refs/heads/'))).toHaveLength(branchesBefore.length + 1);
+    expect(await git(app, ['rev-parse', `refs/paimeng/versions/${created.id}`])).toBe(`${created.id}\n`);
     const overview = await listVersions(app);
-    expect(overview.current).toEqual({ kind: 'branch', branch: created.heads[0], versionId: created.id });
-    // 再提交一次没有改动：不产生提交，也不重复开分支
+    expect(overview.current).toEqual({ versionId: created.id });
+    expect(overview.versions.map(version => version.id)).toEqual([created.id, second.id, first.id]);
+    // 再提交一次没有改动：不产生提交，也不产生台账行
     expect(await commitVersion({ app, title: '再提交' })).toBe(null);
+    expect((await listVersions(app)).versions).toHaveLength(3);
   });
 
-  it('已在分支上提交不新建分支，ensureVersionBranch 是幂等的', async () => {
+  it('在主线上的提交接在上一版后面，不新开任何分支', async () => {
     const { app, second } = await twoVersions();
-    expect(await currentBranchName(app)).toBe('main');
-    expect(await ensureVersionBranch(app)).toBe('main');
 
     const version = await commit(app, '主线的第三版', { 'index.html': '<html><body>v3</body></html>' });
 
-    expect(version.parents).toEqual([second.id]);
-    expect(await currentBranchName(app)).toBe('main');
-    expect(await ensureVersionBranch(app)).toBe('main');
-    expect((await refs(app)).filter(line => line.startsWith('refs/heads/'))).toHaveLength(1);
-  });
-
-  it('ensureVersionBranch 在 detached HEAD 上只建分支，不产生提交', async () => {
-    const { app, first, second } = await twoVersions();
-    await restoreVersion({ app, versionId: first.id });
-    const commitsBefore = await commitSet(app);
-
-    const branch = await ensureVersionBranch(app);
-
-    expect(branch).toMatch(/^from-[0-9a-f]{7}$/);
-    expect(await currentBranchName(app)).toBe(branch);
-    expect(await headOf(app)).toBe(first.id);
-    expect(await commitSet(app)).toEqual(commitsBefore);
-    expect(await git(app, ['rev-parse', `refs/heads/${branch}`])).toBe(`${first.id}\n`);
-    expect(await git(app, ['rev-parse', 'refs/heads/main'])).toBe(`${second.id}\n`);
-    expect(await ensureVersionBranch(app)).toBe(branch);
-  });
-});
-
-describe('分支', () => {
-  it('从历史版本开分支不产生提交，工作区等于该版本', async () => {
-    const { app, first } = await twoVersions();
-    const commitsBefore = await commitSet(app);
-
-    const branched = await branchFromVersion({ app, versionId: first.id, label: 'plan-a' });
-
-    expect(branched.branch).toBe('plan-a');
-    expect(branched.version.id).toBe(first.id);
-    expect(await commitSet(app)).toEqual(commitsBefore);
-    expect(await currentBranchName(app)).toBe('plan-a');
-    await expectWorktreeAt(app, first.id);
-  });
-
-  it('跨分支来回切换不产生提交，工作区等于各分支头', async () => {
-    const { app, first, second } = await twoVersions();
-    await branchFromVersion({ app, versionId: first.id, label: 'plan-a' });
-    await commit(app, '分支上的改动', { 'index.html': '<html><body>plan-a</body></html>' });
-    const commitsBefore = await commitSet(app);
-    const refsBefore = await refs(app);
-
-    await switchBranch({ app, branch: 'main' });
-    await expectWorktreeAt(app, second.id);
-    await switchBranch({ app, branch: 'plan-a' });
-    await switchBranch({ app, branch: 'main' });
-
-    expect(await commitSet(app)).toEqual(commitsBefore);
-    expect(await refs(app)).toEqual(refsBefore);
-    expect(await currentBranchName(app)).toBe('main');
-  });
-
-  it('从 detached HEAD 切回分支也不产生提交', async () => {
-    const { app, first, second } = await twoVersions();
-    await restoreVersion({ app, versionId: first.id });
-    const commitsBefore = await commitSet(app);
-
-    const outcome = await switchBranch({ app, branch: 'main' });
-
-    expect(outcome.version?.id).toBe(second.id);
-    expect(await commitSet(app)).toEqual(commitsBefore);
-    await expectWorktreeAt(app, second.id);
-  });
-
-  it('主线能快进时采纳只移动主线，不造合并提交', async () => {
-    const app = await newApp();
-    const base = await commit(app, '基线', { 'index.html': 'base' });
-    await branchFromVersion({ app, versionId: base.id, label: 'feature' });
-    const ahead = await commit(app, '分支领先', { 'feature-only.txt': 'ahead' });
-    await switchBranch({ app, branch: 'main' });
-    const commitsBefore = await commitSet(app);
-
-    const adopted = await adoptBranch({ app, branch: 'feature' });
-
-    expect(adopted.version?.id).toBe(ahead.id);
-    expect(adopted.version?.parents).toEqual([base.id]);
-    expect(await git(app, ['rev-parse', 'refs/heads/main'])).toBe(`${ahead.id}\n`);
-    expect(await commitSet(app)).toEqual(commitsBefore);
-    expect(await read(app, 'feature-only.txt')).toBe('ahead');
-  });
-
-  it('真分叉的采纳用三方合并：两个父提交，双方改动都在', async () => {
-    const app = await newApp();
-    const base = await commit(app, '基线', { 'index.html': 'base', 'shared.txt': 'base' });
-    await branchFromVersion({ app, versionId: base.id, label: 'feature' });
-    await commit(app, '分支改动', { 'feature-only.txt': 'from branch' });
-    await switchBranch({ app, branch: 'main' });
-    await commit(app, '主线改动', { 'main-only.txt': 'from main' });
-
-    const mainBefore = (await git(app, ['rev-parse', 'refs/heads/main'])).trim();
-    const featureHead = (await git(app, ['rev-parse', 'refs/heads/feature'])).trim();
-
-    const adopted = await adoptBranch({ app, branch: 'feature' });
-
-    expect(adopted.version).not.toBe(null);
-    const merge = adopted.version!;
-    expect(merge.parents).toEqual([mainBefore, featureHead]);
-    expect(await git(app, ['rev-parse', 'refs/heads/main'])).toBe(`${merge.id}\n`);
-    // 采纳发生在 main 上，所以工作区物化到合并结果
-    expect(await read(app, 'feature-only.txt')).toBe('from branch');
-    expect(await read(app, 'main-only.txt')).toBe('from main');
-
-    const graph = await versionGraph(app);
-    const node = graph.nodes.find(item => item.versionId === merge.id)!;
-    expect(node.parents).toHaveLength(2);
-    const rowOf = new Map(graph.nodes.map(item => [item.versionId, item.row]));
-    const linked = [...graph.geometry.edges, ...graph.geometry.curves].filter(edge => edge.rowFrom === rowOf.get(merge.id));
-    expect(linked).toHaveLength(2);
-  });
-
-  it('分支头已在主线历史里时采纳是无操作：不新增提交、refs 与工作区不变', async () => {
-    const app = await newApp();
-    const base = await commit(app, '基线', { 'index.html': 'base' });
-    await branchFromVersion({ app, versionId: base.id, label: 'feature' });
-    await commit(app, '分支改动', { 'feature-only.txt': 'from branch' });
-    await switchBranch({ app, branch: 'main' });
-    await commit(app, '主线改动', { 'main-only.txt': 'from main' });
-    const adopted = await adoptBranch({ app, branch: 'feature' });
-    expect(adopted.version?.parents).toHaveLength(2);
-    const refsBefore = await refs(app);
-    const commitsBefore = await commitSet(app);
-    const contentBefore = await read(app, 'index.html');
-
-    const outcome = await adoptBranch({ app, branch: 'feature' });
-
-    expect(outcome.version).toBe(null);
-    expect(await commitSet(app)).toEqual(commitsBefore);
-    expect(await refs(app)).toEqual(refsBefore);
-    expect(await read(app, 'index.html')).toBe(contentBefore);
-  });
-
-  it('冲突的采纳如实报错：主线与工作区都不变', async () => {
-    const app = await newApp();
-    const base = await commit(app, '基线', { 'shared.txt': 'base' });
-    await branchFromVersion({ app, versionId: base.id, label: 'feature' });
-    await commit(app, '分支改冲突文件', { 'shared.txt': 'branch' });
-    await switchBranch({ app, branch: 'main' });
-    const main = await commit(app, '主线改冲突文件', { 'shared.txt': 'main' });
-    const refsBefore = await refs(app);
-    const commitsBefore = await commitSet(app);
-
-    await expect(adoptBranch({ app, branch: 'feature' })).rejects.toThrow(/冲突/);
-
-    expect(await git(app, ['rev-parse', 'refs/heads/main'])).toBe(`${main.id}\n`);
-    expect(await refs(app)).toEqual(refsBefore);
-    expect(await commitSet(app)).toEqual(commitsBefore);
-    expect(await read(app, 'shared.txt')).toBe('main');
+    expect(await git(app, ['rev-parse', `${version.id}^`])).toBe(`${second.id}\n`);
+    const heads = (await git(app, ['for-each-ref', '--format=%(refname:short)', 'refs/heads'])).trim();
+    expect(heads).toBe('main');
   });
 });
 
@@ -451,70 +319,45 @@ describe('只读路径', () => {
     const app = await newApp();
 
     const overview = await listVersions(app);
-    expect(overview).toEqual({ current: null, versions: [], branches: [], blocked: null });
-    const graph = await versionGraph(app);
-    expect(graph.nodes).toEqual([]);
+    expect(overview).toEqual({ current: null, versions: [], blocked: null });
     await expect(getVersion(app, 'a'.repeat(40))).rejects.toThrow('版本不存在');
     await expect(diffVersions(app, 'a'.repeat(40), 'b'.repeat(40))).rejects.toThrow('版本不存在');
     expect(await stat(versionRepo(app)).then(() => true, () => false)).toBe(false);
   });
 
-  it('列表 limit 不丢已知提交，历史图仍然完整', async () => {
+  it('清单来自台账：按时间倒序，limit 只截数量不丢顺序', async () => {
     const { app, first, second } = await twoVersions();
     await commit(app, '第三版', { 'index.html': '<html><body>v3</body></html>' });
 
-    const overview = await listVersions(app, { limit: 1 });
-    expect(overview.versions).toHaveLength(1);
-    expect(overview.graph?.nodes).toHaveLength(3);
-    // 标题是「这一版改了什么」，不是提交信息：概述缓存没有时按改动文件兜底。
-    expect(await getVersion(app, first.id)).toMatchObject({ id: first.id, title: '改 style.css 等 2 个文件' });
-
-    // 搜索仍然按文件与提交信息命中，但结果里的标题还是改动描述。
-    const filtered = await listVersions(app, { query: 'about' });
-    expect(filtered.versions.map(version => version.id)).toEqual([second.id]);
-    expect(filtered.graph).toBe(undefined);
+    const all = await listVersions(app);
+    expect(all.versions.map(version => version.id)).toHaveLength(3);
+    expect(all.versions[0]!.id).not.toBe(first.id);
+    expect((await listVersions(app, { limit: 1 })).versions).toHaveLength(1);
+    expect((await listVersions(app, { query: '第二版' })).versions.map(version => version.id)).toEqual([second.id]);
   });
 
-  it('版本详情带父提交、分支头、改动文件与体积', async () => {
-    const { app, first, second } = await twoVersions();
+  it('版本详情带改动文件与体积，标题取自台账', async () => {
+    const { app, second } = await twoVersions();
     const detail = await getVersion(app, second.id);
-    expect(detail.parents).toEqual([first.id]);
-    expect(detail.heads).toEqual(['main']);
+    expect(detail.title).toBe('第二版');
     expect(detail.changedFiles).toEqual(['about.html', 'index.html']);
     expect(detail.fileCount).toBe(3);
     expect(detail.bytes).toBeGreaterThan(0);
     expect(detail.createTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/);
   });
 
-  it('保留 refs/paimeng/versions/* 的历史能读到，但不算用户分支', async () => {
-    const { app, first, second } = await twoVersions();
+  it('没有台账行的提交不冒充版本：钉子只在自愈时用来补行', async () => {
+    const { app, first } = await twoVersions();
     const tree = (await git(app, ['rev-parse', `${first.id}^{tree}`])).trim();
     const orphan = (await git(app, [
-      '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit-tree', tree, '-p', first.id, '-m', '保留的历史',
+      '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit-tree', tree, '-p', first.id, '-m', '只在 refs 里的历史',
     ])).trim();
     await git(app, ['update-ref', `refs/paimeng/versions/${orphan}`, orphan]);
 
     const overview = await listVersions(app);
 
-    // 孤儿提交与父提交同一棵树：没有文件差异，标题也不能拿提交信息冒充改动。
-    expect(overview.versions.some(version => version.id === orphan && version.title === '合并已有版本')).toBe(true);
-    expect(overview.branches.map(branch => branch.branch)).toEqual(['main']);
-    expect(overview.current).toEqual({ kind: 'branch', branch: 'main', versionId: second.id });
-    expect(overview.graph?.nodes.some(node => node.versionId === orphan)).toBe(true);
-  });
-
-  it('stash 与 notes 的引用不被当成应用版本', async () => {
-    const { app, second } = await twoVersions();
-    await write(app, 'index.html', '<html>stashed</html>');
-    await git(app, ['stash', 'push', '-m', '临时改动']);
-    await git(app, ['notes', 'add', '-m', '一条备注', second.id]);
-    const stash = (await git(app, ['rev-parse', 'refs/stash'])).trim();
-    const notes = (await git(app, ['rev-parse', 'refs/notes/commits'])).trim();
-
-    const overview = await listVersions(app);
-
-    expect(overview.versions.some(version => version.id === stash || version.id === notes)).toBe(false);
-    expect(overview.graph?.nodes.some(node => node.versionId === stash || node.versionId === notes)).toBe(false);
+    expect(overview.versions.some(version => version.id === orphan)).toBe(false);
+    expect(await versionRowOf(app.id, orphan)).toBe(null);
   });
 
   it('差异返回改动文件与补丁文本', async () => {
@@ -529,19 +372,16 @@ describe('只读路径', () => {
 });
 
 describe('展示缓存', () => {
-  it('概述只覆盖展示标题，删除缓存后回落到改动文件，Git 历史不受影响', async () => {
+  it('改标题只动台账那一列，Git 历史与提交信息都不受影响', async () => {
     const { app, first } = await twoVersions();
     const commitsBefore = await commitSet(app);
 
-    await setVersionTitle(app, first.id, '重写首页排版');
+    await setVersionTitle(app.id, first.id, '重写首页排版');
 
     expect((await getVersion(app, first.id)).title).toBe('重写首页排版');
     expect((await listVersions(app)).versions.find(version => version.id === first.id)?.title).toBe('重写首页排版');
     expect((await git(app, ['log', '-1', '--format=%s', first.id])).trim()).toBe('第一版');
     expect(await commitSet(app)).toEqual(commitsBefore);
-
-    await rm(join(versionRoot(), 'titles', `${app.codeGenType}_${app.id}.json`));
-    expect((await getVersion(app, first.id)).title).toBe('改 style.css 等 2 个文件');
   });
 
   it('截图按 commit SHA 落盘并反映到 thumbnailKey', async () => {
@@ -608,9 +448,9 @@ describe('旧裸库迁移', () => {
       // 迁移不检出：工作区内容保持原样，旧库提交成为当前分支头
       expect(await read(app, 'index.html')).toBe('current-content');
       const overview = await listVersions(app);
-      expect(overview.current).toEqual({ kind: 'branch', branch: 'main', versionId: legacyHead });
-      // 迁移过来的提交同样不带提交信息当标题。
-      expect(overview.versions[0]?.title).toMatch(/^改 /);
+      expect(overview.current).toEqual({ versionId: legacyHead });
+      // 迁移只搬历史、不写台账：清单只认台账，老版本的回填是另一个脚本的事。
+      expect(overview.versions).toEqual([]);
       // 工作区与旧库 HEAD 不同 → 切版前必须先提交，不会被静默覆盖
       await expect(restoreVersion({ app, versionId: legacyHead })).rejects.toThrow(/未提交的源码改动/);
       expect(await read(app, 'index.html')).toBe('current-content');
@@ -634,7 +474,7 @@ describe('锁', () => {
 
     const recorded = [first, other].filter((version): version is AppVersion => version !== null);
     expect(recorded).toHaveLength(1);
-    expect(recorded[0]!.parents).toEqual([second.id]);
+    expect(await git(app, ['rev-parse', `${recorded[0]!.id}^`])).toBe(`${second.id}\n`);
     expect(await commitSet(app)).toHaveLength(before.length + 1);
   });
 
@@ -667,27 +507,28 @@ describe('锁', () => {
     expect(lockedDuringGuard).toBe(true);
     expect(outcome.status).toBe('restored');
 
-    await switchBranch({ app, branch: 'main' });
+    const headBefore = await headOf(app);
+    const second = (await listVersions(app)).versions[0]!.id;
     await expect(restoreVersion({
       app,
-      versionId: first.id,
+      versionId: second === first.id ? first.id : second,
       guard: async () => { throw new Error('应用正在生成'); },
     })).rejects.toThrow('应用正在生成');
-    expect(await currentBranchName(app)).toBe('main');
+    expect(await headOf(app)).toBe(headBefore);
   });
 });
 
 describe('清理', () => {
-  it('删除应用时版本库、截图与标题缓存一起回收', async () => {
+  it('删除应用时回收仓库与截图；台账行随应用外键级联', async () => {
     const { app, first } = await twoVersions();
     await saveVersionThumbnail(app, first.id, Buffer.from([1, 2, 3]));
-    await setVersionTitle(app, first.id, '要被删掉的标题');
 
     await purgeVersions(app);
-
     expect(await stat(versionRepo(app)).then(() => true, () => false)).toBe(false);
     expect(await stat(versionThumbnailPath(app, first.id)).then(() => true, () => false)).toBe(false);
-    expect(await stat(join(versionRoot(), 'titles', `${app.codeGenType}_${app.id}.json`)).then(() => true, () => false)).toBe(false);
+
+    // 行由数据库级联删除，purgeVersions 不碰表：两条路径各管一半，互不重复。
+    await db().delete(apps).where(eq(apps.id, BigInt(app.id)));
     expect((await listVersions(app)).versions).toEqual([]);
   });
 });

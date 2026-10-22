@@ -24,94 +24,16 @@
 .version-panel-loading { justify-content: center; padding: 24px 0; }
 .version-panel-error { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 
-.version-panel-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid #eee4dd;
-  border-radius: 8px;
-  background: #faf7f5;
-  font-size: 12px;
-}
-.version-panel-toolbar-label { color: #867870; }
-.version-panel-branch-select { min-width: 140px; }
-.version-panel-toolbar-sha {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: #867870;
-}
-.version-panel-toolbar-version { margin-left: auto; color: #867870; font-variant-numeric: tabular-nums; }
-
-.version-panel-section-title { color: #867870; font-size: 12px; font-weight: 600; }
-.version-panel-branches { display: flex; flex-direction: column; gap: 6px; }
-.version-panel-branch-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border: 1px dashed #e6d3c6;
-  border-radius: 8px;
-  background: #fff;
-  font-size: 12px;
-}
-.version-panel-branch-icon { color: #7d8c86; }
-.version-panel-branch-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
 .version-tree {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.version-tree-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  font-size: 11px;
-  color: #7b8783;
-  padding: 0 4px 4px;
-}
-
-.version-tree-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.version-tree-legend-item i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-}
-
-.version-tree-legend-note {
-  color: #a5b0ac;
-}
-
 .version-tree-body {
   position: relative;
   display: flex;
   flex-direction: column;
-}
-
-/* 连线层铺满整列并压在行的下面：行本身不画线，树才能连续 */
-.version-tree-gutter {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  pointer-events: none;
-}
-
-.version-tree-lines {
-  display: block;
 }
 
 .version-tree-row {
@@ -145,19 +67,6 @@
   flex-wrap: wrap;
 }
 
-.version-tree-row-sha {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-weight: 600;
-  font-size: 12px;
-  color: #2b3532;
-}
-
-.version-tree-row-time {
-  margin-left: auto;
-  font-size: 11px;
-  color: #9aa5a1;
-}
-
 .version-tree-row-title {
   margin-top: 2px;
   font-size: 13px;
@@ -165,19 +74,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.version-tree-row-foot {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin-top: 2px;
-}
-
-.version-tree-row-meta {
-  font-size: 11px;
-  color: #8b9692;
-  margin-right: 6px;
 }
 
 .version-panel-thumb {
@@ -292,10 +188,7 @@
 
 @media (max-width: 600px) {
   .version-panel-thumb { width: 72px; height: 48px; }
-  .version-panel-toolbar-version { margin-left: 0; }
 }
-
-/* 默认视图只讲人话：一个版本一行，一个「使用」按钮。分支/合并/SHA 收在「修改路径与分支」里。 */
 
 .version-panel-status {
   display: flex;
@@ -310,11 +203,3 @@
 .version-panel-status-text { color: #867870; }
 
 .version-row-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.version-row-sha {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  color: #867870;
-}
-
-.version-panel-advanced { border-top: 1px dashed #eee4dd; margin-top: 10px; padding-top: 4px; }
-.version-panel-advanced-note { margin: 0 0 8px; font-size: 12px; line-height: 1.6; color: #9aa5a1; }

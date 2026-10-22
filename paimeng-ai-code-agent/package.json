@@ -41,6 +41,7 @@
     "test:all": "vitest run",
     "dev:web": "next dev --hostname 127.0.0.1 --port 3000",
     "versions:backfill": "NODE_OPTIONS=\"--import ./scripts/lib/register-server-only.mjs\" tsx --env-file=.env scripts/backfill-versions.ts",
+    "versions:ledger": "NODE_OPTIONS=\"--import ./scripts/lib/register-server-only.mjs\" tsx --env-file=.env scripts/backfill-version-ledger.ts",
     "versions:titles": "NODE_OPTIONS=\"--import ./scripts/lib/register-server-only.mjs\" tsx --env-file=.env scripts/backfill-version-titles.ts",
     "versions:migrate": "NODE_OPTIONS=\"--import ./scripts/lib/register-server-only.mjs\" tsx --env-file=.env scripts/migrate-versions-to-git.ts"
   },

@@ -2,13 +2,15 @@ import 'server-only';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { db } from '@/server/db';
 import { apps } from '@/server/schema';
-import { changeStats, listVersions, setVersionTitle, versionTitles } from '@/server/version-store';
+import { changeStats, listVersions } from '@/server/version-store';
+import { listVersionRows, setVersionTitle } from '@/server/version-ledger';
 import { summarizeVersion } from '@/server/version-summary';
 import { codeGenTypes, type CodeGenType } from '@/shared/contracts';
 
 /**
- * 给每个 Git 提交补/重算展示用的概述。概述只是缓存，改写它不动任何提交。
- * 默认只预演；加 --apply 才写缓存。可用 --app <id> 只处理一个应用。
+ * 按真实 diff 重算历史版本的标题（台账里的 title 列），不动任何提交。
+ * 新版本落账时标题已经由 agent 的总结写好，这个脚本只服务迁移进来的老版本。
+ * 默认只预演；加 --apply 才写库。可用 --app <id> 只处理一个应用。
  */
 
 const apply = process.argv.includes('--apply');
@@ -31,19 +33,19 @@ for (const row of rows) {
   const codeGenType = codeGenTypeOf(row.codeGenType);
   if (!codeGenType) continue;
   const app = { id: String(row.id), codeGenType };
-  // 纯读仓库；没有 Git 提交就等于没有版本可取名。
-  const overview = await listVersions(app, { limit: 200 });
-  const titles = await versionTitles(app);
+  // 纯读仓库；台账里没有行就等于没有版本可取标题。
+  const [overview, rows] = await Promise.all([listVersions(app, { limit: 200 }), listVersionRows(app.id, { limit: 200 })]);
+  const recorded = new Set(rows.map(row => row.commitSha));
   for (const version of overview.versions) {
     scanned += 1;
-    // 提交信息不是概述：以前把提交信息当标题，于是「继续」这种话进了面板。只有缓存的概述才算已有。
-    if (titles[version.id]) continue;
+    // 只补「按文件兜底」出来的标题：台账里已有的成品标题不覆盖。
+    if (recorded.has(version.id) && version.title !== version.changedFiles[0]) continue;
     const stats = await changeStats(app, version.id).catch(() => []);
     const summary = await summarizeVersion({ userPrompt: null, version, stats });
     if (summary === version.title) continue;
     changed += 1;
     console.log(`  ${String(row.appName ?? row.id).slice(0, 14)} ${version.id.slice(0, 7)}: ${version.title.slice(0, 30)} → ${summary}`);
-    if (apply) await setVersionTitle(app, version.id, summary);
+    if (apply) await setVersionTitle(app.id, version.id, summary);
   }
 }
 console.log(apply ? `扫描 ${scanned} 个版本，已更新 ${changed} 个概述` : `扫描 ${scanned} 个版本，这是预演，${changed} 个会被改名`);

@@ -18,8 +18,7 @@ import { db } from './db';
 import { adoptLease, beginGeneration, finishGeneration, generationFor, heartbeat, restoreGeneration, setGeneration, staleActiveGenerations, withAppWriter } from './generation-store';
 import { recordAssistantStep, recordBuildStep, type AccountToolCall, type EntryUsage, type GenerationStopReason, type ModelIdentity } from './generation-accounting';
 import { BusinessError } from './http';
-import { changeStats, commitVersion, getVersion, listVersions, setVersionTitle } from './version-store';
-import { summarizeVersion } from './version-summary';
+import { commitVersion } from './version-store';
 import { versionThumbnail } from './version-thumbnail';
 import { clientIp } from './rate-limit';
 import { apps, generationSteps } from './schema';
@@ -583,7 +582,7 @@ async function observeHarnessRun(options: {
         finished = await finishGeneration(requestId, outcome, detail, anchor.firstAssistantEntryId, reason, async () => {
           const current = await harnessRuntime(conversationId);
           return !current.live.run && latestInputId(current) === verifiedInput;
-        });
+        }, () => recordGenerationVersion(app, requestId, conversationId));
         if (!finished) {
           if (!await setGeneration(requestId, 'generating')) throw new Error('生成任务已停止');
           return false;
@@ -607,10 +606,7 @@ async function observeHarnessRun(options: {
         continue;
       }
       if (verdict.ok) {
-        if (await finishChecked('ready', null, 'completed')) {
-          await recordGenerationVersion(app, requestId, conversationId);
-          break;
-        }
+        if (await finishChecked('ready', null, 'completed')) break;
         continue;
       }
       if (stop.signal.aborted) {
@@ -669,47 +665,32 @@ async function observeHarnessRun(options: {
   }
 }
 
-/** 概述模型的上下文取最后一条用户输入的首行：让标题描述改动而不是复述原话。 */
-function versionPromptOf(messages: TranscriptEntry[]): string | null {
-  const entry = messages.findLast(item => item.kind === userEntryKind);
-  const bubble = entry ? userBubbleSchema.safeParse(entry.data) : null;
-  if (!bubble?.success) return null;
-  const lines = bubble.data.parts.flatMap(part => {
-    const block = z.object({ type: z.literal('text'), text: z.string() }).safeParse(part);
-    return block.success ? block.data.text.split('\n') : [];
-  });
-  const first = lines.map(line => line.trim()).find(Boolean);
-  return first ? (first.length > 80 ? `${first.slice(0, 80)}…` : first) : null;
+/** 标题就是 agent 这一轮的收尾总结：取最后一条助手消息的首行，不额外调模型，也不再异步改写。 */
+function versionTitleOf(messages: TranscriptEntry[]): string | null {
+  const entry = messages.findLast(item => entryAssistantMessage(item) !== undefined);
+  const text = entry ? [...textBlocksOf(entryAssistantMessage(entry)).values()].join('\n') : '';
+  const first = text.split('\n').map(line => line.trim()).find(Boolean) ?? '';
+  return first || null;
 }
 
-/** 平台兜底提交用的占位标题；落库后立刻被异步概述替换成「改了什么」。 */
-const generationFallbackTitle = '生成完成';
+/** 「已完成」这类回话不描述改动，当标题等于没说：退回按改动文件生成的兜底标题。 */
+const fillerTitle = /^(?:好|好的|完成|完成了|已完成|搞定|已修复|已修改|ok|done)[。.!！~\s]*$/i;
 
 /**
- * 生成成功收尾只兜底「模型忘了提交」的真实改动：git 是版本唯一的事实源。
- * 模型已经自己提交、或这一轮没改文件时 commitVersion 返回 null，不产生版本，也不把工作区接回别的分支。
- * 记版失败不能影响生成结果；截图与概述都是展示缓存，不拖慢收尾。
+ * 收尾落账：一次生成走到 ready 时提交一次、钉一次、插一行。
+ *
+ * 只在租约仍被持有的时候被调用（finishGeneration 的 beforeRelease 钩子），
+ * 因此「生成准入」与「版本写入」天然互斥，不会出现两边同时改工作区。
+ * 没有真实改动时不出版本：纯问答与失败的轮次不该在清单里留下空行。
  */
 async function recordGenerationVersion(app: AppInfo, requestId: string, conversationId: number) {
-  try {
-    const runtime = await harnessRuntime(conversationId).catch(() => null);
-    const prompt = versionPromptOf(runtime?.messages ?? []);
-    const committed = await commitVersion({ app, title: generationFallbackTitle });
-    // 模型自己提交时当前 HEAD 就是这一轮的版本；没有提交也没有改动时没有可截的版本。
-    const sha = committed?.id ?? (await listVersions(app, { limit: 1 })).current?.versionId ?? null;
-    if (!sha) return;
-    // 截图按提交 SHA 存：面板打开时直接读这一版的图。
-    void versionThumbnail(app, sha).catch(() => undefined);
-    // 面板标题必须是「这一版实际改了什么」：提交信息常是用户那句话（「继续」），不能拿来当标题。
-    // 每版都按文件改动重新概括，失败就退回文件级兜底，绝不影响生成结果。
-    void (async () => {
-      const version = committed ?? await getVersion(app, sha);
-      const stats = await changeStats(app, sha).catch(() => []);
-      await setVersionTitle(app, sha, await summarizeVersion({ version, userPrompt: prompt, stats }));
-    })().catch(() => undefined);
-  } catch (problem) {
-    console.error(`版本记录失败（生成 ${requestId}）：`, problem);
-  }
+  const runtime = await harnessRuntime(conversationId).catch(() => null);
+  const summary = runtime ? versionTitleOf(runtime.messages) : null;
+  // 空标题让 commitVersion 按改动文件兜底：标题与提交信息在同一处定稿。
+  const committed = await commitVersion({ app, title: summary && !fillerTitle.test(summary) ? summary : '', generationId: requestId });
+  if (!committed) return;
+  // 截图按提交 SHA 存：面板打开时直接读这一版的图，失败不影响版本本身。
+  void versionThumbnail(app, committed.id).catch(() => undefined);
 }
 
 /**

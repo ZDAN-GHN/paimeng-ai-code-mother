@@ -3,7 +3,8 @@ import { execFile } from 'node:child_process';
 import { copyFile, mkdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { ensureVersionRepo, setVersionTitle, versionRepo, versionRoot, versionThumbnailPath } from './version-store';
+import { ensureVersionRepo, versionRepo, versionRoot, versionThumbnailPath } from './version-store';
+import { insertVersionRow, listVersionRows } from './version-ledger';
 import type { WorkspaceApp } from './workspace';
 
 /**
@@ -74,12 +75,10 @@ async function objectState(repo: string, sha: string): Promise<'present' | 'miss
   return 'unverified';
 }
 
-function cachedTitles(app: WorkspaceApp): Promise<Record<string, string>> {
-  const file = join(versionRoot(), 'titles', `${app.codeGenType}_${app.id}.json`);
-  return readFile(file, 'utf8').then(
-    text => JSON.parse(text) as Record<string, string>,
-    () => ({}) as Record<string, string>,
-  );
+/** 已经搬进台账的标题：迁移只补缺，不覆盖用户后来看到过的标题。 */
+async function recordedTitles(app: WorkspaceApp): Promise<Record<string, string>> {
+  const rows = await listVersionRows(app.id, { limit: 200 });
+  return Object.fromEntries(rows.map(row => [row.commitSha, row.title]));
 }
 
 function legacyThumbnailPath(app: WorkspaceApp, legacyId: string) {
@@ -110,7 +109,7 @@ async function readableRepo(app: WorkspaceApp): Promise<RepoSource> {
  * 预演与真正写入共用同一套判断，避免「预演说会改 3 个、实际改 5 个」。
  */
 export async function planLegacyVersions(app: WorkspaceApp, rows: LegacyVersionRow[]): Promise<MigrationPlan[]> {
-  const [source, titles] = await Promise.all([readableRepo(app), cachedTitles(app)]);
+  const [source, titles] = await Promise.all([readableRepo(app), recordedTitles(app)]);
   // 没有仓库 = 无法核对任何一条；读不了同样无法核对。两种情况都必须标成「无法确认」，
   // 否则预演会报告「全部缺失」然后退 0，看起来像迁移顺利完成。
   if (source.kind !== 'ok') {
@@ -153,7 +152,7 @@ export async function applyLegacyVersions(app: WorkspaceApp, rows: LegacyVersion
     };
   }
   const repo = await ensureVersionRepo(app);
-  const titles = await cachedTitles(app);
+  const titles = await recordedTitles(app);
   const result: MigrationResult = { pinned: 0, titled: 0, shots: 0, missing: 0, unverified: 0, problems: [] };
   for (const row of rows) {
     const versionId = row.commitSha;
@@ -177,7 +176,8 @@ export async function applyLegacyVersions(app: WorkspaceApp, rows: LegacyVersion
     }
     if (row.title && !titles[versionId]) {
       try {
-        await setVersionTitle(app, versionId, row.title);
+        // 老概述直接作为这一版最终标题入台账：它比按文件兜底更接近用户当年看到的说法。
+        await insertVersionRow({ appId: app.id, commitSha: versionId, title: row.title });
         titles[versionId] = row.title;
         result.titled += 1;
       } catch (problem) {

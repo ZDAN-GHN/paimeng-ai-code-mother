@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { assertGitSubcommand, gitCreatesCommit } from '@/server/durable/git-args';
+import { assertGitSubcommand } from '@/server/durable/git-args';
 import { baseUrl, freePort, harnessAvailable, postgresReachable, postgresUrl, productRoot, startHarness, stopHarness, waitForState, waitHealthy, type HarnessProcess } from './support';
 
 const harnessReady = harnessAvailable();
@@ -104,10 +104,10 @@ async function submitTurn(base: string, conversationId: number, requestId: strin
 
 describe('git 工具的参数白名单', () => {
 	it('拒绝把 git 指向别处或改写 hook 配置的参数', () => {
-		expect(() => assertGitSubcommand(['-c', 'core.hooksPath=/tmp', 'commit', '-m', 'x'])).toThrow(/不支持的 git 子命令/);
+		expect(() => assertGitSubcommand(['-c', 'core.hooksPath=/tmp', 'log'])).toThrow(/不支持的 git 子命令/);
 		expect(() => assertGitSubcommand(['log', '-c', 'core.hooksPath=/tmp'])).toThrow(/拒绝参数/);
 		expect(() => assertGitSubcommand(['log', '--git-dir=/tmp/repo.git'])).toThrow(/拒绝参数/);
-		expect(() => assertGitSubcommand(['checkout', '--work-tree', '/tmp'])).toThrow(/拒绝参数/);
+		expect(() => assertGitSubcommand(['status', '--work-tree', '/tmp'])).toThrow(/拒绝参数/);
 		expect(() => assertGitSubcommand(['cat-file', '--bare'])).toThrow(/拒绝参数/);
 	});
 
@@ -122,18 +122,13 @@ describe('git 工具的参数白名单', () => {
 		expect(() => assertGitSubcommand(['Status'])).toThrow(/不支持的 git 子命令/);
 	});
 
-	it('放行本地历史操作', () => {
-		expect(assertGitSubcommand(['status'])).toBe('status');
-		expect(assertGitSubcommand(['commit', '-m', '你好'])).toBe('commit');
-		expect(assertGitSubcommand(['switch', '--detach', 'HEAD~1'])).toBe('switch');
-	});
-
-	it('只有会造新提交的子命令需要先落到分支', () => {
-		expect(gitCreatesCommit(['commit', '-am', '改标题'])).toBe(true);
-		expect(gitCreatesCommit(['merge', 'plan-1'])).toBe(true);
-		expect(gitCreatesCommit(['switch', '--detach', 'HEAD~1'])).toBe(false);
-		expect(gitCreatesCommit(['status'])).toBe(false);
-		expect(gitCreatesCommit([])).toBe(false);
+	it('只放行读操作，写操作一律拒绝', () => {
+		for (const subcommand of ['status', 'log', 'show', 'diff', 'rev-parse', 'blame', 'ls-files', 'cat-file']) {
+			expect(assertGitSubcommand([subcommand])).toBe(subcommand);
+		}
+		for (const subcommand of ['add', 'commit', 'merge', 'branch', 'checkout', 'switch', 'restore', 'stash']) {
+			expect(() => assertGitSubcommand([subcommand])).toThrow(/提交与回退由平台负责/);
+		}
 	});
 });
 
@@ -198,79 +193,20 @@ describe.skipIf(!harnessReady || !postgresReady)('durable M1：git 工具', () =
 		}
 	}, 180_000);
 
-	it('commit 之后仓库多一条提交记录', async () => {
-		initRepo();
-		writeFileSync(join(appWorkspace, 'index.html'), '<!doctype html><html><body>v2</body></html>');
-		const runDir = mkdtempSync(join(tmpdir(), 'durable-git-commit-'));
-		const { base, harness } = await startGitHarness({ runDir, args: ['commit', '-a', '-m', '第二次提交'], finalText: 'GIT_COMMIT_DONE' });
-		try {
-			const conversationId = await createAppConversation(base);
-			await submitTurn(base, conversationId, 'git-commit');
-			const result = await settledGitResult(base, conversationId, 'GIT_COMMIT_DONE');
-			expect(result.text).toContain('第二次提交');
-			expect(result.exitCode).toBe(0);
-			const log = git(['log', '--oneline']).trim().split('\n');
-			expect(log).toHaveLength(2);
-			expect(log[0]).toContain('第二次提交');
-			// 提交落在原来的主线上，不额外开分支。
-			expect(git(['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('main');
-		} finally {
-			await stopHarness(harness);
-			rmSync(runDir, { recursive: true, force: true });
-			rmSync(appWorkspace, { recursive: true, force: true });
-		}
-	}, 180_000);
-
-	it('游离 HEAD 上没有产生提交时不留空分支（空提交、dry-run 都不算）', async () => {
+	it('模型提交被拒绝，工作区不会被它改出历史', async () => {
 		const v1 = initRepo();
-		git(['switch', '--detach', v1]);
-		const branchesBefore = git(['for-each-ref', '--format=%(refname:short)', 'refs/heads']).trim();
-		const headsBefore = git(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads']).trim();
-		const runDir = mkdtempSync(join(tmpdir(), 'durable-git-empty-'));
-		// 干净工作区上提交：git 自己会拒绝（nothing to commit），平台也不能先建一条空分支。
-		const { base, harness } = await startGitHarness({ runDir, args: ['commit', '-m', '什么也没改'], finalText: 'GIT_EMPTY_DONE' });
+		writeFileSync(join(appWorkspace, 'index.html'), '<!doctype html><html><body>v2</body></html>');
+		const runDir = mkdtempSync(join(tmpdir(), 'durable-git-readonly-'));
+		const { base, harness } = await startGitHarness({ runDir, args: ['commit', '-am', '自己提交'], finalText: 'GIT_READONLY_DONE' });
 		try {
 			const conversationId = await createAppConversation(base);
-			await submitTurn(base, conversationId, 'git-empty-commit');
-			const result = await settledGitResult(base, conversationId, 'GIT_EMPTY_DONE');
-			expect(result.exitCode).not.toBe(0);
-			expect(git(['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('HEAD');
-			expect(git(['for-each-ref', '--format=%(refname:short)', 'refs/heads']).trim()).toBe(branchesBefore);
-			expect(git(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads']).trim()).toBe(headsBefore);
+			await submitTurn(base, conversationId, 'git-readonly');
+			const result = await settledGitResult(base, conversationId, 'GIT_READONLY_DONE');
+			expect(result.isError).toBe(true);
+			expect(result.text).toContain('提交与回退由平台负责');
+			// 提交没有发生：HEAD 还是那一版，历史没有多出提交。
+			expect(git(['rev-parse', 'HEAD']).trim()).toBe(v1);
 			expect(commitCount()).toBe(1);
-		} finally {
-			await stopHarness(harness);
-			rmSync(runDir, { recursive: true, force: true });
-			rmSync(appWorkspace, { recursive: true, force: true });
-		}
-	}, 180_000);
-
-	it('游离 HEAD 上的提交先落到新分支，主线不动', async () => {
-		const v1 = initRepo();
-		writeFileSync(join(appWorkspace, 'index.html'), '<!doctype html><html><body>v2</body></html>');
-		git(['commit', '-am', '主线第二版']);
-		const mainHead = git(['rev-parse', 'HEAD']).trim();
-		git(['switch', '--detach', v1]);
-		// 从旧版继续改：工作区此刻等于 v1，改出真实差异。
-		writeFileSync(join(appWorkspace, 'index.html'), '<!doctype html><html><body>v1-fix</body></html>');
-
-		const runDir = mkdtempSync(join(tmpdir(), 'durable-git-detached-'));
-		const { base, harness } = await startGitHarness({ runDir, args: ['commit', '-am', '从旧版继续改'], finalText: 'GIT_DETACHED_DONE' });
-		try {
-			const conversationId = await createAppConversation(base);
-			await submitTurn(base, conversationId, 'git-detached');
-			const result = await settledGitResult(base, conversationId, 'GIT_DETACHED_DONE');
-			expect(result.exitCode).toBe(0);
-
-			// 提交没有落在游离 HEAD 上：它挂在一条新分支上，父提交是旧版，主线仍是第二版。
-			const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
-			expect(branch).not.toBe('main');
-			expect(branch).not.toBe('HEAD');
-			expect(git(['rev-parse', 'refs/heads/main']).trim()).toBe(mainHead);
-			expect(git(['rev-parse', 'HEAD^']).trim()).toBe(v1);
-			expect(commitCount()).toBe(3);
-			const branches = git(['for-each-ref', '--format=%(refname:short)', 'refs/heads']).trim().split('\n').sort();
-			expect(branches).toEqual([branch, 'main'].sort());
 		} finally {
 			await stopHarness(harness);
 			rmSync(runDir, { recursive: true, force: true });

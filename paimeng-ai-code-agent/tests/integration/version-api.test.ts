@@ -126,11 +126,9 @@ describe('版本接口', () => {
     const response = await get('app/versions', { appId }, owner.cookie);
     expect(response.status).toBe(200);
     const body = await json<AppVersionOverview>(response);
-    expect(body.data.current).toEqual({ kind: 'branch', branch: 'main', versionId: first.id });
+    expect(body.data.current).toEqual({ versionId: first.id });
     expect(body.data.versions.map(version => version.id)).toEqual([first.id]);
     expect(body.data.versions).toHaveLength(await commitCount());
-    expect(body.data.graph?.nodes.map(node => node.versionId)).toEqual([first.id]);
-    expect(body.data.branches.map(branch => branch.branch)).toContain('main');
     expect(body.data.blocked).toBeNull();
   });
 
@@ -167,74 +165,21 @@ describe('版本接口', () => {
     expect(await readProject('index.html')).toContain('第一版');
 
     const overview = await json<AppVersionOverview>(await get('app/versions', { appId }, owner.cookie));
-    expect(overview.data.current).toEqual({ kind: 'detached', versionId: first.id });
+    expect(overview.data.current).toEqual({ versionId: first.id });
     expect(overview.data.versions).toHaveLength(commitsBefore);
   });
 
-  it('从历史提交开分支不新增提交，主线不动', async () => {
-    const mainBefore = await mainHead();
-    const commitsBefore = await commitCount();
-    const branchesBefore = await git(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads']);
+  it('回退后继续生成会把新版本接在这一版后面（清单仍线性）', async () => {
+    await writeProject('index.html', '<html><body>从第一版改</body></html>');
+    const next = await commitVersion({ app: appRef(), title: '从第一版继续改' });
+    expect(next).not.toBeNull();
 
-    const branched = await json<{ branch: string; version: AppVersion }>(
-      await post('app/versions/branch', { appId, versionId: first.id, label: 'plan-x' }, owner.cookie),
-    );
-    expect(branched.code).toBe(0);
-    expect(branched.data.branch).toBe('plan-x');
-    expect(branched.data.version.id).toBe(first.id);
-
-    expect(await git(['symbolic-ref', 'HEAD'])).toBe('refs/heads/plan-x');
-    expect(await git(['rev-parse', 'HEAD'])).toBe(first.id);
-    expect(await git(['rev-parse', 'refs/heads/plan-x'])).toBe(first.id);
-    expect(await commitCount()).toBe(commitsBefore);
-    // 主干那条 ref 与其他分支头保持原样，只多了 plan-x。
-    expect(await mainHead()).toBe(mainBefore);
-    expect(await git(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads']))
-      .toBe(`${branchesBefore}\nrefs/heads/plan-x ${first.id}`);
-
+    expect(await git(['rev-parse', 'HEAD^'])).toBe(first.id);
     const overview = await json<AppVersionOverview>(await get('app/versions', { appId }, owner.cookie));
-    expect(overview.data.current).toEqual({ kind: 'branch', branch: 'plan-x', versionId: first.id });
-  });
-
-  it('把落后于主线的分支合并回主线是无操作，并被标为已合并', async () => {
-    const mainBefore = await mainHead();
-    const adopted = await json<{ branch: string; version: AppVersion | null; previewError: string | null }>(
-      await post('app/versions/adopt', { appId, branch: 'plan-x' }, owner.cookie),
-    );
-    expect(adopted.code).toBe(0);
-    expect(adopted.data.version).toBeNull();
-    expect(await mainHead()).toBe(mainBefore);
-
-    const overview = await json<AppVersionOverview>(await get('app/versions', { appId }, owner.cookie));
-    expect(overview.data.branches.find(branch => branch.branch === 'plan-x')?.merged).toBe(true);
-  });
-
-  it('切换分支只换 HEAD 与工作区，返回预览重建结果', async () => {
-    const commitsBefore = await commitCount();
-    const switched = await json<{ branch: string; previewError: string | null }>(
-      await post('app/versions/switch', { appId, branch: 'main' }, owner.cookie),
-    );
-    expect(switched.code).toBe(0);
-    expect(switched.data.branch).toBe('main');
-    // 预览重建必须被触发：切换只换了源码，dist 还是旧的。html 类型重建很轻，正常应为 null。
-    expect(switched.data.previewError).toBeNull();
-    expect(await git(['symbolic-ref', 'HEAD'])).toBe('refs/heads/main');
-    expect(await commitCount()).toBe(commitsBefore);
-    expect(await readProject('index.html')).toContain('第二版');
-  });
-
-  it('在分支上提交后合并回主线，主线快进到分支头', async () => {
-    const second = await mainHead();
-    await post('app/versions/branch', { appId, versionId: second, label: 'plan-y' }, owner.cookie);
-    await writeProject('index.html', '<html><body>第三版</body></html>');
-    const third = await commitVersion({ app: appRef(), title: '第三版' });
-    expect(third).not.toBeNull();
-    expect(await git(['rev-parse', 'refs/heads/plan-y'])).toBe(third!.id);
-    expect(await mainHead()).toBe(second);
-
-    expect((await post('app/versions/adopt', { appId, branch: 'plan-y' }, owner.cookie)).status).toBe(200);
-    expect(await mainHead()).toBe(third!.id);
-    expect(await readProject('index.html')).toContain('第三版');
+    // 清单按时间排：新接的一版在最前，被回退到的第一版仍在列表里可选。
+    expect(overview.data.versions[0]!.id).toBe(next!.id);
+    expect(overview.data.versions.map(version => version.id)).toContain(first.id);
+    expect(overview.data.current).toEqual({ versionId: next!.id });
   });
 
   it('回退后会真的重建预览：内容不合法时 previewError 带出构建失败，而不是静默假装成功', async () => {

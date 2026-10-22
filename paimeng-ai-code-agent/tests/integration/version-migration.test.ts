@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
 import { chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -6,6 +6,15 @@ import { promisify } from 'node:util';
 import { ensureWorkspace, workspace, type WorkspaceApp } from '@/server/workspace';
 import { applyLegacyVersions, planLegacyVersions, type LegacyVersionRow } from '@/server/version-migration';
 import { commitVersion, listVersions, purgeVersions, versionRepo, versionRoot, versionThumbnailPath } from '@/server/version-store';
+import { db, getPool, now } from '@/server/db';
+import { apps, users } from '@/server/schema';
+import { nextSnowflakeId } from '@/server/snowflake';
+import { testDatabaseUrl } from '../test-database-url';
+import { loadEnvFile } from 'node:process';
+import { eq } from 'drizzle-orm';
+
+loadEnvFile('.env');
+process.env.DATABASE_URL = testDatabaseUrl(process.env.DATABASE_URL ?? '');
 
 /**
  * 旧表 → Git 迁移的验收。用真实 git 仓库跑，不碰数据库：
@@ -24,20 +33,33 @@ const gitEnv = {
 };
 
 let counter = 0;
+let owner: bigint;
 const created: WorkspaceApp[] = [];
 
+/** 提交现在会写台账行，台账有 app 外键：这里必须有真实应用行。 */
 async function newApp(): Promise<WorkspaceApp> {
-  const app: WorkspaceApp = { id: `${Date.now()}${String(counter++).padStart(2, '0')}`, codeGenType: 'html' };
+  const id = await nextSnowflakeId();
+  await db().insert(apps).values({ id, appName: `旧表迁移 ${counter}`, initPrompt: '迁移测试', codeGenType: 'html', userId: owner, createTime: now(), updateTime: now() });
+  const app: WorkspaceApp = { id: String(id), codeGenType: 'html' };
+  counter += 1;
   await ensureWorkspace(app);
   created.push(app);
   return app;
 }
 
+beforeAll(async () => {
+  owner = await nextSnowflakeId();
+  await db().insert(users).values({ id: owner, userAccount: `ts_version_migration_${Date.now()}`, userPassword: 'unused', userRole: 'user', createTime: now(), updateTime: now() });
+});
+
 afterAll(async () => {
   for (const app of created) {
     await purgeVersions(app).catch(() => undefined);
     await rm(workspace(app), { recursive: true, force: true });
+    await db().delete(apps).where(eq(apps.id, BigInt(app.id))).catch(() => undefined);
   }
+  await db().delete(users).where(eq(users.id, owner)).catch(() => undefined);
+  await getPool().end().catch(() => undefined);
 });
 
 async function git(app: WorkspaceApp, args: string[]) {
@@ -93,14 +115,16 @@ describe('旧版本表迁移', () => {
     // 预演：不写任何东西，但要真的核对提交存在性。
     const plan = await planLegacyVersions(app, rows);
     expect(plan.filter(item => item.missing)).toHaveLength(0);
-    expect(plan.every(item => item.pin)).toBe(true);
-    expect(plan.filter(item => item.title)).toHaveLength(3);
+    // 新提交落账时就已经有了钉子与标题，迁移只补那只孤儿提交。
+    expect(plan.filter(item => item.pin)).toHaveLength(1);
+    expect(plan.filter(item => item.title)).toHaveLength(1);
     expect(plan.filter(item => item.thumbnail)).toHaveLength(1);
     expect(await exists(versionThumbnailPath(app, first.id))).toBe(false);
-    expect((await git(app, ['for-each-ref', '--format=%(refname)', 'refs/paimeng/'])).trim()).toBe('');
+    // 预演阶段唯一缺的东西没被补：孤儿提交仍然没有任何引用。
+    expect(await git(app, ['for-each-ref', '--format=%(refname)', `refs/paimeng/versions/${orphan}`])).toBe('');
 
     const result = await applyLegacyVersions(app, rows);
-    expect(result).toMatchObject({ pinned: 3, titled: 3, shots: 1, missing: 0, problems: [] });
+    expect(result).toMatchObject({ pinned: 1, titled: 1, shots: 1, missing: 0, problems: [] });
 
     // 保留引用让无 ref 的老提交永远可达，且不改任何分支头。
     for (const sha of [first.id, second.id, orphan]) {
@@ -108,15 +132,15 @@ describe('旧版本表迁移', () => {
     }
     expect((await git(app, ['rev-parse', 'refs/heads/main'])).trim()).toBe(second.id);
 
-    // 概述进了展示缓存，标题立即可见；提交信息本身没被改动。
-    expect((await listVersions(app)).versions.find(version => version.id === first.id)?.title).toBe('为上线前内容加版本记录');
+    // 已有标题不被老概述覆盖（用户已经看到过的说法优先）；提交信息本身没被改动。
+    expect((await listVersions(app)).versions.find(version => version.id === first.id)?.title).toBe('第一版');
     expect((await git(app, ['log', '-1', '--format=%s', first.id])).trim()).toBe('第一版');
 
     // 截图按 commit SHA 复制过去，字节一致。
     expect((await readFile(versionThumbnailPath(app, first.id))).equals(png)).toBe(true);
     expect(exists(legacyShot)).toBeTruthy();
 
-    // 老提交现在出现在历史里，且没有任何提交被新建。
+    // 孤儿提交被补了台账行，现在出现在清单里；没有任何提交被新建。
     const after = (await listVersions(app)).versions.map(version => version.id).sort();
     expect(after).toContain(orphan);
     expect(after.filter(sha => !commitsBefore.includes(sha))).toEqual([orphan]);

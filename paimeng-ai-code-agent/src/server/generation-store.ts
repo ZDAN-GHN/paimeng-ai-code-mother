@@ -178,10 +178,20 @@ function effectiveStopReason(current: string | null, status: 'ready' | 'failed' 
   return stopReasonFrom(current) ?? proposed ?? (status === 'ready' ? 'completed' : status === 'cancelled' ? 'cancelled' : null);
 }
 
-export async function finishGeneration(id: string, status: 'ready' | 'failed' | 'cancelled', error: string | null, messageId?: string | null, stopReason?: GenerationStopReason, canFinish?: () => Promise<boolean>): Promise<boolean> {
+/**
+ * 收尾分三步，顺序不能换：
+ * 1. 事务里判定能不能完成、把状态写定，租约先留着；
+ * 2. 租约还在手里时执行 beforeRelease（提交这一版、写台账行）；
+ * 3. 事务里删租约，下一次生成才能开始。
+ *
+ * 落账不放进第一步的事务：台账行要引用 generation(id)，而那一步正锁着这行，
+ * 换个连接插子行会在外键检查上自锁。分两步既不丢互斥，也不互锁。
+ * 钩子失败只记日志——一批磁盘满不该把任务永久钉在「生成中」。
+ */
+export async function finishGeneration(id: string, status: 'ready' | 'failed' | 'cancelled', error: string | null, messageId?: string | null, stopReason?: GenerationStopReason, canFinish?: () => Promise<boolean>, beforeRelease?: () => Promise<void>): Promise<boolean> {
   const [task] = await db().select().from(generations).where(eq(generations.id, id));
   if (!task) return false;
-  return db().transaction(async tx => {
+  const settled = await db().transaction(async tx => {
     await lockedApp(tx, String(task.appId));
     const [lease] = await tx.select().from(leases).where(eq(leases.appId, task.appId)).limit(1);
     if (!lease || lease.generationId !== id) return false;
@@ -193,7 +203,19 @@ export async function finishGeneration(id: string, status: 'ready' | 'failed' | 
       stopReason = stopReasonFrom(current.stopReason) ?? stopReason;
     }
     await tx.update(generations).set({ status, error, stopReason: effectiveStopReason(current.stopReason, status, stopReason), messageId: messageId ?? null, updateTime: now() }).where(eq(generations.id, id));
-    await tx.delete(leases).where(and(eq(leases.appId, task.appId), eq(leases.generationId, id)));
     return true;
   });
+  if (!settled) return false;
+  if (status === 'ready' && beforeRelease) {
+    try {
+      await beforeRelease();
+    } catch (problem) {
+      console.error(`版本落账失败（生成 ${id}）：`, problem);
+    }
+  }
+  await db().transaction(async tx => {
+    await lockedApp(tx, String(task.appId));
+    await tx.delete(leases).where(and(eq(leases.appId, task.appId), eq(leases.generationId, id)));
+  });
+  return true;
 }

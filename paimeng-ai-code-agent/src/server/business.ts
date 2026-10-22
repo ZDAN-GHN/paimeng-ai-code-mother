@@ -13,9 +13,9 @@ import { contentType } from './preview';
 import { listProjectFiles, readProjectFileBytes, workspace } from './workspace';
 import { routeCodeGenType } from './model';
 import { appTemplate, initializeTemplate } from './template-workspace';
-import { adoptBranch, branchFromVersion, diffVersions, listVersions, purgeVersions, restoreVersion, switchBranch } from './version-store';
+import { diffVersions, listVersions, purgeVersions, restoreVersion } from './version-store';
 import { versionThumbnail } from './version-thumbnail';
-import { versionAdoptSchema, versionBranchSchema, versionDiffSchema, versionSwitchSchema, versionTargetSchema } from '@/shared/versioning';
+import { versionDiffSchema, versionTargetSchema } from '@/shared/versioning';
 import { defaultTemplateFor, resolveTemplate } from './templates';
 import { codeGenTypes, idSchema, isProjectCodeGenType, pageSchema, type User, type AppInfo, type PageQuery } from '@/shared/contracts';
 import type { TemplateInfo } from '@/shared/templates';
@@ -111,7 +111,7 @@ async function rebuildAfterVersionChange(app:{id:string;codeGenType:AppInfo['cod
  try{await buildApp(app as Parameters<typeof buildApp>[0]);return null;}
  catch(error){return error instanceof Error?error.message.slice(0,300):'预览重建失败';}
 }
-/** 版本清单、当前位置与分支都来自 Git；存储层不查租约，blocked 在这里补上。 */
+/** 版本清单来自台账、文件事实来自 Git；存储层不查租约，blocked 在这里补上。 */
 export async function listAppVersions(raw:{appId:string;query?:string},user:User){
  const app=await versionApp(raw.appId,user);
  const overview=await listVersions(app,{query:raw.query});
@@ -122,27 +122,6 @@ export async function restoreAppVersion(raw:unknown,user:User){
  const app=await versionApp(input.appId,user);
  await assertVersionWritable(app);
  const outcome=await restoreVersion({app,versionId:input.versionId,guard:()=>assertVersionWritable(app)});
- return {...outcome,previewError:await rebuildAfterVersionChange(app)};
-}
-export async function branchAppVersion(raw:unknown,user:User){
- const input=versionBranchSchema.parse(raw);
- const app=await versionApp(input.appId,user);
- await assertVersionWritable(app);
- const outcome=await branchFromVersion({app,versionId:input.versionId,label:input.label,guard:()=>assertVersionWritable(app)});
- return {...outcome,previewError:await rebuildAfterVersionChange(app)};
-}
-export async function adoptAppVersion(raw:unknown,user:User){
- const input=versionAdoptSchema.parse(raw);
- const app=await versionApp(input.appId,user);
- await assertVersionWritable(app);
- const outcome=await adoptBranch({app,branch:input.branch,guard:()=>assertVersionWritable(app)});
- return {...outcome,previewError:await rebuildAfterVersionChange(app)};
-}
-export async function switchAppVersion(raw:unknown,user:User){
- const input=versionSwitchSchema.parse(raw);
- const app=await versionApp(input.appId,user);
- await assertVersionWritable(app);
- const outcome=await switchBranch({app,branch:input.branch,guard:()=>assertVersionWritable(app)});
  return {...outcome,previewError:await rebuildAfterVersionChange(app)};
 }
 export async function diffAppVersions(raw:{appId:string;base:string;target:string},user:User){

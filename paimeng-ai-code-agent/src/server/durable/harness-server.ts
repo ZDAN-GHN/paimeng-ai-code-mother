@@ -46,11 +46,11 @@ import {
 	type WebAccessRuntime,
 	type WebAccessSession,
 } from "../web-access/tools";
-import { ensureVersionBranch, ensureVersionRepo } from "../version-store";
+import { ensureVersionRepo } from "../version-store";
 import { workspace } from "../workspace";
 import { fauxFixtureEnabled } from "./faux-fixture";
 import { fauxModelEnabled } from "./faux-model";
-import { assertGitSubcommand, gitCreatesCommit } from "./git-args";
+import { assertGitSubcommand } from "./git-args";
 import { context, entryText, openPgHarness } from "./harness";
 import { webToolResult } from "./web-tool-result";
 import {
@@ -305,7 +305,7 @@ async function runGit(cwd: string, args: readonly string[]): Promise<{ text: str
 
 const gitTool = defineTool({
 	name: "git",
-	description: "在应用工作区内执行 git 命令（本地历史操作）。可用子命令：status log show diff add commit branch checkout switch merge restore stash rev-parse reflog tag describe blame shortlog ls-files cat-file。完成一组修改后要 git add -A 并 git commit -m \"不超过20字的中文概述\"：这条提交信息就是版本标题，用户会在版本面板看到。回到旧版本用 git switch --detach <提交>：它只切 HEAD，不产生新提交，版本数量不变。想在旧版基础上继续改，先 git switch -c <新分支名> 再提交，原主线保持不动。历史只增：hook 会拒绝删除分支与非快进更新。没有远端，push/pull 一律不可用。",
+	description: "在应用工作区内执行只读 git 命令，用来理解项目历史和这一轮还没提交的改动。可用子命令：status log show diff rev-parse reflog tag describe blame shortlog ls-files cat-file。提交、切换、合并、恢复都由平台负责：一次生成成功结束后平台自动提交成一版，你不需要也不能 git add 或 git commit。没有远端，push/pull 不可用。",
 	parameters: Type.Object({ args: Type.Array(Type.String({ maxLength: 200 }), { minItems: 1, maxItems: 16 }) }),
 	execute: async (args, api) => {
 		const app = await appRefFor(api.conversationId);
@@ -314,28 +314,8 @@ const gitTool = defineTool({
 		// 第一次显式使用 git 时才初始化仓库：此前的文件就是仓库的初始内容。
 		await ensureVersionRepo(app);
 		const tree = workspace(app);
-		const before = gitCreatesCommit(args.args) ? await runGit(tree, ["rev-parse", "HEAD"]) : null;
-		const headBefore = before?.exitCode === 0 ? before.text.trim() : "";
 		const outcome = await runGit(tree, args.args);
-		let text = outcome.exitCode === 0 ? outcome.text : `退出码 ${outcome.exitCode}\n${outcome.text}`;
-		// 游离 HEAD 上产生的新提交没有分支引用，会从版本列表里消失。
-		// 只在这个命令真的移动了 HEAD 之后才建分支：空提交、commit --dry-run、
-		// 已经是最新的 merge 都不该留下一条没有提交的分支。
-		if (headBefore) {
-			const after = await runGit(tree, ["rev-parse", "HEAD"]);
-			const headAfter = after.exitCode === 0 ? after.text.trim() : "";
-			if (outcome.exitCode === 0 && headAfter && headAfter !== headBefore) {
-				// 提交已经产生了：万一挂分支失败，也不能让这条提交变成「只在 reflog 里」。
-				// 先按保留引用兜底（版本列表会读 refs/paimeng/versions/*），再如实告诉用户怎么接回分支。
-				await ensureVersionBranch(app).catch(async (problem: unknown) => {
-					const fallback = await runGit(tree, ["update-ref", `refs/paimeng/versions/${headAfter}`, headAfter]);
-					const reason = problem instanceof Error ? problem.message : String(problem);
-					text += fallback.exitCode === 0
-						? `\n\n注意：新提交 ${headAfter.slice(0, 7)} 没能落到分支（${reason}），已保留为历史引用，版本面板仍能看到它。要接着在它上面改，先 git switch -c <分支名> ${headAfter.slice(0, 7)}。`
-						: `\n\n警告：新提交 ${headAfter.slice(0, 7)} 既没落到分支也没能保留为历史引用（${reason}）；请立即执行 git branch <分支名> ${headAfter}，否则这条提交可能在清理后消失。`;
-				});
-			}
-		}
+		const text = outcome.exitCode === 0 ? outcome.text : `退出码 ${outcome.exitCode}\n${outcome.text}`;
 		return {
 			output: [{ type: "text", text }],
 			details: { exitCode: outcome.exitCode },

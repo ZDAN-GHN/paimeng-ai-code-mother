@@ -53,9 +53,6 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/deploy')return withHeartbeat(async()=>success(await business.publish(value,user)));
    if(path==='app/build')return withHeartbeat(async()=>success(await business.rebuildPreview(value,user)));
    if(path==='app/versions/restore')return withHeartbeat(async()=>success(await business.restoreAppVersion(value,user)));
-   if(path==='app/versions/branch')return withHeartbeat(async()=>success(await business.branchAppVersion(value,user)));
-   if(path==='app/versions/adopt')return withHeartbeat(async()=>success(await business.adoptAppVersion(value,user)));
-   if(path==='app/versions/switch')return withHeartbeat(async()=>success(await business.switchAppVersion(value,user)));
    if(path==='app/chat/gen/code')return await harnessChatResponse(req,value,user);
    if(path==='app/generation/cancel'){const appId=z.object({appId:idSchema}).parse(value).appId;return success(await harnessCancelGeneration(appId,user));}
    if(path==='app/chat/input')return success(await harnessSubmitInput(value,user));

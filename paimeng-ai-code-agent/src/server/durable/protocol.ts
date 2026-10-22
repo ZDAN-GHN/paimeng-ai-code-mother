@@ -10,5 +10,7 @@
  * 10：版本以 git 为唯一事实源——回退只切游离 HEAD 不产生提交，提交前先落到分支，
  *    生成收尾只在真有未提交改动时兜底。旧 harness 仍教模型「复制旧内容再提交」，
  *    会把一次回退记成新版本，必须重启换掉。
+ * 11：git 工具收成只读，版本改由平台在收尾时提交并记账（docs/plans/version-ledger.md）。
+ *    旧 harness 仍会教模型 git add/commit，也会在建版分支上自作主张；必须重启换掉。
  */
-export const harnessProtocol = 10;
+export const harnessProtocol = 11;
