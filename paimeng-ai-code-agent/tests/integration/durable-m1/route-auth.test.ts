@@ -17,8 +17,10 @@ let cookie = '';
 let otherCookie = '';
 let adminCookie = '';
 let appId = '';
+let bareAppId = '';
 
-type UpstreamRecord = { key: string; aborted: boolean };
+const boundConversationId = 9001;
+type UpstreamRecord = { key: string; body?: string; aborted: boolean };
 const records: UpstreamRecord[] = [];
 let upstream: Server;
 
@@ -26,7 +28,7 @@ const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
 async function waitForRecord(key: string): Promise<UpstreamRecord> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
-    const record = records.find((candidate) => candidate.key === key);
+    const record = records.findLast((candidate) => candidate.key.startsWith(key));
     if (record) return record;
     await delay(25);
   }
@@ -57,9 +59,16 @@ beforeAll(async () => {
   await db().update(users).set({ userRole: 'admin' }).where(eq(users.userAccount, `${prefix}_admin`));
   const [owner] = await db().select().from(users).where(eq(users.userAccount, `${prefix}_owner`)).limit(1);
   appId = await createApp({ initPrompt: 'durable route auth', codeGenType: 'html' }, publicUser(owner!));
+  bareAppId = await createApp({ initPrompt: 'durable route auth bare', codeGenType: 'html' }, publicUser(owner!));
+  await db().update(apps).set({ conversationId: boundConversationId }).where(eq(apps.id, BigInt(appId)));
 
   upstream = createServer((incoming, response) => {
     const record: UpstreamRecord = { key: `${incoming.method} ${incoming.url}`, aborted: false };
+    const chunks: Buffer[] = [];
+    incoming.on('data', (chunk: Buffer) => chunks.push(chunk));
+    incoming.on('end', () => {
+      record.body = Buffer.concat(chunks).toString();
+    });
     records.push(record);
     response.on('close', () => {
       if (!response.writableEnded) record.aborted = true;
@@ -113,6 +122,33 @@ describe('durable M1 attach 路由鉴权与视图限界', () => {
     const response = await POST(request('submit', { method: 'POST', session: cookie, body: { appId, content: 'hello' } }), params('submit'));
     expect(response.status).toBe(202);
     expect(await response.text()).toBe('{"submissionId":1}');
+  });
+
+  it('带他人会话 ID 的 POST 返回 403', async () => {
+    const response = await POST(request('submit', { method: 'POST', session: cookie, body: { appId, conversationId: 8888, content: 'hello' } }), params('submit'));
+    expect(response.status).toBe(403);
+  });
+
+  it('POST 缺省会话 ID 时注入应用绑定值转发', async () => {
+    const response = await POST(request('submit', { method: 'POST', session: cookie, body: { appId, content: 'hello' } }), params('submit'));
+    expect(response.status).toBe(202);
+    const record = await waitForRecord('POST /submit');
+    expect(JSON.parse(record.body ?? '')).toMatchObject({ conversationId: boundConversationId, content: 'hello' });
+  });
+
+  it('GET 用绑定会话覆盖调用方传入的会话 ID', async () => {
+    const response = await GET(request(`state?appId=${appId}&conversationId=8888`, { method: 'GET', session: cookie }), params('state'));
+    expect(response.status).toBe(202);
+    const record = await waitForRecord('GET /state');
+    expect(record.key).toContain(`conversationId=${boundConversationId}`);
+    expect(record.key).not.toContain('conversationId=8888');
+  });
+
+  it('未绑定会话的应用一律 404，仅创建会话入口放行', async () => {
+    expect((await GET(request(`events?appId=${bareAppId}`, { method: 'GET', session: cookie }), params('events'))).status).toBe(404);
+    expect((await POST(request('submit', { method: 'POST', session: cookie, body: { appId: bareAppId, content: 'x' } }), params('submit'))).status).toBe(404);
+    const created = await POST(request('conversations', { method: 'POST', session: cookie, body: { appId: bareAppId } }), params('conversations'));
+    expect(created.status).toBe(202);
   });
 
   it('断连只中止 SSE 视图，不中止提交', async () => {

@@ -250,7 +250,8 @@ async function configureHarnessInstructions(conversationId: number, instructions
   });
 }
 
-async function conversationIdOf(appId: string): Promise<number | undefined> {
+/** 应用绑定的 harness 会话 ID（未开过会话为 undefined）；attach 路由用它校验/注入会话，避免信任调用方。 */
+export async function conversationIdOf(appId: string): Promise<number | undefined> {
   const [row] = await db().select({ conversationId: apps.conversationId }).from(apps).where(eq(apps.id, BigInt(appId))).limit(1);
   return row?.conversationId ?? undefined;
 }
