@@ -7,6 +7,8 @@ import { WebAccessError } from './types';
 export const httpUserAgent = 'paimeng-web-access/1.0 (+https://github.com/zdan/paimeng-ai-code-mother)';
 const redirectLimit = 3;
 const redirectStatuses = new Set([301, 302, 303, 307, 308]);
+/** 重定向目标可以是任意主机，凭据头只应发给首跳的原始服务商，跟随跳一律剥除。 */
+const credentialHeaderNames = new Set(['authorization', 'x-subscription-token', 'x-api-key', 'cookie', 'proxy-authorization']);
 
 export type TransportResponse = { status: number; header: (name: string) => string | null; body: AsyncIterable<Uint8Array> };
 export type Transport = (target: URL, init: { method: string; headers: Record<string, string>; body?: string; signal: AbortSignal; dispatcher?: Dispatcher }) => Promise<TransportResponse>;
@@ -117,11 +119,12 @@ async function perform(rawUrl: string, init: { method: string; body?: string }, 
     const timer = timeoutSignal(options.signal, options.timeoutMs);
     const headers: Record<string, string> = { accept: options.accept ?? 'application/json', 'user-agent': httpUserAgent, ...(options.headers ?? {}) };
     if (init.body !== undefined) headers['content-type'] = 'application/json';
+    if (hop > 0) for (const name of Object.keys(headers)) if (credentialHeaderNames.has(name.toLowerCase())) delete headers[name];
     try {
       const response = await transport(target.url, { method: init.method, headers, body: init.body, signal: timer, dispatcher });
       if (redirectStatuses.has(response.status)) {
         const location = response.header('location');
-        if (init.body !== undefined) throw new WebAccessError('unsupported', '服务商端点返回重定向，已拒绝跟随');
+        if (init.body !== undefined || options.trustedHost || options.trustedFacility) throw new WebAccessError('unsupported', '服务商端点返回重定向，已拒绝跟随');
         if (!location) throw new WebAccessError('invalid-response', '上游重定向缺少 Location');
         if (hop >= redirectLimit) throw new WebAccessError('unavailable', `重定向超过 ${redirectLimit} 次`);
         const next = parseTarget(new URL(location, target.url).href, '重定向地址');

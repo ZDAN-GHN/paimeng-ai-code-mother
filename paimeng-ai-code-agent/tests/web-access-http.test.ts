@@ -68,6 +68,27 @@ describe('传输层的大小、状态与重定向处理', () => {
     await expect(httpGet('https://example.com/', { ...base, deps: deps(transport) })).rejects.toThrow('30 秒');
   });
 
+  it('重定向后的跟随请求不再携带凭据头', async () => {
+    const { transport, calls } = recorder([response(302, { headers: { location: 'https://cdn.test/a' } }), response(200, { body: 'ok' })]);
+    await httpGet('https://api.tavily.com/search', {
+      ...base,
+      headers: { authorization: 'Bearer secret', 'x-subscription-token': 'brave-token' },
+      deps: deps(transport),
+    });
+    expect(calls[0].headers.authorization).toBe('Bearer secret');
+    expect(calls[1].headers.authorization).toBeUndefined();
+    expect(calls[1].headers['x-subscription-token']).toBeUndefined();
+  });
+
+  it('受信主机与自建设施即使 GET 也拒绝跟随重定向', async () => {
+    const host = recorder([response(302, { headers: { location: 'https://cdn.test/a' } })]);
+    await expect(httpGet('https://api.tavily.com/search', { ...base, trustedHost: true, deps: deps(host.transport) })).rejects.toMatchObject({ code: 'unsupported' });
+    expect(host.calls).toHaveLength(1);
+    const facility = recorder([response(302, { headers: { location: 'https://cdn.test/a' } })]);
+    await expect(httpGet('https://searxng.example.net/search', { ...base, trustedFacility: true, deps: deps(facility.transport) })).rejects.toMatchObject({ code: 'unsupported' });
+    expect(facility.calls).toHaveLength(1);
+  });
+
   it('跟随重定向时逐跳重新校验地址', async () => {
     const { transport, calls } = recorder([response(302, { headers: { location: 'https://cdn.test/a' } }), response(200, { body: 'ok' })]);
     const result = await httpGet('https://example.com/', { ...base, deps: deps(transport) });
