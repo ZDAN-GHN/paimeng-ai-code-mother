@@ -1,7 +1,7 @@
 import 'server-only';
 import { z } from 'zod';
 import { webAccessEndpoints, webAccessLimits, webAccessSettings } from './config';
-import { httpGet, httpPostJson, readJson, type HttpDeps } from './http';
+import { httpGet, httpPostJson, readJson, type HttpDeps, type HttpRequestOptions } from './http';
 import { tavilySearch } from './tavily';
 import { WebAccessError } from './types';
 
@@ -29,13 +29,13 @@ function providerHttpError(provider: string, label: string, status: number): Web
   return new WebAccessError('unavailable', `${label}暂时不可用`, status);
 }
 
-const httpOptions = (options: { signal?: AbortSignal; deps?: HttpDeps }) => ({
+const httpOptions = (options: { signal?: AbortSignal; deps?: HttpDeps }): HttpRequestOptions => ({
   signal: options.signal,
   timeoutMs: webAccessLimits.search.timeoutMs,
   maxBytes: webAccessLimits.search.maxBytes,
   networks: webAccessSettings().allowNetworks,
   proxy: webAccessSettings().proxy,
-  trustedHost: true,
+  endpoint: 'provider',
   deps: options.deps,
 });
 
@@ -76,7 +76,7 @@ const searxng: ProviderImplementation = {
     const payload = await httpGet(`${base}/search?q=${encodeURIComponent(query)}&format=json&safesearch=1`, {
       ...httpOptions(options),
       // 自建设施端点：部署者配置的 URL（模型不可控），允许 http://127.0.0.1 本机实例。
-      trustedFacility: true,
+      endpoint: 'facility',
       headers: { accept: 'application/json' },
     });
     if (payload.status !== 200) throw providerHttpError('searxng', 'SearXNG 搜索', payload.status);

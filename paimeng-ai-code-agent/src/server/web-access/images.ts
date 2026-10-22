@@ -67,7 +67,7 @@ export async function openverseImages(query: string, options: { signal?: AbortSi
     maxBytes: webAccessLimits.images.maxBytes,
     networks: webAccessSettings().allowNetworks,
     proxy: webAccessSettings().proxy,
-    trustedHost: true,
+    endpoint: 'provider',
     deps: options.deps,
   });
   const parsed = openverseSchema.safeParse(readJson(payload.body, '图片服务'));

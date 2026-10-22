@@ -58,7 +58,7 @@ export async function tavilySearch(options: { query: string; maxResults: number;
     maxBytes: webAccessLimits.search.maxBytes,
     networks: webAccessSettings().allowNetworks,
     proxy: webAccessSettings().proxy,
-    trustedHost: true,
+    endpoint: 'provider',
     headers: authHeaders(),
     deps: options.deps,
   });
@@ -89,7 +89,7 @@ export async function tavilyExtract(url: string, options: { signal?: AbortSignal
     maxBytes: webAccessLimits.page.maxBytes,
     networks: webAccessSettings().allowNetworks,
     proxy: webAccessSettings().proxy,
-    trustedHost: true,
+    endpoint: 'provider',
     headers: authHeaders(),
     deps: options.deps,
   });

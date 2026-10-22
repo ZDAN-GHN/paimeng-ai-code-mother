@@ -29,7 +29,7 @@ async function jinaRead(url: string, options: { signal?: AbortSignal; deps?: Htt
     maxBytes: webAccessLimits.page.maxBytes,
     networks: webAccessSettings().allowNetworks,
     proxy: webAccessSettings().proxy,
-    trustedHost: true,
+    endpoint: 'provider',
     accept: 'text/plain',
     deps: options.deps,
   });

@@ -36,7 +36,7 @@ const base = { timeoutMs: 5000, maxBytes: 64 * 1024, networks: [] } as const;
 describe('传输层的大小、状态与重定向处理', () => {
   it('正常返回正文、内容类型与最终地址', async () => {
     const { transport, calls } = recorder([response(200, { body: '{"ok":true}', headers: { 'content-type': 'application/json; charset=utf-8' } })]);
-    const result = await httpPostJson('https://api.tavily.com/search', { query: 'x' }, { ...base, trustedHost: true, deps: deps(transport) });
+    const result = await httpPostJson('https://api.tavily.com/search', { query: 'x' }, { ...base, endpoint: 'provider', deps: deps(transport) });
     expect(result.contentType).toBe('application/json');
     expect(result.body.toString()).toBe('{"ok":true}');
     expect(calls[0].method).toBe('POST');
@@ -82,10 +82,10 @@ describe('传输层的大小、状态与重定向处理', () => {
 
   it('受信主机与自建设施即使 GET 也拒绝跟随重定向', async () => {
     const host = recorder([response(302, { headers: { location: 'https://cdn.test/a' } })]);
-    await expect(httpGet('https://api.tavily.com/search', { ...base, trustedHost: true, deps: deps(host.transport) })).rejects.toMatchObject({ code: 'unsupported' });
+    await expect(httpGet('https://api.tavily.com/search', { ...base, endpoint: 'provider', deps: deps(host.transport) })).rejects.toMatchObject({ code: 'unsupported' });
     expect(host.calls).toHaveLength(1);
     const facility = recorder([response(302, { headers: { location: 'https://cdn.test/a' } })]);
-    await expect(httpGet('https://searxng.example.net/search', { ...base, trustedFacility: true, deps: deps(facility.transport) })).rejects.toMatchObject({ code: 'unsupported' });
+    await expect(httpGet('https://searxng.example.net/search', { ...base, endpoint: 'facility', deps: deps(facility.transport) })).rejects.toMatchObject({ code: 'unsupported' });
     expect(facility.calls).toHaveLength(1);
   });
 
@@ -114,7 +114,7 @@ describe('传输层的大小、状态与重定向处理', () => {
 
   it('带凭据的 POST 请求不跟随重定向，避免密钥被转发', async () => {
     const { transport } = recorder([response(307, { headers: { location: 'https://evil.test/' } })]);
-    await expect(httpPostJson('https://api.tavily.com/search', { query: 'x' }, { ...base, trustedHost: true, deps: deps(transport) })).rejects.toMatchObject({ code: 'unsupported' });
+    await expect(httpPostJson('https://api.tavily.com/search', { query: 'x' }, { ...base, endpoint: 'provider', deps: deps(transport) })).rejects.toMatchObject({ code: 'unsupported' });
   });
 });
 
@@ -142,7 +142,7 @@ describe('超时、取消与调度器', () => {
     expect(proxied.calls[0].dispatcher).toBeInstanceOf(ProxyAgent);
 
     const trusted = recorder([response(200, { body: 'ok' })]);
-    await httpGet('https://api.tavily.com/search', { ...base, trustedHost: true, deps: deps(trusted.transport, async () => { throw new Error('可信端点不应解析 DNS'); }) });
+    await httpGet('https://api.tavily.com/search', { ...base, endpoint: 'provider', deps: deps(trusted.transport, async () => { throw new Error('可信端点不应解析 DNS'); }) });
     expect(trusted.calls[0].dispatcher).toBeUndefined();
   });
 

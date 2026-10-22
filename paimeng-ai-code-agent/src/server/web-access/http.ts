@@ -21,10 +21,12 @@ export type HttpRequestOptions = {
   maxBytes: number;
   networks: readonly ExtraNetwork[];
   proxy?: string;
-  /** 服务商固定端点：跳过本地地址校验，禁止跟随重定向。 */
-  trustedHost?: boolean;
-  /** 部署者配置的自建设施端点（如本机 SearXNG）：允许 HTTP 与本机地址，禁止跟随重定向。 */
-  trustedFacility?: boolean;
+  /**
+   * 受信端点类型，决定地址校验方式：`provider` 是配置好的服务商固定端点（HTTPS 443，跳过本机地址校验），
+   * `facility` 是部署者配置的自建设施（允许 HTTP 与本机地址）。两者都禁止跟随重定向；
+   * 缺省时按公网任意地址处理（DNS 逐地址校验，允许跟随重定向但每跳剥除凭据）。
+   */
+  endpoint?: 'provider' | 'facility';
   accept?: string;
   headers?: Record<string, string>;
   deps?: HttpDeps;
@@ -119,11 +121,18 @@ function translate(error: unknown, options: HttpRequestOptions, timedOut: () => 
   return new WebAccessError('unavailable', '联网请求失败');
 }
 
+async function targetFor(url: URL, options: HttpRequestOptions): Promise<ResolvedTarget> {
+  if (options.endpoint === 'facility') return trustedFacilityTarget(url);
+  if (options.endpoint === 'provider') return trustedTarget(url);
+  if (options.proxy) return delegatedTarget(url);
+  return resolveTarget(url, { lookup: options.deps?.lookup, networks: options.networks });
+}
+
 async function perform(rawUrl: string, init: { method: string; body?: string }, options: HttpRequestOptions): Promise<HttpPayload> {
   const transport = options.deps?.transport ?? undiciTransport;
   let current = parseTarget(rawUrl, '请求地址');
   for (let hop = 0; ; hop += 1) {
-    const target = options.trustedFacility ? trustedFacilityTarget(current) : options.trustedHost ? trustedTarget(current) : options.proxy ? delegatedTarget(current) : await resolveTarget(current, { lookup: options.deps?.lookup, networks: options.networks });
+    const target = await targetFor(current, options);
     const dispatcher = createDispatcher(target, options);
     const timer = timeoutSignal(options.signal, options.timeoutMs);
     const headers: Record<string, string> = { accept: options.accept ?? 'application/json', 'user-agent': httpUserAgent, ...(options.headers ?? {}) };
@@ -133,7 +142,7 @@ async function perform(rawUrl: string, init: { method: string; body?: string }, 
       const response = await transport(target.url, { method: init.method, headers, body: init.body, signal: timer, dispatcher });
       if (redirectStatuses.has(response.status)) {
         const location = response.header('location');
-        if (init.body !== undefined || options.trustedHost || options.trustedFacility) throw new WebAccessError('unsupported', '服务商端点返回重定向，已拒绝跟随');
+        if (init.body !== undefined || options.endpoint !== undefined) throw new WebAccessError('unsupported', '服务商端点返回重定向，已拒绝跟随');
         if (!location) throw new WebAccessError('invalid-response', '上游重定向缺少 Location');
         if (hop >= redirectLimit) throw new WebAccessError('unavailable', `重定向超过 ${redirectLimit} 次`);
         const next = parseTarget(new URL(location, target.url).href, '重定向地址');
