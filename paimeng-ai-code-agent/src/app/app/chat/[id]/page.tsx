@@ -17,8 +17,9 @@ import { VoiceInput, appendTranscript } from '@/components/chat/voice-input';
 import { MarkdownMessage } from '@/components/chat/markdown-message';
 import { GenerationUsage } from '@/components/chat/generation-usage';
 import { BuildProgress } from '@/components/chat/build-progress';
-import { composerAction, initialProgress, interruptedStreamMessage, parseProgressEvent, parseSteerLanded, progressReducer, settleProgress, type ProgressState } from '@/components/chat/generation-feedback';
-import { adoptPending, adoptTranscript, admitInput, applyBoundary, dropShownInputs, emptySentInputs, forgetInput, messageSegments, placeInput, placedInputs, queuedInputs, transcriptSignature, unresolvedInputs, type InputEntry, type LostInput, type PlacedInput, type QueuedInput, type SentInputs } from '@/components/chat/chat-inputs';
+import { composerAction, initialProgress, interruptedStreamMessage, parseProgressEvent, parseSteerLanded, progressReducer, type ProgressState } from '@/components/chat/generation-feedback';
+import { admitInput, applyBoundary, forgetInput, messageSegments, placeInput, placedInputs, queuedInputs, type InputEntry, type LostInput, type PlacedInput, type QueuedInput } from '@/components/chat/chat-inputs';
+import { useGenerationSync } from './use-generation-sync';
 import { ToolCall, toolCallOf } from '@/components/chat/tool-call';
 import { AppDetailModal, formatCodeGenType } from '@/components/chat/app-detail-modal';
 import { VersionPanel } from '@/components/chat/version-panel';
@@ -126,10 +127,6 @@ function Chat({ id }: { id: string }) {
   const [deployModal, setDeployModal] = useState<{ open: boolean; url: string }>({ open: false, url: '' });
   const [memoryBusy, setMemoryBusy] = useState(false);
   const [progress, setProgress] = useState<ProgressState>(initialProgress);
-  const [inputs, setInputs] = useState<SentInputs>(emptySentInputs);
-  const [lostInputs, setLostInputs] = useState<LostInput[]>([]);
-  const [awaitingHistory, setAwaitingHistory] = useState(false);
-  const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [previewVersion, setPreviewVersion] = useState<number | null>(null);
@@ -148,16 +145,13 @@ function Chat({ id }: { id: string }) {
   const voiceInput = useRef<ComponentRef<typeof Input.TextArea>>(null);
   const focusComposerOnClose = useRef(false);
   const loadingOlder = useRef(false);
-  const inputsRef = useRef(inputs);
-  const lostRef = useRef(lostInputs);
   const postingInput = useRef(false);
   const recalling = useRef(new Set<string>());
   const lastAssistantId = useRef<string | null>(null);
-  const liveSignature = useRef('');
+  // 本轮生成的指针：transport 发送时写入 requestId，applyProgress 在 SSE 终态里读，
+  // useGenerationSync 收尾时核对是不是同一轮；它桥接 useChat 的两侧回调，必须在 useChat
+  // 之前声明，所以留在页面而不是收进 hook。
   const activeGenerationId = useRef<string | null>(null);
-  const settledTask = useRef<string | null>(null);
-  const settledGenerations = useRef(new Set<string>());
-  const shownMessageIds = useRef(new Set<string>());
   const previewRefreshAt = useRef(0);
   const previewPending = useRef<number | null>(null);
   const canEdit = !!user && user.id === app?.userId;
@@ -266,7 +260,6 @@ function Chat({ id }: { id: string }) {
   // 初始化页面并 stop() 掉刚要跑的流）。效果在渲染后同步，异步回调读到的就是当前值。
   const liveRef = useRef(live);
   useEffect(() => { liveRef.current = live; }, [live]);
-  const generating = live || runtimeBusy || task?.status === 'generating' || task?.status === 'building';
   /** 读一遍转录（`app/messages` 已按条目顺序投影成 UI 消息）；不下地时不改当前消息列表。 */
   const fetchHistory = useCallback(async (): Promise<ChatMessage[]> => api<ChatMessage[]>('app/messages?appId=' + encodeURIComponent(id)), [id]);
   /**
@@ -277,78 +270,15 @@ function Chat({ id }: { id: string }) {
     try { return await api<ChatRuntime>('app/chat/runtime?appId=' + encodeURIComponent(id)); }
     catch { return null; }
   }, [id]);
-  /**
-   * 应用一次运行态：补齐原生队列、认领已经进转录的输入。本地没有在流的消息时才用运行态投影替换显示
-   * （断流或刷新后重新附着时它就是权威的进行中状态）；`liveSignature` 挡住内容没变的重复替换，
-   * 否则每 1.5 秒会把整段转录重渲染一遍，也会打断用户自己发起的流式消息。
-   */
-  const applyRuntime = useCallback((runtime: ChatRuntime) => {
-    setRuntimeBusy(runtime.busy);
-    const shown = new Set(runtime.messages.map(message => message.id));
-    // 待重发区里的输入后来还是进了对话（例如取消后服务端仍把它交给了模型）：转录接管它的显示。
-    setLostInputs(current => {
-      const kept = current.filter(item => !shown.has(item.id));
-      return kept.length === current.length ? current : kept;
-    });
-    setMessages(current => {
-      if (!runtime.busy || liveRef.current || !runtime.messages.length) return current;
-      const signature = transcriptSignature(runtime.messages);
-      if (signature === liveSignature.current) return current;
-      liveSignature.current = signature;
-      shownMessageIds.current = new Set(runtime.messages.map(message => message.id));
-      return runtime.messages;
-    });
-    setInputs(current => {
-      const recovered = adoptPending(current, runtime.pending, lostRef.current.map(item => item.id));
-      // 没有本地流时运行态转录就是显示本身：它已经是权威，里面的用户条目由它渲染，
-      // 本地再分段或停在末尾就会重复显示一条。
-      if (runtime.busy && !liveRef.current && runtime.messages.length) return dropShownInputs(recovered, runtime.messages);
-      // 还有本地流时不能提前删：分段层是这些输入的展示者，只把已进转录的从队列里认领出来。
-      return adoptTranscript(recovered, runtime.messages);
-    });
-  }, [setMessages]);
-  /**
-   * 任务终态统一收尾：终态可能来自终态进度事件，也可能只有轮询才能看到（连接被切断、用户主动取消）。
-   * 终态对当前这一轮是权威的，所以本地流即使还挂着也先停掉，再按转录（权威）重取显示——断流后
-   * 卡在「进行中」的工具卡片不会一直转圈。转录读不回来时不标记收尾（保留下一次重试），读回时也
-   * 要重新核对是不是同一轮，否则旧响应会覆盖新开始的本地流。
-   */
-  useEffect(() => {
-    // 刷新页面后也能等待现有任务结束；历史终态不属于本次生成，不能影响新队列。
-    if (activeGenerationId.current === null && (task?.status === 'generating' || task?.status === 'building')) activeGenerationId.current = task.id;
-    const terminal = task?.status === 'ready' || task?.status === 'failed' || task?.status === 'cancelled' ? task.status : null;
-    if (!task || !terminal || task.id !== activeGenerationId.current || settledTask.current === task.id) return;
-    const settling = task.id;
-    setProgress(current => current.outcome === 'running' ? settleProgress(current, terminal) : current);
-    setAwaitingHistory(true);
-    void (async () => {
-      if (status === 'submitted' || status === 'streaming') await stop();
-      const history = await fetchHistory().catch(() => null);
-      if (!mounted.current || !history) return;
-      // pi 在模型失败后保留 inbox；仍在原生队列里的消息不能被当成丢失输入重新提交。
-      const runtime = terminal === 'failed' ? await fetchRuntime() : null;
-      if (!mounted.current || (terminal === 'failed' && !runtime)) return;
-      // 读回期间又开始了新一轮（用户又发了一条）：这份历史已经过期，不能覆盖新的流。
-      if (activeGenerationId.current !== settling) return;
-      const authoritative = runtime?.messages ?? history;
-      const pending = runtime?.pending ?? [];
-      const pendingIds = new Set(pending.map(item => item.id));
-      const lost = unresolvedInputs(inputsRef.current, authoritative).filter(item => !pendingIds.has(item.id));
-      shownMessageIds.current = new Set(authoritative.map(message => message.id));
-      if (!pending.length) settledGenerations.current.add(settling);
-      setMessages(authoritative);
-      liveSignature.current = transcriptSignature(authoritative);
-      setInputs(adoptPending(emptySentInputs(), pending));
-      settledTask.current = pending.length ? null : settling;
-      setAwaitingHistory(pending.length > 0);
-      if (!lost.length) return;
-      message.warning(`${lost.length} 条输入没有进入对话，已放进输入框上方的待重发区`);
-      setLostInputs(current => [...current, ...lost.filter(item => !current.some(entry => entry.id === item.id))]);
-    })();
-  }, [task, status, stop, fetchHistory, fetchRuntime, setMessages, message]);
+  const {
+    inputs, setInputs, lostInputs, setLostInputs, awaitingHistory, runtimeBusy,
+    applyRuntime, settledGenerations, shownMessageIds,
+  } = useGenerationSync({
+    task, status, stop, fetchHistory, fetchRuntime, liveRef, mounted,
+    activeGenerationId, setMessages, setProgress, message,
+  });
+  const generating = live || runtimeBusy || task?.status === 'generating' || task?.status === 'building';
   // 最后一条助手气泡：`data-steer` 只给 part 数，分段要落到那一刻正在流的那条气泡上。
-  useEffect(() => { inputsRef.current = inputs; }, [inputs]);
-  useEffect(() => { lostRef.current = lostInputs; }, [lostInputs]);
   useEffect(() => { lastAssistantId.current = [...messages].reverse().find(message => message.role === 'assistant')?.id ?? null; }, [messages]);
   const taskStatus = task?.status;
   // 每次生成结束时取一次用量：一条助手回复对应一次生成，按消息 id 挂到气泡上；生成中不轮询明细。
