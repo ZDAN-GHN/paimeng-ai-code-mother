@@ -2,6 +2,8 @@ import { test, expect, type Page, type Route } from '@playwright/test';
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
 import { appOrigin, previewOrigin as serverPreviewOrigin } from './support/app-origin';
 
+test.use({ timezoneId: 'Asia/Shanghai' });
+
 const appId = '900001';
 const previewOrigin = serverPreviewOrigin();
 const previewUrl = `${previewOrigin}/preview/html_${appId}/`;
@@ -94,7 +96,7 @@ test('非本人公开应用仍显示详情、失败历史不自动生成', async
   await page.getByRole('button', { name: '应用详情' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByText('测试创建者', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('2026-10-10 10:00:00', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('2026-10-10 18:00:00', { exact: true })).toBeVisible();
   await expect(dialog.getByText('原生 HTML 模式', { exact: true })).toBeVisible();
   await expect(dialog.getByRole('button', { name: '修改' })).toHaveCount(0);
   await expect(dialog.getByRole('button', { name: '删除' })).toHaveCount(0);

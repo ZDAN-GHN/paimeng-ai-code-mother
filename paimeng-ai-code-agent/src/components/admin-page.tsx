@@ -5,7 +5,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { api } from '@/client/api';
 import { AdminGuard, useAuth } from './providers';
 import { UserInfo } from './user-info';
-import { codeGenTypeOptions, formatCodeGenType, formatTime } from '@/shared/display';
+import { codeGenTypeOptions, formatCodeGenType, formatStoredTime } from '@/shared/display';
 import type { Page } from '@/shared/contracts';
 import styles from './admin-view.module.css';
 
@@ -66,7 +66,7 @@ function Manager({ mode }: { mode: Mode }) {
     { title: '头像', dataIndex: 'userAvatar', width: 140, render: value => value ? <Image src={value} width={120} alt="用户头像" /> : <span className={styles.textGray}>无头像</span> },
     { title: '简介', dataIndex: 'userProfile', ellipsis: true },
     { title: '用户角色', dataIndex: 'userRole', render: value => <Tag color={value === 'admin' ? 'green' : 'blue'}>{value === 'admin' ? '管理员' : '普通用户'}</Tag> },
-    { title: '创建时间', dataIndex: 'createTime', render: value => formatTime(value) },
+    { title: '创建时间', dataIndex: 'createTime', render: value => formatStoredTime(value) },
     {
       title: '操作', key: 'actions', width: 160,
       render: (_, row) => <Space><Button size="small" onClick={() => { setEditing(row); form.setFieldsValue(row); }}>编辑</Button><Popconfirm title="确认删除？" onConfirm={() => remove(row.id)}><Button size="small" danger disabled={row.id === user?.id}>删除</Button></Popconfirm></Space>,
@@ -80,9 +80,9 @@ function Manager({ mode }: { mode: Mode }) {
     { title: '初始提示词', dataIndex: 'initPrompt', width: 200, render: value => <Tooltip title={value}><div className={styles.promptText}>{value}</div></Tooltip> },
     { title: '生成类型', dataIndex: 'codeGenType', width: 100, render: value => formatCodeGenType(value) },
     { title: '优先级', dataIndex: 'priority', width: 80, render: value => isFeatured(value) ? <Tag color="gold">精选</Tag> : <span>{value || 0}</span> },
-    { title: '部署时间', dataIndex: 'deployedTime', width: 160, render: value => value ? formatTime(value) : <span className={styles.textGray}>未部署</span> },
+    { title: '部署时间', dataIndex: 'deployedTime', width: 160, render: value => value ? formatStoredTime(value) : <span className={styles.textGray}>未部署</span> },
     { title: '创建者', dataIndex: 'user', width: 120, render: (_, row) => row.user ? <UserInfo user={row.user} /> : <span className={styles.textGray}>未知用户</span> },
-    { title: '创建时间', dataIndex: 'createTime', width: 160, render: value => formatTime(value) },
+    { title: '创建时间', dataIndex: 'createTime', width: 160, render: value => formatStoredTime(value) },
     {
       title: '操作', key: 'actions', width: 220, fixed: 'right',
       render: (_, row) => <Space><Button size="small" type="primary" onClick={() => { setEditing(row); form.setFieldsValue(row); }}>编辑</Button><Button size="small" className={isFeatured(row.priority) ? styles.featuredBtn : undefined} onClick={() => toggleFeatured(row)}>{isFeatured(row.priority) ? '取消精选' : '精选'}</Button><Popconfirm title="确定要删除这个应用吗？" onConfirm={() => remove(row.id)}><Button size="small" danger>删除</Button></Popconfirm></Space>,

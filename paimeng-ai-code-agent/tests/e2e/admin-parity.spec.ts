@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { appOrigin } from './support/app-origin';
 
 test.describe.configure({ timeout: 120000 });
-test.use({ baseURL: appOrigin() });
+test.use({ baseURL: appOrigin(), timezoneId: 'Asia/Shanghai' });
 
 const admin = { id: '1', userAccount: 'admin', userName: '超级管理员', userAvatar: null, userProfile: null, userRole: 'admin', createTime: '2026-01-01 00:00:00', updateTime: '2026-01-01 00:00:00' };
 const creator = { id: '2', userAccount: 'creator', userName: '作者甲', userAvatar: 'https://cdn.example/avatar.png', userProfile: '平台作者', userRole: 'user', createTime: '2026-01-02 00:00:00', updateTime: '2026-01-02 00:00:00' };
@@ -36,8 +36,8 @@ test('管理员在编辑页编辑他人应用走 app/admin/update，展示封面
   await expect(page.getByLabel('应用名称')).toHaveValue('他人应用');
   await expect(page.getByText('100', { exact: true })).toBeVisible();
   await expect(page.getByText('作者甲', { exact: true })).toBeVisible();
-  await expect(page.getByText('2026-10-01 08:00:00', { exact: true })).toBeVisible();
-  await expect(page.getByText('2026-10-03 11:22:33', { exact: true })).toBeVisible();
+  await expect(page.getByText('2026-10-01 16:00:00', { exact: true })).toBeVisible();
+  await expect(page.getByText('2026-10-03 19:22:33', { exact: true })).toBeVisible();
   await expect(page.getByLabel('部署密钥')).toHaveValue('deploy-key-1');
   await expect(page.getByLabel('优先级')).toHaveValue('99');
   await expect(page.getByAltText('应用封面预览')).toBeVisible();
@@ -105,7 +105,7 @@ test('应用管理展示封面/初始需求/部署时间/创建者，支持类�
   await expect(page.getByRole('heading', { name: '应用管理' })).toBeVisible();
   await expect(page.getByText('做一个博客', { exact: true })).toBeVisible();
   await expect(page.getByText('原生 HTML 模式', { exact: true })).toBeVisible();
-  await expect(page.getByText('2026-10-05 10:00:00', { exact: true })).toBeVisible();
+  await expect(page.getByText('2026-10-05 18:00:00', { exact: true })).toBeVisible();
   await expect(page.getByText('未部署', { exact: true })).toBeVisible();
   await expect(page.getByText('作者甲').first()).toBeVisible();
   await expect(page.locator('img[src="https://cdn.example/a.png"]')).toBeVisible();
@@ -137,7 +137,7 @@ test('用户管理展示头像与原时间格式，分页显示总条数并支�
   await page.goto('/admin/userManage');
   await expect(page.getByRole('heading', { name: '用户管理' })).toBeVisible();
   await expect(page.locator('img[src="https://cdn.example/avatar.png"]').first()).toBeVisible();
-  await expect(page.getByText('2026-10-07 08:09:10', { exact: true })).toBeVisible();
+  await expect(page.getByText('2026-10-07 16:09:10', { exact: true })).toBeVisible();
   await expect(page.getByText('共 25 条')).toBeVisible();
 
   await expect(page.locator('.ant-pagination-options')).toBeVisible();

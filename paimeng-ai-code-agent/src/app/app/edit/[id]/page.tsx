@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { api } from '@/client/api';
 import { useAuth } from '@/components/providers';
 import { UserInfo } from '@/components/user-info';
-import { formatCodeGenType, formatTime } from '@/shared/display';
+import { formatCodeGenType, formatStoredTime } from '@/shared/display';
 import type { AppInfo } from '@/shared/contracts';
 import styles from './edit-view.module.css';
 
@@ -64,9 +64,9 @@ export default function AppEdit({ params }: { params: Promise<{ id: string }> })
   const infoItems = app ? [
     { key: 'id', label: '应用ID', children: app.id },
     { key: 'creator', label: '创建者', children: <UserInfo user={app.user} /> },
-    { key: 'createTime', label: '创建时间', children: formatTime(app.createTime) },
-    { key: 'updateTime', label: '更新时间', children: formatTime(app.updateTime) },
-    { key: 'deployedTime', label: '部署时间', children: app.deployedTime ? formatTime(app.deployedTime) : '未部署' },
+    { key: 'createTime', label: '创建时间', children: formatStoredTime(app.createTime) },
+    { key: 'updateTime', label: '更新时间', children: formatStoredTime(app.updateTime) },
+    { key: 'deployedTime', label: '部署时间', children: app.deployedTime ? formatStoredTime(app.deployedTime) : '未部署' },
     {
       key: 'link',
       label: '访问链接',

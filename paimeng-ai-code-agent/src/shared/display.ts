@@ -34,18 +34,9 @@ export function parseStoredTime(value: string | null | undefined): Date | null {
   ));
 }
 
-/** 按本地时区显示存储时间（YYYY-MM-DD HH:mm:ss）。 */
+/** 按本地时区显示存储时间（YYYY-MM-DD HH:mm:ss）。空值返回 fallback。 */
 export function formatStoredTime(value: string | null | undefined, fallback = ''): string {
   const date = parseStoredTime(value);
   if (!date) return fallback;
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-}
-
-/** 与原版 utils/time.ts 的 formatTime 一致，输出 YYYY-MM-DD HH:mm:ss，空值返回 fallback。 */
-export function formatTime(time: string | null | undefined, fallback = ''): string {
-  if (!time) return fallback;
-  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(time) ? time.replace(' ', 'T') : time;
-  const date = new Date(normalized);
-  if (Number.isNaN(date.getTime())) return fallback;
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
