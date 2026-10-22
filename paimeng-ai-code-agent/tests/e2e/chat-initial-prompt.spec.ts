@@ -9,12 +9,12 @@ async function setup(page: Page, options: { owner?: boolean; history?: UIMessage
   let history = options.history ?? [];
   let releaseTask = () => {};
   const taskGate = new Promise<void>(resolve => { releaseTask = resolve; });
-  await page.route('**/api/user/get/login', route => route.fulfill({ json: { code: 0, data: { id: options.owner === false ? 'other' : 'owner', userName: '测试创建者', userRole: 'user' } } }));
-  await page.route('**/api/app/get/vo?*', route => route.fulfill({ json: { code: 0, data: { id: appId, userId: 'owner', appName: '初始提示词测试', initPrompt: prompt, codeGenType: 'html' } } }));
-  await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: history } }));
+  await page.route('**/api/user/get/login', route => route.fulfill({ json: { code: 0, data: { id: options.owner === false ? 'other' : 'owner', userName: '测试创建者', userRole: 'user' }, message: 'ok' } }));
+  await page.route('**/api/app/get/vo?*', route => route.fulfill({ json: { code: 0, data: { id: appId, userId: 'owner', appName: '初始提示词测试', initPrompt: prompt, codeGenType: 'html' }, message: 'ok' } }));
+  await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: history, message: 'ok' } }));
   await page.route('**/api/app/generation?*', async route => {
     if (options.delayedTask) await taskGate;
-    await route.fulfill({ json: { code: 0, data: options.task ?? null } });
+    await route.fulfill({ json: { code: 0, data: options.task ?? null, message: 'ok' } });
   });
   await page.route('**/api/app/chat/gen/code', async route => {
     requests += 1;

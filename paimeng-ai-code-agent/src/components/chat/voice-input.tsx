@@ -64,27 +64,25 @@ export function voiceUnavailableReason(input: { editable: boolean; serverEnabled
   return null;
 }
 
-const transcribeResultSchema = z.object({
-  code: z.number(),
-  message: z.string().optional(),
-  // 失败响应是 `data: null`（http.ts 的 failure 包装），所以这里用 nullish。
-  data: z.object({ text: z.string() }).nullish(),
-});
+import { ApiResponseError, readApiResponse } from '@/client/api';
+
+const transcribeDataSchema = z.object({ text: z.string() });
 
 /** 录音上传走 FormData（`src/client/api.ts` 只做 JSON）；失败时把服务端文案原样抛出。 */
 export async function transcribeAudio(blob: Blob): Promise<string> {
   const form = new FormData();
   form.append('audio', blob, `recording.${audioFileExtension(blob.type)}`);
-  let response: Response;
+  let data: unknown;
   try {
-    response = await fetch('/api/app/chat/transcribe', { method: 'POST', body: form, credentials: 'same-origin' });
-  } catch {
-    throw new Error('语音转写失败：网络错误');
+    const response = await fetch('/api/app/chat/transcribe', { method: 'POST', body: form, credentials: 'same-origin' });
+    data = await readApiResponse(response);
+  } catch (error) {
+    const reason = error instanceof ApiResponseError && error.status !== 0 ? error.message : '网络错误';
+    throw new Error('语音转写失败：' + reason);
   }
-  const payload = transcribeResultSchema.safeParse(await response.json().catch(() => null));
-  if (!payload.success) throw new Error(response.ok ? '语音转写失败：响应格式不正确' : `语音转写失败（HTTP ${response.status}）`);
-  if (payload.data.code !== 0 || !payload.data.data) throw new Error(payload.data.message || `语音转写失败（HTTP ${response.status}）`);
-  return payload.data.data.text;
+  const parsed = transcribeDataSchema.safeParse(data);
+  if (!parsed.success) throw new Error('语音转写失败：响应格式不正确');
+  return parsed.data.text;
 }
 
 type VoicePhase = 'idle' | 'starting' | 'recording' | 'transcribing' | 'failed';

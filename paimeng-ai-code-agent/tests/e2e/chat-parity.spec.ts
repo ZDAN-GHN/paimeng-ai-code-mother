@@ -46,24 +46,24 @@ async function respondStream(route: Route, text: string) {
 
 async function setup(page: Page, options: Options = {}) {
   const state = { chatRequests: 0, lastChatBody: null as { message?: { parts?: { text?: string }[] } } | null, deleteRequests: 0 };
-  await page.route('**/api/app/good/list/page/vo', route => route.fulfill({ json: { code: 0, data: { records: [], totalRow: 0, pageNumber: 1, pageSize: 10 } } }));
-  await page.route('**/api/app/my/list/page/vo', route => route.fulfill({ json: { code: 0, data: { records: [], totalRow: 0, pageNumber: 1, pageSize: 10 } } }));
-  await page.route('**/api/user/get/login', route => route.fulfill({ json: { code: 0, data: { id: options.userId ?? 'owner', userName: options.admin ? '管理员' : '测试创建者', userRole: options.admin ? 'admin' : 'user', userAvatar: null } } }));
-  await page.route('**/api/app/get/vo?*', route => route.fulfill({ json: { code: 0, data: appInfo(options) } }));
+  await page.route('**/api/app/good/list/page/vo', route => route.fulfill({ json: { code: 0, data: { records: [], totalRow: 0, pageNumber: 1, pageSize: 10 }, message: 'ok' } }));
+  await page.route('**/api/app/my/list/page/vo', route => route.fulfill({ json: { code: 0, data: { records: [], totalRow: 0, pageNumber: 1, pageSize: 10 }, message: 'ok' } }));
+  await page.route('**/api/user/get/login', route => route.fulfill({ json: { code: 0, data: { id: options.userId ?? 'owner', userName: options.admin ? '管理员' : '测试创建者', userRole: options.admin ? 'admin' : 'user', userAvatar: null }, message: 'ok' } }));
+  await page.route('**/api/app/get/vo?*', route => route.fulfill({ json: { code: 0, data: appInfo(options), message: 'ok' } }));
   await page.route('**/api/app/messages?*', route => options.historyFailure
     ? route.fulfill({ status: 403, json: { code: 40300, data: null, message: '无权限访问该应用' } })
-    : route.fulfill({ json: { code: 0, data: [] } }));
+    : route.fulfill({ json: { code: 0, data: [], message: 'ok' } }));
   await page.route('**/api/app/generation?*', route => options.historyFailure
     ? route.fulfill({ status: 403, json: { code: 40300, data: null, message: '无权限访问该应用' } })
-    : route.fulfill({ json: { code: 0, data: options.task ?? null } }));
+    : route.fulfill({ json: { code: 0, data: options.task ?? null, message: 'ok' } }));
   await page.route('**/api/app/chat/gen/code', async route => {
     state.chatRequests += 1;
     state.lastChatBody = route.request().postDataJSON();
     await respondStream(route, options.streamText ?? '已收到。');
   });
-  await page.route('**/api/app/deploy', route => route.fulfill({ json: { code: 0, data: deployUrl } }));
-  await page.route('**/api/app/delete', route => { state.deleteRequests += 1; return route.fulfill({ json: { code: 0, data: true } }); });
-  await page.route('**/api/app/generation/cancel', route => route.fulfill({ json: { code: 0, data: true } }));
+  await page.route('**/api/app/deploy', route => route.fulfill({ json: { code: 0, data: deployUrl, message: 'ok' } }));
+  await page.route('**/api/app/delete', route => { state.deleteRequests += 1; return route.fulfill({ json: { code: 0, data: true, message: 'ok' } }); });
+  await page.route('**/api/app/generation/cancel', route => route.fulfill({ json: { code: 0, data: true, message: 'ok' } }));
   return state;
 }
 
@@ -201,7 +201,7 @@ test('生成中可视化编辑仍可用，选中元素随 Ctrl+Enter 插话发�
   await page.route('**/api/app/chat/input', async route => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
     inputs.push(body);
-    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 31, generationId: 'task-generating', state: 'queued' } } });
+    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 31, generationId: 'task-generating', state: 'queued' }, message: 'ok' } });
   });
   await page.goto('/app/chat/' + appId);
   const edit = page.getByRole('button', { name: '可视化编辑' });

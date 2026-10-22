@@ -20,6 +20,7 @@ import {
   Tag,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { ApiResponseError, readApiResponse } from '@/client/api';
 import { AdminGuard } from './providers';
 import styles from './admin-view.module.css';
 import {
@@ -1049,28 +1050,14 @@ async function adminPost<T>(
       credentials: 'same-origin',
       cache: 'no-store',
     });
-    const body: unknown = await response.json();
-    if (
-      typeof body !== 'object' ||
-      body === null ||
-      !('code' in body) ||
-      typeof body.code !== 'number' ||
-      !('message' in body) ||
-      typeof body.message !== 'string'
-    ) {
-      return { ok: false, status: response.status, message: '响应格式不正确' };
-    }
-    if (!response.ok || body.code !== 0) {
-      return { ok: false, status: response.status, message: body.message || '请求失败' };
-    }
-    let data: T;
+    const data = await readApiResponse(response);
     try {
-      data = parse('data' in body ? body.data : undefined);
+      return { ok: true, data: parse(data) };
     } catch {
       return { ok: false, status: response.status, message: '响应格式不正确' };
     }
-    return { ok: true, data };
-  } catch {
+  } catch (error) {
+    if (error instanceof ApiResponseError) return { ok: false, status: error.status, message: error.message };
     return { ok: false, status: 0, message: '网络请求失败，请稍后重试' };
   }
 }

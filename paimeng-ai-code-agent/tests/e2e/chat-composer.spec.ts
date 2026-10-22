@@ -19,8 +19,8 @@ test.beforeEach(async ({ page }) => {
   expect((await page.request.post('/api/user/login', { headers, data: credentials })).status()).toBe(200);
   const created = await page.request.post('/api/app/add', { headers, data: { initPrompt: prompt, codeGenType: 'html' } });
   expect(created.status()).toBe(200);
-  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'composer-existing-task', status: 'cancelled' } } }));
-  await page.route('**/api/app/chat/runtime?*', route => route.fulfill({ json: { code: 0, data: idleRuntime } }));
+  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'composer-existing-task', status: 'cancelled' }, message: 'ok' } }));
+  await page.route('**/api/app/chat/runtime?*', route => route.fulfill({ json: { code: 0, data: idleRuntime, message: 'ok' } }));
   await page.goto('/app/chat/' + (await created.json()).data);
   await expect(page.getByLabel('对话消息')).toHaveValue(prompt);
   await expect(page.getByLabel('对话消息')).toBeEnabled();
@@ -76,7 +76,7 @@ test('错误提示可关闭，同一失败任务轮询刷新后保持关闭，�
   let task = { id: 'failed-task-one', status: 'failed', error: '测试构建失败一' };
   let polls = 0;
   await page.unroute('**/api/app/generation?*');
-  await page.route('**/api/app/generation?*', route => { polls++; return route.fulfill({ json: { code: 0, data: task } }); });
+  await page.route('**/api/app/generation?*', route => { polls++; return route.fulfill({ json: { code: 0, data: task, message: 'ok' } }); });
   await page.reload();
   await expect(errorAlert).toContainText('测试构建失败一');
   await page.getByRole('button', { name: '关闭错误提示' }).click();
@@ -186,7 +186,7 @@ test('工具调用渲染成可读操作记录：没有原始 JSON、工具调用
 test('生成中追加消息不打断用户向上翻历史，出现回到底部按钮', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   const history = Array.from({ length: 24 }, (_, index) => ({ id: 'history-' + index, role: index % 2 ? 'assistant' : 'user', parts: [{ type: 'text', text: `历史消息 ${index}：` + '内容'.repeat(40) }] }));
-  await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: history } }));
+  await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: history, message: 'ok' } }));
   const chunks = ['第一段回复。', '第二段回复。', '第三段回复。'];
   const server = createServer((_, response) => {
     response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
@@ -278,7 +278,7 @@ test('生成中按 Enter 走服务端原生队列：不发第二次生成请求�
   await page.route('**/api/app/chat/input', async route => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
     inputs.push(body);
-    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 31, generationId: 'queue-assistant', state: 'queued' } } });
+    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 31, generationId: 'queue-assistant', state: 'queued' }, message: 'ok' } });
   });
   try {
     await page.getByLabel('对话消息').fill('第一条需求');
@@ -307,18 +307,18 @@ test('生成中按 Enter 走服务端原生队列：不发第二次生成请求�
 test('生成中空输入时主按钮是取消、有文本时是发送并走 followUp，Ctrl + Enter 是插话，撤回调服务端取消', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.unroute('**/api/app/generation?*');
-  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'composer-running-task', status: 'generating' } } }));
+  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'composer-running-task', status: 'generating' }, message: 'ok' } }));
   const inputs: Array<Record<string, unknown>> = [];
   const recalls: Array<Record<string, unknown>> = [];
   await page.route('**/api/app/chat/input', async route => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
     inputs.push(body);
-    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 7, generationId: 'composer-running-task', state: 'queued' } } });
+    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 7, generationId: 'composer-running-task', state: 'queued' }, message: 'ok' } });
   });
   await page.route('**/api/app/chat/input/cancel', async route => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
     recalls.push(body);
-    await route.fulfill({ json: { code: 0, data: { state: 'aborted' } } });
+    await route.fulfill({ json: { code: 0, data: { state: 'aborted' }, message: 'ok' } });
   });
   await page.reload();
   await expect(page.getByLabel('对话消息')).toBeEnabled();
@@ -360,10 +360,10 @@ test('生成中空输入时主按钮是取消、有文本时是发送并走 foll
 test('回执说已经交付的输入直接成为气泡，不经过队列（没有队列闪烁）', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.unroute('**/api/app/generation?*');
-  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'composer-running-task', status: 'generating' } } }));
+  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'composer-running-task', status: 'generating' }, message: 'ok' } }));
   await page.route('**/api/app/chat/input', async route => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
-    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 8, generationId: 'composer-running-task', state: 'placed' } } });
+    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 8, generationId: 'composer-running-task', state: 'placed' }, message: 'ok' } });
   });
   await page.reload();
   await page.evaluate(() => {
@@ -390,9 +390,9 @@ for (const short of [{ width: 844, height: 390 }, { width: 375, height: 844 }]) 
         { id: 'queued-steer-2', mode: 'steer', text: '插话二', attachments: [], submissionId: 52 },
         { id: 'queued-follow-up', mode: 'followUp', text: '排队消息一', attachments: [], submissionId: 53 },
       ], messages: [],
-    } } }));
+    }, message: 'ok' } }));
     await page.unroute('**/api/app/generation?*');
-    await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'composer-running-task', status: 'generating' } } }));
+    await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'composer-running-task', status: 'generating' }, message: 'ok' } }));
     await page.reload();
     await expect(page.locator('.composer-queue-steer .composer-queue-chip')).toHaveCount(2);
     await expect(page.locator('.composer-queue-follow-up .composer-queue-chip')).toHaveCount(1);
@@ -408,12 +408,12 @@ for (const short of [{ width: 844, height: 390 }, { width: 375, height: 844 }]) 
 test('生成中 Ctrl + Enter 中途插话：先停在插话队列，模型接收后才成为对话气泡', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.unroute('**/api/app/generation?*');
-  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'steer-task', status: 'generating' } } }));
+  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'steer-task', status: 'generating' }, message: 'ok' } }));
   const inputs: Array<Record<string, unknown>> = [];
   await page.route('**/api/app/chat/input', async route => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
     inputs.push(body);
-    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 21, generationId: 'steer-task', state: 'queued' } } });
+    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 21, generationId: 'steer-task', state: 'queued' }, message: 'ok' } });
   });
   await page.reload();
   await expect(page.getByLabel('对话消息')).toBeEnabled();
@@ -458,7 +458,7 @@ test('插话落地后离开队列，停在模型真正接收它的位置', async
     steers += 1;
     const body = route.request().postDataJSON() as Record<string, unknown>;
     landedId = String(body.id);
-    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 22, generationId: requestId, state: 'queued' } } });
+    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 22, generationId: requestId, state: 'queued' }, message: 'ok' } });
   });
   await page.route('**/api/app/chat/gen/code', route => {
     requestId = String(route.request().postDataJSON().requestId);
@@ -519,7 +519,7 @@ test('data-steer 早于输入回执到达：落点被记住，插话不经过队
     // 先让流把 data-steer 发出去（而且先于回执被处理），回执再带着一个过时的队列状态回来。
     steerWritten();
     await new Promise(resolve => setTimeout(resolve, 300));
-    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 23, generationId: requestId, state: 'queued' } } });
+    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 23, generationId: requestId, state: 'queued' }, message: 'ok' } });
   });
   await page.route('**/api/app/chat/gen/code', route => {
     requestId = String(route.request().postDataJSON().requestId);
@@ -566,16 +566,16 @@ for (const scenario of [
     let received = () => {};
     const submitted = new Promise<void>(resolve => { received = resolve; });
     await page.unroute('**/api/app/generation?*');
-    await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: task } }));
+    await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: task, message: 'ok' } }));
     await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: task.status === 'generating' ? [] : [
       ...(scenario.shown ? [{ id: inputId, role: 'user', parts: [{ type: 'text', text: '迟到回执的消息' }] }] : []),
       { id: 'late-assistant', role: 'assistant', parts: [{ type: 'text', text: '权威历史已经接管' }] },
-    ] } }));
+    ], message: 'ok' } }));
     await page.route('**/api/app/chat/input', async route => {
       inputId = String(route.request().postDataJSON().id);
       received();
       await replyGate;
-      await route.fulfill({ json: { code: 0, data: { id: inputId, submissionId: 91, generationId: task.id, state: scenario.state } } });
+      await route.fulfill({ json: { code: 0, data: { id: inputId, submissionId: 91, generationId: task.id, state: scenario.state }, message: 'ok' } });
     });
     await page.reload();
     await expect(page.getByLabel('对话消息')).toBeEnabled();
@@ -609,14 +609,14 @@ test('模型失败后原生 inbox 保留的消息继续排队，不误转待重�
   await page.unroute('**/api/app/generation?*');
   await page.route('**/api/app/generation?*', route => {
     polls += 1;
-    return route.fulfill({ json: { code: 0, data: task } });
+    return route.fulfill({ json: { code: 0, data: task, message: 'ok' } });
   });
-  await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: [] } }));
+  await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: [], message: 'ok' } }));
   await page.unroute('**/api/app/chat/runtime?*');
   await page.route('**/api/app/chat/runtime?*', route => route.fulfill({ json: { code: 0, data: {
     generation: task, busy: task.status === 'generating', messages: [],
     pending: pending ? [{ id: 'retained-input', mode: 'followUp', text: '仍在 pi 队列里的需求', attachments: [], submissionId: 93 }] : [],
-  } } }));
+  }, message: 'ok' } }));
   await page.route('**/api/app/chat/gen/code', route => {
     duplicateSends += 1;
     return route.fulfill({ status: 500, json: { code: 50000, data: null, message: '不应重复发送' } });
@@ -624,7 +624,7 @@ test('模型失败后原生 inbox 保留的消息继续排队，不误转待重�
   await page.route('**/api/app/chat/input/cancel', route => {
     expect(route.request().postDataJSON().submissionId).toBe(93);
     pending = false;
-    return route.fulfill({ json: { code: 0, data: { state: 'aborted' } } });
+    return route.fulfill({ json: { code: 0, data: { state: 'aborted' }, message: 'ok' } });
   });
   await page.reload();
   await expect(page.locator('.composer-queue-follow-up')).toContainText('仍在 pi 队列里的需求');
@@ -646,13 +646,13 @@ test('终态收尾：转录里没有的输入连附件留进待重发区，转�
   let polls = 0;
   await page.route('**/api/app/generation?*', route => {
     polls += 1;
-    return route.fulfill({ json: { code: 0, data: { id: 'steer-task', status: polls > 2 ? 'cancelled' : 'generating' } } });
+    return route.fulfill({ json: { code: 0, data: { id: 'steer-task', status: polls > 2 ? 'cancelled' : 'generating' }, message: 'ok' } });
   });
   await page.unroute('**/api/app/messages?*');
-  await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: [] } }));
+  await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: [], message: 'ok' } }));
   await page.route('**/api/app/chat/input', async route => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
-    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 24, generationId: 'steer-task', state: 'queued' } } });
+    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 24, generationId: 'steer-task', state: 'queued' }, message: 'ok' } });
   });
   await page.reload();
   await expect(page.getByLabel('对话消息')).toBeEnabled();
@@ -689,13 +689,13 @@ test('取消后的附图排队消息保留附件，重发时不覆盖新草稿',
   let task = { id: 'lost-image-task', status: 'generating' };
   const attachment = { type: 'attachment', attachmentId: randomUUID(), mediaType: 'image/png', filename: '素材.png' };
   await page.unroute('**/api/app/generation?*');
-  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: task } }));
-  await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: [] } }));
+  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: task, message: 'ok' } }));
+  await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: [], message: 'ok' } }));
   await page.unroute('**/api/app/chat/runtime?*');
   await page.route('**/api/app/chat/runtime?*', route => route.fulfill({ json: { code: 0, data: {
     generation: task, busy: task.status === 'generating', messages: [],
     pending: task.status === 'generating' ? [{ id: 'lost-image-input', mode: 'followUp', text: '带素材的旧需求', attachments: [attachment], submissionId: 92 }] : [],
-  } } }));
+  }, message: 'ok' } }));
   await page.route('**/api/app/attachment?*', route => route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aJ1sAAAAASUVORK5CYII=', 'base64') }));
   await page.reload();
   await expect(page.locator('.composer-queue-follow-up')).toContainText('1 张图');
@@ -734,8 +734,8 @@ test('刷新后长时间只有工具在跑：轮询投影持续更新工具卡�
   ];
   let phase = 0;
   let runtimePolls = 0;
-  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'slow-tools-task', status: 'generating' } } }));
-  await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: [] } }));
+  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'slow-tools-task', status: 'generating' }, message: 'ok' } }));
+  await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: [], message: 'ok' } }));
   await page.route('**/api/app/chat/runtime?*', async route => {
     runtimePolls += 1;
     const current = phases[Math.min(phase, phases.length - 1)];
@@ -748,7 +748,7 @@ test('刷新后长时间只有工具在跑：轮询投影持续更新工具卡�
         { type: 'text', text: current.text },
         ...(current.tool ? [current.tool] : []),
       ] }],
-    } } });
+    }, message: 'ok' } });
   });
   await page.reload();
   // 第一段文字出现。
@@ -779,9 +779,9 @@ test('刷新后从运行态恢复原生队列与进行中的工具卡片，终�
   ];
   let task: { id: string; status: string } = { id: 'recover-task', status: 'generating' };
   await page.unroute('**/api/app/generation?*');
-  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: task } }));
+  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: task, message: 'ok' } }));
   await page.unroute('**/api/app/messages?*');
-  await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: finalHistory } }));
+  await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: finalHistory, message: 'ok' } }));
   await page.unroute('**/api/app/chat/runtime?*');
   await page.route('**/api/app/chat/runtime?*', route => {
     const running = task.status === 'generating';
@@ -789,7 +789,7 @@ test('刷新后从运行态恢复原生队列与进行中的工具卡片，终�
       generation: task, busy: running,
       pending: running ? [{ id: 'recover-input', mode: 'steer', text: '排队中的插话', attachments: [], submissionId: 41 }] : [],
       messages: running ? [liveAssistant] : [],
-    } } });
+    }, message: 'ok' } });
   });
   await page.reload();
   // 没有本地流时以运行态投影为准：刷新页面也能看到正在跑的工具卡片与原生队列。
@@ -864,7 +864,7 @@ test('生成中连接被切断：错误条说人话，时间线不再停在运�
   const port = (server.address() as AddressInfo).port;
   let requestId = 'broken-stream-task';
   await page.unroute('**/api/app/generation?*');
-  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: requestId, status: 'cancelled' } } }));
+  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: requestId, status: 'cancelled' }, message: 'ok' } }));
   await page.route('**/api/app/chat/gen/code', route => {
     requestId = route.request().postDataJSON().requestId;
     return route.continue({ url: `http://127.0.0.1:${port}/stream` });
@@ -949,14 +949,14 @@ test('断流后轮询先拿到 generating 再拿到 cancelled：时间线收尾�
   await page.unroute('**/api/app/generation?*');
   await page.route('**/api/app/generation?*', route => {
     polls += 1;
-    return route.fulfill({ json: { code: 0, data: { id: taskId, status: taskStatus, error: taskStatus === 'cancelled' ? '生成已取消' : null } } });
+    return route.fulfill({ json: { code: 0, data: { id: taskId, status: taskStatus, error: taskStatus === 'cancelled' ? '生成已取消' : null }, message: 'ok' } });
   });
   await page.unroute('**/api/app/messages?*');
-  await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: [] } }));
+  await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: [], message: 'ok' } }));
   await page.route('**/api/app/chat/input', async route => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
     inputs.push(body);
-    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 25, generationId: taskId, state: 'queued' } } });
+    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 25, generationId: taskId, state: 'queued' }, message: 'ok' } });
   });
   await page.route('**/api/app/chat/gen/code', route => {
     sends += 1;

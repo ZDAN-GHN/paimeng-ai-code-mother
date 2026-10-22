@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { App, Button, Image, Spin } from 'antd';
 import { DeleteOutlined, LoadingOutlined, ReloadOutlined } from '@ant-design/icons';
 import { z } from 'zod';
+import { ApiResponseError, readApiResponse } from '@/client/api';
 import { attachmentInfoSchema, attachmentPartSchema, attachmentPartsSchema, type AttachmentInfo, type AttachmentPart } from '@/shared/attachments';
 import { selectImages } from '@/components/clipboard-images';
 
@@ -22,11 +23,7 @@ export type AttachmentDraft = { key: string } & (
   | { status: 'ready'; attachment: AttachmentInfo }
 );
 
-const uploadResultSchema = z.object({
-  code: z.number(),
-  message: z.string().optional(),
-  data: z.object({ attachments: z.array(attachmentInfoSchema) }).optional(),
-});
+const uploadDataSchema = z.object({ attachments: z.array(attachmentInfoSchema) });
 
 const messageMetadataSchema = z.object({
   attachments: attachmentPartsSchema.optional(),
@@ -80,16 +77,17 @@ export async function uploadAttachments(appId: string, files: readonly File[]): 
   const form = new FormData();
   form.append('appId', appId);
   for (const file of files) form.append('images', file, file.name);
-  let response: Response;
+  let data: unknown;
   try {
-    response = await fetch('/api/app/attachment/upload', { method: 'POST', body: form, credentials: 'same-origin' });
-  } catch {
-    throw new Error('图片上传失败：网络错误');
+    const response = await fetch('/api/app/attachment/upload', { method: 'POST', body: form, credentials: 'same-origin' });
+    data = await readApiResponse(response);
+  } catch (error) {
+    const reason = error instanceof ApiResponseError && error.status !== 0 ? error.message : '网络错误';
+    throw new Error('图片上传失败：' + reason);
   }
-  const payload = uploadResultSchema.safeParse(await response.json().catch(() => null));
-  if (!payload.success) throw new Error(response.ok ? '图片上传失败：响应格式不正确' : `图片上传失败（HTTP ${response.status}）`);
-  if (payload.data.code !== 0 || !payload.data.data) throw new Error(payload.data.message || `图片上传失败（HTTP ${response.status}）`);
-  return payload.data.data.attachments;
+  const parsed = uploadDataSchema.safeParse(data);
+  if (!parsed.success) throw new Error('图片上传失败：响应格式不正确');
+  return parsed.data.attachments;
 }
 
 /** 输入框的图片草稿：`add` 之后自己上传，暴露给发送流程的是 `parts`（已上传的那些）。 */

@@ -15,7 +15,7 @@ test.beforeEach(async ({ page }) => {
   expect((await page.request.post('/api/user/login', { headers, data: credentials })).status()).toBe(200);
   const created = await page.request.post('/api/app/add', { headers, data: { initPrompt: prompt, codeGenType: 'html' } });
   expect(created.status()).toBe(200);
-  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'image-existing-task', status: 'cancelled' } } }));
+  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'image-existing-task', status: 'cancelled' }, message: 'ok' } }));
   await page.goto('/app/chat/' + (await created.json()).data);
   await expect(page.getByLabel('对话消息')).toHaveValue(prompt);
   await expect(page.getByLabel('对话消息')).toBeEnabled();
@@ -69,11 +69,11 @@ test('非图片文件被客户端拒绝：提示具体原因且不进草稿', as
 test('生成中附图插话：图片随 Ctrl+Enter 的 steer 一起排队', async ({ page }) => {
   const inputs: Array<Record<string, unknown>> = [];
   await page.unroute('**/api/app/generation?*');
-  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'image-steer-task', status: 'generating' } } }));
+  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'image-steer-task', status: 'generating' }, message: 'ok' } }));
   await page.route('**/api/app/chat/input', async route => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
     inputs.push(body);
-    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 41, generationId: 'image-steer-task', state: 'queued' } } });
+    await route.fulfill({ json: { code: 0, data: { id: body.id, submissionId: 41, generationId: 'image-steer-task', state: 'queued' }, message: 'ok' } });
   });
   await page.reload();
   await expect(page.getByLabel('对话消息')).toHaveValue(prompt);

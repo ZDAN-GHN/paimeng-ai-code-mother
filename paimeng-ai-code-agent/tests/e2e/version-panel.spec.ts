@@ -114,9 +114,9 @@ function overviewOf(versions: AppVersion[], current: VersionPosition, branches: 
 
 /** 面板用函数式谓词拦截，避免 `?` 通配把 thumbnail / diff 一起吃掉。 */
 async function mockVersions(page: Page, data: AppVersionOverview, options: { diff?: unknown } = {}) {
-  await page.route(url => url.pathname === '/api/app/versions', route => route.fulfill({ json: { code: 0, data } }));
+  await page.route(url => url.pathname === '/api/app/versions', route => route.fulfill({ json: { code: 0, data, message: 'ok' } }));
   await page.route(url => url.pathname === '/api/app/versions/thumbnail', route => route.fulfill({ status: 404 }));
-  if (options.diff) await page.route(url => url.pathname === '/api/app/versions/diff', route => route.fulfill({ json: { code: 0, data: options.diff } }));
+  if (options.diff) await page.route(url => url.pathname === '/api/app/versions/diff', route => route.fulfill({ json: { code: 0, data: options.diff, message: 'ok' } }));
 }
 
 async function openPanel(page: Page) {
@@ -134,7 +134,7 @@ function captureWrite(page: Page, path: string, body: unknown) {
   const seen: unknown[] = [];
   void page.route((url: URL) => url.pathname === path, async (route: Route) => {
     seen.push(route.request().postDataJSON());
-    await route.fulfill({ json: { code: 0, data: body } });
+    await route.fulfill({ json: { code: 0, data: body, message: 'ok' } });
   });
   return seen;
 }
@@ -147,8 +147,8 @@ test.beforeEach(async ({ page }) => {
   expect((await page.request.post('/api/user/login', { headers, data: credentials })).status()).toBe(200);
   const created = await page.request.post('/api/app/add', { headers, data: { initPrompt: prompt, codeGenType: 'html' } });
   expect(created.status()).toBe(200);
-  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'versions-existing-task', status: 'ready' } } }));
-  await page.route('**/api/app/chat/runtime?*', route => route.fulfill({ json: { code: 0, data: idleRuntime } }));
+  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'versions-existing-task', status: 'ready' }, message: 'ok' } }));
+  await page.route('**/api/app/chat/runtime?*', route => route.fulfill({ json: { code: 0, data: idleRuntime, message: 'ok' } }));
   await page.goto('/app/chat/' + (await created.json()).data);
   await expect(page.getByLabel('对话消息')).toHaveValue(prompt);
 });
@@ -277,7 +277,7 @@ test('回退成功后页面会刷新预览（iframe 换成新地址，不是停�
     return route.fulfill({ json: { code: 0, data: {
       id: appIdPlaceholder, userId: 'owner', appName: '版本回退预览', initPrompt: prompt, codeGenType: 'html',
       sourceAvailable: true, previewUrl: origin.replace(/\/$/, '') + '/preview/html_versions/', builtAt: null, deployedTime: null,
-    } } });
+    }, message: 'ok' } });
   });
   await page.goto('/app/chat/' + appIdPlaceholder);
   const frame = page.locator('.preview-frame');
@@ -375,14 +375,14 @@ test('版本记录与差异加载时没有 HTML 嵌套或 hydration 错误', asy
   const pending: AppVersionOverview = { current: { kind: 'branch', branch: 'main', versionId: v2.id }, versions: [v2, v1], branches: [], blocked: null };
   await page.route(url => url.pathname === '/api/app/versions', async route => {
     await overviewResponse.promise;
-    await route.fulfill({ json: { code: 0, data: pending } });
+    await route.fulfill({ json: { code: 0, data: pending, message: 'ok' } });
   });
   await page.route(url => url.pathname === '/api/app/versions/thumbnail', route => route.fulfill({ status: 404 }));
   await page.route(url => url.pathname === '/api/app/versions/diff', async route => {
     await diffResponse.promise;
     await route.fulfill({ json: { code: 0, data: {
       base: v1, target: v2, files: [], patch: '', truncated: false,
-    } } });
+    }, message: 'ok' } });
   });
 
   await openPanel(page);
@@ -405,7 +405,7 @@ test('读取失败时可以重试', async ({ page }) => {
     attempts += 1;
     return attempts === 1
       ? route.fulfill({ json: { code: 50000, message: '版本库暂时不可用', data: null } })
-      : route.fulfill({ json: { code: 0, data: overviewOf([], { kind: 'branch', branch: 'main', versionId: null }, []) } });
+      : route.fulfill({ json: { code: 0, data: overviewOf([], { kind: 'branch', branch: 'main', versionId: null }, []), message: 'ok' } });
   });
   await openPanel(page);
   await expect(page.getByText('读取版本记录失败：版本库暂时不可用')).toBeVisible();

@@ -13,7 +13,6 @@ export const roleSchema = z.enum(['user', 'admin']);
 export type User = {id:string;userAccount:string;userName:string|null;userAvatar:string|null;userProfile:string|null;userRole:'user'|'admin';createTime:string;updateTime:string};
 export type AppInfo = {id:string;appName:string|null;cover:string|null;initPrompt:string;codeGenType:CodeGenType;deployKey:string|null;deployedTime:string|null;editTime?:string|null;priority:number;userId:string;createTime:string;updateTime:string;user?:User;sourceAvailable?:boolean;previewUrl?:string|null;builtAt?:string|null;deployUrl?:string|null;template?:TemplateIdentity|null};
 export type Page<T> = {records:T[];totalRow:number;pageNumber:number;pageSize:number};
-export type ApiResult<T> = {code:number;data:T;message:string};
 export type GenerationStatus = 'generating'|'building'|'ready'|'failed'|'cancelled';
 export type Generation = {id:string;appId:string;status:GenerationStatus;error:string|null;stopReason:string|null;createTime:string;updateTime:string};
 export type ChatHistory = {id:string;appId:string;userId:string;message:string;messageType:'user'|'ai';createTime:string};

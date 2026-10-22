@@ -36,7 +36,7 @@ test.beforeEach(async ({ page }) => {
   expect((await page.request.post('/api/user/login', { headers, data: credentials })).status()).toBe(200);
   const created = await page.request.post('/api/app/add', { headers, data: { initPrompt: prompt, codeGenType: 'html' } });
   expect(created.status()).toBe(200);
-  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'voice-existing-task', status: 'cancelled' } } }));
+  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: { id: 'voice-existing-task', status: 'cancelled' }, message: 'ok' } }));
   await page.addInitScript(stubRecording);
   await page.goto('/app/chat/' + (await created.json()).data);
   await expect(page.getByLabel('对话消息')).toHaveValue(prompt);
@@ -46,9 +46,9 @@ test.beforeEach(async ({ page }) => {
 test('录音结束后转写文本追加进输入框，且不自动发送', async ({ page }) => {
   const uploads: Array<{ contentType: string | null }> = [];
   await page.route('**/api/app/chat/transcribe', async route => {
-    if (route.request().method() === 'GET') return route.fulfill({ json: { code: 0, data: { enabled: true } } });
+    if (route.request().method() === 'GET') return route.fulfill({ json: { code: 0, data: { enabled: true }, message: 'ok' } });
     uploads.push({ contentType: route.request().headers()['content-type'] ?? null });
-    return route.fulfill({ json: { code: 0, data: { text: transcript } } });
+    return route.fulfill({ json: { code: 0, data: { text: transcript }, message: 'ok' } });
   });
   await page.reload();
   await expect(page.getByLabel('对话消息')).toBeEnabled();
@@ -67,7 +67,7 @@ test('录音结束后转写文本追加进输入框，且不自动发送', async
 
 test('未配置转写模型时麦克风禁用并说明原因', async ({ page }) => {
   await page.route('**/api/app/chat/transcribe', async route => {
-    if (route.request().method() === 'GET') return route.fulfill({ json: { code: 0, data: { enabled: false } } });
+    if (route.request().method() === 'GET') return route.fulfill({ json: { code: 0, data: { enabled: false }, message: 'ok' } });
     return route.fulfill({ json: { code: 409, data: null, message: '未配置语音转写模型' } });
   });
   await page.reload();

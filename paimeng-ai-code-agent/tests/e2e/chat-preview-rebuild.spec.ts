@@ -11,17 +11,17 @@ async function setup(page: Page, options: { viewer?: 'owner' | 'other'; codeGenT
   let preview = options.preview ?? false;
   let release = () => {};
   const gate = new Promise<void>(resolve => { release = resolve; });
-  await page.route('**/api/user/get/login', route => route.fulfill({ json: { code: 0, data: { id: options.viewer === 'other' ? 'other' : 'owner', userName: '测试创建者', userRole: 'user' } } }));
-  await page.route('**/api/app/get/vo?*', route => route.fulfill({ json: { code: 0, data: { id: appId, userId: 'owner', appName: '预览重建测试', initPrompt: '预览重建测试', codeGenType: options.codeGenType ?? 'vue_project', sourceAvailable: options.source ?? true, previewUrl: preview ? previewUrl : null, builtAt: options.builtAt ?? null, deployedTime: options.deployedTime ?? null } } }));
-  await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: history } }));
-  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: options.task === undefined ? { id: 'task-1', status: 'cancelled', error: '生成已取消' } : options.task } }));
+  await page.route('**/api/user/get/login', route => route.fulfill({ json: { code: 0, data: { id: options.viewer === 'other' ? 'other' : 'owner', userName: '测试创建者', userRole: 'user' }, message: 'ok' } }));
+  await page.route('**/api/app/get/vo?*', route => route.fulfill({ json: { code: 0, data: { id: appId, userId: 'owner', appName: '预览重建测试', initPrompt: '预览重建测试', codeGenType: options.codeGenType ?? 'vue_project', sourceAvailable: options.source ?? true, previewUrl: preview ? previewUrl : null, builtAt: options.builtAt ?? null, deployedTime: options.deployedTime ?? null }, message: 'ok' } }));
+  await page.route('**/api/app/messages?*', route => route.fulfill({ json: { code: 0, data: history, message: 'ok' } }));
+  await page.route('**/api/app/generation?*', route => route.fulfill({ json: { code: 0, data: options.task === undefined ? { id: 'task-1', status: 'cancelled', error: '生成已取消' } : options.task, message: 'ok' } }));
   await page.route('**/api/app/build', async route => {
     builds += 1;
     expect(route.request().method()).toBe('POST');
     expect(route.request().postDataJSON()).toMatchObject({ appId });
     if (options.gated) await gate;
     preview = true;
-    await route.fulfill({ json: { code: 0, data: previewUrl } });
+    await route.fulfill({ json: { code: 0, data: previewUrl, message: 'ok' } });
   });
   return { builds: () => builds, release: () => release() };
 }
