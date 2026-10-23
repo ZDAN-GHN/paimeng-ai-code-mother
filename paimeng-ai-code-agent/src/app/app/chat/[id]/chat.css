@@ -3,7 +3,7 @@
 .chat-page {
   display: flex;
   flex-direction: column;
-  height: calc(100dvh - 64px);
+  height: calc(100dvh - 65px);
   max-width: none;
   margin: 0;
   padding: 16px;
@@ -26,12 +26,15 @@
 .chat-page .chat-columns {
   flex: 1;
   display: flex;
-  gap: 16px;
+  gap: 0;
   min-height: 0;
   padding: 4px;
 }
+/* 两栏宽度由行内 flex-basis 给（对话区占比），预览区吃掉剩下的；拖拽条自己占固定宽度。 */
+.chat-page .chat-columns-solo .chat-panel { flex: 1 1 auto; width: 100%; }
 .chat-page .chat-panel {
-  flex: 2;
+  flex: 0 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -241,7 +244,9 @@
 }
 
 .chat-page .preview-panel {
-  flex: 3;
+  flex: 1 1 0;
+  min-width: 0;
+  margin-left: 16px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -262,7 +267,71 @@
 .chat-page .preview-bar h3 { margin: 0; font-size: 16px; font-weight: 600; }
 .chat-page .preview-bar .ant-space { flex-wrap: wrap; }
 .chat-page .preview-bar .ant-space-item { white-space: nowrap; }
+.chat-page .chat-divider {
+  flex: 0 0 9px;
+  align-self: stretch;
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+}
+/* 只画一条 2px 的线，但可点的宽度是 9px：细线更好看，粗一点更好抓。 */
+.chat-page .chat-divider::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: #eadcd1;
+}
+/* 中段一小截抓手：没有它，这条线在浅底上几乎看不出来可以拖。 */
+.chat-page .chat-divider::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 28px;
+  transform: translate(-50%, -50%);
+  border-radius: 2px;
+  background: #d3beb0;
+}
+.chat-page .chat-divider:hover::before,
+.chat-page .chat-divider:hover::after,
+body.chat-resizing .chat-page .chat-divider::before,
+body.chat-resizing .chat-page .chat-divider::after { background: #cb573e; }
+/* 拖动期间：整页禁用选中与指针事件，iframe 不会吞掉鼠标。 */
+body.chat-resizing { cursor: col-resize; user-select: none; }
+body.chat-resizing .chat-page .preview-frame { pointer-events: none; }
+.chat-page .preview-live { align-items: center; justify-content: center; }
+.chat-page .preview-screen { width: 100%; height: 100%; min-height: 0; }
 .chat-page .preview-frame { width: 100%; height: 100%; flex: 1; border: 0; background: #fff; }
+/* 手机端：一个 390px 的圆角框，屏比面板窄时收成面板宽。 */
+.chat-page .preview-live-mobile { padding: 16px 0; }
+.chat-page .preview-live-mobile .preview-screen {
+  width: 390px;
+  max-width: calc(100% - 32px);
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid #e8e8e8;
+  border-radius: 14px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+}
+/* 对话流里的提示条目：原来是页面级 Alert，现在跟着消息一起滚。 */
+.chat-page .chat-stream-alert { margin: 0 0 14px; }
+/* 中断记录：一行说明，不给关闭按钮，也不做成卡片。 */
+.chat-page .message-note {
+  margin: 0 0 14px;
+  color: #8a7c72;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+/* 图标走伪元素：读屏不念它，断言拿到的文本也只有原因本身。 */
+.chat-page .message-note::before { content: '⏹'; margin-right: 8px; font-size: 11px; }
+.chat-page .message-note-failed { color: #a2614c; }
 .chat-page .preview-placeholder,
 .chat-page .preview-loading {
   flex: 1;
@@ -351,9 +420,15 @@
 
 @media (max-width: 1024px) {
   .chat-page { height: auto; }
-  .chat-page .chat-columns { flex-direction: column; }
+  .chat-page .chat-columns { flex-direction: column; gap: 16px; }
   .chat-page .chat-panel,
-  .chat-page .preview-panel { flex: none; height: 50vh; }
+  .chat-page .preview-panel { flex: none; height: 50vh; margin-left: 0; }
+  /* 堆叠布局没有左右之分，拖拽条不出现。 */
+  .chat-page .chat-divider { display: none; }
+  /* 收起时对话区接管剩下的一屏：整页锁在一屏内，对话列吃掉工具栏以下的空间。 */
+  .chat-page.chat-page-solo { height: calc(100dvh - 65px); }
+  .chat-page .chat-columns-solo { flex: 1; min-height: 0; }
+  .chat-page .chat-columns-solo .chat-panel { flex: 1 1 auto; height: auto; min-height: 0; }
 }
 @media (max-width: 768px) {
   .chat-page { padding: 12px; }

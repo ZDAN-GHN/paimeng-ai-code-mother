@@ -131,6 +131,9 @@ test('仅有源码时下载和部署可用，没有可预览产物', async ({ pa
   await expect(page.getByRole('button', { name: '部署' })).toBeEnabled();
   await expect(page.getByRole('button', { name: '可视化编辑' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '新窗口打开' })).toHaveCount(0);
+  // 没有可预览产物时面板默认收起，占位说明要点开才看得到。
+  await expect(page.locator('.preview-panel')).toBeHidden();
+  await page.getByRole('button', { name: '网页展示' }).click();
   await expect(page.getByText('网站文件生成完成后将在这里展示', { exact: true })).toBeVisible();
 });
 

@@ -1,10 +1,10 @@
 'use client';
-import { Fragment, memo, use, useState, useEffect, useMemo, useRef, useCallback, type ComponentRef } from 'react';
+import { Fragment, memo, use, useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, type ComponentRef, type PointerEvent as ReactPointerEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
 import { App, Button, Input, Alert, Tag, Space, Spin, Tooltip } from 'antd';
-import { SendOutlined, DownloadOutlined, CloudUploadOutlined, EditOutlined, StopOutlined, InfoCircleOutlined, ExportOutlined, PictureOutlined, HistoryOutlined } from '@ant-design/icons';
+import { SendOutlined, DownloadOutlined, CloudUploadOutlined, EditOutlined, StopOutlined, InfoCircleOutlined, ExportOutlined, PictureOutlined, HistoryOutlined, DesktopOutlined, MobileOutlined, RightOutlined } from '@ant-design/icons';
 import { api } from '@/client/api';
 import { useAuth } from '@/components/providers';
 import { type AppInfo, type Generation, type GenerationAccount, isProjectCodeGenType } from '@/shared/contracts';
@@ -29,6 +29,23 @@ import './chat.css';
 const statusLabels = { generating: '生成中', building: '构建中', ready: '可预览', failed: '失败', cancelled: '已取消' } as const;
 const historyPageSize = 10;
 const inputLimit = 1000;
+/** 两栏布局的偏好键：按浏览器记一份，跨应用共用。 */
+const layoutKeys = { open: 'paimeng.chat.preview', split: 'paimeng.chat.split', device: 'paimeng.chat.device' } as const;
+/** 对话区默认占 40%，对齐原来写死的 2:3。两侧都不小于 300px。 */
+const defaultSplit = 0.4;
+const minPaneWidth = 300;
+type PreviewDevice = 'desktop' | 'mobile';
+
+/** localStorage 可能被禁用（隐私模式）：读不到就用默认值，不抛错。 */
+function readLayout<T>(key: string, parse: (value: string) => T | null): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? null : parse(raw);
+  } catch { return null; }
+}
+function writeLayout(key: string, value: string) {
+  try { localStorage.setItem(key, value); } catch { /* 存不下就只在本次会话里生效 */ }
+}
 
 /** 服务端用 transient data 事件告知摘要进度；data 是未知形状，只在明确为 consolidating 时显示提示。 */
 function isConsolidating(data: unknown): boolean {
@@ -108,7 +125,6 @@ function Chat({ id }: { id: string }) {
   const [task, setTask] = useState<Generation | null>(null);
   const [usageByMessage, setUsageByMessage] = useState<Map<string, GenerationAccount>>(new Map());
   const [error, setError] = useState('');
-  const [dismissedTaskError, setDismissedTaskError] = useState('');
   const [historyError, setHistoryError] = useState('');
   const [appLoaded, setAppLoaded] = useState(false);
   const [historySettled, setHistorySettled] = useState(false);
@@ -130,7 +146,14 @@ function Chat({ id }: { id: string }) {
   const [dragging, setDragging] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [previewVersion, setPreviewVersion] = useState<number | null>(null);
+  // null 表示用户没动过：跟着有没有预览走（没有就收起，有了就展开）。用户点过就以用户为准。
+  const [previewOpen, setPreviewOpen] = useState<boolean | null>(null);
+  const [split, setSplit] = useState(defaultSplit);
+  const [device, setDevice] = useState<PreviewDevice | null>(null);
+  const [deviceDefault, setDeviceDefault] = useState<PreviewDevice>('desktop');
   const iframe = useRef<HTMLIFrameElement>(null);
+  const columns = useRef<HTMLDivElement>(null);
+  const splitRef = useRef(defaultSplit);
   const messageList = useRef<HTMLDivElement>(null);
   const messageContent = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -159,6 +182,18 @@ function Chat({ id }: { id: string }) {
   const loaded = appLoaded && historySettled;
   const canAttachImages = canEdit && loaded;
   const { drafts: imageDrafts, parts: imageParts, blockReason: imageBlockReason, add: addImages, remove: removeImage, retry: retryImage, clearSent: clearSentImages } = useImageAttachments(id);
+  // 布局偏好（展开、宽比、手机端）在首帧之前读进来：挂载后再读会让画面先按默认值闪一下。
+  useLayoutEffect(() => {
+    const storedSplit = readLayout(layoutKeys.split, raw => {
+      const value = Number(raw);
+      return Number.isFinite(value) ? Math.min(Math.max(value, 0.2), 0.8) : null;
+    });
+    splitRef.current = storedSplit ?? defaultSplit;
+    setSplit(splitRef.current);
+    setPreviewOpen(readLayout(layoutKeys.open, raw => (raw === 'open' ? true : raw === 'closed' ? false : null)));
+    setDevice(readLayout(layoutKeys.device, raw => (raw === 'mobile' ? 'mobile' as const : raw === 'desktop' ? 'desktop' as const : null)));
+    setDeviceDefault(window.innerWidth < 768 ? 'mobile' : 'desktop');
+  }, []);
   // 转写别名是否配置由服务端回答（需要登录）：未配置时麦克风禁用并说明，不假装可用。
   useEffect(() => {
     if (!canEdit) return;
@@ -463,7 +498,7 @@ function Chat({ id }: { id: string }) {
     setStickToBottom(true);
     setProgress(initialProgress());
     setPreviewVersion(null);
-    setError(''); clearError(); setDismissedTaskError('');
+    setError(''); clearError();
     if (!options.keepDraft) { setInput(''); setSelected([]); setEditing(false); clearSentImages(attachments); }
     try {
       await sendMessage({ text, metadata: attachments.length ? { attachments: [...attachments] } : undefined });
@@ -606,17 +641,24 @@ function Chat({ id }: { id: string }) {
   // 响应流被浏览器/网络层切断时的原文（如 `Error in input stream`）换成可读文案。
   const interrupted = rawRequestError ? interruptedStreamMessage({ message: rawRequestError, status: task?.status ?? null }) : null;
   const requestError = interrupted ? null : rawRequestError;
-  const taskError = !failureResolved && taskErrorKey !== dismissedTaskError ? task?.error ?? null : null;
-  const alert = interrupted
-    ? { type: 'warning' as const, title: interrupted, dismiss: () => { setError(''); clearError(); } }
-    : requestError
-    ? { type: 'error' as const, title: requestError, dismiss: () => { setError(''); clearError(); } }
-    : taskError
-      ? canPreview
-        ? { type: 'warning' as const, title: `上次生成失败：${taskError}。当前预览由已有代码构建，可以直接预览、编辑或部署；重新发送需求可继续修复。`, dismiss: () => { setDismissedTaskError(taskErrorKey); } }
-        : { type: 'error' as const, title: taskError, dismiss: () => { setDismissedTaskError(taskErrorKey); } }
-      : null;
   const taskRunning = task?.status === 'generating' || task?.status === 'building';
+  // 正在跑的这一轮不该背着上一轮的失败：重新发送之后旧原因就收起来。
+  const taskError = !failureResolved && !taskRunning ? task?.error ?? null : null;
+  /**
+   * 中断记录：像终端里那样直接写在对话里，不给关闭按钮。
+   * 说清楚原因（你取消的 / 连接断了 / 模型或构建失败的具体原文），并说明接下来能做什么。
+   */
+  const cancelledByUser = task?.status === 'cancelled' && !!taskError;
+  const interruption = interrupted
+    ? interrupted
+    : requestError
+      ? `请求失败：${requestError}`
+      : taskError
+        ? (cancelledByUser ? '你取消了这次生成' : `生成中断：${taskError}`) + (canPreview
+          ? '。已有预览由之前的代码构建，可以直接预览、编辑或部署；重新发送需求可继续。'
+          : '。重新发送需求可继续。')
+        : null;
+  const interruptionFailed = !!requestError || (!!taskError && !cancelledByUser);
   const statusLabel = task ? (taskRunning ? statusLabels[task.status] : canPreview ? statusLabels.ready : statusLabels[task.status]) : null;
   const statusColor = statusLabel === statusLabels.ready ? 'green' : statusLabel === statusLabels.failed ? 'red' : 'default';
   const canDownload = canEdit && sourceAvailable && !generating;
@@ -631,16 +673,60 @@ function Chat({ id }: { id: string }) {
   const leftoverInputs = placed.filter(input => input.boundary === null || !bubbleIdOf(input) || !visibleMessageIds.has(bubbleIdOf(input) ?? ''));
   const contextLength = selected.length ? selectionContext(selected).length : 0;
   const textareaMax = Math.max(0, inputLimit - contextLength);
+  // 收起是隐藏，不是卸载：预览区留在 DOM 里，iframe 不重新挂载，多页原型的浏览位置不会丢。
+  const previewShown = previewOpen === null ? canPreview : previewOpen;
+  const activeDevice: PreviewDevice = device ?? deviceDefault;
+  /** 没有预览时点「网页展示」也能打开，看的是占位说明。 */
+  const togglePreview = () => setPreviewOpen(current => {
+    const next = !(current === null ? canPreview : current);
+    writeLayout(layoutKeys.open, next ? 'open' : 'closed');
+    return next;
+  });
+  const toggleDevice = () => {
+    const next: PreviewDevice = activeDevice === 'mobile' ? 'desktop' : 'mobile';
+    setDevice(next);
+    writeLayout(layoutKeys.device, next);
+  };
+  /**
+   * 拖动分界：整个拖动期间的 pointermove 都落在拖拽条自己身上（指针捕获），
+   * 否则划到 iframe 上方时事件会被预览文档吃掉。松手才写 localStorage。
+   */
+  const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const rect = columns.current?.getBoundingClientRect();
+    if (!rect) return;
+    event.preventDefault();
+    const handle = event.currentTarget;
+    handle.setPointerCapture(event.pointerId);
+    document.body.classList.add('chat-resizing');
+    const move = (pointer: PointerEvent) => {
+      const min = minPaneWidth / rect.width;
+      const max = Math.max(min, 1 - (minPaneWidth + 24) / rect.width);
+      const next = Math.min(Math.max((pointer.clientX - rect.left) / rect.width, min), max);
+      splitRef.current = next;
+      setSplit(next);
+    };
+    const finish = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', finish);
+      handle.removeEventListener('pointercancel', finish);
+      document.body.classList.remove('chat-resizing');
+      writeLayout(layoutKeys.split, String(splitRef.current));
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', finish);
+    handle.addEventListener('pointercancel', finish);
+  };
   const previewSrc = canPreview && app?.previewUrl
     ? app.previewUrl + (app.previewUrl.includes('?') ? '&' : '?') + 'generation=' + encodeURIComponent(task?.id || '') + (previewVersion === null ? '' : '&pv=' + previewVersion)
     : undefined;
 
-  return <main className="chat-page">
+  return <main className={previewShown ? 'chat-page' : 'chat-page chat-page-solo'}>
     <div className="chat-toolbar">
       <h1 className="chat-app-name">{app?.appName || '网站生成器'}</h1>
       {app?.codeGenType && <Tag color="blue">{formatCodeGenType(app.codeGenType)}</Tag>}
       {task && statusLabel && <Tag color={statusColor}>{statusLabel}</Tag>}
       <Space wrap>
+        {!previewShown && <Button icon={<DesktopOutlined aria-hidden="true" />} onClick={togglePreview}>网页展示</Button>}
         <Button icon={<InfoCircleOutlined aria-hidden="true" />} disabled={!app} onClick={() => setDetailOpen(true)}>应用详情</Button>
         <Button icon={<HistoryOutlined aria-hidden="true" />} disabled={!app} onClick={() => setVersionOpen(true)}>版本</Button>
         <Button href={canEdit ? '/app/edit/' + id : undefined} icon={<EditOutlined aria-hidden="true" />} disabled={!canEdit}>编辑应用</Button>
@@ -648,11 +734,8 @@ function Chat({ id }: { id: string }) {
         <Button type="primary" icon={<CloudUploadOutlined aria-hidden="true" />} loading={publishing} disabled={!canDeploy} onClick={() => { void deploy(); }}>{publishing ? '部署中…' : '部署'}</Button>
       </Space>
     </div>
-    {alert && <Alert style={{ marginBottom: 12 }} type={alert.type} title={alert.title} closable={{ 'aria-label': '关闭错误提示' }} onClose={alert.dismiss} />}
-    {buildPending && <Alert style={{ marginBottom: 12 }} type="info" title={publishing ? `正在部署：容器内安装依赖并打包，已用时 ${busySeconds} 秒（通常 1-5 分钟），完成后会弹出部署链接` : `正在构建预览：容器内安装依赖并打包，已用时 ${busySeconds} 秒（通常 1-5 分钟）`} />}
-    {historyError && <Alert style={{ marginBottom: 12 }} type="warning" title={'对话历史暂不可读取：' + historyError} />}
-    <div className="chat-columns">
-      <section className="chat-panel" aria-label="应用对话">
+    <div className={previewShown ? 'chat-columns' : 'chat-columns chat-columns-solo'} ref={columns}>
+      <section className="chat-panel" aria-label="应用对话" style={previewShown ? { flexBasis: `${split * 100}%` } : undefined}>
         <div className="messages" ref={messageList} onScroll={onMessagesScroll}>
           <div className="messages-inner" ref={messageContent}>
             {messages.length > visibleHistory && <Button type="link" onClick={() => { loadingOlder.current = true; setVisibleHistory(count => count + historyPageSize); }}>加载更多历史消息</Button>}
@@ -681,6 +764,13 @@ function Chat({ id }: { id: string }) {
                     </div>
                   </div>)}</Fragment>;
             })}
+            {/* 报错与进行中的提示是对话的一部分：跟随消息流滚动，不再挂在页面顶上。
+                顺序与原先一致：错误 → 构建/部署进度 → 历史读取失败。 */}
+            {interruption && <div className={'message-item message-note' + (interruptionFailed ? ' message-note-failed' : '')} role="status">
+              {interruption}
+            </div>}
+            {buildPending && <Alert className="chat-stream-alert" type="info" title={publishing ? `正在部署：容器内安装依赖并打包，已用时 ${busySeconds} 秒（通常 1-5 分钟），完成后会弹出部署链接` : `正在构建预览：容器内安装依赖并打包，已用时 ${busySeconds} 秒（通常 1-5 分钟）`} />}
+            {historyError && <Alert className="chat-stream-alert" type="warning" title={'对话历史暂不可读取：' + historyError} />}
             {/* 已经进了 pi 上下文但还没到步骤边界的输入：先停在对话末尾，让用户马上看到自己发出的话（队列里的输入不在这里）。 */}
             {leftoverInputs.map(input => <InputBubble key={input.id} appId={id} input={input} />)}
           </div>
@@ -765,15 +855,22 @@ function Chat({ id }: { id: string }) {
           </div>
         </div>
       </section>
-      <section className="preview-panel">
+      {previewShown && <div className="chat-divider" title="拖动调整两边宽度" onPointerDown={startResize} />}
+      <section className="preview-panel" style={previewShown ? undefined : { display: 'none' }}>
         <div className="preview-bar"><h3>生成后的网页展示</h3><Space>
           {canPreview && <Button size="small" type="link" danger={editing} disabled={!canEdit} onClick={() => setEditing(value => !value)}>{editing ? '退出编辑' : '可视化编辑'}</Button>}
           {canPreview && <Button size="small" type="link" icon={<ExportOutlined aria-hidden="true" />} onClick={() => { if (app?.previewUrl) window.open(app.previewUrl, '_blank', 'noopener'); }}>新窗口打开</Button>}
           {app?.deployUrl && <a href={app.deployUrl} target="_blank" rel="noopener noreferrer">访问作品</a>}
+          {/* 按钮文案永远是「切过去的那一端」：手机端时显示电脑端，反之亦然。 */}
+          {canPreview && <Button size="small" type="link" icon={activeDevice === 'mobile' ? <DesktopOutlined aria-hidden="true" /> : <MobileOutlined aria-hidden="true" />} onClick={toggleDevice}>{activeDevice === 'mobile' ? '电脑端' : '手机端'}</Button>}
+          <Button size="small" type="text" icon={<RightOutlined aria-hidden="true" />} aria-label="收起网页展示" onClick={togglePreview}>收起</Button>
         </Space></div>
-        {canPreview ? <div className="preview-live">
+        {canPreview ? <div className={'preview-live preview-live-' + activeDevice}>
           {generating && <div className="preview-live-badge" role="status">生成中，内容会持续更新</div>}
-          <iframe ref={iframe} className="preview-frame" title="应用预览" src={previewSrc} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={() => { previewLoaded.current = true; setSelected([]); editorMessage({ type: 'TOGGLE_EDIT_MODE', editMode: editing }); }} />
+          {/* 手机端与电脑端共用这一个 iframe：只换外层容器的类名，切换时不重载。 */}
+          <div className="preview-screen">
+            <iframe ref={iframe} className="preview-frame" title="应用预览" src={previewSrc} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={() => { previewLoaded.current = true; setSelected([]); editorMessage({ type: 'TOGGLE_EDIT_MODE', editMode: editing }); }} />
+          </div>
         </div> :
           generating || rebuilding ? <div className="preview-loading" role="status"><Spin size="large" /><p>{generating ? '正在生成网站...' : '正在重建预览...'}</p></div> :
           <div className="preview-placeholder"><div className="preview-placeholder-icon">🌐</div><p>网站文件生成完成后将在这里展示</p></div>}

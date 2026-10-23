@@ -71,16 +71,16 @@ for (const action of ['button', 'shortcut'] as const) {
   });
 }
 
-test('错误提示可关闭，同一失败任务轮询刷新后保持关闭，新任务错误仍出现', async ({ page }) => {
-  const errorAlert = page.locator('.ant-alert-error[role="alert"]');
+test('中断原因写在对话里、不能关闭，轮询刷新后仍与任务一致', async ({ page }) => {
+  const note = page.locator('.message-note');
   let task = { id: 'failed-task-one', status: 'failed', error: '测试构建失败一' };
   let polls = 0;
   await page.unroute('**/api/app/generation?*');
   await page.route('**/api/app/generation?*', route => { polls++; return route.fulfill({ json: { code: 0, data: task, message: 'ok' } }); });
   await page.reload();
-  await expect(errorAlert).toContainText('测试构建失败一');
-  await page.getByRole('button', { name: '关闭错误提示' }).click();
-  await expect(errorAlert).toHaveCount(0);
+  await expect(note).toContainText('生成中断：测试构建失败一');
+  // 没有关闭按钮：这条记录是对话的一部分，与 pi 里的中断行一样永久可见。
+  await expect(note.getByRole('button')).toHaveCount(0);
   const before = polls;
   await page.route('**/api/app/chat/gen/code', async route => {
     task = { ...task, status: 'generating' };
@@ -89,12 +89,10 @@ test('错误提示可关闭，同一失败任务轮询刷新后保持关闭，�
   });
   await page.getByRole('button', { name: /^发\s*送$/ }).click();
   await expect.poll(() => polls).toBeGreaterThan(before + 1);
-  await page.getByRole('button', { name: '关闭错误提示' }).click();
-  const afterClose = polls;
-  await expect.poll(() => polls).toBeGreaterThan(afterClose + 1);
-  await expect(errorAlert).toHaveCount(0);
+  // 生成中不再显示旧失败；结束后换成新任务的原因。
+  await expect(note).toHaveCount(0);
   task = { id: 'failed-task-two', status: 'failed', error: '测试构建失败二' };
-  await expect(errorAlert).toContainText('测试构建失败二');
+  await expect(note).toContainText('测试构建失败二');
 });
 
 test('工具调用渲染成可读操作记录：没有原始 JSON、工具调用 id 与状态字段', async ({ page }) => {
@@ -874,7 +872,7 @@ test('生成中连接被切断：错误条说人话，时间线不再停在运�
     await page.getByRole('button', { name: /^发\s*送$/ }).click();
     const timeline = page.locator('.build-progress');
     await expect(timeline).toContainText('安装依赖');
-    await expect(page.locator('.ant-alert-warning')).toHaveText('生成连接中断，任务已取消；可重新发送需求继续');
+    await expect(page.locator('.message-note')).toHaveText('生成连接中断，任务已取消；可重新发送需求继续');
     await expect(timeline.locator('.build-progress-running')).toHaveCount(0);
     await expect(timeline.locator('.anticon-loading')).toHaveCount(0);
     await expect(timeline.locator('.build-progress-item', { hasText: '安装依赖' })).toHaveClass(/build-progress-cancelled/);
@@ -971,7 +969,7 @@ test('断流后轮询先拿到 generating 再拿到 cancelled：时间线收尾�
     await page.getByRole('button', { name: /^发\s*送$/ }).click();
     const timeline = page.locator('.build-progress');
     await expect(timeline).toContainText('安装依赖');
-    await expect(page.locator('.ant-alert-warning')).toContainText('生成连接中断');
+    await expect(page.locator('.message-note')).toContainText('生成连接中断');
     await expect.poll(() => polls).toBeGreaterThan(1);
     await expect(timeline.locator('.build-progress-running')).not.toHaveCount(0);
     await page.getByLabel('对话消息').fill('排队的需求');
@@ -982,7 +980,7 @@ test('断流后轮询先拿到 generating 再拿到 cancelled：时间线收尾�
     taskStatus = 'cancelled';
     await expect(timeline.locator('.build-progress-running')).toHaveCount(0);
     await expect(timeline.locator('.build-progress-item', { hasText: '安装依赖' })).toHaveClass(/build-progress-cancelled/);
-    await expect(page.locator('.ant-alert-warning')).toContainText('任务已取消');
+    await expect(page.locator('.message-note')).toContainText('任务已取消');
     // 终态后转录里没有这条输入（被取消、没进上下文）：队列清空，文字与附件留在待重发区。
     await expect(page.locator('.composer-queue-chip')).toHaveCount(1);
     await expect(page.locator('.composer-queue-lost')).toContainText('排队的需求');

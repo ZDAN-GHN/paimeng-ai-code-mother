@@ -29,7 +29,9 @@ async function setup(page: Page, options: { viewer?: 'owner' | 'other'; codeGenT
 test('进入对话页预览缺失而源码仍在时自动重建并显示预览', async ({ page }) => {
   const fixture = await setup(page, { gated: true });
   await page.goto('/app/chat/' + appId);
-  await expect(page.getByText('正在重建预览...')).toBeVisible();
+  // 没有预览时预览面板默认收起：重建进度现在是一条对话流里的提示。
+  await expect(page.locator('.preview-panel')).toBeHidden();
+  await expect(page.getByText(/正在构建预览：容器内安装依赖并打包/)).toBeVisible();
   expect(fixture.builds()).toBe(1);
   fixture.release();
   await expect(page.locator('.preview-frame')).toHaveAttribute('src', new RegExp('/preview/vue_project_' + appId + '/'));
@@ -60,15 +62,15 @@ test('已有预览时失败任务只作提示，不再当成当前阻塞', async
   await setup(page, { preview: true, task: { id: 'task-failed', status: 'failed', error: '生成失败' } });
   await page.goto('/app/chat/' + appId);
   await expect(page.locator('.ant-tag').filter({ hasText: '可预览' })).toBeVisible();
-  await expect(page.locator('.ant-alert-warning')).toContainText('上次生成失败：生成失败');
-  await expect(page.locator('.ant-alert-error')).toHaveCount(0);
+  await expect(page.locator('.message-note')).toContainText('生成中断：生成失败。已有预览由之前的代码构建');
+  await expect(page.locator('.message-note-failed')).toHaveCount(1);
   await expect(page.locator('.preview-frame')).toBeAttached();
 });
 
-test('没有预览时失败任务仍然按错误展示', async ({ page }) => {
+test('没有预览时失败任务仍然写清原因', async ({ page }) => {
   await setup(page, { preview: false, source: false, task: { id: 'task-failed', status: 'failed', error: '生成失败' } });
   await page.goto('/app/chat/' + appId);
-  await expect(page.locator('.ant-alert-error')).toContainText('生成失败');
+  await expect(page.locator('.message-note')).toContainText('生成中断：生成失败');
   await expect(page.locator('.ant-tag').filter({ hasText: '失败' })).toBeVisible();
 });
 
@@ -76,18 +78,17 @@ test('失败之后又成功构建过，过期的失败不再提示', async ({ pa
   await setup(page, { preview: true, builtAt: '2026-10-14 07:32:46.470', task: { id: 'task-failed', status: 'failed', error: '构建失败 npm error code ETIMEDOUT', updateTime: '2026-10-14 05:13:36.692' } });
   await page.goto('/app/chat/' + appId);
   await expect(page.locator('.ant-tag').filter({ hasText: '可预览' })).toBeVisible();
-  await expect(page.locator('.ant-alert-warning')).toHaveCount(0);
-  await expect(page.locator('.ant-alert-error')).toHaveCount(0);
+  await expect(page.locator('.message-note')).toHaveCount(0);
 });
 
 test('只有更晚的部署时间时同样不再提示失败', async ({ page }) => {
   await setup(page, { preview: true, deployedTime: '2026-10-14 07:32:48', task: { id: 'task-failed', status: 'failed', error: '生成失败', updateTime: '2026-10-14 05:13:36.692' } });
   await page.goto('/app/chat/' + appId);
-  await expect(page.locator('.ant-alert-warning')).toHaveCount(0);
+  await expect(page.locator('.message-note')).toHaveCount(0);
 });
 
 test('成功时间早于失败时仍然提示失败', async ({ page }) => {
   await setup(page, { preview: true, builtAt: '2026-10-14 05:00:00.000', task: { id: 'task-failed', status: 'failed', error: '生成失败', updateTime: '2026-10-14 05:13:36.692' } });
   await page.goto('/app/chat/' + appId);
-  await expect(page.locator('.ant-alert-warning')).toContainText('上次生成失败：生成失败');
+  await expect(page.locator('.message-note')).toContainText('生成中断：生成失败');
 });
