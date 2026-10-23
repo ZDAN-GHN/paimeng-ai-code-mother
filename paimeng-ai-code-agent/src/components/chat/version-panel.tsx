@@ -11,7 +11,7 @@ import './version-panel.css';
  * 版本历史面板。
  *
  * 一条按时间排的清单，每行讲三件事：这一版长什么样、标题说了什么改动、能不能用。
- * 每行两个动作：「使用这个版本」把页面换回去，「根据这版修改」从这一版接着改。
+ * 每行一个动作：「使用这一版本」把页面换回去并收起面板，光标交回输入框。
  * 没有分支、合并、泳道——这里不是 Git 客户端，只是用户找回喜欢那一版的入口。
  */
 
@@ -125,11 +125,11 @@ export type VersionPanelProps = {
   onAfterClose?: () => void;
   /** 切版成功且工作区真的变了：聊天页据此提示「先重新读文件」。 */
   onWorkspaceChanged: () => void;
-  /** 「根据这版修改」：面板关掉、焦点回到输入框。 */
-  onStartFromVersion?: () => void;
+  /** 「使用这一版本」成功后：面板关掉、焦点回到输入框，用户直接说下一句需求。 */
+  onVersionApplied?: () => void;
 };
 
-export function VersionPanel({ appId, open, onClose, onAfterClose, onWorkspaceChanged, onStartFromVersion }: VersionPanelProps) {
+export function VersionPanel({ appId, open, onClose, onAfterClose, onWorkspaceChanged, onVersionApplied }: VersionPanelProps) {
   const { message, modal } = App.useApp();
   const [state, setState] = useState<OverviewState>({ status: 'loading' });
   const [diff, setDiff] = useState<DiffState>({ status: 'idle' });
@@ -214,28 +214,14 @@ export function VersionPanel({ appId, open, onClose, onAfterClose, onWorkspaceCh
 
   const confirmUse = (version: AppVersion) => {
     modal.confirm({
-      title: `换成「${version.title}」这一版？`,
-      content: '页面会换成这一版的样子。其他版本都还留着，之后随时能再切回来，也不会新增版本。',
+      title: `使用「${version.title}」这一版？`,
+      content: '页面会换成这一版的样子，光标回到输入框，你可以接着说要改成什么样。其他版本都还留着，之后随时能再切回来，也不会新增版本。',
       okText: '使用这一版',
       cancelText: '取消',
-      onOk: () => runWrite(`restore:${version.id}`, () => restoreTo(version)),
-    });
-  };
-
-  const confirmContinue = (version: AppVersion) => {
-    if (version.id === currentVersion?.id) {
-      onStartFromVersion?.();
-      return;
-    }
-    modal.confirm({
-      title: `从「${version.title}」接着改？`,
-      content: '页面会先换成这一版，接下来你说的话都从它开始改。现在最新的内容不会丢，之后还能切回来。',
-      okText: '从这版接着改',
-      cancelText: '取消',
-      onOk: () => runWrite(`continue:${version.id}`, async () => {
+      onOk: () => runWrite(`restore:${version.id}`, async () => {
         const outcome = await restoreTo(version);
-        onStartFromVersion?.();
-        return { ...outcome, text: `已回到「${version.title}」，接着说要改成什么样` };
+        onVersionApplied?.();
+        return { ...outcome, text: outcome.changed ? `已换成「${version.title}」这一版，接着说要改成什么样` : outcome.text };
       }),
     });
   };
@@ -310,14 +296,7 @@ export function VersionPanel({ appId, open, onClose, onAfterClose, onWorkspaceCh
                         title={isCurrent ? '这已经是正在使用的版本' : undefined}
                         loading={busy === `restore:${version.id}`}
                         onClick={() => confirmUse(version)}
-                      >使用这个版本</Button>
-                      <Button
-                        size="small"
-                        type="text"
-                        disabled={!canWrite}
-                        loading={busy === `continue:${version.id}`}
-                        onClick={() => confirmContinue(version)}
-                      >根据这版修改</Button>
+                      >使用这一版本</Button>
                       <Button
                         size="small"
                         type="text"

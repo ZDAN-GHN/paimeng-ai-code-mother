@@ -59,7 +59,7 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByLabel('对话消息')).toHaveValue(prompt);
 });
 
-test('一版一行，只有人类说法：标题、时间、正在使用、用这一版/根据这版修改', async ({ page }) => {
+test('一版一行，只有人类说法：标题、时间、正在使用、使用这一版本', async ({ page }) => {
   await mockVersions(page, overviewOf([v2, v1], v2.id));
   await openPanel(page);
 
@@ -75,9 +75,10 @@ test('一版一行，只有人类说法：标题、时间、正在使用、用�
   const current = page.locator('.version-tree-row-current');
   await expect(current).toHaveCount(1);
   await expect(current.getByText('正在使用', { exact: true })).toBeVisible();
-  await expect(current.getByRole('button', { name: /使用这个版本/ })).toBeDisabled();
-  await expect(page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /使用这个版本/ })).toBeEnabled();
-  await expect(page.getByRole('button', { name: /根据这版修改/ })).toHaveCount(2);
+  await expect(current.getByRole('button', { name: /使用这一版本/ })).toBeDisabled();
+  await expect(page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /使用这一版本/ })).toBeEnabled();
+  // 一行只留一个动作：看和改是同一件事，不再分两个按钮。
+  await expect(page.getByRole('button', { name: /使用这一版本/ })).toHaveCount(2);
   await expect(page.getByText('无缩略图').first()).toBeVisible();
 });
 
@@ -113,8 +114,8 @@ test('停在旧版本时明确提示「旧版本」，并提供一键回到最�
   await expect(page.getByText('你正在看一个旧版本，新的修改会从这里开始。')).toBeVisible();
   await expect(page.getByRole('button', { name: '回到最新' })).toBeEnabled();
   // 当前停在这一版：它自己不能再「使用」，更新的 v2 仍然可以。
-  await expect(page.locator('.version-tree-row-current').getByRole('button', { name: /使用这个版本/ })).toBeDisabled();
-  await expect(page.locator('.version-tree-row', { hasText: '把卡片改成圆角' }).getByRole('button', { name: /使用这个版本/ })).toBeEnabled();
+  await expect(page.locator('.version-tree-row-current').getByRole('button', { name: /使用这一版本/ })).toBeDisabled();
+  await expect(page.locator('.version-tree-row', { hasText: '把卡片改成圆角' }).getByRole('button', { name: /使用这一版本/ })).toBeEnabled();
 });
 
 test('没有版本时显示空态，并说明回到旧版不新增版本', async ({ page }) => {
@@ -128,26 +129,41 @@ test('使用旧版本要二次确认，确认后按这一版恢复', async ({ pa
   await mockVersions(page, overviewOf([v2, v1], v2.id));
   const writes = captureWrite(page, '/api/app/versions/restore', { status: 'restored', version: v1, previewError: null });
   await openPanel(page);
-  await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /使用这个版本/ }).click();
+  await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /使用这一版本/ }).click();
   const dialog = page.locator('.ant-modal-confirm');
   await expect(dialog).toContainText('其他版本都还留着');
   await dialog.getByRole('button', { name: '使用这一版' }).click();
   await expect.poll(() => writes.length).toBe(1);
   expect(writes[0]).toMatchObject({ versionId: v1.id });
-  await expect(page.getByText('已换成「首版首页」这一版')).toBeVisible();
+  await expect(page.getByText('已换成「首版首页」这一版，接着说要改成什么样')).toBeVisible();
 });
 
-test('「根据这版修改」恢复该版本后收起面板，把光标交回输入框', async ({ page }) => {
+test('使用这一版本后收起面板，把光标交回输入框', async ({ page }) => {
   await mockVersions(page, overviewOf([v2, v1], v2.id));
   const writes = captureWrite(page, '/api/app/versions/restore', { status: 'restored', version: v1, previewError: null });
   await openPanel(page);
-  await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /根据这版修改/ }).click();
-  await page.locator('.ant-modal-confirm').getByRole('button', { name: '从这版接着改' }).click();
+  await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /使用这一版本/ }).click();
+  await page.locator('.ant-modal-confirm').getByRole('button', { name: '使用这一版' }).click();
   await expect.poll(() => writes.length).toBe(1);
   expect(writes[0]).toMatchObject({ versionId: v1.id });
-  await expect(page.getByText('已回到「首版首页」，接着说要改成什么样')).toBeVisible();
+  await expect(page.getByText('已换成「首版首页」这一版，接着说要改成什么样')).toBeVisible();
   await expect(page.getByRole('dialog', { name: /版本历史/ })).toBeHidden();
   await expect(page.getByLabel('对话消息')).toBeFocused();
+});
+
+test('正在使用的版本不能再点「使用这一版本」', async ({ page }) => {
+  await mockVersions(page, overviewOf([v2, v1], v1.id));
+  const writes = captureWrite(page, '/api/app/versions/restore', { status: 'restored', version: v2, previewError: null });
+  await openPanel(page);
+  const current = page.locator('.version-tree-row-current');
+  await expect(current.getByText('首版首页')).toBeVisible();
+  await expect(current.getByRole('button', { name: /使用这一版本/ })).toBeDisabled();
+  // 禁用之后没有第二个动作可以绕过它。
+  await expect(current.getByRole('button')).toHaveCount(2);
+  await page.locator('.version-tree-row', { hasText: '把卡片改成圆角' }).getByRole('button', { name: /使用这一版本/ }).click();
+  await page.locator('.ant-modal-confirm').getByRole('button', { name: '使用这一版' }).click();
+  await expect.poll(() => writes.length).toBe(1);
+  expect(writes[0]).toMatchObject({ versionId: v2.id });
 });
 
 test('回退成功后页面会刷新预览（iframe 换成新地址，不是停在旧画面）', async ({ page }) => {
@@ -169,9 +185,9 @@ test('回退成功后页面会刷新预览（iframe 换成新地址，不是停�
   await mockVersions(page, overviewOf([v2, v1], v2.id));
   captureWrite(page, '/api/app/versions/restore', { status: 'restored', version: v1, previewError: null });
   await openPanel(page);
-  await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /使用这个版本/ }).click();
+  await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /使用这一版本/ }).click();
   await page.locator('.ant-modal-confirm').getByRole('button', { name: '使用这一版' }).click();
-  await expect(page.getByText('已换成「首版首页」这一版')).toBeVisible();
+  await expect(page.getByText(/已换成「首版首页」这一版/)).toBeVisible();
   await expect(frame).not.toHaveAttribute('src', before ?? '');
   await expect(frame).toHaveAttribute('src', /pv=\d+/);
   expect(appReads).toBeGreaterThan(readsBefore);
@@ -181,7 +197,7 @@ test('预览重建失败时明确告诉用户「画面没变」的原因', async
   await mockVersions(page, overviewOf([v2, v1], v2.id));
   captureWrite(page, '/api/app/versions/restore', { status: 'restored', version: v1, previewError: '生成结果缺少 index.html' });
   await openPanel(page);
-  await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /使用这个版本/ }).click();
+  await page.locator('.version-tree-row', { hasText: '首版首页' }).getByRole('button', { name: /使用这一版本/ }).click();
   await page.locator('.ant-modal-confirm').getByRole('button', { name: '使用这一版' }).click();
   await expect(page.getByText('预览没能重建：生成结果缺少 index.html')).toBeVisible();
 });
@@ -191,8 +207,7 @@ test('生成占用应用时写操作全部禁用并说明原因', async ({ page 
   await openPanel(page);
   await expect(page.getByText('应用正在生成，跑完或取消后才能切换版本')).toBeVisible();
   const item = page.locator('.version-tree-row', { hasText: '首版首页' });
-  await expect(item.getByRole('button', { name: /使用这个版本/ })).toBeDisabled();
-  await expect(item.getByRole('button', { name: /根据这版修改/ })).toBeDisabled();
+  await expect(item.getByRole('button', { name: /使用这一版本/ })).toBeDisabled();
 });
 
 test('和上一版对比显示改动文件与补丁', async ({ page }) => {

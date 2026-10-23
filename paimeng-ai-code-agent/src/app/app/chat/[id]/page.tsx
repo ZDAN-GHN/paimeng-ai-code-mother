@@ -783,7 +783,7 @@ function Chat({ id }: { id: string }) {
       onEdit={() => { setDetailOpen(false); router.push('/app/edit/' + id); }} onDelete={() => { void removeApp(); }} />
     <VersionPanel appId={id} open={versionOpen} onClose={() => setVersionOpen(false)}
       onWorkspaceChanged={() => { setPreviewVersion(current => (current ?? 0) + 1); void refresh(); }}
-      onStartFromVersion={() => { focusComposerOnClose.current = true; setVersionOpen(false); }}
+      onVersionApplied={() => { focusComposerOnClose.current = true; setVersionOpen(false); }}
       onAfterClose={() => {
         if (!focusComposerOnClose.current) return;
         focusComposerOnClose.current = false;
