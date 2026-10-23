@@ -475,6 +475,17 @@ async function hasStagedChanges(repo: string, tree: string) {
   return (await gitRaw(repo, tree, ['diff', '--cached', '--quiet', head ?? emptyTree])).code === 1;
 }
 
+/** 这一轮将被提交的改动清单与行数：写标题时用来判断是动结构还是动样式，不进任何展示。 */
+export async function pendingChangeStats(app: WorkspaceApp) {
+  const repo = await ensureVersionRepo(app);
+  const tree = workspace(app);
+  const out = await git(repo, tree, ['diff', '--numstat', '-M', 'HEAD', '--', '.', ...addExcludes]).catch(() => '');
+  return out.split('\n').filter(Boolean).map(line => {
+    const [added, removed, ...rest] = line.split('\t');
+    return { path: rest[rest.length - 1] ?? '', added: Number(added) || 0, removed: Number(removed) || 0 };
+  }).filter(stat => stat.path);
+}
+
 /**
  * 把工作区真实改动提交成一版，并立刻在台账里记一行。
  *

@@ -123,5 +123,6 @@ agent 只读化之后，「模型自己提交时以 HEAD 为版本」的兜底�
 - 「提交即一版」由 `commitVersion` 自己保证：提交、钉引用、插台账行在同一把文件锁内完成，标题在这处定稿（空标题按改动文件兜底），钩子只负责给出 agent 总结与 `generationId`。
 - 自愈仍在 `version-heal.ts`（协调层），`version-store` 只新增只读的 `listVersionPins` / `emptyVersionRepo` / `versionObjectExists`。
 - 回填脚本的命令名是 `versions:ledger`（`versions:backfill` 已被「把没有 git 提交的工作区补成第一版」占用），默认预演，`--apply` 才写库。
-- 验证：单测 366/366；集成 228 过 / 1 跳 / 0 败（含真实 harness 的生成收尾四条）；`verify.mjs` 跑 version-panel 13/13，证据在 `.pi/skills/verify-paimeng-agent/evidence/2026-10-22T17-36-10/`。首页 home-parity 有 5 条预存失败，基线 `e1a9135` 复现同样 5 条，与本次无关。
+- 标题链路在评审后改过一次：原计划「插行即终稿，用 agent 原话」，实际改成「先用便宜模型写一句页面上看得见的变化，写不出来才用 agent 原话，再不行按文件兜底」。产品叙事是原型网页，用户靠一眼看页面认版本，所以标题要写视觉变化，不能出现文件名、行数、代码；模型调用 6 秒超时，仍在提交之前完成，因此仍是一次写入、没有异步改写。
+- 验证：单测 367/367；集成 228 过 / 1 跳 / 0 败（含真实 harness 的生成收尾四条）；`verify.mjs` 跑 version-panel 13/13，证据在 `.pi/skills/verify-paimeng-agent/evidence/2026-10-22T17-36-10/`。首页 home-parity 有 5 条预存失败，基线 `e1a9135` 复现同样 5 条，与本次无关。
 - 真实库已执行 `005` 迁移与 `versions:ledger --apply`：78 条旧记录里 7 条能对应到 Git 对象，其余 71 条的提交对象从未进过应用仓库（回退不了，故不列）。

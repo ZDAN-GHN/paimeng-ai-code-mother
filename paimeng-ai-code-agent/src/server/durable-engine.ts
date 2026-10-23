@@ -18,7 +18,8 @@ import { db } from './db';
 import { adoptLease, beginGeneration, finishGeneration, generationFor, heartbeat, restoreGeneration, setGeneration, staleActiveGenerations, withAppWriter } from './generation-store';
 import { recordAssistantStep, recordBuildStep, type AccountToolCall, type EntryUsage, type GenerationStopReason, type ModelIdentity } from './generation-accounting';
 import { BusinessError } from './http';
-import { commitVersion } from './version-store';
+import { commitVersion, pendingChangeStats } from './version-store';
+import { agentVersionTitle, summarizeVersion } from './version-summary';
 import { versionThumbnail } from './version-thumbnail';
 import { clientIp } from './rate-limit';
 import { apps, generationSteps } from './schema';
@@ -665,12 +666,25 @@ async function observeHarnessRun(options: {
   }
 }
 
-/** 标题就是 agent 这一轮的收尾总结：取最后一条助手消息的首行，不额外调模型，也不再异步改写。 */
-function versionTitleOf(messages: TranscriptEntry[]): string | null {
+/** agent 这一轮的收尾原话：写标题时的线索，也是模型不可用时的兜底来源。 */
+function versionClosingOf(messages: TranscriptEntry[]): string | null {
   const entry = messages.findLast(item => entryAssistantMessage(item) !== undefined);
-  const text = entry ? [...textBlocksOf(entryAssistantMessage(entry)).values()].join('\n') : '';
-  const first = text.split('\n').map(line => line.trim()).find(Boolean) ?? '';
-  return first || null;
+  if (!entry) return null;
+  const text = [...textBlocksOf(entryAssistantMessage(entry)).values()].join('\n').trim();
+  return text || null;
+}
+
+/** 写标题时要知道用户这一轮想要什么：只取最后一条用户输入的首行，80 字以内。 */
+function versionPromptOf(messages: TranscriptEntry[]): string | null {
+  const entry = messages.findLast(item => item.kind === userEntryKind);
+  const bubble = entry ? userBubbleSchema.safeParse(entry.data) : null;
+  if (!bubble?.success) return null;
+  const lines = bubble.data.parts.flatMap(part => {
+    const block = z.object({ type: z.literal('text'), text: z.string() }).safeParse(part);
+    return block.success ? block.data.text.split('\n') : [];
+  });
+  const first = lines.map(line => line.trim()).find(Boolean);
+  return first ? (first.length > 80 ? `${first.slice(0, 80)}…` : first) : null;
 }
 
 /** 「已完成」这类回话不描述改动，当标题等于没说：退回按改动文件生成的兜底标题。 */
@@ -685,9 +699,19 @@ const fillerTitle = /^(?:好|好的|完成|完成了|已完成|搞定|已修复|
  */
 async function recordGenerationVersion(app: AppInfo, requestId: string, conversationId: number) {
   const runtime = await harnessRuntime(conversationId).catch(() => null);
-  const summary = runtime ? versionTitleOf(runtime.messages) : null;
-  // 空标题让 commitVersion 按改动文件兜底：标题与提交信息在同一处定稿。
-  const committed = await commitVersion({ app, title: summary && !fillerTitle.test(summary) ? summary : '', generationId: requestId });
+  const messages = runtime?.messages ?? [];
+  const spoken = versionClosingOf(messages);
+  const userPrompt = versionPromptOf(messages);
+  // 标题优先让便宜模型看改动写一句「页面上最显眼的变化」；写不出来才退回助手原话，再不行按文件兜底。
+  const stats = await pendingChangeStats(app).catch(() => []);
+  const summarized = await summarizeVersion({
+    version: { id: '', title: '', createTime: '', changedFiles: stats.map(stat => stat.path), fileCount: stats.length, bytes: 0, statsKnown: true, thumbnailKey: null },
+    userPrompt,
+    agentSummary: spoken,
+    stats,
+  });
+  const title = summarized ?? agentVersionTitle(spoken) ?? '';
+  const committed = await commitVersion({ app, title, generationId: requestId });
   if (!committed) return;
   // 截图按提交 SHA 存：面板打开时直接读这一版的图，失败不影响版本本身。
   void versionThumbnail(app, committed.id).catch(() => undefined);

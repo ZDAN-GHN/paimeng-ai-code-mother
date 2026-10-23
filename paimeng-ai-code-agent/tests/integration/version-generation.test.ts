@@ -153,8 +153,9 @@ describe.skipIf(!harnessReady || !postgresReady)('生成收尾的版本', () => 
     expect(rows).toHaveLength(2);
     const head = rows[0]!;
     expect(head.commitSha).toBe(headSha(app));
-    // 标题就是 agent 这一轮的总结，提交信息与台账标题同一句话。
-    expect(head.title).toBe('把首页正文换成了第二版，导航保持原样');
+    // 没有可用的总结模型时标题取助手这一轮的原话，只留第一个短句：
+    // 后半截「导航保持原样」是解释，标签里不要。
+    expect(head.title).toBe('把首页正文换成了第二版');
     expect(git(app, ['log', '-1', '--pretty=%s']).trim()).toBe(head.title);
     expect(head.generationId).toBe(requestId);
     // 钉子让这一版在 HEAD 离开后依然可达。

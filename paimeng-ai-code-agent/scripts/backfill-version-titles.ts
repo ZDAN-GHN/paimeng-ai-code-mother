@@ -42,7 +42,7 @@ for (const row of rows) {
     if (recorded.has(version.id) && version.title !== version.changedFiles[0]) continue;
     const stats = await changeStats(app, version.id).catch(() => []);
     const summary = await summarizeVersion({ userPrompt: null, version, stats });
-    if (summary === version.title) continue;
+    if (!summary || summary === version.title) continue;
     changed += 1;
     console.log(`  ${String(row.appName ?? row.id).slice(0, 14)} ${version.id.slice(0, 7)}: ${version.title.slice(0, 30)} → ${summary}`);
     if (apply) await setVersionTitle(app.id, version.id, summary);

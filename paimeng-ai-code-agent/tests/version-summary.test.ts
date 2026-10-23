@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fallbackVersionTitle, normalizeVersionSummary, versionSummaryLimit } from '@/server/version-summary';
+import { agentVersionTitle, fallbackVersionTitle, normalizeVersionSummary, versionSummaryLimit } from '@/server/version-summary';
 import type { AppVersion } from '@/shared/versioning';
 
 const base: AppVersion = {
@@ -20,6 +20,18 @@ describe('版本概述', () => {
     const result = normalizeVersionSummary(long);
     expect([...result].length).toBeLessThanOrEqual(versionSummaryLimit);
     expect(result).toBe([...long].slice(0, versionSummaryLimit).join(''));
+  });
+
+  it('助手原话当兜底标题：去掉代码标记与客套开场，只留第一句', () => {
+    // 真实出现过的收尾原话：整段是解释，标题只需要前半句。
+    expect(agentVersionTitle('已完成一个完整的创作者作品集网站，全部写在 `index.html` 中（样式在 `<style>` 里）'))
+      .toBe('一个完整的创作者作品集网站');
+    expect(agentVersionTitle('好的，我把首页改成了分栏大图。其余保持原样。')).toBe('把首页改成了分栏大图');
+    expect(agentVersionTitle('```html\n<h1>x</h1>\n```\n页面加了一个大标题')).toBe('页面加了一个大标题');
+    // 空话等于没说：交给文件级兜底。
+    expect(agentVersionTitle('已完成')).toBe(null);
+    expect(agentVersionTitle('好的。')).toBe(null);
+    expect(agentVersionTitle('')).toBe(null);
   });
 
   it('兜底标题直接说改了哪个文件，不照抄用户原话', () => {
