@@ -6,7 +6,7 @@ import { z } from 'zod';
 
 /**
  * 语音输入：点击开始录音（MediaRecorder），再点结束，录音上传到 `POST app/chat/transcribe` 转写成文字，
- * 追加到输入框（不自动发送）。转写别名 `speech.transcribe` 没配置时按钮禁用并说明原因。
+ * 追加到输入框（不自动发送）。语音转写槽位没配置时按钮禁用并说明原因。
  *
  * 这里只有一条录音状态机：idle → starting → recording → transcribing →（failed 可重试，保留录音）。
  */
@@ -59,7 +59,7 @@ export function microphoneError(cause: unknown): string {
 /** 麦克风按钮禁用的原因；可用时返回 null。 */
 export function voiceUnavailableReason(input: { editable: boolean; serverEnabled: boolean; recorderSupported: boolean }): string | null {
   if (!input.editable) return '当前不可编辑，无法使用语音输入';
-  if (!input.serverEnabled) return '未配置语音转写模型：请在模型管理里新增别名 speech.transcribe（OpenAI 兼容的 /audio/transcriptions）';
+  if (!input.serverEnabled) return '未配置语音转写模型：请在模型管理的模型分配里配置语音转写槽位（OpenAI 兼容的 /audio/transcriptions）';
   if (!input.recorderSupported) return '当前浏览器不支持录音（需要 MediaRecorder）';
   return null;
 }
@@ -90,7 +90,7 @@ type VoicePhase = 'idle' | 'starting' | 'recording' | 'transcribing' | 'failed';
 export function VoiceInput({ editable, serverEnabled, onTranscript }: {
   /** 输入框可用（本人且已加载）；false 时按钮禁用并说明原因。 */
   editable: boolean;
-  /** 服务端是否配置了转写别名（GET app/chat/transcribe）。 */
+  /** 服务端是否配置了语音转写槽位（GET app/chat/transcribe）。 */
   serverEnabled: boolean;
   onTranscript: (text: string) => void;
 }) {
@@ -226,7 +226,7 @@ export function VoiceInput({ editable, serverEnabled, onTranscript }: {
     loading={busy}
     onClick={() => { if (recording) stopRecording(); else void startRecording(); }}
   >{recording ? '结束录音' : '语音输入'}</Button>;
-  // 不可用的原因文案很长（含别名与接口路径），放在悬浮提示里，不占按钮行的宽度；
+  // 不可用的原因文案很长（含槽位与接口路径），放在悬浮提示里，不占按钮行的宽度；
   // 提示挂在一层 span 上：禁用的原生按钮不派发鼠标事件，直接挂在按钮上悬停不出提示（实测）。
   return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
     {reason === null ? mic : <Tooltip title={reason}><span>{mic}</span></Tooltip>}

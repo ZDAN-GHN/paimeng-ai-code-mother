@@ -1288,7 +1288,7 @@ export async function harnessChatResponse(req: Request, raw: unknown, user: User
   };
   const admission = await admitGenerationModel();
   if (attachmentParts.length > 0 && !admission.imageInput) {
-    throw new BusinessError(400, 40000, '当前生成模型不支持图片输入：请在模型管理里为别名开启「图片输入」，或换用支持视觉的模型');
+    throw new BusinessError(400, 40000, '当前生成模型不支持图片输入：请在模型管理的模型分配里为该槽位开启「图片输入」，或换用支持视觉的模型');
   }
   const attachmentImages: AttachmentImage[] = await Promise.all(attachmentParts.map(async part => ({
     attachmentId: part.attachmentId,

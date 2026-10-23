@@ -113,8 +113,8 @@ describe('应用类型路由（F01）', () => {
     expect(failure).toBeInstanceOf(BusinessError);
     expect(failure?.status).toBe(502);
     expect(failure?.code).toBe(50200);
-    expect(failure?.message).toContain('route.classify');
-    expect(failure?.message).toContain('模型管理');
+    expect(failure?.message).toContain('类型路由');
+    expect(failure?.message).toContain('模型分配');
     expect(failure?.message).not.toContain('sk-abcdef1234567890');
   });
 

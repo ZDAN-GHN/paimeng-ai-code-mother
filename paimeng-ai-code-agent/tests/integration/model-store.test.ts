@@ -199,6 +199,19 @@ describe('模型配置存储', () => {
     expect((await readConfigSnapshot()).revision).toBe('1');
   });
 
+  it('清单外的槽位名写入被拒绝', async () => {
+    await seedFromEnv();
+    await expect(upsertAlias({ ...codegenAlias({ alias: 'extra.model' }) }, { expectedRevision: '1' }))
+      .rejects.toMatchObject({ status: 400, code: 40000 });
+    expect((await readConfigSnapshot()).aliases.map(alias => alias.alias).sort()).toEqual(['codegen.default', 'route.classify']);
+  });
+
+  it('槽位要求的能力缺失时点名具体能力', async () => {
+    await seedFromEnv();
+    await expect(upsertAlias(codegenAlias({ capabilities: { streaming: true, toolCalling: false, structuredOutput: false, imageInput: false } }), { expectedRevision: '1' }))
+      .rejects.toMatchObject({ status: 400, code: 40000, message: expect.stringContaining('工具调用') as unknown as string });
+  });
+
   it('别名必须指向存在的提供商', async () => {
     await seedFromEnv();
     await expect(upsertAlias(routeAlias({ providerId: 'ghost' }), { expectedRevision: '1' })).rejects.toMatchObject({ status: 400, code: 40000 });

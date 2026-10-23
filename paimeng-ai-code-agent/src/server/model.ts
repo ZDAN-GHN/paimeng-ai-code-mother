@@ -36,6 +36,6 @@ export async function routeCodeGenType(prompt: string): Promise<CodeGenType> {
   return result.output.codeGenType;
  } catch (error) {
   // 上游拒答、超时或返回非法 JSON 都不能变成没有线索的 500：路由别名可以在管理端改。
-  throw new BusinessError(502, 50200, `生成类型识别失败：${routingFailureDetail(error)}。请在「模型管理 → 别名」里更换别名 route.classify 的提供商或模型后重试。`);
+  throw new BusinessError(502, 50200, `生成类型识别失败：${routingFailureDetail(error)}。请在「模型管理 → 模型分配」里更换类型路由槽位的提供商或模型后重试。`);
  }
 }

@@ -5,10 +5,11 @@ import { getConfig } from '../config';
 import { BusinessError } from '../http';
 import {
   baseModelApiKeyEnv,
+  capabilitiesForSlot,
   decimalVersionSchema,
   defaultModelProviderId,
   modelConfigIssues,
-  requiredModelAliases,
+  modelSlots,
   type ModelAlias,
   type ModelConfigSnapshot,
   type ModelProvider,
@@ -88,13 +89,11 @@ function environmentSnapshot(): ModelConfigSnapshot {
     createTime: '',
     updateTime: '',
   };
-  const aliases: ModelAlias[] = requiredModelAliases.map(alias => ({
-    alias,
+  const aliases: ModelAlias[] = modelSlots.filter(slot => !slot.optional).map(slot => ({
+    alias: slot.slot,
     providerId: defaultModelProviderId,
     modelName: config.aiModel,
-    capabilities: alias === 'codegen.default'
-      ? { streaming: true, toolCalling: true, structuredOutput: false, imageInput: false }
-      : { streaming: false, toolCalling: false, structuredOutput: true, imageInput: false },
+    capabilities: capabilitiesForSlot(slot),
     settings: {},
     enabled: true,
     createTime: '',

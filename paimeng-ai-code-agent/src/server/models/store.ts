@@ -6,11 +6,14 @@ import { BusinessError } from '../http';
 import { modelAliases, modelConfigState, modelProviders } from '../schema';
 import {
   baseModelApiKeyEnv,
+  capabilitiesForSlot,
   defaultModelProviderId,
   modelAliasInputSchema,
   modelConfigIssues,
   modelConfigStateId,
   modelProviderInputSchema,
+  modelSlotOf,
+  modelSlots,
   requiredModelAliases,
   type ModelAlias,
   type ModelAliasInput,
@@ -161,6 +164,11 @@ function applyMutation(mutation: StoredModelConfigMutation, providers: readonly 
       return { providers: providers.filter(provider => provider.id !== mutation.id), aliases: [...aliases] };
     }
     case 'upsertAlias': {
+      const slot = modelSlotOf(mutation.alias.alias);
+      if (!slot) {
+        const names = modelSlots.map(candidate => `${candidate.label}（${candidate.slot}）`).join('、');
+        throw new BusinessError(400, 40000, `模型分配只有四个固定槽位：${names}，不能自建 ${mutation.alias.alias}`);
+      }
       const next: ModelAliasInput[] = aliases.filter(alias => alias.alias !== mutation.alias.alias);
       next.push(mutation.alias);
       return { providers: [...providers], aliases: next };
@@ -308,13 +316,11 @@ export async function initializeModelConfigFromEnv(): Promise<ModelInitializatio
       options: {},
       enabled: true,
     });
-    const aliasesToCreate = requiredModelAliases.map(alias => modelAliasInputSchema.parse({
-      alias,
+    const aliasesToCreate = modelSlots.filter(slot => !slot.optional).map(slot => modelAliasInputSchema.parse({
+      alias: slot.slot,
       providerId: defaultModelProviderId,
       modelName: config.aiModel,
-      capabilities: alias === 'codegen.default'
-        ? { streaming: true, toolCalling: true, structuredOutput: false, imageInput: false }
-        : { streaming: false, toolCalling: false, structuredOutput: true, imageInput: false },
+      capabilities: capabilitiesForSlot(slot),
       settings: {},
       enabled: true,
     }));

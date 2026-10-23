@@ -1,32 +1,101 @@
 import { z } from 'zod';
 
-/** 业务必需别名：缺失或禁用的完整配置会被写入事务拒绝。 */
-export const requiredModelAliases = ['codegen.default', 'route.classify'] as const;
-export type RequiredModelAlias = typeof requiredModelAliases[number];
+/** 槽位的必需能力：只声明会改变调用方式的三种，图片输入随模型差异由管理员按提供商勾选。 */
+export const modelSlotRequirements = ['streaming', 'toolCalling', 'structuredOutput'] as const;
+export type ModelSlotRequirement = typeof modelSlotRequirements[number];
+
+type ModelSlotShape = {
+  readonly slot: string;
+  readonly label: string;
+  readonly purpose: string;
+  readonly requires: readonly ModelSlotRequirement[];
+  readonly optional: boolean;
+  readonly missingImpact: string;
+};
 
 /**
- * 业务可用的可选别名：不配置时对应功能优雅降级（当前只有语音输入），配置后由注册表按名字解析。
- * 管理端据此在别名列表里标注用途、并提供预填了名字与能力的新建入口。
+ * 模型分配的四个槽位：编号、展示名、用途、必需能力与未配置后果都只在这里定义，
+ * 管理端只读展示，写入端按这份清单拒绝自建名字。
  */
-export const optionalModelAliases = {
-  'version.summary': {
-    label: '版本概述',
-    purpose: '给每个应用版本起一句 20 字以内的中文概括（版本历史里显示）；未配置时用「改动 N 个文件」这类兜底文案',
-    capabilities: { streaming: false, toolCalling: false, structuredOutput: false, imageInput: false },
+const modelSlotList = [
+  {
+    slot: 'codegen.default',
+    label: '代码生成',
+    purpose: '生成与修复应用源码的主力模型',
+    requires: ['streaming', 'toolCalling'],
+    optional: false,
+    missingImpact: '无法生成应用，所有生成请求都会被拒绝',
   },
-  'speech.transcribe': {
-    label: '语音输入转写',
-    purpose: '浏览器录音转文字，需要提供商提供 OpenAI 兼容的 /audio/transcriptions 接口；未配置时聊天页禁用麦克风按钮',
-    /** 转写不走对话补全，声明上没有流式/工具/结构化输出需求。 */
-    capabilities: { streaming: false, toolCalling: false, structuredOutput: false, imageInput: false },
+  {
+    slot: 'route.classify',
+    label: '类型路由',
+    purpose: '从用户需求里识别要生成的工程类型',
+    requires: ['structuredOutput'],
+    optional: false,
+    missingImpact: '无法识别工程类型，生成请求会被拒绝',
   },
-} as const satisfies Record<string, { label: string; purpose: string; capabilities: ModelAliasCapabilities }>;
-export type OptionalModelAlias = keyof typeof optionalModelAliases;
+  {
+    slot: 'version.summary',
+    label: '版本标题',
+    purpose: '给每个版本写一句 20 字以内的页面变化说明',
+    requires: [],
+    optional: true,
+    missingImpact: '版本标题改用 agent 收尾原话兜底',
+  },
+  {
+    slot: 'speech.transcribe',
+    label: '语音转写',
+    purpose: '把浏览器录到的语音转成文字（OpenAI 兼容的 /audio/transcriptions）',
+    requires: [],
+    optional: true,
+    missingImpact: '聊天页麦克风按钮禁用并提示未配置',
+  },
+] as const satisfies readonly ModelSlotShape[];
 
-/** 别名用途说明；未知别名返回 null（界面不标注）。 */
-export function aliasPurposeOf(alias: string): { label: string; purpose: string } | null {
-  return alias in optionalModelAliases ? optionalModelAliases[alias as OptionalModelAlias] : null;
+export const modelSlots = modelSlotList;
+export type ModelSlot = typeof modelSlotList[number];
+export type ModelSlotName = ModelSlot['slot'];
+type RequiredSlot = Extract<ModelSlot, { readonly optional: false }>;
+type OptionalSlot = Extract<ModelSlot, { readonly optional: true }>;
+
+export type RequiredModelAlias = RequiredSlot['slot'];
+export type OptionalModelAlias = OptionalSlot['slot'];
+
+/** 业务必需槽位：缺失或禁用的完整配置会被写入事务拒绝。 */
+export const requiredModelAliases: readonly RequiredModelAlias[] = modelSlots
+  .filter((slot): slot is RequiredSlot => !slot.optional)
+  .map(slot => slot.slot);
+
+/** 槽位编号到定义的查找；未知编号返回 null。 */
+export function modelSlotOf(slot: string): ModelSlot | null {
+  return modelSlots.find(candidate => candidate.slot === slot) ?? null;
 }
+
+/** 按槽位要求生成能力声明：要求的三项为真，其余（含图片输入）为假。 */
+export function capabilitiesForSlot(slot: { readonly requires: readonly ModelSlotRequirement[] }): ModelAliasCapabilities {
+  return {
+    streaming: slot.requires.includes('streaming'),
+    toolCalling: slot.requires.includes('toolCalling'),
+    structuredOutput: slot.requires.includes('structuredOutput'),
+    imageInput: false,
+  };
+}
+
+/** 槽位要求里尚未满足的能力；空数组表示满足。 */
+export function missingSlotCapabilities(
+  slot: { readonly requires: readonly ModelSlotRequirement[] },
+  capabilities: ModelAliasCapabilities,
+): ModelSlotRequirement[] {
+  return slot.requires.filter(requirement => !capabilities[requirement]);
+}
+
+/** 能力中文名：校验报错与管理端能力标签共用。 */
+export const modelCapabilityLabels: Record<ModelSlotRequirement | 'imageInput', string> = {
+  streaming: '流式',
+  toolCalling: '工具调用',
+  structuredOutput: '结构化输出',
+  imageInput: '图片输入',
+};
 
 /** 第一版支持的 API 格式；值写入 model_provider.api_format。 */
 export const providerApiFormats = ['openai-chat', 'openai-responses', 'anthropic-messages'] as const;
@@ -280,12 +349,6 @@ export type ModelConfigPolicy = {
   internalOrigins: readonly string[];
 };
 
-/** 必需的声明能力；只校验配置声明，不代表上游一定支持。 */
-const requiredCapabilities: Record<RequiredModelAlias, (capabilities: ModelAliasCapabilities) => boolean> = {
-  'codegen.default': capabilities => capabilities.streaming && capabilities.toolCalling,
-  'route.classify': capabilities => capabilities.structuredOutput,
-};
-
 function originOf(value: string): string | null {
   try {
     return new URL(value).origin;
@@ -388,16 +451,22 @@ export function modelConfigIssues(
     if (!provider) issues.push(`别名 ${alias.alias} 指向不存在的提供商 ${alias.providerId}`);
     else if (alias.enabled && !provider.enabled) issues.push(`启用中的别名 ${alias.alias} 不能指向已禁用的提供商 ${alias.providerId}`);
   }
-  for (const required of requiredModelAliases) {
-    const alias = aliases.find(candidate => candidate.alias === required);
+  for (const slot of modelSlots) {
+    if (slot.optional) continue;
+    const alias = aliases.find(candidate => candidate.alias === slot.slot);
+    const name = `${slot.label}（${slot.slot}）`;
     if (!alias) {
-      issues.push(`缺少必需别名 ${required}`);
+      issues.push(`缺少必需槽位${name}：${slot.missingImpact}`);
       continue;
     }
-    if (!alias.enabled) issues.push(`必需别名 ${required} 不能禁用`);
+    if (!alias.enabled) issues.push(`必需槽位${name}不能禁用`);
     const provider = providersById.get(alias.providerId);
-    if (provider && !provider.enabled) issues.push(`必需别名 ${required} 不能指向已禁用的提供商 ${alias.providerId}`);
-    if (!requiredCapabilities[required](alias.capabilities)) issues.push(`必需别名 ${required} 声明的能力不满足业务要求`);
+    if (provider && !provider.enabled) issues.push(`必需槽位${name}不能指向已禁用的提供商 ${alias.providerId}`);
+    const missing = missingSlotCapabilities(slot, alias.capabilities);
+    if (missing.length) {
+      const required = missing.map(requirement => modelCapabilityLabels[requirement]).join('、');
+      issues.push(`槽位${name}需要${required}能力，当前未勾选`);
+    }
   }
   return issues;
 }
@@ -466,6 +535,17 @@ export type ModelInstanceStatus = {
   lastError: string | null;
 };
 
+/** 槽位视图：管理端按它渲染固定的模型分配卡片，不自己维护名单。 */
+export const modelSlotViewSchema = z.strictObject({
+  slot: z.string(),
+  label: z.string(),
+  purpose: z.string(),
+  requires: z.array(z.enum(modelSlotRequirements)),
+  optional: z.boolean(),
+  missingImpact: z.string(),
+});
+export type ModelSlotView = z.infer<typeof modelSlotViewSchema>;
+
 /** POST `/api/model/admin/config` 的响应：DB 配置 + 本实例状态 + UI 可选名单。 */
 export type ModelAdminConfig = {
   revision: string;
@@ -473,7 +553,7 @@ export type ModelAdminConfig = {
   initialized: boolean;
   providers: ModelProviderView[];
   aliases: ModelAlias[];
-  requiredAliases: readonly RequiredModelAlias[];
+  slots: readonly ModelSlot[];
   providerFormats: readonly ModelProviderFormatView[];
   allowedApiKeyEnvs: readonly string[];
   instance: ModelInstanceStatus;
@@ -499,7 +579,7 @@ export const modelAdminConfigViewSchema = z.strictObject({
   initialized: z.boolean(),
   providers: z.array(modelProviderViewSchema),
   aliases: z.array(modelAliasViewSchema),
-  requiredAliases: z.array(z.enum(requiredModelAliases)),
+  slots: z.array(modelSlotViewSchema),
   providerFormats: z.array(modelProviderFormatViewSchema),
   allowedApiKeyEnvs: z.array(z.string()),
   instance: modelInstanceStatusSchema,

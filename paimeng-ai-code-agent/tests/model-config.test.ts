@@ -18,6 +18,11 @@ import {
   providerHeaderNameLimit,
   providerHeaderValueLimit,
   providerOptionsIssue,
+  capabilitiesForSlot,
+  missingSlotCapabilities,
+  modelCapabilityLabels,
+  modelSlotOf,
+  modelSlots,
   reasoningLevels,
   requiredModelAliases,
   thinkingSwitchValues,
@@ -310,10 +315,14 @@ describe('完整候选配置校验', () => {
     expect(modelConfigIssues([provider()], [codegenAlias(), routeAlias()], policy)).toEqual([]);
   });
 
-  it('缺少、禁用必需别名或能力不符会被拒绝', () => {
-    expect(modelConfigIssues([provider()], [codegenAlias()], policy)).toContain('缺少必需别名 route.classify');
-    expect(modelConfigIssues([provider()], [codegenAlias({ enabled: false }), routeAlias()], policy)).toContain('必需别名 codegen.default 不能禁用');
-    expect(modelConfigIssues([provider()], [codegenAlias({ capabilities: { streaming: true, toolCalling: false, structuredOutput: false, imageInput: false } }), routeAlias()], policy)).toContain('必需别名 codegen.default 声明的能力不满足业务要求');
+  it('缺少、禁用必需槽位或能力不符会被拒绝', () => {
+    const missing = modelConfigIssues([provider()], [codegenAlias()], policy);
+    expect(missing.some(issue => issue.includes('缺少必需槽位类型路由（route.classify）'))).toBe(true);
+    expect(missing.some(issue => issue.includes('无法识别工程类型'))).toBe(true);
+    expect(modelConfigIssues([provider()], [codegenAlias({ enabled: false }), routeAlias()], policy))
+      .toContain('必需槽位代码生成（codegen.default）不能禁用');
+    expect(modelConfigIssues([provider()], [codegenAlias({ capabilities: { streaming: true, toolCalling: false, structuredOutput: false, imageInput: false } }), routeAlias()], policy))
+      .toContain('槽位代码生成（codegen.default）需要工具调用能力，当前未勾选');
   });
 
   it('别名必须指向存在的启用提供商', () => {
@@ -338,9 +347,30 @@ describe('版本号十进制字符串', () => {
   });
 });
 
-describe('表标识', () => {
-  it('仅有两个必需别名', () => {
+describe('槽位清单', () => {
+  it('仅有两个必需槽位，四个槽位编号唯一', () => {
     expect([...requiredModelAliases]).toEqual(['codegen.default', 'route.classify']);
+    expect(modelSlots).toHaveLength(4);
+    expect(new Set(modelSlots.map(slot => slot.slot)).size).toBe(4);
+  });
+
+  it('槽位要求能生成满足要求的能力声明', () => {
+    for (const slot of modelSlots) {
+      const capabilities = capabilitiesForSlot(slot);
+      expect(missingSlotCapabilities(slot, capabilities)).toEqual([]);
+      expect(missingSlotCapabilities(slot, { ...capabilities, ...Object.fromEntries(slot.requires.map(requirement => [requirement, false])) }))
+        .toEqual([...slot.requires]);
+    }
+    expect(capabilitiesForSlot(modelSlotOf('codegen.default') ?? modelSlots[0])).toEqual({ streaming: true, toolCalling: true, structuredOutput: false, imageInput: false });
+    expect(capabilitiesForSlot(modelSlotOf('route.classify') ?? modelSlots[1])).toEqual({ streaming: false, toolCalling: false, structuredOutput: true, imageInput: false });
+  });
+
+  it('每个能力都有中文名，未配置后果不为空', () => {
+    for (const slot of modelSlots) {
+      expect(slot.missingImpact.length).toBeGreaterThan(0);
+      for (const requirement of slot.requires) expect(modelCapabilityLabels[requirement].length).toBeGreaterThan(0);
+    }
+    expect(modelSlotOf('unknown.slot')).toBeNull();
   });
 
   it('别名 schema 拒绝未知字段', () => {

@@ -14,3 +14,10 @@
 .sectionHeading h2{margin:0;font-size:18px}
 .statusHint{color:#999;font-size:12px}
 .adminPage :global(.ant-table-tbody > tr > td){vertical-align:middle}
+.slotGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+.slotCard{display:flex;flex-direction:column;gap:8px;border:1px solid #f0f0f0;border-radius:8px;padding:16px}
+.slotCardHead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.slotName{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:#8c8c8c}
+.slotPurpose{color:#595959}
+.slotImpact{color:#999;font-size:12px}
+.slotFooter{margin-top:auto;display:flex;justify-content:flex-end}

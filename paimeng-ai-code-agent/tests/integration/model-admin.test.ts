@@ -190,7 +190,7 @@ describe('模型管理 API', () => {
       initialized: boolean;
       providers: { id: string; apiKeyEnv: string; apiKeyConfigured: boolean }[];
       aliases: { alias: string }[];
-      requiredAliases: string[];
+      slots: { slot: string; label: string; optional: boolean; requires: string[]; missingImpact: string }[];
       providerFormats: { value: string; label: string; optionKeys: string[] }[];
       allowedApiKeyEnvs: string[];
       instance: { degraded: boolean };
@@ -199,7 +199,9 @@ describe('模型管理 API', () => {
     expect(data.providers).toHaveLength(1);
     expect(data.providers[0]).toMatchObject({ id: 'env-default', apiKeyEnv: 'AI_API_KEY', apiKeyConfigured: true });
     expect(data.aliases.map(alias => alias.alias).sort()).toEqual(['codegen.default', 'route.classify']);
-    expect(data.requiredAliases).toEqual(['codegen.default', 'route.classify']);
+    expect(data.slots.map(slot => slot.slot)).toEqual(['codegen.default', 'route.classify', 'version.summary', 'speech.transcribe']);
+    expect(data.slots.filter(slot => !slot.optional).map(slot => slot.slot)).toEqual(['codegen.default', 'route.classify']);
+    expect(data.slots[0]).toMatchObject({ label: '代码生成', requires: ['streaming', 'toolCalling'], optional: false });
     expect(data.providerFormats.map(format => format.value)).toEqual(['openai-chat', 'openai-responses', 'anthropic-messages']);
     expect(data.providerFormats[0]?.optionKeys).toEqual([
       'includeUsage',
@@ -268,13 +270,13 @@ describe('模型管理 API', () => {
     expect((await json(accepted)).data).toMatchObject({ revision: '2' });
   });
 
-  it('提供商与别名写入返回新版本并可读回', async () => {
+  it('提供商与槽位分配写入返回新版本并可读回', async () => {
     const created = await request('model/admin/provider/upsert', { provider: providerInput({ id: 'secondary', displayName: '备用' }), expectedRevision: '1' }, adminCookie);
     expect(created.status).toBe(200);
     expect((await json(created)).data).toMatchObject({ revision: '2', refreshEpoch: '0' });
 
     const aliasSaved = await request('model/admin/alias/upsert', {
-      alias: aliasInput({ alias: 'extra.model', providerId: 'secondary', modelName: 'gpt-extra', capabilities: { streaming: true, toolCalling: false, structuredOutput: false, imageInput: false } }),
+      alias: aliasInput({ alias: 'version.summary', providerId: 'secondary', modelName: 'gpt-extra', capabilities: { streaming: false, toolCalling: false, structuredOutput: false, imageInput: false } }),
       expectedRevision: '2',
     }, adminCookie);
     expect(aliasSaved.status).toBe(200);
@@ -282,7 +284,44 @@ describe('模型管理 API', () => {
 
     const snapshot = await modelStore.readConfigSnapshot();
     expect(snapshot.providers.map(provider => provider.id).sort()).toEqual(['env-default', 'secondary']);
-    expect(snapshot.aliases.map(alias => alias.alias).sort()).toEqual(['codegen.default', 'extra.model', 'route.classify']);
+    expect(snapshot.aliases.map(alias => alias.alias).sort()).toEqual(['codegen.default', 'route.classify', 'version.summary']);
+  });
+
+  it('清单外的槽位名写入返回 400 且不留行', async () => {
+    const created = await request('model/admin/provider/upsert', { provider: providerInput({ id: 'secondary', displayName: '备用' }), expectedRevision: '1' }, adminCookie);
+    expect(created.status).toBe(200);
+    const rejected = await request('model/admin/alias/upsert', {
+      alias: aliasInput({ alias: 'extra.model', providerId: 'secondary' }),
+      expectedRevision: '2',
+    }, adminCookie);
+    expect(rejected.status).toBe(400);
+    const payload = await json(rejected);
+    expect(payload.code).toBe(40000);
+    expect(String(payload.message)).toContain('模型分配只有四个固定槽位');
+    const snapshot = await modelStore.readConfigSnapshot();
+    expect(snapshot.aliases.map(alias => alias.alias).sort()).toEqual(['codegen.default', 'route.classify']);
+  });
+
+  it('库里存在清单外旧行时仍能保存其它槽位', async () => {
+    await db().insert(modelAliases).values({
+      alias: 'extra.model',
+      providerId: 'env-default',
+      modelName: 'legacy-model',
+      capabilities: { streaming: true, toolCalling: false, structuredOutput: false, imageInput: false },
+      settings: {},
+      enabled: 1,
+      createTime: now(),
+      updateTime: now(),
+    });
+    const saved = await request('model/admin/alias/upsert', {
+      alias: aliasInput({ alias: 'version.summary', capabilities: { streaming: false, toolCalling: false, structuredOutput: false, imageInput: false } }),
+      expectedRevision: '1',
+    }, adminCookie);
+    expect(saved.status).toBe(200);
+    const config = await request('model/admin/config', {}, adminCookie);
+    expect(config.status).toBe(200);
+    const data = (await json(config)).data as { aliases: { alias: string }[] };
+    expect(data.aliases.map(alias => alias.alias)).toContain('extra.model');
   });
 
   it('版本冲突返回 409 并且不写入配置', async () => {
@@ -380,16 +419,16 @@ describe('模型管理 API', () => {
     }
   });
 
-  it('删除别名与提供商往返成功，返回十进制版本号', async () => {
+  it('清空槽位与删除提供商往返成功，返回十进制版本号', async () => {
     const created = await request('model/admin/provider/upsert', { provider: providerInput({ id: 'secondary', displayName: '备用' }), expectedRevision: '1' }, adminCookie);
     expect((await json(created)).data).toMatchObject({ revision: '2' });
     const aliasSaved = await request('model/admin/alias/upsert', {
-      alias: aliasInput({ alias: 'extra.model', providerId: 'secondary', capabilities: { streaming: true, toolCalling: false, structuredOutput: false, imageInput: false } }),
+      alias: aliasInput({ alias: 'speech.transcribe', providerId: 'secondary', capabilities: { streaming: false, toolCalling: false, structuredOutput: false, imageInput: false } }),
       expectedRevision: '2',
     }, adminCookie);
     expect((await json(aliasSaved)).data).toMatchObject({ revision: '3' });
 
-    const deletedAlias = await request('model/admin/alias/delete', { alias: 'extra.model', expectedRevision: '3' }, adminCookie);
+    const deletedAlias = await request('model/admin/alias/delete', { alias: 'speech.transcribe', expectedRevision: '3' }, adminCookie);
     expect(deletedAlias.status).toBe(200);
     const afterAlias = (await json(deletedAlias)).data as { revision: string; refreshEpoch: string };
     expect(afterAlias.revision).toMatch(/^\d+$/);

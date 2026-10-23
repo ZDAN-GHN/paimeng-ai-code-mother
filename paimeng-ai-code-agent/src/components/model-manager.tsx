@@ -25,17 +25,17 @@ import { AdminGuard } from './providers';
 import styles from './admin-view.module.css';
 import {
   baseModelApiKeyEnv,
+  capabilitiesForSlot,
+  modelCapabilityLabels,
   modelAdminConfigViewSchema,
   modelConfigVersionSchema,
   modelProviderChoiceOptionKeys,
   modelProviderOptionChoices,
   modelProviderOptionLabels,
   modelProviderOptionKeys,
-  aliasPurposeOf,
   providerHeaderLimit,
   providerHeaderNameSchema,
   providerHeaderValueSchema,
-  optionalModelAliases,
   providerOptionKeysByFormat,
   providerOptionsSchema,
   providerModelListLimit,
@@ -50,9 +50,9 @@ import {
   type ModelAliasInput,
   type ModelAliasSettings,
   type ModelConfigVersion,
-  type OptionalModelAlias,
   type ModelProviderOptions,
   type ModelProviderView,
+  type ModelSlotView,
   type ModelProviderWriteInput,
   type ProviderModelsView,
   type ProviderApiFormat,
@@ -83,7 +83,6 @@ type ProviderFormValues = {
 };
 
 type AliasFormValues = {
-  alias: string;
   providerId: string;
   modelName: string;
   capabilities: ModelAliasCapabilities;
@@ -98,7 +97,7 @@ type AliasFormValues = {
 };
 
 type ProviderEditor = { mode: 'create' } | { mode: 'edit'; original: ModelProviderView };
-type AliasEditor = { mode: 'create'; prefill?: OptionalModelAlias } | { mode: 'edit'; original: ModelAlias };
+type AliasEditor = { slot: ModelSlotView; original: ModelAlias } | { slot: ModelSlotView };
 
 export function ModelManager() {
   return (
@@ -175,14 +174,9 @@ function ModelConfigManager() {
     setProviderEditor({ mode: 'edit', original: row });
   }
 
-  function openCreateAlias(prefill?: OptionalModelAlias) {
+  function openAliasEditor(slot: ModelSlotView, original?: ModelAlias) {
     setConflict(null);
-    setAliasEditor({ mode: 'create', ...(prefill ? { prefill } : {}) });
-  }
-
-  function openEditAlias(row: ModelAlias) {
-    setConflict(null);
-    setAliasEditor({ mode: 'edit', original: row });
+    setAliasEditor(original ? { slot, original } : { slot });
   }
 
   function closeProviderEditor() {
@@ -228,7 +222,7 @@ function ModelConfigManager() {
     }
   }
 
-  /** 拉取所选提供商的上游模型名，供别名的「上游模型名」下拉选择。 */
+  /** 拉取所选提供商的上游模型名，供槽位分配的「上游模型名」下拉选择。 */
   async function loadAliasModels() {
     if (!config) return;
     const selected: unknown = aliasForm.getFieldValue('providerId');
@@ -259,7 +253,7 @@ function ModelConfigManager() {
     setProbeText(null);
     setUpstreamModels([]);
     aliasForm.setFieldsValue(
-      aliasEditor.mode === 'edit' ? aliasFormValues(aliasEditor.original) : emptyAliasValues(aliasEditor.prefill),
+      'original' in aliasEditor ? aliasFormValues(aliasEditor.original) : emptyAliasValues(aliasEditor.slot),
     );
   }, [aliasEditor, aliasForm]);
 
@@ -296,7 +290,7 @@ function ModelConfigManager() {
 
   async function saveAlias(values: AliasFormValues, applyImmediately: boolean) {
     if (!config || !aliasEditor) return;
-    const alias = toAliasInput(values);
+    const alias = toAliasInput(aliasEditor.slot.slot, values);
     await runOperation(
       () =>
         adminPost(
@@ -305,7 +299,7 @@ function ModelConfigManager() {
           (data) => modelConfigVersionSchema.parse(data),
         ),
       () => setAliasEditor(null),
-      applyImmediately ? '别名已保存并立即生效' : '别名已保存',
+      applyImmediately ? '模型分配已保存并立即生效' : '模型分配已保存',
     );
   }
 
@@ -323,17 +317,17 @@ function ModelConfigManager() {
     );
   }
 
-  async function removeAlias(row: ModelAlias) {
+  async function clearSlot(slot: ModelSlotView) {
     if (!config) return;
     await runOperation(
       () =>
         adminPost(
           'model/admin/alias/delete',
-          { alias: row.alias, expectedRevision: config.revision },
+          { alias: slot.slot, expectedRevision: config.revision },
           (data) => modelConfigVersionSchema.parse(data),
         ),
-      () => undefined,
-      '别名已删除',
+      () => setAliasEditor(null),
+      `已清除${slot.label}槽位的模型分配`,
     );
   }
 
@@ -377,10 +371,12 @@ function ModelConfigManager() {
     );
   }
 
-  const requiredAliasSet = new Set<string>(config.requiredAliases);
-  /** 尚未配置的可选别名：给出预填入口，而不是让用户自己猜别名名字。 */
-  const missingOptionalAliases = (Object.keys(optionalModelAliases) as OptionalModelAlias[])
-    .filter(name => !config.aliases.some(alias => alias.alias === name));
+  const slotCards = config.slots.map((slot) => ({
+    slot,
+    alias: config.aliases.find((alias) => alias.alias === slot.slot) ?? null,
+  }));
+  const providerName = (providerId: string) =>
+    config.providers.find((provider) => provider.id === providerId)?.displayName ?? providerId;
 
   const providerColumns: ColumnsType<ModelProviderView> = [
     { title: 'ID', dataIndex: 'id' },
@@ -429,54 +425,6 @@ function ModelConfigManager() {
               删除
             </Button>
           </Popconfirm>
-        </Space>
-      ),
-    },
-  ];
-
-  const aliasColumns: ColumnsType<ModelAlias> = [
-    {
-      title: '别名',
-      dataIndex: 'alias',
-      render: (_, row) => {
-        const purpose = aliasPurposeOf(row.alias);
-        return (
-          <Space>
-            <span>{row.alias}</span>
-            {requiredAliasSet.has(row.alias) ? <Tag color="orange">必需</Tag> : null}
-            {purpose ? <Tag color="geekblue">{purpose.label}</Tag> : null}
-          </Space>
-        );
-      },
-    },
-    { title: '提供商', dataIndex: 'providerId' },
-    { title: '上游模型名', dataIndex: 'modelName' },
-    { title: '能力', dataIndex: 'capabilities', render: (_, row) => capabilityTags(row.capabilities) },
-    { title: '参数', dataIndex: 'settings', render: (_, row) => formatSettings(row.settings) },
-    {
-      title: '启用',
-      dataIndex: 'enabled',
-      render: (value: boolean) => (value ? <Tag color="blue">启用</Tag> : <Tag>停用</Tag>),
-    },
-    {
-      title: '操作',
-      key: 'actions',
-      render: (_, row) => (
-        <Space>
-          <Button size="small" onClick={() => openEditAlias(row)}>
-            编辑
-          </Button>
-          {requiredAliasSet.has(row.alias) ? (
-            <Button size="small" danger disabled>
-              删除
-            </Button>
-          ) : (
-            <Popconfirm title="删除该别名？" onConfirm={() => void removeAlias(row)}>
-              <Button size="small" danger>
-                删除
-              </Button>
-            </Popconfirm>
-          )}
         </Space>
       ),
     },
@@ -540,7 +488,7 @@ function ModelConfigManager() {
             title="模型配置尚未初始化"
             description={
               <div>
-                <p>当前数据库中没有可用的模型提供商与别名。请在服务器上执行一次初始化命令，从环境变量导入默认提供商与必需别名：</p>
+                <p>当前数据库中没有可用的模型提供商与槽位分配。请在服务器上执行一次初始化命令，从环境变量导入默认提供商与必需槽位：</p>
                 <p>
                   <code>npm run db:init-models</code>
                 </p>
@@ -602,27 +550,40 @@ function ModelConfigManager() {
           />
 
           <div className={styles.sectionHeading}>
-            <h2>别名</h2>
-            <Space>
-              {missingOptionalAliases.map((name) => (
-                <Button key={name} onClick={() => openCreateAlias(name)} disabled={saving}>
-                  新增{optionalModelAliases[name].label}别名
-                </Button>
-              ))}
-              <Button type="primary" onClick={() => openCreateAlias()} disabled={saving}>
-                新增别名
-              </Button>
-            </Space>
+            <h2>模型分配</h2>
+            <span className={styles.statusHint}>四个槽位由代码定义，这里只决定每个槽位用哪个模型</span>
           </div>
-          <Table<ModelAlias>
-            rowKey="alias"
-            size="small"
-            loading={loading}
-            dataSource={config.aliases}
-            pagination={false}
-            scroll={{ x: 'max-content' }}
-            columns={aliasColumns}
-          />
+          <div className={styles.slotGrid}>
+            {slotCards.map(({ slot, alias }) => (
+              <section key={slot.slot} className={styles.slotCard} aria-label={`${slot.label}槽位`}>
+                <div className={styles.slotCardHead}>
+                  <strong>{slot.label}</strong>
+                  {slot.optional ? <Tag>可选</Tag> : <Tag color="orange">必需</Tag>}
+                  <span className={styles.slotName}>{slot.slot}</span>
+                </div>
+                <div className={styles.slotPurpose}>{slot.purpose}</div>
+                {alias ? (
+                  <>
+                    <div>
+                      {providerName(alias.providerId)} / <code>{alias.modelName}</code>
+                    </div>
+                    <div>{capabilityTags(alias.capabilities)}</div>
+                    {alias.enabled ? null : <div className={styles.slotImpact}>已停用，实际不会使用</div>}
+                  </>
+                ) : (
+                  <>
+                    <div className={styles.textGray}>未配置</div>
+                    <div className={styles.slotImpact}>{slot.missingImpact}</div>
+                  </>
+                )}
+                <div className={styles.slotFooter}>
+                  <Button size="small" onClick={() => openAliasEditor(slot, alias ?? undefined)} disabled={saving}>
+                    配置
+                  </Button>
+                </div>
+              </section>
+            ))}
+          </div>
         </>
       )}
 
@@ -871,7 +832,7 @@ function ModelConfigManager() {
       {aliasEditor ? (
         <Modal
           open
-          title={aliasEditor.mode === 'create' ? '新增别名' : '编辑别名'}
+          title={`配置${aliasEditor.slot.label}`}
           destroyOnHidden
           onCancel={() => {
             if (!saving) setAliasEditor(null);
@@ -887,6 +848,13 @@ function ModelConfigManager() {
               <Button type="primary" onClick={() => void submitAlias(false)} loading={saving}>
                 保存
               </Button>
+              {aliasEditor.slot.optional && 'original' in aliasEditor ? (
+                <Popconfirm title="清除这个槽位的模型分配？" onConfirm={() => void clearSlot(aliasEditor.slot)}>
+                  <Button danger disabled={saving}>
+                    清除分配
+                  </Button>
+                </Popconfirm>
+              ) : null}
             </Space>
           }
         >
@@ -895,23 +863,17 @@ function ModelConfigManager() {
             form={aliasForm}
             layout="vertical"
             preserve={false}
-            initialValues={aliasEditor.mode === 'edit' ? aliasFormValues(aliasEditor.original) : emptyAliasValues(aliasEditor.prefill)}
+            initialValues={'original' in aliasEditor ? aliasFormValues(aliasEditor.original) : emptyAliasValues(aliasEditor.slot)}
           >
-            <Form.Item
-              name="alias"
-              label="别名"
-              tooltip="稳定的唯一标识，创建后不可修改"
-              rules={[
-                { required: true, message: '请输入别名' },
-                { max: 64, message: '最多 64 个字符' },
-                {
-                  pattern: /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/,
-                  message: '仅小写字母、数字、点、下划线、连字符，且首尾为字母或数字',
-                },
-              ]}
-            >
-              <Input disabled={aliasEditor.mode === 'edit'} placeholder="例如 codegen.default" aria-label="别名" />
-            </Form.Item>
+            <Descriptions size="small" column={1} style={{ marginBottom: 16 }}>
+              <Descriptions.Item label="槽位">
+                {aliasEditor.slot.label}
+                <span className={styles.slotName} style={{ marginLeft: 8 }}>
+                  {aliasEditor.slot.slot}
+                </span>
+              </Descriptions.Item>
+              <Descriptions.Item label="用途">{aliasEditor.slot.purpose}</Descriptions.Item>
+            </Descriptions>
             <Form.Item name="providerId" label="提供商" rules={[{ required: true, message: '请选择提供商' }]}>
               <Select
                 aria-label="提供商"
@@ -943,25 +905,25 @@ function ModelConfigManager() {
               </Button>
             </div>
             {probeText ? <div className={styles.textGray}>{probeText}</div> : null}
-            <Form.Item label="能力">
+            <Form.Item label="能力" tooltip="这些是给这家提供商的端点上声明能力，槽位要求的能力不能关闭">
               <Space size={16} wrap>
-                <Form.Item name={['capabilities', 'streaming']} valuePropName="checked" noStyle>
-                  <Switch aria-label="流式" />
-                </Form.Item>
-                <span>流式</span>
-                <Form.Item name={['capabilities', 'toolCalling']} valuePropName="checked" noStyle>
-                  <Switch aria-label="工具调用" />
-                </Form.Item>
-                <span>工具调用</span>
-                <Form.Item name={['capabilities', 'structuredOutput']} valuePropName="checked" noStyle>
-                  <Switch aria-label="结构化输出" />
-                </Form.Item>
-                <span>结构化输出</span>
-                <Form.Item name={['capabilities', 'imageInput']} valuePropName="checked" noStyle>
-                  <Switch aria-label="图片输入" />
-                </Form.Item>
-                <span>图片输入</span>
+                {(['streaming', 'toolCalling', 'structuredOutput', 'imageInput'] as const).map((capability) => {
+                  const locked = aliasEditor.slot.requires.some((requirement) => requirement === capability);
+                  return (
+                    <span key={capability}>
+                      <Form.Item name={['capabilities', capability]} valuePropName="checked" noStyle>
+                        <Switch aria-label={modelCapabilityLabels[capability]} disabled={locked} />
+                      </Form.Item>
+                      <span>{modelCapabilityLabels[capability]}</span>
+                    </span>
+                  );
+                })}
               </Space>
+              {aliasEditor.slot.requires.length ? (
+                <div className={styles.statusHint}>
+                  该槽位需要{aliasEditor.slot.requires.map((requirement) => modelCapabilityLabels[requirement]).join('、')}能力，已锁定
+                </div>
+              ) : null}
             </Form.Item>
             <Space size={16} wrap>
               <Form.Item
@@ -1002,7 +964,7 @@ function ModelConfigManager() {
                 name={['settings', 'reasoningContentPassthrough']}
                 label="回传思考内容"
                 valuePropName="checked"
-                tooltip="该别名指向 DeepSeek 类混合推理模型时打开：多轮对话回放历史消息会带上 reasoning_content。经第三方网关访问 DeepSeek 时必须打开，否则上游报 400；只影响这一个别名"
+                tooltip="该槽位指向 DeepSeek 类混合推理模型时打开：多轮对话回放历史消息会带上 reasoning_content。经第三方网关访问 DeepSeek 时必须打开，否则上游报 400；只影响这一个槽位"
               >
                 <Switch aria-label="回传思考内容" />
               </Form.Item>
@@ -1167,13 +1129,11 @@ function providerWriteFromView(provider: ModelProviderView): ModelProviderWriteI
     : { ...common, apiKeySource: 'inline', apiKey: '' };
 }
 
-function emptyAliasValues(prefill?: OptionalModelAlias): AliasFormValues {
-  const optional = prefill ? optionalModelAliases[prefill] : undefined;
+function emptyAliasValues(slot: ModelSlotView): AliasFormValues {
   return {
-    alias: prefill ?? '',
     providerId: '',
     modelName: '',
-    capabilities: optional ? { ...optional.capabilities } : { streaming: true, toolCalling: false, structuredOutput: false, imageInput: false },
+    capabilities: capabilitiesForSlot(slot),
     settings: {},
     enabled: true,
   };
@@ -1181,7 +1141,6 @@ function emptyAliasValues(prefill?: OptionalModelAlias): AliasFormValues {
 
 function aliasFormValues(alias: ModelAlias): AliasFormValues {
   return {
-    alias: alias.alias,
     providerId: alias.providerId,
     modelName: alias.modelName,
     capabilities: { ...alias.capabilities },
@@ -1196,7 +1155,7 @@ function aliasFormValues(alias: ModelAlias): AliasFormValues {
   };
 }
 
-function toAliasInput(values: AliasFormValues): ModelAliasInput {
+function toAliasInput(slot: string, values: AliasFormValues): ModelAliasInput {
   const settings: ModelAliasSettings = {};
   if (typeof values.settings?.temperature === 'number') settings.temperature = values.settings.temperature;
   if (typeof values.settings?.topP === 'number') settings.topP = values.settings.topP;
@@ -1204,7 +1163,7 @@ function toAliasInput(values: AliasFormValues): ModelAliasInput {
   if (values.settings?.reasoning) settings.reasoning = values.settings.reasoning;
   if (values.settings?.reasoningContentPassthrough) settings.reasoningContentPassthrough = true;
   return {
-    alias: values.alias.trim(),
+    alias: slot,
     providerId: values.providerId,
     modelName: values.modelName.trim(),
     capabilities: {
