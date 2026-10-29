@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { loadEnvFile } from 'node:process';
 
 const root = process.cwd();
@@ -16,6 +17,9 @@ const appPort = Number(process.env.DURABLE_APP_PORT ?? 3000);
 const appOrigin = process.env.DURABLE_APP_ORIGIN ?? `http://localhost:${appPort}`;
 const harnessUrl = `http://127.0.0.1:${harnessPort}`;
 const previewOrigin = new URL(process.env.PREVIEW_ORIGIN ?? 'http://127.0.0.1:3001');
+const statePath = join(root, 'runtime', 'dev-processes.json');
+const stateChildren: { label: string; pid: number }[] = [];
+const startedAt = new Date().toISOString();
 
 const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
@@ -37,6 +41,18 @@ const labels = { harness: '\u001b[36m', preview: '\u001b[35m', app: '\u001b[32m'
 const children = new Set<ChildProcess>();
 let closing = false;
 let cleanup: Promise<void> | undefined;
+
+function persistState() {
+  mkdirSync(dirname(statePath), { recursive: true });
+  writeFileSync(statePath, JSON.stringify({ parentPid: process.pid, startedAt, children: stateChildren }, null, 2));
+}
+
+function clearState() {
+  try { unlinkSync(statePath); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') console.warn(`无法删除 ${statePath}：${(error as Error).message}`);
+  }
+}
 
 function groupAlive(child: ChildProcess) {
   if (!child.pid) return false;
@@ -62,6 +78,7 @@ function stop(code: number) {
     const deadline = Date.now() + 5000;
     while ([...children].some(groupAlive) && Date.now() < deadline) await delay(100);
     for (const child of children) if (groupAlive(child)) signalGroup(child, 'SIGKILL');
+    clearState();
   })();
   return cleanup.then(() => { process.exitCode = code; });
 }
@@ -79,6 +96,10 @@ function prefixer(label: keyof typeof labels, stream: NodeJS.WriteStream) {
 function start(label: keyof typeof labels, command: string, args: string[], options: { cwd: string; env?: NodeJS.ProcessEnv }) {
   const child = spawn(command, args, { cwd: options.cwd, env: options.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   children.add(child);
+  if (child.pid) {
+    stateChildren.push({ label, pid: child.pid });
+    persistState();
+  }
   child.stdout?.on('data', prefixer(label, process.stdout));
   child.stderr?.on('data', prefixer(label, process.stderr));
   child.once('error', (error) => { console.error(`${label} 无法启动：${error.message}`); void stop(1); });
@@ -104,19 +125,20 @@ async function ensurePostgres() {
 }
 
 if (await portOpen('127.0.0.1', harnessPort)) {
-  console.error(`端口 ${harnessPort} 已被占用，请先停止占用进程，或用 DURABLE_HARNESS_PORT 指定其他端口`);
+  console.error(`端口 ${harnessPort} 已被占用。先运行 npm run dev:stop 清理上次残留；或用 DURABLE_HARNESS_PORT 指定其他端口`);
   process.exit(1);
 }
 if (await portOpen('127.0.0.1', appPort)) {
-  console.error(`端口 ${appPort} 已被占用，请先停止占用进程，或用 DURABLE_APP_PORT 指定其他端口`);
+  console.error(`端口 ${appPort} 已被占用。先运行 npm run dev:stop 清理上次残留；或用 DURABLE_APP_PORT 指定其他端口`);
   process.exit(1);
 }
 if (await portOpen(previewOrigin.hostname, Number(previewOrigin.port || 80))) {
-  console.error(`端口 ${previewOrigin.port} 已被占用，请先停止占用进程，或用 PREVIEW_ORIGIN 指定其他地址`);
+  console.error(`端口 ${previewOrigin.port} 已被占用。先运行 npm run dev:stop 清理上次残留；或用 PREVIEW_ORIGIN 指定其他地址`);
   process.exit(1);
 }
 
 await ensurePostgres();
+persistState();
 
 console.log(`管理端 ${appOrigin}，预览 ${previewOrigin.origin}，harness ${harnessUrl}；输出前缀为 [harness] / [preview] / [app]，按 Ctrl-C 一起停止`);
 console.log(process.env.DURABLE_FAUX_MODEL === '1' || process.env.DURABLE_FAUX_FIXTURE === '1'
@@ -139,4 +161,4 @@ start('app', join(root, 'node_modules', '.bin', process.platform === 'win32' ? '
   cwd: root,
   env: { ...process.env, DURABLE_HARNESS_URL: harnessUrl, APP_ORIGIN: appOrigin },
 });
-start('preview', join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'tsx.cmd' : 'tsx'), ['--conditions=react-server', join(root, 'scripts', 'preview.ts')], { cwd: root });
+start('preview', join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'tsx.cmd' : 'tsx'), ['--conditions=react-server', join(root, 'scripts', 'dev', 'preview.ts')], { cwd: root });

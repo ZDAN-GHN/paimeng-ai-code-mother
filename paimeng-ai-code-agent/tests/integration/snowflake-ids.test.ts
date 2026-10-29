@@ -39,7 +39,7 @@ async function runImport(snapshot: unknown) {
   await mkdir(directory, { recursive: true });
   const file = join(directory, 'snowflake-test-' + randomUUID() + '.json');
   await writeFile(file, JSON.stringify(snapshot), { mode: 0o600 });
-  try { return await execute(process.execPath, ['--conditions=react-server', '--import', 'tsx', 'scripts/import-legacy.ts', file], { env: childEnvironment(), cwd: process.cwd(), timeout: 15000 }); }
+  try { return await execute(process.execPath, ['--conditions=react-server', '--import', 'tsx', 'scripts/db/import-legacy.ts', file], { env: childEnvironment(), cwd: process.cwd(), timeout: 15000 }); }
   finally { await unlink(file); }
 }
 

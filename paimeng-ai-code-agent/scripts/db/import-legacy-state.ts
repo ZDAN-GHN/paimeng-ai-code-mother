@@ -24,7 +24,7 @@ import { codeGenTypes, isProjectCodeGenType } from '@/shared/contracts';
  * 40 位十六进制值且不存在于 version_record；草稿目录固定在 `snapshots/legacy/` 下。
  * 默认 dry-run；`--apply` 才写库和文件。已有预览指针、已有草稿的应用跳过。
  *
- * 与 `scripts/import-legacy.ts`（旧 MySQL 副本 + code_output/code_deploy 文件搬迁）分开：
+ * 与 `scripts/db/import-legacy.ts`（旧 MySQL 副本 + code_output/code_deploy 文件搬迁）分开：
  * 那个脚本负责把旧数据放进新库/新运行目录，这个脚本只把已就位的旧预览与工作区接进新控制面。
  */
 

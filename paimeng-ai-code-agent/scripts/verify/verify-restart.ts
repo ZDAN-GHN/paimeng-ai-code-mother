@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { UIMessage } from 'ai';
-import type { AppInfo, Generation, User } from '../src/shared/contracts';
+import type { AppInfo, Generation, User } from '../../src/shared/contracts';
 
 type Snapshot = { appId: string; userId: string; cookie: string; messages: UIMessage[]; generation: Generation; previewDigest: string };
 const origin = process.env.APP_ORIGIN;

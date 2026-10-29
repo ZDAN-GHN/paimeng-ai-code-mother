@@ -276,23 +276,24 @@ user/login/page.tsx → auth-form.tsx → client/api.ts
 
 | 文件 | 实际作用 |
 | --- | --- |
-| [scripts/durable-dev.ts](../scripts/durable-dev.ts) | npm run dev 的进程协调器：检查已有 PG，启动 harness/preview/Next，合并带前缀日志并统一退出；不会启动数据库。 |
-| [scripts/preview.ts](../scripts/preview.ts) | 读取预览配置，启动独立静态服务，只允许绑定回环主机并处理退出信号。 |
-| [scripts/durable-pg.ts](../scripts/durable-pg.ts) | 连接现有 PG，补建开发/测试的产品库与 harness 库并报告状态；不会启动/停止容器。 |
-| [scripts/infra.ts](../scripts/infra.ts) | 建立 runtime 后执行 docker compose up -d --wait；实际会启动 compose 声明的服务，包括归档 MySQL 和 Redis。 |
-| [scripts/migrate.ts](../scripts/migrate.ts) | 顺序执行未应用的 SQL 迁移，记录 checksum，拒绝修改已执行迁移。 |
-| [scripts/initialize-models.ts](../scripts/initialize-models.ts) | 仅在模型配置仍为空时从环境配置初始化产品库模型，再关闭连接池。 |
-| [scripts/admin.ts](../scripts/admin.ts) | 把指定已注册账号设为管理员，是会改变权限的操作脚本。 |
-| [scripts/import-legacy.ts](../scripts/import-legacy.ts) | 将已审查 JSON 用户/应用快照导入新 PG，可同时复制审查过的旧产物；保留原 ID，并提升发号下界。 |
-| [scripts/import-legacy-state.ts](../scripts/import-legacy-state.ts) | 把 legacy 当前预览和未发布源码导入不可变交付/封存草稿；默认预演，--apply 才落地，不补造 generation/版本。 |
-| [scripts/durable-inspect.ts](../scripts/durable-inspect.ts) | 命令行读取 harness 会话/任务/转录，支持会话列表和完整输出，便于运行诊断。 |
-| [scripts/check-ui-patterns.ts](../scripts/check-ui-patterns.ts) | 静态扫描 TSX，拦截已知 antd 失效表单绑定与废弃 API 写法。 |
-| [scripts/check-e2e-patterns.ts](../scripts/check-e2e-patterns.ts) | 静态扫描浏览器测试，拦截写死地址、易误选的定位器和直接拼证据目录等写法。 |
-| [scripts/verify-boundary.ts](../scripts/verify-boundary.ts) | 检查当前工作区对旧代码/项目外文件的改动是否符合冻结边界；已有用户改动也可能让它失败。 |
-| [scripts/verify-infra.ts](../scripts/verify-infra.ts) | 真实读写验证产品 PG 和 Redis；可选重启本项目 Redis 验证持久化。 |
-| [scripts/verify-restart.ts](../scripts/verify-restart.ts) | prepare/verify 两阶段保存和比较专用 fixture 样本：会话、转录、任务、预览、下载与重启后续轮。 |
-| [scripts/test-database.ts](../scripts/test-database.ts) | 创建专用产品/harness 测试库，并在产品测试库执行迁移。 |
-| [scripts/test-e2e.ts](../scripts/test-e2e.ts) | 隔离浏览器测试启动器：强制测试库、测试 Redis 与模型夹具，构建/启动 Next、预览和独立 harness，检查健康并清理进程。 |
+| [scripts/dev/durable-dev.ts](../scripts/dev/durable-dev.ts) | npm run dev 的进程协调器：检查已有 PG，启动 harness/preview/Next，合并带前缀日志并统一退出；不会启动数据库。 |
+| [scripts/dev/dev-stop.ts](../scripts/dev/dev-stop.ts) | 读取 `runtime/dev-processes.json`，按保存的父进程和子进程组清理开发栈；用于后台启动器只杀掉父进程后的恢复。 |
+| [scripts/dev/preview.ts](../scripts/dev/preview.ts) | 读取预览配置，启动独立静态服务，只允许绑定回环主机并处理退出信号。 |
+| [scripts/ops/durable-pg.ts](../scripts/ops/durable-pg.ts) | 连接现有 PG，补建开发/测试的产品库与 harness 库并报告状态；不会启动/停止容器。 |
+| [scripts/ops/infra.ts](../scripts/ops/infra.ts) | 建立 runtime 后执行 docker compose up -d --wait；实际会启动 compose 声明的服务，包括归档 MySQL 和 Redis。 |
+| [scripts/db/migrate.ts](../scripts/db/migrate.ts) | 顺序执行未应用的 SQL 迁移，记录 checksum，拒绝修改已执行迁移。 |
+| [scripts/db/initialize-models.ts](../scripts/db/initialize-models.ts) | 仅在模型配置仍为空时从环境配置初始化产品库模型，再关闭连接池。 |
+| [scripts/db/admin.ts](../scripts/db/admin.ts) | 把指定已注册账号设为管理员，是会改变权限的操作脚本。 |
+| [scripts/db/import-legacy.ts](../scripts/db/import-legacy.ts) | 将已审查 JSON 用户/应用快照导入新 PG，可同时复制审查过的旧产物；保留原 ID，并提升发号下界。 |
+| [scripts/db/import-legacy-state.ts](../scripts/db/import-legacy-state.ts) | 把 legacy 当前预览和未发布源码导入不可变交付/封存草稿；默认预演，--apply 才落地，不补造 generation/版本。 |
+| [scripts/ops/durable-inspect.ts](../scripts/ops/durable-inspect.ts) | 命令行读取 harness 会话/任务/转录，支持会话列表和完整输出，便于运行诊断。 |
+| [scripts/verify/check-ui-patterns.ts](../scripts/verify/check-ui-patterns.ts) | 静态扫描 TSX，拦截已知 antd 失效表单绑定与废弃 API 写法。 |
+| [scripts/verify/check-e2e-patterns.ts](../scripts/verify/check-e2e-patterns.ts) | 静态扫描浏览器测试，拦截写死地址、易误选的定位器和直接拼证据目录等写法。 |
+| [scripts/verify/verify-boundary.ts](../scripts/verify/verify-boundary.ts) | 检查当前工作区对旧代码/项目外文件的改动是否符合冻结边界；已有用户改动也可能让它失败。 |
+| [scripts/verify/verify-infra.ts](../scripts/verify/verify-infra.ts) | 真实读写验证产品 PG 和 Redis；可选重启本项目 Redis 验证持久化。 |
+| [scripts/verify/verify-restart.ts](../scripts/verify/verify-restart.ts) | prepare/verify 两阶段保存和比较专用 fixture 样本：会话、转录、任务、预览、下载与重启后续轮。 |
+| [scripts/db/test-database.ts](../scripts/db/test-database.ts) | 创建专用产品/harness 测试库，并在产品测试库执行迁移。 |
+| [scripts/verify/test-e2e.ts](../scripts/verify/test-e2e.ts) | 隔离浏览器测试启动器：强制测试库、测试 Redis 与模型夹具，构建/启动 Next、预览和独立 harness，检查健康并清理进程。 |
 | [scripts/hooks/pre-commit](../scripts/hooks/pre-commit) | 启用项目 Git hooks 后，提交前运行 check:fast；文件存在不代表 hooks 已启用。 |
 | [scripts/hooks/pre-push](../scripts/hooks/pre-push) | 启用项目 Git hooks 后，推送前运行项目 type-check。 |
 

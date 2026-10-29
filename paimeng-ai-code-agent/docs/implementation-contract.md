@@ -73,7 +73,7 @@ POST `/api/app/build` 接收 `{appId}`，按应用现有源码重建前端预览
 
 `src/server/artifacts.ts` 提供 `buildApp`、`deployApp`、`downloadApp`、`previewUrl`、`deployedUrl` 和 `captureCover`。源码与发布文件位于本目录的 `runtime/`，不写入旧产物。
 
-`src/server/preview.ts` 创建独立静态预览 HTTP 服务，启动入口为 `scripts/preview.ts`。封面及生成页面与管理端使用不同主机名。配置由 `src/server/config.ts` 校验。Vue 构建只在隔离 Docker 环境运行，详细限制见 [产物、构建与预览限制](./artifacts.md)。
+`src/server/preview.ts` 创建独立静态预览 HTTP 服务，启动入口为 `scripts/dev/preview.ts`。封面及生成页面与管理端使用不同主机名。配置由 `src/server/config.ts` 校验。Vue 构建只在隔离 Docker 环境运行，详细限制见 [产物、构建与预览限制](./artifacts.md)。
 
 ## 模型配置与解析
 

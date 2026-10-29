@@ -55,7 +55,7 @@ ZIP 下载包含经过路径校验的真实源文件，不包含 `dist/`、`node
 
 ## 独立预览服务
 
-`src/server/preview.ts` 创建 HTTP 服务，`scripts/preview.ts` 负责在配置的回环地址启动它。该服务不提供管理 API，也不授予管理端 Cookie 或跨域凭据权限。
+`src/server/preview.ts` 创建 HTTP 服务，`scripts/dev/preview.ts` 负责在配置的回环地址启动它。该服务不提供管理 API，也不授予管理端 Cookie 或跨域凭据权限。
 
 - `/preview/{类型}_{ID}/` 提供生成源码或 Vue 的 `dist/`。
 - `/deploy/{deployKey}/` 提供已发布副本。

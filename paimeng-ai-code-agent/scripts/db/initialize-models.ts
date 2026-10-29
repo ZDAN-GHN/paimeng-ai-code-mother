@@ -1,5 +1,5 @@
-import { getPool } from '../src/server/db';
-import { initializeModelConfigFromEnv } from '../src/server/models/store';
+import { getPool } from '../../src/server/db';
+import { initializeModelConfigFromEnv } from '../../src/server/models/store';
 
 const result = await initializeModelConfigFromEnv();
 console.log(result.initialized

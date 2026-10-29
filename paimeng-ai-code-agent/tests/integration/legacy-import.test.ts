@@ -12,7 +12,7 @@ import {
   appAuthority, appPreviewPointers, apps, generationDeliveries, sourceSnapshots, users, versionRecords, generations,
 } from '@/server/schema';
 import type { WorkspaceApp } from '@/server/workspace';
-import { importLegacy } from '../../scripts/import-legacy-state';
+import { importLegacy } from '../../scripts/db/import-legacy-state';
 
 loadEnvFile('.env');
 process.env.DATABASE_URL = testDatabaseUrl(process.env.DATABASE_URL ?? '');

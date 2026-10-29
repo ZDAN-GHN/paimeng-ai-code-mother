@@ -14,7 +14,7 @@ try {
     if (!existing.rowCount) await admin.query(`CREATE DATABASE ${name}`);
   }
 } finally { await admin.end(); }
-const result = execFileSync(process.execPath, ['--import', 'tsx', '--env-file=.env', 'scripts/migrate.ts'], {
+const result = execFileSync(process.execPath, ['--import', 'tsx', '--env-file=.env', 'scripts/db/migrate.ts'], {
   stdio: 'inherit', env: { ...process.env, DATABASE_URL: url.href },
 });
 assert.equal(result, null);

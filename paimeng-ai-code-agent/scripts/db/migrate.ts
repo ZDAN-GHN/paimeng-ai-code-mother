@@ -7,7 +7,7 @@ const client=new pg.Client({connectionString:url.href});
 await client.connect();
 try{
  await client.query("CREATE TABLE IF NOT EXISTS schema_migration(name VARCHAR(256) PRIMARY KEY, checksum VARCHAR(64) NOT NULL, applied_at TIMESTAMP NOT NULL DEFAULT timezone('UTC', now()))");
- const directory=new URL('../migrations/',import.meta.url);
+ const directory=new URL('../../migrations/',import.meta.url);
  for(const name of (await readdir(directory)).filter(n=>/^\d+_.*\.sql$/.test(n)).sort()){
   const sql=await readFile(new URL(name,directory),'utf8');const checksum=createHash('sha256').update(sql).digest('hex');
   const existing=await client.query<{checksum:string}>('SELECT checksum FROM schema_migration WHERE name=$1',[name]);

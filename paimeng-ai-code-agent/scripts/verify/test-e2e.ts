@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createConnection, createServer } from 'node:net';
 import { loadEnvFile } from 'node:process';
-import { storageTestDatabaseUrl, testDatabaseUrl } from '../tests/test-database-url';
+import { storageTestDatabaseUrl, testDatabaseUrl } from '../../tests/test-database-url';
 
 function testPort(name: string, fallback: number) {
   const port = Number(process.env[name] ?? fallback);

@@ -15,7 +15,7 @@
 5. 执行 `npm run durable:pg` 确保 Postgres 就绪（连接本机自己的 Postgres 容器 `zslm-postgres`，127.0.0.1:5432，建好 `paimeng_app`、`paimeng_app_test`、`paimeng_agent`、`paimeng_agent_test` 四个 database，再打印 server_version 与各库大小），再执行 `npm run db:migrate`。迁移完成后显示“产品 Postgres 库迁移完成”，依次执行尚未应用的 SQL 迁移；`001_initial.sql` 建业务表，`002_drop_rate_limit.sql` 删除已迁往 Redis 的限流表。重复执行会核对已有迁移的校验和。随后执行一次 `npm run db:init-models`，把现有 `.env` 的模型配置写入数据库（仅当表仍为空且版本为零；幂等，已有配置不会被覆盖）。旧 MySQL 的一次性搬迁已经完成，历史操作记录见 `docs/plans/archive/pi-durable-m4.md`。
 6. 执行 `docker pull node:24-alpine`。Vue 生成工程使用该镜像进行隔离构建。
 7. 执行 `npx playwright install chromium`。发布封面截图和浏览器测试都需要 Chromium。若系统缺少浏览器依赖，按 Playwright 的报错安装系统依赖。
-8. 执行 `npm run dev` 启动全套开发进程：harness（5599）、预览（3001）与管理端（3000），输出按 `[harness]`、`[preview]`、`[app]` 前缀合并，Ctrl-C 一起停止。它要求本机 Postgres 容器已在跑（不在跑就直接报错，不会自己起数据库）。也可以分开跑：`npm run durable:harness`、`npm run preview`、`npm run dev:web`（只起 Next）。
+8. 执行 `npm run dev` 启动全套开发进程：harness（5599）、预览（3001）与管理端（3000），输出按 `[harness]`、`[preview]`、`[app]` 前缀合并，Ctrl-C 一起停止。若后台启动器只杀掉了父进程，先用 `npm run dev:stop` 按进程组清理上次残留。它要求本机 Postgres 容器已在跑（不在跑就直接报错，不会自己起数据库）。也可以分开跑：`npm run durable:harness`、`npm run preview`、`npm run dev:web`（只起 Next）。
 9. 打开 `http://localhost:3000`，注册并登录。
 10. 浏览器打开 `http://localhost:3000` 登录后进入应用，生成由第 8 步起的 harness 执行；`http://localhost:3000/app/chat/<应用 ID>` 是对话页。Ctrl-C 会一起收尾 harness、预览与 Next；数据库不属于该脚本，不会被停。
 

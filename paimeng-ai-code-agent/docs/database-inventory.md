@@ -78,7 +78,7 @@ docker exec -i zslm-postgres psql -U postgres -d paimeng_agent -c "select relnam
 | 表 | 作用 | 谁读写 | 行数 | 删除代价 |
 | --- | --- | --- | --- | --- |
 | `id_sequence` | 产品雪花 ID 的发号下界（`node_id` 主键 + `last_id`） | `snowflake.ts:29`（`SELECT … FOR UPDATE` 预留号段） | 1（`last_id=469396143160164352`） | 可换 Postgres 序列；代价是丢掉与旧库 MyBatis Flex 一致的位布局/起始时间，且要重新保证「已提交下界」跨进程共享 |
-| `schema_migration` | 迁移台账 `name` + `checksum` + `applied_at` | `scripts/migrate.ts` | 已含 `001_initial.sql` 与 `002_drop_rate_limit.sql` | 不能删：没有它就无法判断库执行到哪一步、也无法禁止改已执行迁移的内容 |
+| `schema_migration` | 迁移台账 `name` + `checksum` + `applied_at` | `scripts/db/migrate.ts` | 已含 `001_initial.sql` 与 `002_drop_rate_limit.sql` | 不能删：没有它就无法判断库执行到哪一步、也无法禁止改已执行迁移的内容 |
 
 `id_sequence` 与 harness 的 `mintId` 是**两个独立命名空间**：产品不读 harness 的号段，harness 只给会话/记录发号。
 

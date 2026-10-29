@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
-const root=resolve(import.meta.dirname,'../..');
+const root=resolve(import.meta.dirname,'../../..');
 const diff=execFileSync('git',['diff','--binary','--','.',':!paimeng-ai-code-agent',':!.agents',':!.github/workflows/tests.yml'],{cwd:root,maxBuffer:16*1024*1024});
 const actual=createHash('sha256').update(diff).digest('hex');
 // 2026-10-14 重冻结：旧代码归档到 archive/、项目目录改名为 paimeng-ai-code-agent/ 之后，项目目录外的未提交差异应恒为空。

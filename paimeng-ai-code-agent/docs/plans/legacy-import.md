@@ -1,6 +1,6 @@
 # legacy 预览 / 草稿导入与切换演练
 
-本文对应 `scripts/import-legacy-state.ts`（`npm run legacy:import`）与用户、应用、产物导入（`npm run db:import`）。它只把**当前旧预览**和**未发布工作区草稿**接进新控制面，不导入旧版本历史、不重建 generation，也不删除任何旧目录。生产切换不在本文自动执行。
+本文对应 `scripts/db/import-legacy-state.ts`（`npm run legacy:import`）与用户、应用、产物导入（`npm run db:import`）。它只把**当前旧预览**和**未发布工作区草稿**接进新控制面，不导入旧版本历史、不重建 generation，也不删除任何旧目录。生产切换不在本文自动执行。
 
 ## 前置条件
 
