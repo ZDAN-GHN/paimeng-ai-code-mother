@@ -56,6 +56,8 @@ export const runModelDoc: ConversationDocToken<{ run?: JsonValue }> = defineDoc(
 	history: "latest",
 	fork: "initial",
 	initial: (): { run?: JsonValue } => ({}),
+	// 运行描述很小，每次变更都存完整 base：避免 delta 重放，也让旧运行在重启后能被直接读回。
+	checkpointWhen: () => true,
 });
 
 const modelRefSchema = z.strictObject({ provider: z.string().min(1), modelId: z.string().min(1) });

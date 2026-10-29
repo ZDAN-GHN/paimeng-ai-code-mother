@@ -7,10 +7,10 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db, getPool, now } from '@/server/db';
 import { nextSnowflakeId } from '@/server/snowflake';
-import { apps, users } from '@/server/schema';
+import { appAuthority, apps, users } from '@/server/schema';
 import { publicUser } from '@/server/auth';
 import { harnessChatResponse } from '@/server/durable-engine';
-import { generationFor } from '@/server/generation-store';
+import { generationControl, generationFor } from '@/server/generation-store';
 import { listVersionRows, versionRowOf } from '@/server/version-ledger';
 import { workspace, writeProjectFile } from '@/server/workspace';
 import { commitVersion, ensureVersionRepo, listVersions } from '@/server/version-store';
@@ -88,7 +88,7 @@ async function waitForTerminal(appId: string, requestId: string, timeoutMs: numb
  * 跑一次真实生成：faux 模型按脚本写一个文件，收尾走 durable-engine 的版本落账。
  * 返回后生成已结终态，版本行与截图都在收尾里写完了。
  */
-async function runGeneration(options: { account: TestAccount; tool: string; args: unknown; text: string; finalText: string }) {
+async function runGeneration(options: { account: TestAccount; tool: string; args: unknown; text: string; finalText: string; expectedStatus?: 'ready' | 'failed' }) {
   const port = await freePort();
   const runDir = mkdtempSync(join(tmpdir(), 'version-generation-'));
   process.env.DURABLE_HARNESS_URL = baseUrl(port);
@@ -105,7 +105,7 @@ async function runGeneration(options: { account: TestAccount; tool: string; args
     // 读完流：生成收尾与版本落账都在流关闭前完成。
     await response.text();
     const task = await waitForTerminal(options.account.app.id, requestId, 90_000);
-    expect(task.status).toBe('ready');
+    expect(task.status).toBe(options.expectedStatus ?? 'ready');
     return requestId;
   } finally {
     await stopHarness(harness);
@@ -210,17 +210,22 @@ describe.skipIf(!harnessReady || !postgresReady)('生成收尾的版本', () => 
     expect(overview.current).toEqual({ versionId: v2 });
   }, 180_000);
 
-  it('版本库不可写时，生成照样成功收尾（记版失败不影响生成结果）', async () => {
+  it('版本库不可写时生成失败并保留草稿，不留下半截版本', async () => {
     const account = await createApp('版本库不可写');
     const { app } = account;
     await writeProjectFile(app, 'index.html', '<!doctype html><html><body>BLOCKED_REPO</body></html>');
-    // 在 .git 该在的位置放一个普通文件：git 初始化必然失败，落账抛错。
+    // 在 .git 该在的位置放一个普通文件：git 初始化必然失败，发布事务不能凭空造出版本。
     writeFileSync(join(workspace(app), '.git'), 'not-a-repo');
 
-    await runGeneration({ account, text: '照常生成', finalText: '照常完成', tool: 'm1_wait', args: { ms: 0 } });
+    const requestId = await runGeneration({ account, text: '照常生成', finalText: '照常完成', tool: 'm1_wait', args: { ms: 0 }, expectedStatus: 'failed' });
 
     expect(await listVersionRows(app.id)).toHaveLength(0);
     expect(await versionRowOf(app.id, 'a'.repeat(40))).toBe(null);
     await expect(ensureVersionRepo(app)).rejects.toThrow();
+    const control = await generationControl(requestId);
+    expect(control?.phase).toBe('finished');
+    // 失败收尾必须留下可继承的草稿引用，下一轮才能接着改。
+    const [authority] = await db().select().from(appAuthority).where(eq(appAuthority.appId, BigInt(app.id)));
+    expect(authority?.draftSnapshotId).not.toBeNull();
   }, 180_000);
 });

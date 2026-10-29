@@ -21,10 +21,16 @@ export function fauxModels(): MutableModels {
 	const args: ToolCall["arguments"] = rawArgs ? (JSON.parse(rawArgs) as ToolCall["arguments"]) : { ms: waitMs };
 	const faux = fauxProvider({ provider: FAUX_PROVIDER, models: [{ id: FAUX_MODEL_ID, contextWindow: 200_000, maxTokens: 8_192 }] });
 	const thinkingText = process.env.DURABLE_FAUX_THINKING;
+	const firstThinkingText = process.env.DURABLE_FAUX_FIRST_THINKING;
 	const step: FauxResponseStep = (context) =>
 		context.messages.some((message) => message.role === "toolResult")
 			? fauxAssistantMessage(thinkingText ? ([fauxThinking(thinkingText), fauxText(finalText)] as const) : finalText)
-			: fauxAssistantMessage([fauxToolCall(toolName, args)], { stopReason: "toolUse" });
+			: fauxAssistantMessage(
+					firstThinkingText
+						? ([fauxThinking(firstThinkingText), fauxToolCall(toolName, args)] as const)
+						: [fauxToolCall(toolName, args)],
+					{ stopReason: "toolUse" },
+				);
 	faux.setResponses(Array.from({ length: FAUX_STEPS }, () => step));
 	const models = createModels();
 	models.setProvider(faux.provider);

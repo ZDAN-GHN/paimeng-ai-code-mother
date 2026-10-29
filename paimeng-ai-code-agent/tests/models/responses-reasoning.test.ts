@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { reasoningEventStream, reasoningJsonToSummary, rewriteReasoningLine } from '@/server/models/responses-reasoning';
+import { normalizeResponsesJson, reasoningEventStream, reasoningJsonToSummary, rewriteReasoningLine } from '@/server/models/responses-reasoning';
 
 async function runStream(chunks: string[]): Promise<string> {
   const stream = new ReadableStream<Uint8Array>({
@@ -19,7 +19,7 @@ async function runStream(chunks: string[]): Promise<string> {
   return text;
 }
 
-describe('DeepSeek Responses 的思考事件改写', () => {
+describe('DeepSeek Responses 的兼容改写', () => {
   it('把 reasoning_text 的 event 与 data 改写成 SDK 认识的 summary 事件', () => {
     expect(rewriteReasoningLine('event: response.reasoning_text.delta')).toBe('event: response.reasoning_summary_text.delta');
     const rewritten = rewriteReasoningLine(
@@ -75,5 +75,30 @@ describe('DeepSeek Responses 的思考事件改写', () => {
     expect(mapped.output[2]).toEqual({ type: 'message', content: [] });
     expect(reasoningJsonToSummary(null)).toBeNull();
     expect(reasoningJsonToSummary({ output: 'no' })).toEqual({ output: 'no' });
+  });
+
+  it('非流式响应为 DeepSeek 缺失的 output_text annotations 补空数组，已有值保留', () => {
+    const body = {
+      output: [
+        {
+          type: 'message',
+          id: 'msg_1',
+          role: 'assistant',
+          content: [
+            { type: 'output_text', text: '{"codeGenType":"html"}' },
+            { type: 'output_text', text: '带引用', annotations: [{ type: 'url_citation' }] },
+          ],
+        },
+        { type: 'reasoning', summary: [], content: [{ type: 'reasoning_text', text: '甲' }] },
+      ],
+    };
+    const mapped = normalizeResponsesJson(body) as { output: Array<Record<string, unknown>> };
+    expect(mapped.output[0].content).toEqual([
+      { type: 'output_text', text: '{"codeGenType":"html"}', annotations: [] },
+      { type: 'output_text', text: '带引用', annotations: [{ type: 'url_citation' }] },
+    ]);
+    expect(mapped.output[1].summary).toEqual([{ type: 'summary_text', text: '甲' }]);
+    expect(normalizeResponsesJson(null)).toBeNull();
+    expect(normalizeResponsesJson({ output: 'no' })).toEqual({ output: 'no' });
   });
 });

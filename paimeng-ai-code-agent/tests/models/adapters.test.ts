@@ -318,6 +318,25 @@ describe('buildAliasModels', () => {
     expect(request?.body.model).toBe(modelName);
   });
 
+  it('openai-responses 兼容 DeepSeek 缺失 annotations 的非流式响应', async () => {
+    process.env.AI_API_KEY = 'local-secret';
+    respond = (_body, reply) =>
+      replyJson(reply, {
+        id: 'resp_deepseek',
+        created_at: 0,
+        model: modelName,
+        status: 'completed',
+        output: [
+          { type: 'message', role: 'assistant', id: 'msg_1', status: 'completed', content: [{ type: 'output_text', text: '{"codeGenType":"html"}' }] },
+        ],
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      });
+    const models = buildAliasModels([{ ...providerFixture, apiFormat: 'openai-responses', baseUrl }], [aliasFixture()]);
+    const result = await generateText({ model: bindingOf(models, 'codegen.default').model, prompt: '分类' });
+
+    expect(result.text).toBe('{"codeGenType":"html"}');
+  });
+
   it('anthropic-messages 格式向 /messages 发送 x-api-key', async () => {
     process.env.AI_API_KEY = 'local-secret';
     respond = (_body, reply) =>

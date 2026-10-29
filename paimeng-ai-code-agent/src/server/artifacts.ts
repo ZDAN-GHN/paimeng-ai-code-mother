@@ -12,8 +12,9 @@ import { validateProjectManifest } from './build-contract';
 import { markBuildFailure, sourceFailure, type BuildStage } from './build-feedback';
 import { readTemplateFile, templateTypecheck, validateTemplateManifest } from './templates';
 import { appTemplate } from './template-workspace';
-import { workspace, ensureRuntime, ensureWorkspace, ensureSafeDirectory, listProjectFiles, readProjectFile, readProjectFileBytes, validateDeployKey, type WorkspaceApp } from './workspace';
+import { workspace, ensureRuntime, ensureProjectRoot, projectRootPath, ensureSafeDirectory, listProjectFiles, readProjectFile, readProjectFileBytes, validateDeployKey, type ProjectTarget, type WorkspaceApp } from './workspace';
 import { isProjectCodeGenType } from '@/shared/contracts';
+import { currentDelivery, resolveDelivery } from './delivery-store';
 export { workspace } from './workspace';
 
 export { BUILD_DEPENDENCIES } from './build-contract';
@@ -91,26 +92,26 @@ const BUILD_STATE_VERSION = 1;
 // 清单以 .paimeng- 开头：文件工具、源码清单、产物拷贝、下载与预览都会跳过这类名字。
 const BUILD_STATE_FILE = '.paimeng-build.json';
 
-export function buildStatePath(app: WorkspaceApp) {
-  return join(workspace(app), BUILD_STATE_FILE);
+export function buildStatePath(target: ProjectTarget) {
+  return join(projectRootPath(target), BUILD_STATE_FILE);
 }
 
 /** 当前源码与模板版本的指纹：按原始字节计算，图片等二进制资源也要参与。 */
-export async function sourceDigest(app: WorkspaceApp) {
-  const template = await appTemplate(app);
+export async function sourceDigest(target: ProjectTarget) {
+  const template = await appTemplate(target);
   const hash = createHash('sha256');
   hash.update(template ? `template:${template.id}@${template.version}\n` : 'template:none\n');
-  for (const path of await listProjectFiles(app)) {
-    const content = await readProjectFileBytes(app, path);
+  for (const path of await listProjectFiles(target)) {
+    const content = await readProjectFileBytes(target, path);
     hash.update(`file:${path}:${content.byteLength}\n`);
     hash.update(content);
   }
   return hash.digest('hex');
 }
 
-export async function loadBuildState(app: WorkspaceApp): Promise<BuildState | null> {
+export async function loadBuildState(target: ProjectTarget): Promise<BuildState | null> {
   try {
-    const parsed: unknown = JSON.parse(await readFile(buildStatePath(app), 'utf8'));
+    const parsed: unknown = JSON.parse(await readFile(buildStatePath(target), 'utf8'));
     if (typeof parsed !== 'object' || parsed === null) return null;
     const { version, sourceHash, builtAt } = parsed as Partial<BuildState>;
     return version === BUILD_STATE_VERSION && typeof sourceHash === 'string' && typeof builtAt === 'string'
@@ -120,25 +121,27 @@ export async function loadBuildState(app: WorkspaceApp): Promise<BuildState | nu
 }
 
 /** 记录「dist 里的产物对应这份源码」；构建期间源码变过就不会写，下次会自动重建。 */
-export async function saveBuildState(app: WorkspaceApp, sourceHash: string) {
-  const temporary = join(await ensureWorkspace(app), '.paimeng-state-' + randomUUID());
+export async function saveBuildState(target: ProjectTarget, sourceHash: string) {
+  const temporary = join(await ensureProjectRoot(target), '.paimeng-state-' + randomUUID());
   const state: BuildState = { version: BUILD_STATE_VERSION, sourceHash, builtAt: now() };
   await writeFile(temporary, JSON.stringify(state), 'utf8');
-  await rename(temporary, buildStatePath(app));
+  await rename(temporary, buildStatePath(target));
 }
 
 /** 源码与模板都没变、产物也还在时，不必再进容器构建一次。 */
-export async function buildIsCurrent(app: WorkspaceApp, digest?: string) {
+export async function buildIsCurrent(target: ProjectTarget, digest?: string) {
+  const app = 'app' in target ? target.app : target;
   if (!isProjectCodeGenType(app.codeGenType)) return false;
-  const state = await loadBuildState(app);
-  if (!state || state.sourceHash !== (digest ?? await sourceDigest(app))) return false;
-  return hasPreview(app);
+  const state = await loadBuildState(target);
+  if (!state || state.sourceHash !== (digest ?? await sourceDigest(target))) return false;
+  return hasPreview(target);
 }
 
 /** 构建各阶段的进度通知：只报告 started/ok/failed，不改变构建结果。 */
 export type BuildStageProgress = (stage: 'source' | 'install' | 'typecheck' | 'build', status: 'started' | 'ok' | 'failed', ms: number) => void;
 
-export async function buildApp(app: WorkspaceApp, signal?: AbortSignal, onStage?: BuildStageProgress) {
+export async function buildApp(target: ProjectTarget, signal?: AbortSignal, onStage?: BuildStageProgress) {
+  const app = 'app' in target ? target.app : target;
   signal?.throwIfAborted();
   // 进度回调只是通知：回调抛错不能让构建失败。started 的 ms 恒为 0，ok/failed 的 ms 是这一阶段的墙钟。
   const notify: BuildStageProgress = (stage, status, ms) => { try { onStage?.(stage, status, ms); } catch {} };
@@ -150,31 +153,31 @@ export async function buildApp(app: WorkspaceApp, signal?: AbortSignal, onStage?
     notify(step, 'ok', Date.now() - startedAt);
     return value;
   };
-  const root = await ensureWorkspace(app);
-  const files = await listProjectFiles(app);
+  const root = await ensureProjectRoot(target);
+  const files = await listProjectFiles(target);
   if (!isProjectCodeGenType(app.codeGenType)) {
     await stageRun('source', async () => {
       if (!files.includes('index.html')) throw sourceFailure('生成结果缺少 index.html');
-      const index = await readProjectFile(app, 'index.html');
+      const index = await readProjectFile(target, 'index.html');
       if (!/<html[\s>]/i.test(index)) throw sourceFailure('生成结果缺少有效 HTML 页面');
     });
     return;
   }
-  const template = await appTemplate(app);
+  const template = await appTemplate(target) ?? await appTemplate(app);
   const projectCodeGenType = app.codeGenType;
   const lockedManifest = template ? await readTemplateFile(template, 'package.json') : null;
   const lock = template ? await readTemplateFile(template, 'package-lock.json') : null;
   const dependencies = await stageRun('source', async () => {
     try {
-      const manifest = await readProjectFile(app, 'package.json');
+      const manifest = await readProjectFile(target, 'package.json');
       const dependencies = template ? validateTemplateManifest(template, manifest) : validateProjectManifest(projectCodeGenType, manifest);
-      if (lock && await readProjectFile(app, 'package-lock.json') !== lock) throw new Error('模板依赖锁已改变，请恢复对应模板版本的 package-lock.json');
+      if (lock && await readProjectFile(target, 'package-lock.json') !== lock) throw new Error('模板依赖锁已改变，请恢复对应模板版本的 package-lock.json');
       return dependencies;
     } catch (error) { throw sourceFailure(error); }
   });
   // 生成阶段已经构建过一次、之后源码没动过：直接复用那份产物，不再进容器。
-  const digest = await sourceDigest(app);
-  if (await buildIsCurrent(app, digest)) return;
+  const digest = await sourceDigest(target);
+  if (await buildIsCurrent(target, digest)) return;
   const runtime = await ensureRuntime();
   const builds = await ensureSafeDirectory(join(runtime, 'builds'));
   const stage = await ensureSafeDirectory(join(builds, randomUUID()));
@@ -210,7 +213,7 @@ export async function buildApp(app: WorkspaceApp, signal?: AbortSignal, onStage?
     try { await rename(stagedDist, existing); }
     catch (error) { if (backedUp) await rename(backup, existing); throw error; }
     // 清单只在源码整个构建期间都没变时才写：写不下去也只是下次重新构建，不影响本次产物。
-    if (await sourceDigest(app) === digest) await saveBuildState(app, digest).catch(() => {});
+    if (await sourceDigest(target) === digest) await saveBuildState(target, digest).catch(() => {});
   } finally {
     await rm(stagedDist, { recursive: true, force: true });
     await rm(backup, { recursive: true, force: true });
@@ -228,8 +231,11 @@ export function deployedUrl(key: string) {
 
 const staticTemplateIndexes = new Map<string, Promise<string>>();
 
-export async function hasPreview(app: WorkspaceApp) {
-  const directory = join(workspace(app), ...(isProjectCodeGenType(app.codeGenType) ? ['dist'] : []));
+export async function hasPreview(target: ProjectTarget) {
+  const app = 'app' in target ? target.app : target;
+  // 新发布会写交付指针；预览是否可用以它为准，不再要求应用工作区里还留着 dist。
+  if (!('root' in target) && await currentDelivery({ app }).catch(() => null)) return true;
+  const directory = join(projectRootPath(target), ...(isProjectCodeGenType(app.codeGenType) ? ['dist'] : []));
   const index = join(directory, 'index.html');
   try {
     if (await realpath(directory) !== directory || await realpath(index) !== index) return false;
@@ -238,7 +244,7 @@ export async function hasPreview(app: WorkspaceApp) {
     const content = await readFile(index);
     if (!/<html[\s>]/i.test(content.toString('utf8'))) return false;
     if (!isProjectCodeGenType(app.codeGenType)) {
-      const template = await appTemplate(app);
+      const template = await appTemplate(target);
       if (template) {
         const key = `${template.id}@${template.version}`;
         let skeleton = staticTemplateIndexes.get(key);
@@ -263,7 +269,10 @@ export async function deployApp(app: WorkspaceApp & { deployKey?: string | null 
   const backup = join(deploy, '.paimeng-old-' + randomUUID());
   let backedUp = false;
   try {
-    if (isProjectCodeGenType(app.codeGenType)) await copySafeTree(join(workspace(app), 'dist'), stage);
+    const pointer = await currentDelivery({ app }).catch(() => null);
+    const delivery = pointer ? await resolveDelivery({ app, deliveryId: pointer.deliveryId }).catch(() => null) : null;
+    if (delivery) await copySafeTree(delivery.directory, stage);
+    else if (isProjectCodeGenType(app.codeGenType)) await copySafeTree(join(workspace(app), 'dist'), stage);
     else {
       await ensureSafeDirectory(stage);
       for (const file of await listProjectFiles(app)) {
@@ -287,14 +296,20 @@ export async function deployApp(app: WorkspaceApp & { deployKey?: string | null 
   } catch (error) { await rm(stage, { recursive: true, force: true }); throw error; }
 }
 
-export async function downloadApp(app: WorkspaceApp) {
-  const files = await listProjectFiles(app);
+/**
+ * 把一份源码树打成 ZIP。来源由调用方决定：发布过的应用传交付源码快照，legacy 应用传工作区。
+ * 快照根自带平台清单，调用方用 excludePaths 挡掉，不把内部身份写进导出包。
+ */
+export async function downloadApp(target: ProjectTarget, options: { excludePaths?: readonly string[] } = {}) {
+  const app = 'app' in target ? target.app : target;
+  const excluded = new Set(options.excludePaths ?? []);
+  const files = (await listProjectFiles(target)).filter(file => !excluded.has(file));
   if (!files.length) throw new Error('应用代码不存在');
   const output = new PassThrough();
   const archive = archiver('zip', { zlib: { level: 6 } });
   archive.on('error', error => output.destroy(error));
   archive.pipe(output);
-  for (const file of files) archive.append(await readProjectFileBytes(app, file), { name: file });
+  for (const file of files) archive.append(await readProjectFileBytes(target, file), { name: file });
   void archive.finalize();
   return new Response(Readable.toWeb(output) as ReadableStream<Uint8Array>, { headers: { 'Content-Type': 'application/zip', 'Content-Disposition': `attachment; filename="${app.id}.zip"`, 'Cache-Control': 'no-store' } });
 }

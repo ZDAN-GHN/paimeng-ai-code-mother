@@ -8,6 +8,9 @@ import { getConfig } from './config';
 import { idSchema, codeGenTypes, type AppInfo } from '@/shared/contracts';
 
 export type WorkspaceApp = Pick<AppInfo, 'id' | 'codeGenType'>;
+/** 一个应用源码目录的显式根：默认是应用工作区，生成期间是本次执行的隔离目录。 */
+export type ProjectRoot = { readonly app: WorkspaceApp; readonly root: string };
+export type ProjectTarget = WorkspaceApp | ProjectRoot;
 export const MAX_FILE_BYTES = 256 * 1024;
 /** 单张图片的上限：图片是二进制资源，不受文本工具的 256 KiB 约束。 */
 export const MAX_BINARY_FILE_BYTES = 2 * 1024 * 1024;
@@ -41,6 +44,21 @@ export function workspace(app: WorkspaceApp) {
   return join(getConfig().runtimeRoot, 'code_output', `${app.codeGenType}_${app.id}`);
 }
 
+export function projectAt(app: WorkspaceApp, root: string): ProjectRoot {
+  idSchema.parse(app.id);
+  z.enum(codeGenTypes).parse(app.codeGenType);
+  return { app, root };
+}
+
+function rootOf(target: ProjectTarget) {
+  return 'root' in target ? target.root : workspace(target);
+}
+
+/** 只取路径，不创建目录：模板初始化需要先判断目标是否已经存在。 */
+export function projectRootPath(target: ProjectTarget) {
+  return rootOf(target);
+}
+
 export async function ensureSafeDirectory(path: string) {
   try { await mkdir(path); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
@@ -60,9 +78,15 @@ export async function ensureWorkspace(app: WorkspaceApp) {
   return ensureSafeDirectory(workspace(app));
 }
 
-async function resolveFile(app: WorkspaceApp, path: string, createParents = false) {
+/** 显式根的目录已由调用方创建并做过安全检查；这里再确认一次，避免并发替换成软链接。 */
+export async function ensureProjectRoot(target: ProjectTarget) {
+  if (!('root' in target)) return ensureWorkspace(target);
+  return ensureSafeDirectory(target.root);
+}
+
+async function resolveFile(target: ProjectTarget, path: string, createParents = false) {
   const name = safeRelativePath(path);
-  const root = await ensureWorkspace(app);
+  const root = await ensureProjectRoot(target);
   let parent = root;
   for (const part of name.split('/').slice(0, -1)) {
     parent = join(parent, part);
@@ -85,8 +109,8 @@ async function resolveFile(app: WorkspaceApp, path: string, createParents = fals
 }
 
 type ProjectFile = { path: string; size: number };
-async function inspectProject(app: WorkspaceApp) {
-  const root = await ensureWorkspace(app);
+async function inspectProject(target: ProjectTarget) {
+  const root = await ensureProjectRoot(target);
   const files: ProjectFile[] = [];
   let bytes = 0;
   async function walk(directory: string, depth: number) {
@@ -108,12 +132,12 @@ async function inspectProject(app: WorkspaceApp) {
   return { files, bytes };
 }
 
-export async function listProjectFiles(app: WorkspaceApp) {
-  return (await inspectProject(app)).files.map(file => file.path).sort();
+export async function listProjectFiles(target: ProjectTarget) {
+  return (await inspectProject(target)).files.map(file => file.path).sort();
 }
 
-export async function readProjectFile(app: WorkspaceApp, path: string) {
-  const file = await resolveFile(app, path);
+export async function readProjectFile(target: ProjectTarget, path: string) {
+  const file = await resolveFile(target, path);
   const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const info = await handle.stat();
@@ -123,8 +147,8 @@ export async function readProjectFile(app: WorkspaceApp, path: string) {
 }
 
 /** 读取原始字节：用于图片与构建指纹，不受文本工具的 256 KiB 上限约束。 */
-export async function readProjectFileBytes(app: WorkspaceApp, path: string): Promise<Buffer> {
-  const file = await resolveFile(app, path);
+export async function readProjectFileBytes(target: ProjectTarget, path: string): Promise<Buffer> {
+  const file = await resolveFile(target, path);
   const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const info = await handle.stat();
@@ -133,15 +157,15 @@ export async function readProjectFileBytes(app: WorkspaceApp, path: string): Pro
   } finally { await handle.close(); }
 }
 
-async function writeAtomically(app: WorkspaceApp, path: string, data: string | Buffer, encoding: 'utf8' | null) {
-  const file = await resolveFile(app, path, true);
+async function writeAtomically(target: ProjectTarget, path: string, data: string | Buffer, encoding: 'utf8' | null) {
+  const file = await resolveFile(target, path, true);
   const temp = join(file.slice(0, file.lastIndexOf('/')), `.paimeng-${randomUUID()}`);
   const handle = await open(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   try {
     if (encoding) await handle.writeFile(data as string, 'utf8');
     else await handle.writeFile(data as Buffer);
     await handle.close();
-    await resolveFile(app, path);
+    await resolveFile(target, path);
     await rename(temp, file);
   } catch (error) {
     await handle.close().catch(() => {});
@@ -150,27 +174,27 @@ async function writeAtomically(app: WorkspaceApp, path: string, data: string | B
   }
 }
 
-export async function writeProjectFile(app: WorkspaceApp, path: string, content: string) {
+export async function writeProjectFile(target: ProjectTarget, path: string, content: string) {
   if (isPlatformAssetFile(path)) throw new Error('该文件由平台维护，不能通过文本工具修改');
   const size = Buffer.byteLength(content);
   if (size > MAX_FILE_BYTES) throw new Error('文件内容超过限制');
-  const snapshot = await inspectProject(app);
+  const snapshot = await inspectProject(target);
   const existing = snapshot.files.find(entry => entry.path === path);
   if (snapshot.files.length + (existing ? 0 : 1) > MAX_PROJECT_FILES || snapshot.bytes - (existing?.size ?? 0) + size > MAX_PROJECT_BYTES) throw new Error('工程超过文件数量或大小限制');
-  await writeAtomically(app, path, content, 'utf8');
+  await writeAtomically(target, path, content, 'utf8');
 }
 
 /** 写入二进制资源（图片）。与文本写入共用路径校验、配额与原子替换，但另有自己的大小上限。 */
-export async function writeProjectFileBytes(app: WorkspaceApp, path: string, data: Buffer, options: { maxBytes?: number } = {}) {
+export async function writeProjectFileBytes(target: ProjectTarget, path: string, data: Buffer, options: { maxBytes?: number } = {}) {
   const limit = options.maxBytes ?? MAX_BINARY_FILE_BYTES;
   if (data.byteLength > limit) throw new Error('二进制文件超过限制');
-  const snapshot = await inspectProject(app);
+  const snapshot = await inspectProject(target);
   const existing = snapshot.files.find(entry => entry.path === path);
   if (snapshot.files.length + (existing ? 0 : 1) > MAX_PROJECT_FILES || snapshot.bytes - (existing?.size ?? 0) + data.byteLength > MAX_PROJECT_BYTES) throw new Error('工程超过文件数量或大小限制');
-  await writeAtomically(app, path, data, null);
+  await writeAtomically(target, path, data, null);
 }
 
-export async function writePlatformAssetFile(app: WorkspaceApp, path: string, content: string) {
+export async function writePlatformAssetFile(target: ProjectTarget, path: string, content: string) {
   if (!isPlatformAssetFile(path)) throw new Error('仅平台素材文件允许这样写入');
-  await writeAtomically(app, path, content, 'utf8');
+  await writeAtomically(target, path, content, 'utf8');
 }

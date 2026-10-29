@@ -30,7 +30,7 @@ export function stopReasonOf(input: { current: GenerationStopReason; cancelled: 
   if (input.abortedReason !== undefined) {
     const text = input.abortedReason instanceof Error ? input.abortedReason.message : String(input.abortedReason);
     if (text.includes('超时')) return 'timeout';
-    if (text.includes('失效')) return 'lease-lost';
+    if (text.includes('失效') || text.includes('停止写入')) return 'lease-lost';
     return 'model-error';
   }
   return input.current;

@@ -2,7 +2,7 @@
 
 本目录包含 Next.js、React、TypeScript、Vercel AI SDK、Postgres 和 Drizzle 的独立应用。运行新应用无需启动旧 Java 后端或旧 Vue 平台。所有命令都在 `paimeng-ai-code-agent/` 内执行。
 
-生成入口只有一个引擎：请求提交给常驻的 pi-durable harness 进程（单写进程 + attach，实现在 `src/server/durable/`），Next 只做鉴权与 SSE 转发，所以浏览器断连不会取消任务。一条命令起全套见下面的 `npm run dev`。数据库是 Postgres，**同实例两库**：`paimeng_app` 放业务表，`paimeng_agent` 放 harness 的会话存储（表名与列名见 `docs/plans/archive/pi-durable-m4.md`，部署形态见 `docs/plans/pi-durable-deployment.md`）。
+生成入口只有一个引擎：请求提交给常驻的 pi-durable harness 进程（单写进程 + attach，实现在 `src/server/durable/`），Next 只做鉴权与 SSE 转发，所以浏览器断连不会取消任务。一条命令起全套见下面的 `npm run dev`。数据库是 Postgres，**同实例两库**：`paimeng_app` 放业务表，`paimeng_agent` 放 harness 的会话存储（表名与列名见 `docs/plans/archive/pi-durable-m4.md`，部署形态见 `docs/pi-durable-deployment.md`）。
 
 ## 启动开发环境
 
@@ -33,7 +33,7 @@
 
 ## 使用本机自己的数据库容器
 
-产品库是 Postgres 16，落在**本机自己的容器**里（`zslm-postgres`，宿主地址 `127.0.0.1:5432`，命名卷 `zslm-postgres-data`）。此容器不归本仓库管：`compose.yaml` 里没有 postgres 服务，`npm run durable:pg` 只**连接 + 建库 + 健康检查**，不会起、停或清空任何容器；它需要容器已经在跑。同一个实例里四个 database：开发库 `paimeng_app` 与存储库 `paimeng_agent`，集成测试库 `paimeng_app_test` 与 `paimeng_agent_test`；连接串在 `.env`，账号与口令取容器自身的配置。表名与列名见 `docs/plans/archive/pi-durable-m4.md`，部署与并发/清扫说明见 `docs/plans/pi-durable-deployment.md`。
+产品库是 Postgres 16，落在**本机自己的容器**里（`zslm-postgres`，宿主地址 `127.0.0.1:5432`，命名卷 `zslm-postgres-data`）。此容器不归本仓库管：`compose.yaml` 里没有 postgres 服务，`npm run durable:pg` 只**连接 + 建库 + 健康检查**，不会起、停或清空任何容器；它需要容器已经在跑。同一个实例里四个 database：开发库 `paimeng_app` 与存储库 `paimeng_agent`，集成测试库 `paimeng_app_test` 与 `paimeng_agent_test`；连接串在 `.env`，账号与口令取容器自身的配置。表名与列名见 `docs/plans/archive/pi-durable-m4.md`，部署与并发/清扫说明见 `docs/pi-durable-deployment.md`。
 
 这是产品库搬家的终点：数据原先在临时容器 `zslm-pg-paimeng`（127.0.0.1:55432，数据目录 `runtime/durable-pg/pgdata/`，已 gitignore），2026-10-18 四个库（schema + 数据）整体迁到 `zslm-postgres` 后该容器已删除，`runtime/durable-pg/pgdata/` 作为当时的备份目录保留，确认新库无误后可以自行删掉。
 
@@ -81,7 +81,7 @@ Redis 承担生成频率限流；登录会话、生成任务与对话转录仍�
 
 提供商弹窗的「测试连接」与别名弹窗的「获取模型」都会请求上游 `GET {baseUrl}/models`（`openai-chat` / `openai-responses` 用 `Authorization: Bearer`，`anthropic-messages` 用 `x-api-key` + `anthropic-version`），每次点击都会重新请求上游（带 `cache-control: no-cache`，不使用缓存）、10 秒超时、不跟随重定向、错误信息不回显密钥与自定义请求头的值；「获取模型」的结果只填充当前对话框的候选列表（最多 1000 条，命中上限时界面会提示可能被截断），不落库。密钥来源为“直接输入”且表单留空时，探测沿用数据库里已保存的密文。「获取模型」失败的原因会显示在别名的「上游模型名」下方。
 
-`GENERATION_TIMEOUT_MS`（毫秒，默认 `0`）控制产品任务的墙钟预算，`BUILD_TIMEOUT_MS` 控制容器命令预算。harness 当前流请求期限为 `settings.stream.timeoutMs=300000`（`harness-server.ts`）；旧 SDK 生成参数 `MODEL_REPLY_TIMEOUT_MS` / `MODEL_RETRY_LIMIT` 不驱动 pi-durable。上游到达输出上限后，已经写入的文件仍会进入最终验证。
+`GENERATION_TIMEOUT_MS`（毫秒，默认 `0`）在生成开始时写成持久 deadline，观察者重挂、followUp 和 repair 都不延长；`0` 表示没有全局截止。`MODEL_REPLY_TIMEOUT_MS` 是单次模型请求期限，实际生效值是它与剩余 deadline 的较小者；`BUILD_TIMEOUT_MS` 控制容器命令预算。次数预算由 `generation_attempt` 账本持久化：模型 24 次（生成与压缩共享）、工具 400 次、自检构建 2 次、平台构建 3 次、repair 最多 2 轮且服从更低的 `BUILD_REPAIR_ROUNDS`。上游到达输出上限后，已经写入的文件仍会进入最终验证。
 
 长对话上下文由 harness 的 pi-durable compaction 管理。用户消息、模型消息和工具结果保存在 harness 转录中，`GET app/messages` 直接从转录派生页面历史；产品库不保留另一份消息表或滚动摘要表。
 
@@ -118,7 +118,7 @@ Redis 承担生成频率限流；登录会话、生成任务与对话转录仍�
 
 集成测试在数据库操作前统一解析 URL，只将专用开发库或测试库映射到 `paimeng_app_test`；URL 不允许查询选项，防止测试连接目标含糊。`tests/integration/durable-m1` 的 harness 存储用 `paimeng_agent_test`。测试只清理自己创建的记录。隔离浏览器测试使用 `paimeng_app_test` 与 `paimeng_agent_test`，不会复用开发 harness。运行浏览器测试时一次只启动一个测试命令，避免报告目录被另一轮测试覆盖。
 
-浏览器截图写入 `runtime/evidence/`，HTML 报告写入 `playwright-report/`。这些运行文件已被忽略。只验证默认入口跳转、注册登录、会话 Cookie 隔离与来源拒绝时，执行 `npm run test:e2e -- tests/e2e/platform-origin.spec.ts`。这两项浏览器回归测试不调用模型，也不需要预览服务运行。
+浏览器截图写入 `.agents/skills/verify-paimeng/evidences/<YY-MM-DD>/<功能>/`，完整运行归档在同日期的 `runs/` 下；这些运行文件已被忽略。只验证默认入口跳转、注册登录、会话 Cookie 隔离与来源拒绝时，执行 `npm run test:e2e -- tests/e2e/platform-origin.spec.ts`。这两项浏览器回归测试不调用模型，也不需要预览服务运行。
 
 验证短窗口、手机及横屏中的发送区域，以及点击发送和快捷键时，执行 `npm run test:e2e -- tests/e2e/chat-composer.spec.ts`。普通 Enter 发送，Shift + Enter 换行，Ctrl / Command + Enter 也可发送。测试使用独立样本账号和应用，通过浏览器拦截生成接口并返回 SDK 消息流，不调用真实模型。它验证发送操作和回复显示，不代表供应商模型生成质量已验证。聊天区域按动态视口高度限制消息区，输入框和发送按钮保持可见。
 

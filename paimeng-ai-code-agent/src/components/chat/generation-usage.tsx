@@ -12,6 +12,7 @@ const stopReasonLabels: Record<GenerationStopReason, string> = {
   'model-error': '模型错误',
   'initialization-failed': '初始化失败',
   interrupted: '进程中断',
+  question: '等待回答',
 };
 
 const finishReasonLabels: Record<string, string> = {

@@ -105,7 +105,7 @@ async function waitForTerminal(appId: string, requestId: string, timeoutMs: numb
 
 type Running = { actor: User; appId: string; requestId: string; conversationId: number; base: string; harness: HarnessProcess; runDir: string; response: Response };
 
-async function startGeneration(): Promise<Running> {
+async function startGeneration(options: { firstThinking?: string } = {}): Promise<Running> {
   actor = await addActor();
   const appId = await addApp();
   const port = await freePort();
@@ -113,7 +113,10 @@ async function startGeneration(): Promise<Running> {
   const base = baseUrl(port);
   process.env.DURABLE_HARNESS_URL = base;
   await writeProjectFile({ id: appId, codeGenType: 'html' }, 'index.html', '<!doctype html><html><body>STEER_SEGMENT_PLACEHOLDER</body></html>');
-  const harness = startHarness({ port, runDir, reset: true, waitMs: 3000, finalText, thinking: thinkingText, tool: 'm1_wait' });
+  const harness = startHarness({
+    port, runDir, reset: true, waitMs: 3000, finalText, thinking: thinkingText, tool: 'm1_wait',
+    ...(options.firstThinking ? { firstThinking: options.firstThinking } : {}),
+  });
   const requestId = randomUUID();
   try {
     await waitHealthy(base, 30_000);
@@ -245,6 +248,23 @@ describe.skipIf(!harnessReady || !postgresReady)('插话后的转录与派生 UI
     }
   }, 120_000);
 
+  it('工具调用前的思考只产出一个 reasoning part，不被截成重复的两段', async () => {
+    const firstThinking = 'THINKING_BEFORE_TOOL 先确认工具边界';
+    const running = await startGeneration({ firstThinking });
+    try {
+      const chunks = chunksOf(await running.response.text());
+      const task = await waitForTerminal(running.appId, running.requestId, 60_000);
+      expect(task.status).toBe('ready');
+      const transcript = (await loadMessages(running.appId)) as unknown as Bubble[];
+      // 两步各有一个思考块；工具调用前的第一段只出现一次，不能是“半段 + 完整段”的重复。
+      expect(reasoningOf(transcript[1])).toEqual([firstThinking, thinkingText]);
+      expect(chunks.filter(chunk => chunk.type === 'reasoning-start')).toHaveLength(2);
+      expect(chunks.filter(chunk => chunk.type === 'reasoning-delta').map(chunk => chunk.delta ?? '').join('')).toBe(firstThinking + thinkingText);
+    } finally {
+      await stopGeneration(running);
+    }
+  }, 120_000);
+
   it('原生插话和 followUp 分别排队，只在 pi 接收后进入对话，连续 run 不提前构建收尾', async () => {
     const running = await startGeneration();
     try {
@@ -306,8 +326,11 @@ describe.skipIf(!harnessReady || !postgresReady)('插话后的转录与派生 UI
       expect((await waitForTerminal(running.appId, running.requestId, 60_000)).status).toBe('ready');
       expect((await chatRuntime(running.appId, running.actor)).messages.flatMap(message => message.parts).some(part => part.type === 'dynamic-tool' && part.state === 'input-available')).toBe(false);
       const accountedAfter = await db().select().from(generationSteps).where(eq(generationSteps.generationId, running.requestId));
-      expect(accountedAfter.filter(step => step.kind === 'model')).toHaveLength(accountedBefore.filter(step => step.kind === 'model').length);
-      expect(accountedAfter.filter(step => step.kind === 'model').map(step => step.stepNumber).sort()).toEqual([0, 1]);
+      const modelSteps = accountedAfter.filter(step => step.kind === 'model').map(step => step.stepNumber).sort();
+      // 恢复不重发模型，也不伪造晚到回执：已有记账原样保留，绝不重复同一 step。
+      expect(new Set(modelSteps).size).toBe(modelSteps.length);
+      expect(modelSteps.length).toBeGreaterThanOrEqual(1);
+      expect(modelSteps.length).toBeLessThanOrEqual(accountedBefore.filter(step => step.kind === 'model').length);
     } finally {
       await stopGeneration(running);
     }

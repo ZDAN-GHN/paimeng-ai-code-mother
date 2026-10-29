@@ -14,10 +14,23 @@ export type User = {id:string;userAccount:string;userName:string|null;userAvatar
 export type AppInfo = {id:string;appName:string|null;cover:string|null;initPrompt:string;codeGenType:CodeGenType;deployKey:string|null;deployedTime:string|null;editTime?:string|null;priority:number;userId:string;createTime:string;updateTime:string;user?:User;sourceAvailable?:boolean;previewUrl?:string|null;builtAt?:string|null;deployUrl?:string|null;template?:TemplateIdentity|null};
 export type Page<T> = {records:T[];totalRow:number;pageNumber:number;pageSize:number};
 export type GenerationStatus = 'generating'|'building'|'ready'|'failed'|'cancelled';
-export type Generation = {id:string;appId:string;status:GenerationStatus;error:string|null;stopReason:string|null;createTime:string;updateTime:string};
+/**
+ * 草稿交接：`draining` 正在排空本轮写入、`sealing` 正在封存源码快照。它只用于 UI 的等待文案，
+ * 不是产品 phase；状态标签仍按 `GenerationStatus`（generating/building/…）显示。
+ */
+export type GenerationHandoffState = 'draining'|'sealing';
+export type GenerationHandoff = {state:GenerationHandoffState;reason:string|null};
+/** 内部四相位：用于诊断与恢复，不参与公开状态标签。 */
+export type GenerationPhase = 'editing'|'checking'|'publishing'|'finished';
+/**
+ * 等待用户回答的提问（每个 app 最多一个 open）。回答会开启新 generation，所以它只属于提问那一轮。
+ * 旧后端不返回这个字段，页面按「没有提问」处理。
+ */
+export type GenerationQuestion = {id:string;prompt:string;generationId:string};
+export type Generation = {id:string;appId:string;status:GenerationStatus;error:string|null;stopReason:string|null;createTime:string;updateTime:string;phase?:GenerationPhase;handoff?:GenerationHandoff|null;draftPending?:boolean;question?:GenerationQuestion|null};
 export type ChatHistory = {id:string;appId:string;userId:string;message:string;messageType:'user'|'ai';createTime:string};
 /** 任务级停止原因（D2 记账，设计见 docs/plans/archive/agent-design-review.md §9）。`step-limit` 是历史值：步数上限已于 2026-10-16 取消，新代码不再产生它，但旧行仍要能读回与展示。 */
-export const generationStopReasons = ['completed','no-changes','step-limit','verification-failed','timeout','cancelled','lease-lost','model-error','initialization-failed','interrupted'] as const;
+export const generationStopReasons = ['completed','no-changes','step-limit','verification-failed','timeout','cancelled','lease-lost','model-error','initialization-failed','interrupted','question'] as const;
 export type GenerationStopReason = typeof generationStopReasons[number];
 /**
  * 生成过程中的瞬时进度事件（`data-progress`，服务端写、客户端读；不落库、不进 UI 消息 parts）。

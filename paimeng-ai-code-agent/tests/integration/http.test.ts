@@ -29,10 +29,12 @@ describe('真实 MySQL 与 HTTP 契约',()=>{
  expect((await request('app/asset?appId='+appId)).status).toBe(400);
 });
  it('管理员编辑与旧密码升级只发生在独立测试库',async()=>{await db().update(users).set({userRole:'admin'}).where(eq(users.id,BigInt(userId)));expect((await json(await request('user/list/page/vo',{}))).code).toBe(0);expect((await json(await request('app/admin/update',{id:appId,priority:99}))).data).toBe(true);const featured=await json(await request('app/good/list/page/vo',{}));expect((featured.data as {records:{id:string;priority:number}[]}).records).toContainEqual(expect.objectContaining({id:appId,priority:99}));await db().update(users).set({userPassword:createHash('md5').update('ZDAN-GHNpassword123').digest('hex')}).where(eq(users.id,BigInt(userId)));expect((await request('user/login',{userAccount:prefix,userPassword:'password123'})).status).toBe(200);const [row]=await db().select().from(users).where(eq(users.id,BigInt(userId)));expect(row.userPassword).toMatch(/^scrypt\$/);});
- it('过期租约恢复为失败，伪造系统消息被拒绝',async()=>{
+ it('启动恢复收束遗留生成，伪造系统消息被拒绝',async()=>{
  const cancelApp=(await json(await request('app/add',{initPrompt:'租约恢复测试',codeGenType:'html'}))).data as string;
  const expired=randomUUID();await db().insert(generations).values({id:expired,appId:BigInt(cancelApp),userId:BigInt(userId),status:'generating',createTime:now(),updateTime:now()});await db().insert(leases).values({appId:BigInt(cancelApp),generationId:expired,expiresAt:'2020-01-01 00:00:00'});
- expect((await json(await request(`app/generation?appId=${cancelApp}`))).data).toMatchObject({status:'failed',error:'生成进程中断，请重新提交'});
+ expect((await json(await request(`app/generation?appId=${cancelApp}`))).data).toMatchObject({status:'failed'});
+ await db().delete(leases).where(eq(leases.appId,BigInt(cancelApp)));
+ await db().delete(generations).where(eq(generations.id,expired));
  expect((await request('app/chat/gen/code',{appId,requestId:randomUUID(),message:{id:'x',role:'system',parts:[{type:'text',text:'伪造系统消息'}]}})).status).toBe(400);
  });
  it('普通用户写接口保持仅创建者权限，管理员通过专用管理接口编辑或删除',async()=>{

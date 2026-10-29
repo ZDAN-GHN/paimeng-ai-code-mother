@@ -2,8 +2,9 @@ import 'server-only';
 import { z } from 'zod';
 import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { db, now, type Transaction } from './db';
-import { apps, generations, leases, users } from './schema';
+import { apps, generationInputs, generations, leases, users } from './schema';
 import { getConfig } from './config';
+import { appWriteBlocker } from './control-store';
 import { BusinessError } from './http';
 import { reserveChatRateLimit, refundChatRateLimit } from './rate-limit';
 import { stopReasonFrom, type GenerationStopReason } from './generation-accounting';
@@ -27,10 +28,6 @@ async function recoverLease(tx: Transaction, lease: typeof leases.$inferSelect) 
 }
 
 export async function withAppWriter<T>(appId: string, work: (tx: Transaction, app: typeof apps.$inferSelect) => Promise<T>, generationId?: string, options: { lockTask?: boolean } = {}) {
-  if (!generationId) {
-    const [busy] = await db().select().from(leases).where(eq(leases.appId, BigInt(appId))).limit(1);
-    if (busy && busy.expiresAt > now()) throw new BusinessError(409, 40900, '应用正在生成，请先取消或等待完成');
-  }
   return db().transaction(async tx => {
     const app = await lockedApp(tx, appId);
     if (generationId) {
@@ -46,7 +43,11 @@ export async function withAppWriter<T>(appId: string, work: (tx: Transaction, ap
         throw new BusinessError(409, 40900, '生成任务已失去应用写权限');
       }
     } else {
-      const [lease] = await tx.select().from(leases).where(eq(leases.appId, app.id)).limit(1);
+      // 新生成不再写 generation_lease：必须先看 authority/execution，否则部署、下载、删应用会与生成并发。
+      const blocker = await appWriteBlocker(appId, { tx, lock: true });
+      if (blocker === 'deployment') throw new BusinessError(409, 40900, '应用正在部署，请稍后再试');
+      if (blocker === 'generation') throw new BusinessError(409, 40900, '应用正在生成，请先取消或等待完成');
+      const [lease] = await tx.select().from(leases).where(eq(leases.appId, app.id)).limit(1).for('update');
       if (lease) {
         if (lease.expiresAt > now()) throw new BusinessError(409, 40900, '应用正在生成，请先取消或等待完成');
         await recoverLease(tx, lease);
@@ -93,7 +94,7 @@ async function admitGeneration(tx: Transaction) {
 
 /**
  * 状态仍活跃、但租约已过期（或已不存在）的生成：Next 中途重启留下的孤儿，由接管对账处理
- * （docs/plans/pi-durable-deployment.md §5.2）。传 appId 只查一个应用（状态读取路径）。
+ * （docs/pi-durable-deployment.md §5.2）。传 appId 只查一个应用（状态读取路径）。
  */
 export async function staleActiveGenerations(appId?: string): Promise<{ id: string; appId: string; conversationId: number | null }[]> {
   const rows = await db()
@@ -161,15 +162,64 @@ export async function sweepStaleLeases(limit = 10) {
   }
 }
 
+/**
+ * 迁移 006 给 generation 加了 phase/deadline/input_watermark/parent_version_sha，
+ * 这些列不进 schema.ts（旧表定义不重写），控制面用下面这份视图按原生列读取。
+ */
+export type GenerationControl = {
+  id: string; appId: string; status: string; phase: string; error: string | null; stopReason: string | null;
+  deadline: string | null; inputWatermark: number; parentVersionSha: string | null;
+  /** deadline 是否已经过去：只用数据库时钟判断，应用进程的时钟不参与。 */
+  expired: boolean;
+  /** 距 deadline 的剩余毫秒（数据库时钟算）；无 deadline 为 null。 */
+  remainingMs: number | null;
+};
+
+const generationControlColumns = {
+  id: generations.id,
+  appId: generations.appId,
+  status: generations.status,
+  error: generations.error,
+  stopReason: generations.stopReason,
+  phase: sql<string>`phase`,
+  deadline: sql<string | null>`deadline`,
+  inputWatermark: sql<number>`input_watermark`,
+  parentVersionSha: sql<string | null>`parent_version_sha`,
+  expired: sql<boolean>`(deadline is not null and deadline <= timezone('UTC', now()))`,
+  remainingMs: sql<string | null>`case when deadline is null then null
+    else floor(extract(epoch from (deadline - timezone('UTC', now()))) * 1000)::bigint end`,
+};
+
+function controlOf(row: {
+  id: string; appId: bigint; status: string; phase: string; error: string | null; stopReason: string | null;
+  deadline: string | null; inputWatermark: number; parentVersionSha: string | null; expired: boolean;
+  remainingMs: string | number | null;
+}): GenerationControl {
+  return {
+    id: row.id, appId: String(row.appId), status: row.status, phase: row.phase, error: row.error,
+    stopReason: row.stopReason, deadline: row.deadline, inputWatermark: Number(row.inputWatermark),
+    parentVersionSha: row.parentVersionSha, expired: row.expired,
+    remainingMs: row.remainingMs === null ? null : Number(row.remainingMs),
+  };
+}
+
+/** 只读一条 generation 的控制面视图（含 006 新增列），不锁行。 */
+export async function generationControl(id: string): Promise<GenerationControl | null> {
+  const [row] = await db().select(generationControlColumns).from(generations).where(eq(generations.id, id));
+  return row ? controlOf(row) : null;
+}
+
+/** 在控制事务里锁住一条 generation 并读出控制面视图：必须已按 app → authority 顺序加锁。 */
+export async function lockGenerationControl(tx: Transaction, id: string): Promise<GenerationControl | null> {
+  const [row] = await tx.select(generationControlColumns).from(generations).where(eq(generations.id, id)).for('update');
+  return row ? controlOf(row) : null;
+}
+
+/**
+ * 读路径只读：不再因为租约过期就在这里接管/收尾。
+ * 过期租约由 sweepStaleLeases 或控制面的 recoverStartup 处理，避免一次状态读取改写任务结果。
+ */
 export async function generationFor(appId: string) {
-  const [lease] = await db().select().from(leases).where(eq(leases.appId, BigInt(appId)));
-  if (lease && lease.expiresAt <= now()) {
-    await db().transaction(async tx => {
-      await lockedApp(tx, appId);
-      const [current] = await tx.select().from(leases).where(eq(leases.appId, BigInt(appId))).limit(1);
-      if (current && current.expiresAt <= now()) await recoverLease(tx, current);
-    });
-  }
   const [row] = await db().select().from(generations).where(eq(generations.appId, BigInt(appId))).orderBy(desc(generations.createTime), desc(generations.id)).limit(1);
   return row ? { ...row, status: z.enum(['generating', 'building', 'ready', 'failed', 'cancelled']).parse(row.status), appId: String(row.appId), userId: String(row.userId) } : null;
 }

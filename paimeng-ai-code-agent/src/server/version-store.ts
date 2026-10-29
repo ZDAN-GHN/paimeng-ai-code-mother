@@ -1,8 +1,8 @@
 import 'server-only';
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { cp, lstat, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { cp, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import { fallbackVersionTitle, versionIdSchema, type AppVersion, type AppVersionOverview, type VersionDiff } from '@/shared/versioning';
@@ -67,11 +67,21 @@ const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: 
 
 type GitResult = { args: string[]; code: number; stdout: string; stderr: string };
 
+/**
+ * 额外的进程环境与工作目录：隔离目录提交要换 GIT_INDEX_FILE，
+ * 并且必须以执行目录为 cwd（否则 `-- .` 这种相对 pathspec 会按进程 cwd 解释）。
+ */
+type GitOptions = { env?: Record<string, string>; cwd?: string };
+
 /** 退出码是信息而不是异常时需要它：`git diff --quiet` 用 1 表示有差异，merge-tree 用 1 表示冲突。 */
-async function gitRaw(repo: string, workTree: string | null, args: string[]): Promise<GitResult> {
+async function gitRaw(repo: string, workTree: string | null, args: string[], options: GitOptions = {}): Promise<GitResult> {
   const full = ['--git-dir', repo, ...(workTree ? ['--work-tree', workTree] : []), ...args];
   try {
-    const { stdout } = await run('git', full, { env: gitEnv, maxBuffer: 32 * 1024 * 1024 });
+    const { stdout } = await run('git', full, {
+      env: options.env ? { ...gitEnv, ...options.env } : gitEnv,
+      cwd: options.cwd,
+      maxBuffer: 32 * 1024 * 1024,
+    });
     return { args: full, code: 0, stdout, stderr: '' };
   } catch (error) {
     const failure = error as { stdout?: string; stderr?: string; code?: number | string | null };
@@ -84,8 +94,8 @@ async function gitRaw(repo: string, workTree: string | null, args: string[]): Pr
   }
 }
 
-async function git(repo: string, workTree: string | null, args: string[]) {
-  const result = await gitRaw(repo, workTree, args);
+async function git(repo: string, workTree: string | null, args: string[], options: GitOptions = {}) {
+  const result = await gitRaw(repo, workTree, args, options);
   if (result.code !== 0) throw new GitCommandError(result.args, result.stderr, result.code);
   return result.stdout;
 }
@@ -106,8 +116,8 @@ async function gitStdin(repo: string, args: string[], input: string): Promise<Gi
   });
 }
 
-async function gitCommit(repo: string, workTree: string | null, args: string[]) {
-  return git(repo, workTree, ['-c', 'user.name=paimeng', '-c', 'user.email=version@paimeng.local', ...args]);
+async function gitCommit(repo: string, workTree: string | null, args: string[], options: GitOptions = {}) {
+  return git(repo, workTree, ['-c', 'user.name=paimeng', '-c', 'user.email=version@paimeng.local', ...args], options);
 }
 
 const exists = (path: string) => stat(path).then(() => true, () => false);
@@ -470,9 +480,58 @@ async function assertCleanSource(repo: string, tree: string, commit: string) {
   throw new Error(`工作区有未提交的源码改动（${[...blocking].slice(0, 3).join('、')}），请先提交或暂存后再切换版本`);
 }
 
-async function hasStagedChanges(repo: string, tree: string) {
-  const head = await headSha(repo);
-  return (await gitRaw(repo, tree, ['diff', '--cached', '--quiet', head ?? emptyTree])).code === 1;
+/**
+ * 临时索引：版本提交只写这里，应用仓库的默认 `.git/index` 一个字节都不碰。
+ * 放在 runtime/tmp 下，每条路径唯一，退出（包括抛错）时连 `.lock` 一起清掉。
+ */
+async function withTempIndex<T>(work: (index: string) => Promise<T>): Promise<T> {
+  const directory = join(getConfig().runtimeRoot, 'tmp');
+  await mkdir(directory, { recursive: true });
+  const index = join(directory, `version-index-${randomUUID()}`);
+  try {
+    return await work(index);
+  } finally {
+    await rm(index, { force: true }).catch(() => undefined);
+    await rm(`${index}.lock`, { force: true }).catch(() => undefined);
+  }
+}
+
+/**
+ * 隔离执行目录的安全检查：必须是普通目录，且路径上任何一级都不能是软链接。
+ * 生成跑在 runtime/executions/<generationId>/<epoch>/ 下，目录被换成软链接就意味着
+ * 提交会把应用工作区之外的内容读进历史，必须直接拒绝。
+ */
+async function isolatedWorkTree(path: string) {
+  const resolved = resolve(path);
+  const info = await lstat(resolved).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('提交目录不存在');
+    throw error;
+  });
+  if (info.isSymbolicLink() || !info.isDirectory()) throw new Error('提交目录不是安全的普通目录');
+  if (await realpath(resolved) !== resolved) throw new Error('提交目录路径不允许软链接');
+  return resolved;
+}
+
+/** 把临时索引初始化到基线树；基线为空时从空索引开始（等价于仓库还没有任何提交）。 */
+async function seedIndex(repo: string, baseline: string | null, env: Record<string, string>) {
+  if (baseline) await git(repo, null, ['read-tree', baseline], { env });
+  else await git(repo, null, ['read-tree', '--empty'], { env });
+}
+
+/**
+ * 推进 HEAD：在分支上就前进分支指针（与 `git commit` 一致），游离 HEAD 只改 HEAD 本身。
+ * 提交来自别的执行目录、且父提交不是当前 HEAD 时调用方不会走到这里，只留钉子。
+ */
+async function moveHead(repo: string, sha: string) {
+  const symbolic = (await gitRaw(repo, null, ['symbolic-ref', '--quiet', 'HEAD'])).code === 0;
+  await git(repo, null, symbolic ? ['update-ref', 'HEAD', sha] : ['update-ref', '--no-deref', 'HEAD', sha]);
+}
+
+function parseNumstat(out: string) {
+  return out.split('\n').filter(Boolean).map(line => {
+    const [added, removed, ...rest] = line.split('\t');
+    return { path: rest[rest.length - 1] ?? '', added: Number(added) || 0, removed: Number(removed) || 0 };
+  }).filter(stat => stat.path);
 }
 
 /** 这一轮将被提交的改动清单与行数：写标题时用来判断是动结构还是动样式，不进任何展示。 */
@@ -480,10 +539,183 @@ export async function pendingChangeStats(app: WorkspaceApp) {
   const repo = await ensureVersionRepo(app);
   const tree = workspace(app);
   const out = await git(repo, tree, ['diff', '--numstat', '-M', 'HEAD', '--', '.', ...addExcludes]).catch(() => '');
-  return out.split('\n').filter(Boolean).map(line => {
-    const [added, removed, ...rest] = line.split('\t');
-    return { path: rest[rest.length - 1] ?? '', added: Number(added) || 0, removed: Number(removed) || 0 };
-  }).filter(stat => stat.path);
+  return parseNumstat(out);
+}
+
+/**
+ * 与 pendingChangeStats 同样的统计，但针对任意执行目录：临时索引从当前 HEAD 初始化，
+ * 应用工作区的默认索引与 HEAD 都不受影响。
+ */
+export async function pendingChangeStatsFrom(app: WorkspaceApp, workTree: string) {
+  const repo = await ensureVersionRepo(app);
+  const tree = await isolatedWorkTree(workTree);
+  const baseline = await headSha(repo);
+  return withTempIndex(async index => {
+    const env = { GIT_INDEX_FILE: index };
+    await seedIndex(repo, baseline, env);
+    const out = await git(repo, tree, ['diff', '--numstat', '-M', '--', '.', ...addExcludes], { env, cwd: tree })
+      .catch(() => '');
+    return parseNumstat(out);
+  });
+}
+
+export type CommitFromInput = {
+  app: WorkspaceApp;
+  /** 要提交内容的目录：生成期间是本次执行的隔离目录，也可以是应用工作区。 */
+  workTree: string;
+  title: string;
+  generationId?: string | null;
+  /** 这一版的父提交；不给就用应用仓库当前 HEAD（仓库为空时是无父提交）。 */
+  parentSha?: string | null;
+  /** 默认推进 HEAD；只有当前 HEAD 就是父提交（或仓库还没有提交）时才真的移动，其余情况只留钉子。 */
+  updateHead?: boolean;
+  /** 额外排除的根路径（literal，相对 workTree）：封存快照里的平台清单等不属于源码的内容。 */
+  excludePaths?: readonly string[];
+};
+
+/** 一次「只构造提交」的结果：不写台账、不移动 HEAD，供发布事务先拿 SHA 再原子落账。 */
+export type PreparedVersion = { sha: string; title: string; changedFiles: string[]; tree: string; parent: string | null };
+
+/** 平台清单这类文件不是源码：不排除的话每版都会多一个与自己摘要有关的文件。 */
+function excludeSpecs(extra: readonly string[] | undefined) {
+  return [...addExcludes, ...(extra ?? []).map(path => `:(exclude,literal)${path}`)];
+}
+
+/**
+ * 提交内容构造的唯一实现：调用方必须已经持有版本写锁、也已校验过 workTree。
+ * 只用临时索引；提交对象与钉子在这里落地，台账与 HEAD 由调用方决定。
+ */
+async function prepareCommitLocked(input: {
+  repo: string; workTree: string; title: string; parentSha: string | null;
+  excludePaths?: readonly string[]; headFallback?: boolean;
+}): Promise<PreparedVersion | null> {
+  const { repo, workTree } = input;
+  // parentSha 为 null 时默认用仓库 HEAD（工作区提交的老语义）；发布链路要的是「父版本就是记录下来的那个」，
+  // 这时显式关掉回退，null 就是无父提交。
+  const baseline = input.parentSha ?? (input.headFallback === false ? null : await headSha(repo));
+  return withTempIndex(async index => {
+    const env = { GIT_INDEX_FILE: index };
+    await seedIndex(repo, baseline, env);
+    await git(repo, workTree, ['add', '-A', '-f', '--', '.', ...excludeSpecs(input.excludePaths)], { env, cwd: workTree });
+    const tree = (await git(repo, null, ['write-tree'], { env })).trim();
+    const baseTree = baseline
+      ? (await git(repo, null, ['rev-parse', '--verify', `${baseline}^{tree}`])).trim()
+      : emptyTree;
+    // 与父提交同一棵树就说明没有需要版本化的改动（依赖、构建产物、平台元数据已被排除）。
+    if (tree === baseTree) return null;
+    // 标题要在提交之前定：提交信息与台账标题必须同一句话，否则面板与 git log 会各说一套。
+    const changedFiles = (baseline
+      ? await git(repo, null, ['diff-tree', '-r', '--no-commit-id', '--name-only', '-z', baseTree, tree], { env })
+      : await git(repo, null, ['ls-tree', '-r', '--name-only', '-z', tree], { env })
+    ).split('\0').filter(Boolean).sort();
+    const title = input.title.trim().slice(0, maxTitleLength) || fallbackVersionTitle({ changedFiles });
+    // 不用 `git commit`：它把默认索引与工作区当成提交源，而这里的内容来自任意执行目录。
+    const sha = (await gitCommit(repo, null, [
+      'commit-tree', tree, ...(baseline ? ['-p', baseline] : []), '-m', title,
+    ], { env })).trim();
+    // 钉子让这一版在 HEAD 离开之后依然可达：回退到旧版再提交时主线会往回走，
+    // 没有钉子的提交会在一段时间后被 Git 回收，清单里就会出现读不出来的行。
+    await git(repo, null, ['update-ref', `refs/paimeng/versions/${sha}`, sha]);
+    return { sha, title, changedFiles, tree, parent: baseline };
+  });
+}
+
+/** commitVersion 与 commitVersionFrom 共用：唯一差别是提交后要不要把默认索引同步到新 HEAD。 */
+async function writeVersion(input: CommitFromInput & { syncIndex: boolean }): Promise<AppVersion | null> {
+  const { app } = input;
+  return withLock(app, async () => {
+    const repo = await ensureVersionRepo(app);
+    const workTree = await isolatedWorkTree(input.workTree);
+    const prepared = await prepareCommitLocked({
+      repo, workTree, title: input.title, parentSha: input.parentSha ?? null, excludePaths: input.excludePaths,
+    });
+    if (!prepared) return null;
+    if (input.updateHead !== false && (prepared.parent === null || prepared.parent === await headSha(repo))) {
+      await moveHead(repo, prepared.sha);
+    }
+    // 应用工作区这条路沿用「提交后默认索引等于 HEAD」的老语义（git commit 本来就会写索引），
+    // 否则 restoreVersion 的脏检查会把已提交的文件当成本地改动。执行目录提交则完全不碰默认索引。
+    if (input.syncIndex) await git(repo, null, ['read-tree', prepared.sha]);
+    await insertVersionRow({ appId: app.id, commitSha: prepared.sha, generationId: input.generationId ?? null, title: prepared.title });
+    return readVersion(app, prepared.sha);
+  });
+}
+
+/**
+ * 只构造提交，不写 version_record，也不移动 HEAD/主线。
+ *
+ * 发布链路先用它拿到 SHA（版本对象的提交信息与标题必须同一句话），再由发布事务原子写台账、
+ * delivery、预览指针与 generation 终态；事务失败时最多留一个孤儿提交和钉子，不会出现
+ * 「台账有了版本、内容却没落盘」的半截状态。返回 null 表示没有可版本化的改动。
+ */
+export async function prepareVersionCommit(input: {
+  app: WorkspaceApp;
+  workTree: string;
+  title: string;
+  parentSha?: string | null;
+  excludePaths?: readonly string[];
+  /** false 表示 parentSha 为 null 就是无父提交，不回退到仓库 HEAD（发布链路要精确的父版本）。 */
+  headFallback?: boolean;
+}): Promise<PreparedVersion | null> {
+  const { app } = input;
+  return withLock(app, async () => {
+    const repo = await ensureVersionRepo(app);
+    const workTree = await isolatedWorkTree(input.workTree);
+    return prepareCommitLocked({
+      repo, workTree, title: input.title, parentSha: input.parentSha ?? null,
+      excludePaths: input.excludePaths, headFallback: input.headFallback,
+    });
+  });
+}
+
+/**
+ * 发布事务提交后把应用工作区镜像到新版本：HEAD、默认索引和文件一起前进。
+ * 这样旧的 git 工具、下载、部署与恢复仍能读到「当前版本」；失败只影响镜像，不影响已提交的版本。
+ */
+export async function syncVersionWorkspace(input: { app: WorkspaceApp; versionId: string }): Promise<void> {
+  const sha = parseVersionId(input.versionId);
+  return withLock(input.app, async () => {
+    const repo = await ensureVersionRepo(input.app);
+    const tree = workspace(input.app);
+    const commit = await resolveCommit(repo, sha);
+    await materialize(input.app, repo, tree, commit.sha);
+    await git(repo, null, ['update-ref', 'HEAD', commit.sha]);
+  });
+}
+
+/** 应用仓库当前 HEAD；仓库还不存在、或还没有任何提交时返回 null（调用方据此回落到模板/空基线）。 */
+export async function headVersionSha(app: WorkspaceApp): Promise<string | null> {
+  const repo = versionRepo(app);
+  if (!await exists(join(repo, 'HEAD'))) return null;
+  return headSha(repo);
+}
+
+/**
+ * 把某一版物化到已存在且安全的目标目录，用作执行基线：
+ * `read-tree --reset -u <sha>` 只写目标树；这里额外用临时索引，应用仓库的默认索引一个字节都不动。
+ * 仓库不存在、版本不存在、目标目录被换成软链接都抛错，绝不静默退化成空目录。
+ */
+export async function materializeVersionTo(input: { app: WorkspaceApp; versionId: string; target: string }): Promise<string> {
+  const { app } = input;
+  const sha = parseVersionId(input.versionId);
+  if (!await exists(join(versionRepo(app), 'HEAD'))) throw new Error('版本仓库不存在，不能用作执行基线');
+  const repo = await ensureVersionRepo(app);
+  const target = await isolatedWorkTree(input.target);
+  if ((await gitRaw(repo, null, ['cat-file', '-e', `${sha}^{commit}`])).code !== 0) throw new Error('版本不存在，不能用作执行基线');
+  await withTempIndex(async index => {
+    await git(repo, target, ['read-tree', '--reset', '-u', sha], { env: { GIT_INDEX_FILE: index } });
+  });
+  return target;
+}
+
+/**
+ * 从任意执行目录构造一版：tree 由该目录的内容生成，提交写进应用的 Git 内容库。
+ *
+ * 全程只用临时索引，不移动、不污染应用工作区的默认索引；HEAD 只在「父提交就是当前 HEAD」
+ * 时推进，从旧版本的执行目录提交不会把主线指针拽回去。返回 null 表示没有可版本化的改动。
+ */
+export async function commitVersionFrom(input: CommitFromInput): Promise<AppVersion | null> {
+  return writeVersion({ ...input, syncIndex: false });
 }
 
 /**
@@ -496,23 +728,7 @@ export async function pendingChangeStats(app: WorkspaceApp) {
  * 标题为空表示这一轮没有可用的总结：按改动文件兜底，绝不留空标题。
  */
 export async function commitVersion(input: { app: WorkspaceApp; title: string; generationId?: string | null }): Promise<AppVersion | null> {
-  const { app } = input;
-  return withLock(app, async () => {
-    const repo = await ensureVersionRepo(app);
-    const tree = workspace(app);
-    await git(repo, tree, ['add', '-A', '-f', '--', '.', ...addExcludes]);
-    if (!await hasStagedChanges(repo, tree)) return null;
-    // 标题要在提交之前定：提交信息与台账标题必须同一句话，否则面板与 git log 会各说一套。
-    const changedFiles = (await git(repo, tree, ['diff', '--cached', '--name-only', '-z'])).split('\0').filter(Boolean).sort();
-    const title = input.title.trim().slice(0, maxTitleLength) || fallbackVersionTitle({ changedFiles });
-    await gitCommit(repo, tree, ['commit', '--quiet', '-m', title]);
-    const sha = (await git(repo, null, ['rev-parse', 'HEAD'])).trim();
-    // 钉子让这一版在 HEAD 离开之后依然可达：回退到旧版再提交时主线会往回走，
-    // 没有钉子的提交会在一段时间后被 Git 回收，清单里就会出现读不出来的行。
-    await git(repo, null, ['update-ref', `refs/paimeng/versions/${sha}`, sha]);
-    await insertVersionRow({ appId: app.id, commitSha: sha, generationId: input.generationId ?? null, title });
-    return readVersion(app, sha);
-  });
+  return writeVersion({ app: input.app, workTree: workspace(input.app), title: input.title, generationId: input.generationId, updateHead: true, syncIndex: true });
 }
 
 export type RestoreOutcome = { status: 'restored' | 'unchanged'; version: AppVersion };

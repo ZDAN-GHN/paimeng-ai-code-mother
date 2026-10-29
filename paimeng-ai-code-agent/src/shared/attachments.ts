@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 /**
  * 用户上传图片的共享契约（前后端各取一份，避免两处各写一套后漂移）。
- * 设计取舍见 docs/plans/image-voice-input.md：v1 只支持「随消息发送的图片」，
+ * 设计取舍见 docs/plans/archive/image-voice-input.md：v1 只支持「随消息发送的图片」，
  * 不做素材/参考用途选择、不做附件回收站，也没有版本/检查点绑定。
  */
 export const imageMediaTypes = ['image/jpeg', 'image/png', 'image/webp'] as const;

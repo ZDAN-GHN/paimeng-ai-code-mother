@@ -38,6 +38,9 @@ function messageText(message: Message): string {
 
 type ScriptedTurn = { tool: string; args: ToolCall["arguments"] } | { tool: null };
 
+/** 证据用例显式用 `[ask:问题]` 让可控夹具调用真实 ask 工具；普通提示词不会命中。 */
+const ASK_MARKER = /^\[ask:(.+?)\]\s*/;
+
 function scriptedTurn(messages: readonly Message[]): ScriptedTurn {
 	let lastUser = -1;
 	for (let index = messages.length - 1; index >= 0; index--) {
@@ -47,6 +50,8 @@ function scriptedTurn(messages: readonly Message[]): ScriptedTurn {
 	const type = APP_TYPE.exec(instructions)?.[1] as CodeGenType | undefined;
 	if (type === undefined) return { tool: null };
 	const prompt = lastUser < 0 ? "" : messageText(messages[lastUser]);
+	const asked = ASK_MARKER.exec(prompt);
+	if (asked) return { tool: "ask", args: { question: asked[1] } };
 	const results = messages.slice(lastUser + 1).filter((message) => message.role === "toolResult").length;
 	const templated = TEMPLATED.test(instructions) && (type === "react_project" || type === "vue_project");
 	const reads = templated ? fixtureReadSteps(type) : [];

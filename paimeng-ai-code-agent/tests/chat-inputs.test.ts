@@ -16,7 +16,8 @@ import {
   unresolvedInputs,
   type SentInputs,
 } from '@/components/chat/chat-inputs';
-import type { ChatMessage, ChatInputReceipt, PendingChatInput } from '@/shared/chat-runtime';
+import { inputCategory, projectGenerationInputs } from '@/components/chat/generation-feedback';
+import type { ChatMessage, ChatInputReceipt, GenerationInputView, PendingChatInput } from '@/shared/chat-runtime';
 
 const entry = (id: string, mode: 'steer' | 'followUp' = 'steer') => ({ id, mode, text: '补充：' + id, attachments: [] });
 const receipt = (id: string, state: ChatInputReceipt['state']): ChatInputReceipt => ({ id, submissionId: 7, generationId: 'task-1', state });
@@ -153,5 +154,82 @@ describe('按边界分段', () => {
   it('落点越界或乱序也不会丢内容或倒序', () => {
     const segments = messageSegments(parts, [placed('a', 9), placed('b', 0)]);
     expect(segments.map(segment => segment.kind === 'input' ? segment.input.id : segment.parts.length)).toEqual(['b', 3, 'a']);
+  });
+});
+
+describe('持久输入状态投影', () => {
+  const view = (id: string, status: GenerationInputView['status'], seq = 1): GenerationInputView => ({
+    id, seq, mode: 'followUp', text: '补充：' + id, status, submissionId: null,
+  });
+
+  it('按状态分成排队中 / 已进上下文 / 中断未处理 / 已撤回 / 已交付', () => {
+    const projection = projectGenerationInputs({
+      inputs: [view('a', 'accepted', 1), view('b', 'placed', 2), view('c', 'unanswered', 3), view('d', 'withdrawn', 4), view('e', 'resolved', 5)],
+    });
+    expect(projection.source).toBe('inputs');
+    expect(projection.queued.map(item => item.id)).toEqual(['a']);
+    expect(projection.placed.map(item => item.id)).toEqual(['b']);
+    expect(projection.unanswered.map(item => item.id)).toEqual(['c']);
+    expect(projection.withdrawn.map(item => item.id)).toEqual(['d']);
+    expect(projection.resolved.map(item => item.id)).toEqual(['e']);
+    expect(inputCategory('accepted')).toBe('queued');
+    expect(inputCategory('placed')).toBe('placed');
+    expect(inputCategory('unanswered')).toBe('unanswered');
+    expect(inputCategory('withdrawn')).toBe('withdrawn');
+    expect(inputCategory('resolved')).toBe('resolved');
+  });
+
+  it('同一个 id 在 inputs 与 pending 里都出现时只出现一次（inputs 优先）', () => {
+    const projection = projectGenerationInputs({
+      inputs: [view('a', 'withdrawn', 3)],
+      pending: [{ id: 'a', mode: 'steer', text: '旧队列：a', attachments: [], submissionId: 11 }],
+    });
+    expect(projection.items).toHaveLength(1);
+    expect(projection.items[0]).toMatchObject({ id: 'a', status: 'withdrawn', category: 'withdrawn', text: '补充：a' });
+    expect(projection.queued).toEqual([]);
+  });
+
+  it('inputs 里重复的同 id 条目也只保留一条', () => {
+    const projection = projectGenerationInputs({ inputs: [view('a', 'accepted', 1), view('a', 'placed', 2)] });
+    expect(projection.items.map(item => item.id)).toEqual(['a']);
+    expect(projection.queued.map(item => item.id)).toEqual(['a']);
+    expect(projection.placed).toEqual([]);
+  });
+
+  it('分类与序号水位无关：乱序、跳号、重复序号都不改变分类也不丢条目', () => {
+    const inputs = [view('c', 'unanswered', 9), view('a', 'accepted', 4), view('b', 'placed', 2), view('d', 'withdrawn', 4)];
+    const projection = projectGenerationInputs({ inputs });
+    expect(projection.items.map(item => item.id)).toEqual(['c', 'a', 'b', 'd']);
+    expect(projection.queued.map(item => item.id)).toEqual(['a']);
+    expect(projection.placed.map(item => item.id)).toEqual(['b']);
+    expect(projection.unanswered.map(item => item.id)).toEqual(['c']);
+    expect(projection.withdrawn.map(item => item.id)).toEqual(['d']);
+    // 反过来排一遍，分类结果一样（没有任何「水位之前/之后」的过滤）。
+    const reversed = projectGenerationInputs({ inputs: [...inputs].reverse() });
+    expect(reversed.items).toHaveLength(4);
+    expect(reversed.queued.map(item => item.id)).toEqual(['a']);
+    expect(reversed.unanswered.map(item => item.id)).toEqual(['c']);
+  });
+
+  it('旧后端没有 inputs 字段时回退到原生队列 pending，按排队中展示', () => {
+    const pending: PendingChatInput[] = [
+      { id: 'a', mode: 'steer', text: '补充：a', attachments: [], submissionId: 7 },
+      { id: 'b', mode: 'followUp', text: '排队：b', attachments: [], submissionId: 8 },
+    ];
+    const projection = projectGenerationInputs({ inputs: undefined, pending });
+    expect(projection.source).toBe('pending');
+    expect(projection.items.map(item => item.id)).toEqual(['a', 'b']);
+    expect(projection.queued).toEqual([
+      { id: 'a', seq: null, mode: 'steer', text: '补充：a', status: 'accepted', submissionId: 7, category: 'queued' },
+      { id: 'b', seq: null, mode: 'followUp', text: '排队：b', status: 'accepted', submissionId: 8, category: 'queued' },
+    ]);
+    expect(projectGenerationInputs({}).items).toEqual([]);
+  });
+
+  it('形状不合法的条目跳过，不影响同批其它输入', () => {
+    const projection = projectGenerationInputs({
+      inputs: [view('a', 'accepted', 1), { id: 'broken', seq: 2, mode: 'followUp', text: 'x', status: 'nope', submissionId: null } as unknown as GenerationInputView],
+    });
+    expect(projection.items.map(item => item.id)).toEqual(['a']);
   });
 });

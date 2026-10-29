@@ -5,6 +5,7 @@ import { loadEnvFile } from 'node:process';
 import { testDatabaseUrl } from '../test-database-url';
 import type { CodeGenType } from '@/shared/contracts';
 import { appOrigin, previewOrigin as serverPreviewOrigin } from './support/app-origin';
+import { evidencePath } from './support/evidence';
 loadEnvFile('.env');
 const password = 'password123';
 const origin = appOrigin();
@@ -107,11 +108,11 @@ test('浏览器完成注册、登录、生成、编辑、预览、发布和下�
   await page.reload();
   await expect(page.getByText('可预览', { exact: true })).toBeVisible();
   await expect(page.getByText('文件已生成，正在验证与构建。此回复来自可控测试模型。', { exact: true })).toBeVisible();
-  await page.screenshot({ path: 'runtime/evidence/chat-desktop.png', fullPage: true });
+  await page.screenshot({ path: evidencePath('platform', 'chat-desktop.png'), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByLabel('对话消息')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.screenshot({ path: 'runtime/evidence/chat-mobile.png', fullPage: true });
+  await page.screenshot({ path: evidencePath('platform', 'chat-mobile.png'), fullPage: true });
   expect(errors).toEqual([]);
 });
 
@@ -187,7 +188,7 @@ test('普通用户不能打开管理员页面，管理员可查询和编辑', as
   await page.goto('/');
   await expect(page.getByRole('heading', { name: '精选案例', exact: true })).toBeVisible();
   await expect(page.locator('.app-card').filter({ hasText: appName })).toHaveCount(2);
-  await page.screenshot({ path: 'runtime/evidence/home-desktop.png', fullPage: true });
+  await page.screenshot({ path: evidencePath('platform', 'home-desktop.png'), fullPage: true });
 });
 
 for (const type of ['multi_file', 'vue_project', 'react_project'] as const) {

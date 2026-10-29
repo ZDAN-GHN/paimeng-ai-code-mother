@@ -10,6 +10,8 @@ import { join, relative } from 'node:path';
  *   "element is not stable / not visible" 直到超时。
  * - `getByRole('alert')`：Next 的路由播报节点（#__next-route-announcer__）也是 role=alert，
  *   断言会命中它而不是业务提示。
+ * - 直接拼 `runtime/evidence` 或证据目录：截图会散落到旧路径，且日期不再是运行日；
+ *   统一走 `tests/e2e/support/evidence.ts` 的 evidenceDir/evidencePath。
  */
 
 type Rule = { readonly pattern: RegExp; readonly advice: string };
@@ -30,6 +32,10 @@ const rules: readonly Rule[] = [
   {
     pattern: /getByRole\(\s*['"]alert['"]/,
     advice: "Next 的路由播报节点也是 role=alert：收窄到 .ant-alert-error[role=\"alert\"] 或页面内作用域",
+  },
+  {
+    pattern: /(?:runtime\/evidence|\.agents\/skills\/verify-paimeng\/evidences\/|['\"`]evidences\/)/,
+    advice: "E2E 证据按日期写入 .agents/skills/verify-paimeng/evidences/<YY-MM-DD>/...；使用 tests/e2e/support/evidence.ts 的 evidenceDir/evidencePath",
   },
 ];
 

@@ -6,6 +6,15 @@ import { join, resolve } from 'node:path';
 export const productRoot = process.cwd();
 const harnessEntry = resolve(productRoot, 'src', 'server', 'durable', 'harness-server.ts');
 export const postgresUrl = process.env.DURABLE_PG_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/paimeng_agent_test';
+/**
+ * 产品库（app / generation / app_authority / generation_execution）地址。
+ * 集成测试一律指向专用的 paimeng_app_test：从开发库取连接串也只换库名，永不写开发库。
+ */
+export const productPostgresUrl = (() => {
+  const url = new URL(process.env.DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/paimeng_app_test');
+  url.pathname = '/paimeng_app_test';
+  return url.href;
+})();
 
 export function harnessAvailable(): boolean {
   return existsSync(harnessEntry) && existsSync(join(productRoot, 'node_modules', 'tsx'));
@@ -57,7 +66,7 @@ export type HarnessProcess = { child: ChildProcess; output: () => string };
  */
 const startedHarnesses = new Map<number, () => string>();
 
-export function startHarness(options: { port: number; runDir: string; reset: boolean; waitMs: number; finalText: string; thinking?: string; workspace?: string; tool?: string; args?: unknown; env?: Record<string, string> }): HarnessProcess {
+export function startHarness(options: { port: number; runDir: string; reset: boolean; waitMs: number; finalText: string; thinking?: string; firstThinking?: string; workspace?: string; tool?: string; args?: unknown; env?: Record<string, string>; databaseUrl?: string }): HarnessProcess {
   let output = '';
   const env = {
     ...process.env,
@@ -66,10 +75,12 @@ export function startHarness(options: { port: number; runDir: string; reset: boo
     DURABLE_HARNESS_RUN_DIR: options.runDir,
     DURABLE_HARNESS_WORKSPACE: options.workspace ?? join(options.runDir, 'workspace'),
     DURABLE_PG_URL: postgresUrl,
+    ...(options.databaseUrl === undefined ? {} : { DATABASE_URL: options.databaseUrl }),
     DURABLE_FAUX_MODEL: '1',
     DURABLE_FAUX_WAIT_MS: String(options.waitMs),
     DURABLE_FAUX_FINAL: options.finalText,
     ...(options.thinking ? { DURABLE_FAUX_THINKING: options.thinking } : {}),
+    ...(options.firstThinking ? { DURABLE_FAUX_FIRST_THINKING: options.firstThinking } : {}),
     ...(options.tool ? { DURABLE_FAUX_TOOL: options.tool } : {}),
     ...(options.args === undefined ? {} : { DURABLE_FAUX_ARGS: JSON.stringify(options.args) }),
     ...(options.reset ? { DURABLE_HARNESS_RESET: '1' } : {}),

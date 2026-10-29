@@ -89,7 +89,7 @@
 | `anthropic-messages` | `thinking: {type: 'enabled', budget_tokens}` | 预算按 `max_tokens` 比例换算，最低 1024 |
 
 上游是否接受某个等级由上游决定；本项目只做枚举校验，不按厂商收窄。DeepSeek 三种格式的对照见 `README.md` 与官方文档（Responses 用 `reasoning.effort`，Chat 用 `reasoning_effort` + `thinking`，Anthropic 兼容端点用 `output_config.effort`）。
-DeepSeek 的 Responses 格式把思考文本放在 `output[].content`（`type: 'reasoning_text'`）、流式事件叫 `response.reasoning_text.delta`，而 AI SDK 只解析 `response.reasoning_summary_text.delta` 与 `summary`，所以该格式的响应会先经 `src/server/models/responses-reasoning.ts` 兼容改写（SSE 只改写 `delta` 事件并把 `content_index` 映射为 `summary_index`，`.done` 事件原样透传，非流式把 `content` 复制成 `summary`）再交给 SDK；单测在 `tests/models/responses-reasoning.test.ts`。Chat 格式不需要这层改写，`reasoning_content` 由 `@ai-sdk/openai-compatible` 原生解析。
+DeepSeek 的 Responses 格式把思考文本放在 `output[].content`（`type: 'reasoning_text'`）、流式事件叫 `response.reasoning_text.delta`，而 AI SDK 只解析 `response.reasoning_summary_text.delta` 与 `summary`；同时它的非流式 `message.output_text` 会省略 AI SDK schema 要求的 `annotations` 数组。该格式的响应会先经 `src/server/models/responses-reasoning.ts` 兼容改写（SSE 只改写 `delta` 事件并把 `content_index` 映射为 `summary_index`，`.done` 事件原样透传；非流式把 reasoning `content` 复制成 `summary`，并为缺失的 `annotations` 补空数组）再交给 SDK；单测在 `tests/models/responses-reasoning.test.ts`。Chat 格式不需要这层改写，`reasoning_content` 由 `@ai-sdk/openai-compatible` 原生解析。
 
 ### `ts_model_config_state`：共享版本
 

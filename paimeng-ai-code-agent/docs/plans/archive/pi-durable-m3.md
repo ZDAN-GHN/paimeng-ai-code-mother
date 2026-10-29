@@ -1,6 +1,6 @@
 # Pi Durable 迁移 · M3：整合进产品（提拔 + 切默认引擎 + 删临时物）
 
-> 归档：记录当时的设计、迁移与验收。当前行为见[部署说明](../pi-durable-deployment.md)与[模型配置](../provider-convergence.md)。
+> 归档：记录当时的设计、迁移与验收。当前行为见[部署说明](../../pi-durable-deployment.md)与[模型配置](../../provider-convergence.md)。
 
 状态：**整合第一步、第二步、第三步均已完成**（2026-10-18）。第三步删掉 legacy 引擎与自研上下文层，见 §7。分支 `feat/pi-durable-migration`，基线 `main@d0c9797`
 （M1 `4edbdd0`/`1554dcc`/`345d60a`，M2a `d8acf2d`，M2b `3b9279f`，整合前状态提交 `9c7ee52`，

@@ -16,7 +16,7 @@ import { publicUser } from '@/server/auth';
 import { createApp } from '@/server/business';
 import { harnessChatResponse } from '@/server/durable-engine';
 import { generationAccount } from '@/server/generation-accounting';
-import { withAppWriter } from '@/server/generation-store';
+import { appendInput, markInputPlaced } from '@/server/control-store';
 import { withRateLimitRedis } from '@/server/redis';
 import { nextSnowflakeId } from '@/server/snowflake';
 import { workspace as appWorkspace } from '@/server/workspace';
@@ -330,17 +330,18 @@ async function inputBeforeSettlement(appId: string, generationId: string) {
 				const snapshot = await upstream.text();
 				const conversationId = Number(new URL(request.url, harnessBase).searchParams.get('conversationId'));
 				intercepted = true;
-				await withAppWriter(appId, async () => {
-					response.end(snapshot);
-					const id = 'input-' + randomUUID();
-					const accepted = await fetch(`${harnessBase}/submit`, {
-						method: 'POST', headers: { 'content-type': 'application/json' },
-						body: JSON.stringify({ conversationId, requestId: id, whenBusy: 'followUp', content: '模型恢复后继续完成页面', entry: { kind: 'app.user', data: {
-							id, role: 'user', parts: [{ type: 'text', text: '模型恢复后继续完成页面' }], metadata: { generationId, inputMode: 'followUp' },
-						} } }),
-					});
-					expect(accepted.status).toBe(202);
-				}, generationId, { lockTask: true });
+				response.end(snapshot);
+				const id = 'input-' + randomUUID();
+				const appended = await appendInput({ appId, generationId, requestId: id, mode: 'followUp', message: '模型恢复后继续完成页面' });
+				const accepted = await fetch(`${harnessBase}/submit`, {
+					method: 'POST', headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ conversationId, requestId: id, whenBusy: 'followUp', content: '模型恢复后继续完成页面', entry: { kind: 'app.user', data: {
+						id, role: 'user', parts: [{ type: 'text', text: '模型恢复后继续完成页面' }], metadata: { generationId, inputMode: 'followUp' },
+					} } }),
+				});
+				expect(accepted.status).toBe(202);
+				const body = await accepted.json() as { submissionId: number };
+				await markInputPlaced({ appId, inputId: appended.input.id, submissionId: body.submissionId });
 			} else {
 				const reader = upstream.body?.getReader();
 				if (reader) {

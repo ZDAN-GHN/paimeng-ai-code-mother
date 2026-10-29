@@ -1,8 +1,9 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import { mkdir, rm, readFile, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, readFile, stat, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildApp, buildIsCurrent, deployApp, downloadApp, hasPreview, loadBuildState, saveBuildState, sourceDigest, workspace, deployedUrl } from '@/server/artifacts';
-import { writeProjectFile } from '@/server/workspace';
+import { projectAt, writeProjectFile } from '@/server/workspace';
 import { fixtureFiles } from '@/server/fixture-content';
 import { getConfig } from '@/server/config';
 const html={id:String(Date.now()+1),codeGenType:'html' as const};const vue={id:String(Date.now()+2),codeGenType:'vue_project' as const};let published='';
@@ -10,6 +11,7 @@ afterAll(async()=>{await rm(workspace(html),{recursive:true,force:true});await r
 describe('真实产物与受限构建',()=>{
  it('HTML 必须存在并通过真实文件校验',async()=>{await expect(buildApp(html)).rejects.toThrow();await writeProjectFile(html,'index.html','<!doctype html><html><body><h1>产物验收</h1></body></html>');await expect(buildApp(html)).resolves.toBeUndefined();published=await deployApp(html);expect(await readFile(join(getConfig().runtimeRoot,'deploy',published,'index.html'),'utf8')).toContain('<h1>产物验收</h1>');expect(deployedUrl(published)).toContain('/deploy/');});
  it('下载包含真实源文件且具有 ZIP 文件头',async()=>{await writeProjectFile(html,'index.html','<!doctype html><html><body>独立下载验收</body></html>');const response=await downloadApp(html);const bytes=Buffer.from(await response.arrayBuffer());expect(bytes.subarray(0,2).toString()).toBe('PK');expect(bytes.toString()).toContain('index.html');expect(response.headers.get('content-disposition')).toContain(html.id);});
+ it('按给定源码根打包，并排除平台快照清单',async()=>{const root=await realpath(await mkdtemp(join(tmpdir(),'paimeng-download-')));try{await mkdir(join(root,'src'));await writeFile(join(root,'index.html'),'<!doctype html><html><body>快照下载</body></html>');await writeFile(join(root,'src','app.js'),'console.log("snapshot")');await writeFile(join(root,'manifest.json'),'{"version":1}');const archive=Buffer.from(await(await downloadApp(projectAt(html,root),{excludePaths:['manifest.json']})).arrayBuffer()).toString();expect(archive).toContain('index.html');expect(archive).toContain('src/app.js');expect(archive).not.toContain('manifest.json');}finally{await rm(root,{recursive:true,force:true});}});
  it('构建入口拒绝外部依赖，错误提供允许版本供模型重试',async()=>{const content=JSON.stringify({dependencies:{vue:'https://evil.invalid/package.tgz'}});await expect(writeProjectFile(vue,'package.json',content)).resolves.toBeUndefined();await expect(buildApp(vue)).rejects.toThrow('不允许的构建依赖');});
 
 });

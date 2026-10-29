@@ -1,10 +1,10 @@
 # 模型 provider 收敛：现状与 A/B 取舍
 
-> 归档：记录当时的设计、迁移与验收。当前行为见[部署说明](../pi-durable-deployment.md)与[模型配置](../provider-convergence.md)。
+> 归档：记录当时的设计、迁移与验收。当前行为见[部署说明](../../pi-durable-deployment.md)与[模型配置](../../provider-convergence.md)。
 
 状态：**设计稿，待用户决策**（2026-10-18，基线 `076f022`）。本文只做调研与方案对比，不含代码改动。
-相关：库表职责见 [database-inventory.md](../database-inventory.md)，harness 部署与「两份凭据」缺口见
-[pi-durable-deployment.md](./pi-durable-deployment-notes.md) §1（「需要显式决定的重复来源」）。
+相关：库表职责见 [database-inventory.md](../../database-inventory.md)，harness 部署与「两份凭据」缺口见
+[pi-durable-deployment.md](pi-durable-deployment-notes.md) §1（「需要显式决定的重复来源」）。
 
 ## 0. 一句话结论
 

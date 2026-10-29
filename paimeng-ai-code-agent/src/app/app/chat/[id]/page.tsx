@@ -17,10 +17,11 @@ import { VoiceInput, appendTranscript } from '@/components/chat/voice-input';
 import { MarkdownMessage } from '@/components/chat/markdown-message';
 import { GenerationUsage } from '@/components/chat/generation-usage';
 import { BuildProgress } from '@/components/chat/build-progress';
-import { composerAction, initialProgress, interruptedStreamMessage, parseProgressEvent, parseSteerLanded, progressReducer, type ProgressState } from '@/components/chat/generation-feedback';
+import { composerAction, handoffWaitingText, initialProgress, interruptedStreamMessage, interruptionText, parseProgressEvent, parseSteerLanded, progressReducer, projectGenerationInputs, type ProjectedInput, type ProgressState } from '@/components/chat/generation-feedback';
 import { admitInput, applyBoundary, forgetInput, messageSegments, placeInput, placedInputs, queuedInputs, type InputEntry, type LostInput, type PlacedInput, type QueuedInput } from '@/components/chat/chat-inputs';
 import { useGenerationSync } from './use-generation-sync';
 import { ToolCall, toolCallOf } from '@/components/chat/tool-call';
+import { mergeReasoningParts } from '@/components/chat/message-parts';
 import { AppDetailModal, formatCodeGenType } from '@/components/chat/app-detail-modal';
 import { VersionPanel } from '@/components/chat/version-panel';
 import { DeploySuccessModal } from '@/components/chat/deploy-success-modal';
@@ -65,7 +66,7 @@ function repairingOf(data: unknown): { attempt: number; maxAttempts: number } | 
 // memo：轮询/秒表等无关 setState 不再连带重渲染每条消息的全部工具卡片与文字块
 //（卡片的显示状态变化不受影响，那仍由 ToolCall 自己的 useState 管理）。
 const AssistantParts = memo(function AssistantParts({ parts, assetUrl }: { parts: UIMessage['parts']; assetUrl: (path: string) => string }) {
-  return <>{parts.map((part, index) => {
+  return <>{mergeReasoningParts(parts).map((part, index) => {
     if (part.type === 'text') return <MarkdownMessage key={index} content={part.text} />;
     if (part.type === 'reasoning') return <details className="reasoning" key={index}><summary>思考过程</summary><div className="message-text">{part.text}</div></details>;
     const call = toolCallOf(part);
@@ -108,6 +109,17 @@ function LostInputChip({ item, resendable, onResend, onRemove }: { item: LostInp
     <span className="composer-queue-chip-text" title={item.text}>{item.text}{item.attachments.length ? ` · ${item.attachments.length} 张图` : ''}</span>
     <Button type="text" size="small" className="composer-queue-chip-action" aria-label={'重发 ' + item.text} disabled={!resendable} onClick={() => onResend(item)}>重发</Button>
     <Button type="text" size="small" className="composer-queue-chip-close" aria-label={'移除 ' + item.text} onClick={() => onRemove(item)}>×</Button>
+  </span>;
+}
+
+/**
+ * 服务端持久输入（`runtime.inputs`）的一条：队列里等着的显示「排队中」，已撤回的显示「已撤回」。
+ * 这里只读展示，撤回/重发由服务端状态推进，不在本地猜。
+ */
+function RuntimeInputChip({ item }: { item: ProjectedInput }) {
+  return <span className="composer-queue-chip">
+    <span className="composer-queue-chip-text" title={item.text}>{item.text}</span>
+    <span className="composer-hint" style={{ paddingRight: 6 }}>{item.category === 'withdrawn' ? '已撤回' : '排队中'}</span>
   </span>;
 }
 
@@ -250,7 +262,7 @@ function Chat({ id }: { id: string }) {
       const requestId = crypto.randomUUID();
       activeGenerationId.current = requestId;
       const message = messages[messages.length - 1];
-      return { body: { appId: id, message: { ...message, parts: outgoingParts(message) }, requestId } };
+      return { body: { appId: id, message: { ...message, parts: outgoingParts(message) }, requestId, ...(questionRef.current ? { expectedQuestionId: questionRef.current } : {}) } };
     },
   }), [id]);
   /** 消费服务端的瞬时 `data-progress`：推进时间线、按 >=1s 节流刷新 iframe。 */
@@ -307,12 +319,32 @@ function Chat({ id }: { id: string }) {
   }, [id]);
   const {
     inputs, setInputs, lostInputs, setLostInputs, awaitingHistory, runtimeBusy,
-    applyRuntime, settledGenerations, shownMessageIds,
+    applyRuntime, settledGenerations, shownMessageIds, runtimeInputs, handoff, question, setQuestion,
   } = useGenerationSync({
     task, status, stop, fetchHistory, fetchRuntime, liveRef, mounted,
     activeGenerationId, setMessages, setProgress, message,
   });
   const generating = live || runtimeBusy || task?.status === 'generating' || task?.status === 'building';
+  // 持久输入状态与草稿交接：后端给了 `runtime.inputs` 就以它为准，没有这个字段时回退到原生队列
+  // （`runtime.pending` → 本地 `inputs`）与既有文案，页面行为不变。
+  const inputProjection = useMemo(() => projectGenerationInputs({ inputs: runtimeInputs }), [runtimeInputs]);
+  const remoteInputIds = useMemo(() => new Set(inputProjection.items.map(item => item.id)), [inputProjection]);
+  const draftHandoff = handoff ?? task?.handoff ?? null;
+  const handoffText = handoffWaitingText(draftHandoff);
+  // 交接未完成（排空/封存）时挡住发送：避免重复创建任务，也避免复制还在写的目录。
+  const sealing = handoffText !== null;
+  /**
+   * 等待回答：以运行态（`runtime.question`）为唯一来源——它每次轮询都会重查，回答后立即消失。
+   * 不用 generation 上的 `question` 做回退：任务行可能是回答前的旧快照，会把已回答的提问又显示出来。
+   * 提问暂停的公开状态仍是 failed（不新增 generation status），所以文案按「等待回答」处理，
+   * 不把它显示成失败终态。
+   */
+  const openQuestion = question;
+  const awaitingAnswer = !!openQuestion && !live && task?.status !== 'generating' && task?.status !== 'building';
+  const questionPaused = awaitingAnswer || task?.stopReason === 'question';
+  // transport 在发送时读它：有开放提问时把回答标记带进请求体（回答与普通 start 共用入口）。
+  const questionRef = useRef<string | null>(null);
+  useEffect(() => { questionRef.current = openQuestion?.id ?? null; }, [openQuestion?.id]);
   // 最后一条助手气泡：`data-steer` 只给 part 数，分段要落到那一刻正在流的那条气泡上。
   useEffect(() => { lastAssistantId.current = [...messages].reverse().find(message => message.role === 'assistant')?.id ?? null; }, [messages]);
   const taskStatus = task?.status;
@@ -485,7 +517,7 @@ function Chat({ id }: { id: string }) {
   }, [canAttachImages, addImages]);
 
   const submit = useCallback(async (original: string, attachments: readonly AttachmentPart[] = [], options: { keepDraft?: boolean } = {}): Promise<boolean> => {
-    if (!original.trim() || generating || submitting.current || !canEdit || !loaded) return false;
+    if (!original.trim() || generating || submitting.current || !canEdit || !loaded || sealing) return false;
     if (!options.keepDraft && imageBlockReason) { message.warning(imageBlockReason); return false; }
     const context = !options.keepDraft && selected.length ? selectionContext(selected) : '';
     const text = original.trim() + context;
@@ -501,7 +533,10 @@ function Chat({ id }: { id: string }) {
     setError(''); clearError();
     if (!options.keepDraft) { setInput(''); setSelected([]); setEditing(false); clearSentImages(attachments); }
     try {
+      const expectedQuestionId = questionRef.current;
       await sendMessage({ text, metadata: attachments.length ? { attachments: [...attachments] } : undefined });
+      // 回答已经发出去：问题气泡不必等到下一次轮询才消失，新一轮的流式回答会紧接着展示。
+      if (expectedQuestionId) setQuestion(current => current?.id === expectedQuestionId ? null : current);
       await refresh();
       return true;
     } catch (e) {
@@ -512,7 +547,7 @@ function Chat({ id }: { id: string }) {
       }
       return false;
     } finally { submitting.current = false; }
-  }, [generating, canEdit, loaded, selected, clearError, sendMessage, refresh, imageBlockReason, clearSentImages, message]);
+  }, [generating, canEdit, loaded, sealing, selected, clearError, sendMessage, refresh, imageBlockReason, clearSentImages, message, setQuestion]);
 
   /**
    * 生成中的输入走服务端原生队列（`app/chat/input`）：有文字时 Enter 与主按钮是 followUp（本轮结束后
@@ -539,7 +574,9 @@ function Chat({ id }: { id: string }) {
   }, [id, message]);
   const sendInput = useCallback(async (mode: ChatInputMode) => {
     const draft = input.trim();
-    if (!draft || !canEdit || !loaded) return;
+    if (!draft || !canEdit || !loaded || sealing) return;
+    // 等待回答时输入框是「回答」，不能变成插话或排队消息（后端也会拒）。
+    if (openQuestion) { message.warning('正在等待你回答上面的问题，直接发送即可继续'); return; }
     if (imageBlockReason) { message.warning(imageBlockReason); return; }
     // 插话与排队消息都允许附图；选中元素的定位上下文与普通发送一样随消息一起发。
     const context = selected.length ? selectionContext(selected) : '';
@@ -552,7 +589,7 @@ function Chat({ id }: { id: string }) {
     setInput(current => current.trim() === draft ? '' : current);
     if (context) { setSelected([]); editorMessage({ type: 'CLEAR_SELECTION' }); }
     clearSentImages(attachments);
-  }, [input, selected, canEdit, loaded, imageBlockReason, imageParts, clearSentImages, postInput, editorMessage, message]);
+  }, [input, selected, canEdit, loaded, sealing, openQuestion, imageBlockReason, imageParts, clearSentImages, postInput, editorMessage, message]);
 
   /** 撤回队列里的一条输入：服务端说已经进了 pi 上下文（`already_placed`/`settled`）时就当交付处理。 */
   const recallInput = useCallback(async (item: QueuedInput) => {
@@ -572,6 +609,8 @@ function Chat({ id }: { id: string }) {
    * 任务还在跑就继续排队，已经停了就走普通生成入口；成功才从待重发区移除。
    */
   const resendLostInput = useCallback(async (item: LostInput) => {
+    // 等待回答时输入框的内容是「回答」：先把回答发出去，再重发旧输入。
+    if (openQuestion) { message.warning('正在等待你回答上面的问题，先发送回答再重发这条输入'); return; }
     if (generating) {
       if (await postInput({ id: crypto.randomUUID(), mode: 'followUp', text: item.text, attachments: item.attachments })) {
         setLostInputs(current => current.filter(entry => entry.id !== item.id));
@@ -579,7 +618,7 @@ function Chat({ id }: { id: string }) {
       return;
     }
     if (await submit(item.text, item.attachments, { keepDraft: true })) setLostInputs(current => current.filter(entry => entry.id !== item.id));
-  }, [generating, postInput, submit]);
+  }, [openQuestion, generating, postInput, submit, message]);
 
   useEffect(() => {
     if (!appLoaded || !historyLoaded || authLoading || !app || initialPromptHandled.current) return;
@@ -614,7 +653,7 @@ function Chat({ id }: { id: string }) {
   async function deploy() {
     setPublishing(true);
     try {
-      const url = await api<string>('app/deploy', { appId: id });
+      const url = await api<string>('app/deploy', { appId: id, requestId: crypto.randomUUID() });
       setDeployModal({ open: true, url });
       message.success('部署成功');
       await refresh();
@@ -643,29 +682,25 @@ function Chat({ id }: { id: string }) {
   const requestError = interrupted ? null : rawRequestError;
   const taskRunning = task?.status === 'generating' || task?.status === 'building';
   // 正在跑的这一轮不该背着上一轮的失败：重新发送之后旧原因就收起来。
-  const taskError = !failureResolved && !taskRunning ? task?.error ?? null : null;
+  // 提问暂停也不是失败：提问本身或「等待回答」不该显示成失败终态。
+  const taskError = !failureResolved && !taskRunning && !questionPaused ? task?.error ?? null : null;
   /**
    * 中断记录：像终端里那样直接写在对话里，不给关闭按钮。
    * 说清楚原因（你取消的 / 连接断了 / 模型或构建失败的具体原文），并说明接下来能做什么。
    */
   const cancelledByUser = task?.status === 'cancelled' && !!taskError;
-  const interruption = interrupted
-    ? interrupted
-    : requestError
-      ? `请求失败：${requestError}`
-      : taskError
-        ? (cancelledByUser ? '你取消了这次生成' : `生成中断：${taskError}`) + (canPreview
-          ? '。已有预览由之前的代码构建，可以直接预览、编辑或部署；重新发送需求可继续。'
-          : '。重新发送需求可继续。')
-        : null;
+  const taskInterruption = interruptionText({ cancelledByUser, error: taskError, canPreview, draftPending: task?.draftPending === true, handoff: draftHandoff });
+  const interruption = interrupted ?? (requestError ? `请求失败：${requestError}` : taskInterruption);
   const interruptionFailed = !!requestError || (!!taskError && !cancelledByUser);
-  const statusLabel = task ? (taskRunning ? statusLabels[task.status] : canPreview ? statusLabels.ready : statusLabels[task.status]) : null;
+  const statusLabel = task ? (awaitingAnswer ? '等待回答' : taskRunning ? statusLabels[task.status] : canPreview ? statusLabels.ready : statusLabels[task.status]) : null;
   const statusColor = statusLabel === statusLabels.ready ? 'green' : statusLabel === statusLabels.failed ? 'red' : 'default';
   const canDownload = canEdit && sourceAvailable && !generating;
   const canDeploy = canEdit && (canPreview || sourceAvailable) && !generating;
   const placed = placedInputs(inputs);
-  const queuedSteers = queuedInputs(inputs, 'steer');
-  const queuedFollowUps = queuedInputs(inputs, 'followUp');
+  // 服务端持久输入已经覆盖的条目不再走本地队列/待重发区：同一个输入只展示一次（`inputs` 优先）。
+  const queuedSteers = queuedInputs(inputs, 'steer').filter(item => !remoteInputIds.has(item.id));
+  const queuedFollowUps = queuedInputs(inputs, 'followUp').filter(item => !remoteInputIds.has(item.id));
+  const visibleLostInputs = lostInputs.filter(item => !remoteInputIds.has(item.id));
   // 已经交付（`data-steer` 到边界）但那条助手气泡已经不在显示范围内时，仍要把气泡画出来，不能让它消失。
   const visibleMessageIds = new Set(visibleMessages.map(message => message.id));
   const lastAssistantMessageId = [...visibleMessages].reverse().find(message => message.role === 'assistant')?.id ?? null;
@@ -764,6 +799,13 @@ function Chat({ id }: { id: string }) {
                     </div>
                   </div>)}</Fragment>;
             })}
+            {/* 等待回答的提问：它是这一轮的收束理由，不是失败终态；回答后开会新 generation 接着流式展示。 */}
+            {openQuestion && <div className="message-item message-ai message-question" role="status">
+              <div className="message-bubble">
+                <div className="message-role">需要你的回答</div>
+                <div className="message-text">{openQuestion.prompt}</div>
+              </div>
+            </div>}
             {/* 报错与进行中的提示是对话的一部分：跟随消息流滚动，不再挂在页面顶上。
                 顺序与原先一致：错误 → 构建/部署进度 → 历史读取失败。 */}
             {interruption && <div className={'message-item message-note' + (interruptionFailed ? ' message-note-failed' : '')} role="status">
@@ -773,21 +815,37 @@ function Chat({ id }: { id: string }) {
             {historyError && <Alert className="chat-stream-alert" type="warning" title={'对话历史暂不可读取：' + historyError} />}
             {/* 已经进了 pi 上下文但还没到步骤边界的输入：先停在对话末尾，让用户马上看到自己发出的话（队列里的输入不在这里）。 */}
             {leftoverInputs.map(input => <InputBubble key={input.id} appId={id} input={input} />)}
+            {/* 中断前没被这一轮处理的输入：作为历史用户气泡保留原文，明确说明没处理，也不自动重发。 */}
+            {inputProjection.unanswered.map(item => <div className="message-item message-user" key={'unanswered-' + item.id}>
+              <div className="message-bubble">
+                <div className="message-text">{item.text}</div>
+                <div className="composer-hint" role="note">这轮中断前没有处理</div>
+              </div>
+            </div>)}
           </div>
         </div>
         {!stickToBottom && <button type="button" className="jump-to-bottom" onClick={() => scrollToBottom(true)}>回到最新 ↓</button>}
         {memoryBusy && <p className="memory-hint" role="status">正在整理历史上下文，请稍候…</p>}
-        <BuildProgress state={progress} error={taskError} />
+        {!questionPaused && <BuildProgress state={progress} error={taskError} />}
         {generating && <p className="generating-hint" role="status">{repairing ? '构建未通过，正在进行第 ' + repairing.attempt + '/' + repairing.maxAttempts + ' 次修复…' : '正在生成或构建，请稍候…'}</p>}
         <div className="chat-input" style={dragging ? { outline: '2px dashed #cb573e', outlineOffset: -4 } : undefined}
           onDragOver={event => { if (!canAttachImages || !draggingFiles(event.dataTransfer)) return; event.preventDefault(); if (!dragging) setDragging(true); }}
           onDragLeave={event => { if (!canAttachImages) return; const target = event.relatedTarget instanceof Node ? event.relatedTarget : null; if (!event.currentTarget.contains(target)) setDragging(false); }}
           onDrop={event => { if (!canAttachImages || !draggingFiles(event.dataTransfer)) return; event.preventDefault(); setDragging(false); addImages(filesFromDrop(event.dataTransfer)); }}>
           {dragging && <p className="composer-hint" role="status" style={{ marginBottom: 8 }}>松开鼠标即可添加图片（JPEG / PNG / WebP，最多 {imageLimits.maxImages} 张）</p>}
+          {handoffText && <p className="composer-hint" role="status" style={{ marginBottom: 8 }}>{handoffText}</p>}
+          {awaitingAnswer && <p className="composer-hint" role="status" style={{ marginBottom: 8 }}>正在等待你回答问题：直接在下方输入回答，发送后会从当前草稿继续。</p>}
           {/* 输入框上方按种类分开的队列：只有真的在服务端队列里等着的输入才出现（没有排队状态的
               任务不会闪出队列面板），已经进 pi 上下文的直接作为气泡出现在对话里；没进对话的输入
               （取消、断连）留在待重发区，文字与附件都在，由用户显式重发或移除。 */}
-          {queuedSteers.length + queuedFollowUps.length + lostInputs.length > 0 && <div className="composer-queues">
+          {queuedSteers.length + queuedFollowUps.length + inputProjection.queued.length + inputProjection.withdrawn.length + visibleLostInputs.length > 0 && <div className="composer-queues">
+            {(inputProjection.queued.length > 0 || inputProjection.withdrawn.length > 0) && <div className="composer-queue composer-queue-follow-up">
+              <span className="composer-queue-hint" role="status">待发送 · {inputProjection.queued.length} 条排队中{inputProjection.withdrawn.length > 0 ? '，' + inputProjection.withdrawn.length + ' 条已撤回' : ''}</span>
+              <div className="composer-queue-chips">
+                {inputProjection.queued.map(item => <RuntimeInputChip key={item.id} item={item} />)}
+                {inputProjection.withdrawn.map(item => <RuntimeInputChip key={item.id} item={item} />)}
+              </div>
+            </div>}
             {queuedSteers.length > 0 && <div className="composer-queue composer-queue-steer">
               <span className="composer-queue-hint" role="status">插话队列 · {queuedSteers.length} 条，{task?.status === 'failed' ? '继续生成后处理' : '模型在当前步骤结束后处理'}</span>
               <div className="composer-queue-chips">{queuedSteers.map(item => <InputQueueChip key={item.id} item={item} onRecall={item => { void recallInput(item); }} />)}</div>
@@ -796,9 +854,9 @@ function Chat({ id }: { id: string }) {
               <span className="composer-queue-hint" role="status">排队消息 · {queuedFollowUps.length} 条，{task?.status === 'failed' ? '继续生成后处理' : '本轮结束后发送'}</span>
               <div className="composer-queue-chips">{queuedFollowUps.map(item => <InputQueueChip key={item.id} item={item} onRecall={item => { void recallInput(item); }} />)}</div>
             </div>}
-            {lostInputs.length > 0 && <div className="composer-queue composer-queue-lost">
-              <span className="composer-queue-hint" role="status">未接收 · {lostInputs.length} 条，取消或断连后没有进入对话</span>
-              <div className="composer-queue-chips">{lostInputs.map(item => <LostInputChip key={item.id} item={item} resendable={canEdit && loaded}
+            {visibleLostInputs.length > 0 && <div className="composer-queue composer-queue-lost">
+              <span className="composer-queue-hint" role="status">未接收 · {visibleLostInputs.length} 条，取消或断连后没有进入对话</span>
+              <div className="composer-queue-chips">{visibleLostInputs.map(item => <LostInputChip key={item.id} item={item} resendable={canEdit && loaded}
                 onResend={item => { void resendLostInput(item); }} onRemove={item => setLostInputs(current => current.filter(entry => entry.id !== item.id))} />)}</div>
             </div>}
           </div>}
@@ -832,7 +890,7 @@ function Chat({ id }: { id: string }) {
                 else if (action === 'followUp') void sendInput('followUp');
                 else void sendInput('steer');
               }} />
-            <span className="composer-keys">{canEdit ? (generating ? 'Enter 排队发送 · Ctrl + Enter 中途插话 · Shift + Enter 换行' : 'Enter 直接发送 · Ctrl + Enter 中途插话 · Shift + Enter 换行') : ''}</span>
+            <span className="composer-keys">{sealing ? '正在封存上一轮草稿，请稍候' : canEdit ? (generating ? 'Enter 排队发送 · Ctrl + Enter 中途插话 · Shift + Enter 换行' : 'Enter 直接发送 · Ctrl + Enter 中途插话 · Shift + Enter 换行') : ''}</span>
           </div>
           <input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden
             onChange={event => { addImages(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = ''; }} />
@@ -843,13 +901,13 @@ function Chat({ id }: { id: string }) {
               {generating ? (input.trim()
                 ? /* 有文字时的主按钮是 followUp：附件跟着一起进下一轮；附图状态挡住发送时原因走悬浮提示（常显的长文案会把按钮行撑出面板）。 */
                   <Tooltip title={imageBlockReason}>
-                    <span><Button type="primary" icon={<SendOutlined aria-hidden="true" />} disabled={!canEdit || !loaded || imageBlockReason !== null} onClick={() => { void sendInput('followUp'); }}>发送</Button></span>
+                    <span><Button type="primary" icon={<SendOutlined aria-hidden="true" />} disabled={!canEdit || !loaded || sealing || imageBlockReason !== null} onClick={() => { void sendInput('followUp'); }}>发送</Button></span>
                   </Tooltip>
                 : <Button danger icon={<StopOutlined aria-hidden="true" />} loading={cancelling} disabled={!canEdit || !loaded} onClick={() => { void cancel(); }}>取消</Button>) :
                 /* 附图状态挡住发送时，原因走悬浮提示：常显的长文案会把按钮行撑到面板外被裁掉。
                    提示挂在 span 上，因为禁用的原生按钮不派发鼠标事件，直接挂在按钮上悬停不出提示。 */
                 <Tooltip title={imageBlockReason}>
-                  <span><Button type="primary" icon={<SendOutlined aria-hidden="true" />} disabled={!canEdit || !loaded || !input.trim() || imageBlockReason !== null} onClick={() => { void submit(input, imageParts); }}>发送</Button></span>
+                  <span><Button type="primary" icon={<SendOutlined aria-hidden="true" />} disabled={!canEdit || !loaded || sealing || !input.trim() || imageBlockReason !== null} onClick={() => { void submit(input, imageParts); }}>发送</Button></span>
                 </Tooltip>}
             </Space>
           </div>

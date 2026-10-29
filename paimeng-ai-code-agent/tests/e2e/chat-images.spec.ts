@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
 import { appOrigin } from './support/app-origin';
+import { evidencePath } from './support/evidence';
 
 const origin = appOrigin();
 const prompt = '图片输入回归测试';
@@ -55,7 +56,7 @@ test('附图后发送：真实上传成功，消息里带上附件 part 并显�
 
   const bubble = page.locator('.message-user .message-bubble').first();
   await expect(bubble.locator('img')).toBeVisible();
-  await page.screenshot({ path: 'runtime/evidence/chat-images.png' });
+  await page.screenshot({ path: evidencePath('chat-images', 'chat-images.png') });
   await bubble.locator('.ant-image').click();
   await expect(page.locator('.ant-image-preview')).toBeVisible();
 });

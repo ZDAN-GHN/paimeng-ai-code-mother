@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
 import { appOrigin, previewOrigin } from './support/app-origin';
+import { evidencePath } from './support/evidence';
 
 const origin = appOrigin();
 const prompt = '发送操作回归测试';
@@ -36,7 +37,7 @@ test('短窗口、手机和横屏中输入框与发送按钮直接可见', async
     await expect(page.getByLabel('对话消息')).toBeInViewport({ ratio: 1 });
     await expect(page.getByRole('button', { name: /^发\s*送$/ })).toBeInViewport({ ratio: 1 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    if (viewport.width === 596 || viewport.width === 375) await page.screenshot({ path: `runtime/evidence/chat-composer-${viewport.width}x${viewport.height}.png` });
+    if (viewport.width === 596 || viewport.width === 375) await page.screenshot({ path: evidencePath('chat-composer', `chat-composer-${viewport.width}x${viewport.height}.png`) });
   }
 });
 

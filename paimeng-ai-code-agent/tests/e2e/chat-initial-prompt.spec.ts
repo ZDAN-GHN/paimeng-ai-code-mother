@@ -81,7 +81,7 @@ for (const status of ['generating', 'failed', 'cancelled', 'ready']) {
 test('初始发送失败不自动重试，用户仍可手动发送', async ({ page }) => {
   const fixture = await setup(page, { fail: true });
   await page.goto('/app/chat/' + appId);
-  await expect(page.getByText('测试生成失败', { exact: true })).toBeVisible();
+  await expect(page.getByText(/测试生成失败/)).toBeVisible();
   await expect(page.getByLabel('对话消息')).toBeEnabled();
   await page.getByLabel('对话消息').fill('手动重试需求');
   await page.getByLabel('对话消息').blur();

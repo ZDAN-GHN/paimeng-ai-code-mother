@@ -2,7 +2,7 @@ import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels, type MutableModels } from "@earendil-works/pi-ai/models";
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
-import { createRegistry, Harness, type Extension, type HarnessOptions, type JsonObject } from "@earendil-works/pi-durable";
+import { createRegistry, Harness, type Extension, type HarnessOptions, type HarnessSettings, type JsonObject, type ReportInfo } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { fauxModelEnabled, fauxModels } from "./faux-model";
@@ -28,14 +28,44 @@ export function buildHarnessOptions(
 	models: MutableModels,
 	registry: ReturnType<typeof createHarnessRegistry>,
 	settings?: HarnessOptions["settings"],
-): HarnessOptions {
+): HarnessOptions & { readonly settings: HarnessSettings } {
 	return {
 		models,
 		registry,
-		settings,
+		// 产品的一轮输入已经先记在产品库里；SDK 失败后不要再自动消费排队输入，否则用户会看到
+		// 文本被悄悄放进了下一轮。输入文本与 unanswered 状态仍由 SDK 保留。
+		settings: { afterFailedRun: "withdraw", ...settings },
 		env: ({ cwd }) => new NodeExecutionEnv({ cwd: cwd ?? process.cwd() }),
-		onReport: (error) => console.error("[report]", error),
+		onReport: (error, info) => console.error(`[report] ${reportSummary(info)}: ${errorMessage(error)}`),
 	};
+}
+
+/** 把 1.4.0 的结构化报告压成一行，重启后从日志就能判断是 parked、迁移失败还是普通任务错误。 */
+export function reportSummary(info: ReportInfo): string {
+	switch (info.type) {
+		case "task_faulted":
+			return `task_faulted task=${info.task.id} kind=${info.task.kind} conversation=${info.task.conversationId} reason=${info.reason}${info.extension ? ` extension=${info.extension}` : ""}`;
+		case "task_parked":
+			return `task_parked task=${info.task.id} kind=${info.task.kind} conversation=${info.task.conversationId}${info.extension ? ` extension=${info.extension}` : ""}`;
+		case "task_outdated":
+			return `task_outdated task=${info.task.id} kind=${info.task.kind} conversation=${info.task.conversationId} reason=${info.reason}`;
+		case "migration_failed":
+			return `migration_failed task=${info.task.id} kind=${info.task.kind} conversation=${info.task.conversationId}`;
+		case "task_error":
+			return `task_error task=${info.task?.id ?? "-"} kind=${info.task?.kind ?? "-"} conversation=${info.task?.conversationId ?? "-"}`;
+		case "extension_error":
+			return `extension_error extension=${info.extension ?? "-"} task=${info.task?.id ?? "-"}`;
+		case "host_error":
+			return `host_error callback=${info.callback} task=${info.task?.id ?? "-"}`;
+		case "listener_error":
+			return "listener_error";
+		case "session_failed":
+			return "session_failed";
+	}
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
 }
 
 /** Open the Postgres-backed harness. Callers reset the schema first when they need a clean run. */

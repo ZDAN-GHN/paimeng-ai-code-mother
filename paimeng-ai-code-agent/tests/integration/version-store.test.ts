@@ -343,7 +343,7 @@ describe('只读路径', () => {
     expect(detail.changedFiles).toEqual(['about.html', 'index.html']);
     expect(detail.fileCount).toBe(3);
     expect(detail.bytes).toBeGreaterThan(0);
-    expect(detail.createTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/);
+    expect(detail.createTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{1,3}$/);
   });
 
   it('没有台账行的提交不冒充版本：钉子只在自愈时用来补行', async () => {

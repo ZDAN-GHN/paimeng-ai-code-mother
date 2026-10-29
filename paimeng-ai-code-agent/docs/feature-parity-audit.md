@@ -75,7 +75,7 @@ B01 已恢复匿名首页空作品网格与分页，未部署卡片不额外显�
 - 独立只读源码复审未发现可确认的新增功能、安全或数据缺陷。最后一次独立复核检查当前 UI、两个 runner、审计记录、实际运行日志与测量 JSON，并逐张查看全部 22 张截图，结论为无可确认阻断项；复核未重跑测试，不代替运行验收。
 - `verify:boundary` 的旧硬编码基线与当前仓库状态不一致，未修改该检查来使其通过；仓库外原有 139 个暂存删除及用户已有聊天修改保留，以实际 Git 范围核查为准。
 
-可复现入口为 `npm run test:e2e:isolated`（强制 `_test` 数据库、fixture 模型、自有生产服务及进程清理）与 `npm run verify:parity`（先构建，使用生产 Next 3010/Vite 4173 和相同 API fixture）。后者写入 `runtime/parity-fixes/screenshots/`，保留 `runtime/parity-audit/` 的原始基线，不覆写旧证据。
+当前可复现入口是 `npm run test:e2e:isolated`（强制 `_test` 数据库、fixture 模型、自有生产服务及进程清理）。当时的一次性 `verify:parity` 对照脚本已按脚本规则清理，历史截图与原始基线保留在 `runtime/parity-fixes/screenshots/` 和 `runtime/parity-audit/`。
 
 ### 补齐后的截图与运行证据
 
@@ -170,7 +170,7 @@ P1 表示阻碍本次功能等价目标的主要问题，不表示整个项目�
 | B05 | 发布后异步截图并上传 COS。 | 发布流程在返回前等待截图尝试，封面存本地 runtime/covers。 | Java `AppServiceImpl.java:171`、`:177`；新版 `src/server/business.ts:64`、`src/server/artifacts.ts:173`。执行顺序和存储变化由源码确认，未测量耗时，也未做 COS 验收。 |
 | B06 | 删除应用后通过后台线程调用 mapper 清理文本历史。 | 同一事务显式将文本历史逻辑删除，并物理删除新版完整 ts_message。 | Java `AppServiceImpl.java:112`、`ChatHistoryServiceImpl.java:162`；新版 `src/server/business.ts:52`。旧 `model/entity/ChatHistory.java:79` 声明逻辑删除，不能凭 deleteByQuery 方法名将原操作认定为物理删除。此处只确认清理执行方式变化，不声称原文本历史保留方式不同。 |
 
-旧记录导入脚本仅处理用户、应用和文本历史，品牌资源脚本只复制 Logo，不负责搬迁 code_output、code_deploy 和 covers。源码、发布目录和封面需要另行迁移；未复制发布目录时，旧 deployKey 在新版对应地址没有文件。证据为 `scripts/import-legacy.ts:13`、`scripts/import-assets.ts:3`、`src/server/preview.ts:35`。本次未实际导入快照，F03 还需要独立解决任务 ready 门槛。
+当时的旧记录导入脚本仅处理用户、应用和文本历史，品牌资源脚本只复制 Logo，不负责搬迁 code_output、code_deploy 和 covers。品牌资源脚本已清理；旧记录导入仍是待执行的 legacy 迁移入口。源码、发布目录和封面需要另行迁移；未复制发布目录时，旧 deployKey 在新版对应地址没有文件。本次未实际导入快照，F03 还需要独立解决任务 ready 门槛。
 
 ## 网页布局与样式差异
 

@@ -1,6 +1,6 @@
 # Pi Durable 迁移 · M4：产品库从 MySQL 换到 Postgres，表名按业务域重建
 
-> 归档：记录当时的设计、迁移与验收。当前行为见[部署说明](../pi-durable-deployment.md)与[模型配置](../provider-convergence.md)。
+> 归档：记录当时的设计、迁移与验收。当前行为见[部署说明](../../pi-durable-deployment.md)与[模型配置](../../provider-convergence.md)。
 
 状态：**代码与迁移已完成；受影响范围验收通过，全量单测已补跑两次全绿**（2026-10-18）。分支 `feat/pi-durable-migration`，
 基线 `main@d0c9797`（本步之前的提交是 `878f3c2`，备份分支 `backup/pre-m4-postgres`）。
@@ -11,9 +11,9 @@
 > Postgres 从一次性容器 `zslm-pg-durable` 升为固定服务 **`zslm-pg-paimeng`**（端口仍 `127.0.0.1:55432`）。
 > **再改一次（2026-10-18，同日稍后）**：四个库已从 `zslm-pg-paimeng`（55432）整体搬到**本机自己的**容器
 > `zslm-postgres`（`127.0.0.1:5432`），`zslm-pg-paimeng` 已删除，连接串统一为 5432；搬迁步骤、行数对照与配置改动
-> 见 [pi-durable-deployment.md](./pi-durable-deployment-notes.md) §3.5。下面的命令已相应更新。
+> 见 [pi-durable-deployment.md](pi-durable-deployment-notes.md) §3.5。下面的命令已相应更新。
 > 本文其余部分写的是改名前的现场记录（当时叫 `paimeng_ts` / `durable` / `zslm-pg-durable`），命令与 checklist
-> 已按新名更新；现状、并发上限、孤儿容器清扫与状态分裂修法见 [pi-durable-deployment.md](./pi-durable-deployment-notes.md)。
+> 已按新名更新；现状、并发上限、孤儿容器清扫与状态分裂修法见 [pi-durable-deployment.md](pi-durable-deployment-notes.md)。
 
 ## 0. 一句话结论
 
@@ -49,8 +49,8 @@ harness 存储里，`GET app/messages` 经 harness 的 `/messages` 读回。`ts_
 （空库一次建好全部表与索引）。
 
 > 现状补充（2026-10-18）：每张表解决什么问题、哪几张容易被误判成冗余、删表要在别处补什么机制，
-> 见 [database-inventory.md](../database-inventory.md)；生成链路两套 provider 的现状与收敛方案见
-> [provider-convergence.md](./provider-convergence-design.md)。列名统一 snake_case：Postgres 会把无引号标识符折叠成小写，
+> 见 [database-inventory.md](../../database-inventory.md)；生成链路两套 provider 的现状与收敛方案见
+> [provider-convergence.md](provider-convergence-design.md)。列名统一 snake_case：Postgres 会把无引号标识符折叠成小写，
 camelCase 列必须处处加双引号，一次改净比每个查询记得加引号更省心。
 
 ## 2. 转录搬到 harness：产品不再有消息表
@@ -166,14 +166,14 @@ Playwright E2E 套件（`npm run test:e2e:isolated`）仍未跑：它要独占�
 
 1. **旧 MySQL 归档清理**（**收尾时已补归档，未删任何东西**）：容器 `zslm-mysql`、`runtime/mysql/` 数据目录、
    `compose.yaml` 的 `mysql` 服务与 `MYSQL_*` 变量都保留；归档产物 `runtime/archive/mysql-paimeng_ai_code_mother_ts-20261018.sql.gz`
-   （4.3 MB，gzip 已校验，16 张表）。恢复方式见 [pi-durable-deployment.md](./pi-durable-deployment-notes.md) §3.4。
+   （4.3 MB，gzip 已校验，16 张表）。恢复方式见 [pi-durable-deployment.md](pi-durable-deployment-notes.md) §3.4。
    用户确认后：`docker compose stop mysql`（先不动数据），再决定是否删；`scripts/verify-infra.ts` 已经只查 Postgres 与 Redis。
 2. **部署形态**（**收尾时已完成本机形态**）：Postgres 现在就在本机自己的容器 `zslm-postgres`
    （`127.0.0.1:5432`，不归本仓库管；2026-10-18 从当时的 `zslm-pg-paimeng`（55432）搬过去，见 deployment.md §3.5）；
    `kill -9` 后残留的 `paimeng-ts-build-*` 容器
    在 harness `resume()` 之前清扫；全局并发上限 `GENERATION_MAX_CONCURRENT`（默认 4）在提交入口执行；
    Next 重启后的状态分裂由启动/状态读取时的接管对账修复。细节、证据与**仍未做的生产编排**（systemd 单元、
-   命名卷、非零 `GENERATION_TIMEOUT_MS`、Next 健康检查路由）见 [pi-durable-deployment.md](./pi-durable-deployment-notes.md) §4/§7。
+   命名卷、非零 `GENERATION_TIMEOUT_MS`、Next 健康检查路由）见 [pi-durable-deployment.md](pi-durable-deployment-notes.md) §4/§7。
    注意「同实例两库」：`DURABLE_PG_URL`（存储库）与 `DATABASE_URL`（业务库）**不再回退到同一条串**。
 3. **`spike/` 残留**：`spike/pi-durable-pg/pgdata/` 属主是容器用户，当前账号删不掉（需要 `sudo rm -rf`）；
    `spike/pi-durable-m1` 的手工验收脚本仍指向 3000 与 5599，未随本步改动（它们只走产品 HTTP 接口）。

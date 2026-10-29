@@ -14,6 +14,8 @@
  *   GET  /messages               every transcript entry of one conversation (id, kind, model, data), oldest first
  *   GET  /context                the model context of one conversation (verification evidence)
  *   GET  /tools                  the offered tools and their replay policy
+ *   GET  /effect                 the effect-gate snapshot of one conversation (binding, dirty, last check)
+ *   GET  /inspection             live task diagnostics: sleeping deadline, restarts, blocked reason, per-session effect state
  *   GET  /health                 liveness
  */
 import { execFile } from "node:child_process";
@@ -25,14 +27,15 @@ import { promisify } from "node:util";
 import { Type, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { JsonValue } from "@earendil-works/chord";
 import { withAbortSignal } from "@earendil-works/chord/context";
-import type { AgentEvent, Conversation, ConversationId, ConversationView, Cursor, EntryDraft, LiveState, ModelRef, SubmissionId, ToolExecutionApi } from "@earendil-works/pi-durable";
-import { ToolTask, defineExtension, defineTool, hook, watchEvents } from "@earendil-works/pi-durable";
+import type { AgentEvent, Conversation, ConversationId, ConversationView, Cursor, EntryDraft, HookApi, LiveState, ModelRef, SubmissionId, ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
+import { CompactionTask, GenerationTask, ToolTask, defineExtension, defineTool, hook, watchEvents } from "@earendil-works/pi-durable";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { createCodingTools } from "@earendil-works/pi-durable/tools";
 import { getOrThrow, type ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { CodeGenType } from "@/shared/contracts";
 import type { GenerationModelIdentity } from "@/shared/durable-model";
 import { buildApp, type BuildStageProgress } from "../artifacts";
+import { openQuestion, completeAttempt, reserveAttempt } from "../control-store";
 import { BusinessError } from "../http";
 import { harnessProtocol } from "./protocol";
 import { classifyBuildFailure, formatBuildDiagnostic } from "../build-feedback";
@@ -47,7 +50,20 @@ import {
 	type WebAccessSession,
 } from "../web-access/tools";
 import { ensureVersionRepo } from "../version-store";
-import { workspace } from "../workspace";
+import { projectAt, workspace } from "../workspace";
+import {
+	assertReadable,
+	assertWritable,
+	bindEffect,
+	effectBindingDoc,
+	effectBindingOf,
+	effectSnapshot,
+	effectTargetFrom,
+	effectTargets,
+	markDirty,
+	restoreEffectBinding,
+	type EffectTarget,
+} from "./effect-gate";
 import { fauxFixtureEnabled } from "./faux-fixture";
 import { fauxModelEnabled } from "./faux-model";
 import { assertGitSubcommand } from "./git-args";
@@ -173,6 +189,192 @@ const workspacePathHook = hook(ToolTask, {
 	},
 });
 
+/** 只读工具：执行还在就放行，执行结束（封存/失败）后不再读源码。 */
+const readOnlyEffectTools = new Set(["read", "listFiles", "git", "webSearch", "readWebPage", "searchImages"]);
+/** 改源码的工具：先过写门禁，成功后记 dirty。importImage 会把图片写进工作区，算源码修改。 */
+const sourceWriteEffectTools = new Set(["write", "edit", "importImage"]);
+/** buildPreview 只刷新预览、不改源码：过写门禁但不记 dirty。 */
+const buildEffectTools = new Set(["buildPreview"]);
+
+/**
+ * 提问：本轮还没改过源码时，把问题登记到控制面并结束这一轮，等用户回答后从草稿继续。
+ * `control.terminate` 让这一轮不再请求模型或继续调工具；`executionMode: "sequential"` 与
+ * `callers: ["model"]` 保证它不会被并行调用、也不允许被其他工具嵌套调用。
+ * 它自己不记 dirty：ask 不是源码修改。
+ */
+const askTool = defineTool({
+	name: "ask",
+	description: "本轮还没有修改任何源码时，向用户提一个必须由用户决定的问题，并结束本轮；用户回答后会基于当前草稿继续。只在缺少关键信息、无法合理假设时使用，同一轮最多一次，提问后不能再改源码。",
+	parameters: Type.Object({ question: Type.String({ minLength: 3, maxLength: 500 }) }),
+	replay: "unsafe",
+	executionMode: "sequential",
+	callers: ["model"],
+	execute: async (args, api) => {
+		const binding = effectBindingOf(api.conversationId);
+		if (!binding) throw new Error("当前会话没有绑定执行（legacy 会话不能提问）");
+		if (effectSnapshot(binding).dirty) throw new Error("本轮已经修改过源码，不能再提问");
+		const question = await openQuestion({ appId: binding.appId, generationId: binding.generationId, prompt: args.question });
+		recordToolEvent("end", "ask", { conversationId: api.conversationId, appId: binding.appId, generationId: binding.generationId, questionId: question.id });
+		return {
+			output: [{ type: "text", text: "问题已记录，本轮结束，等待用户回答后继续" }],
+			details: { questionId: question.id, prompt: question.prompt, generationId: question.generationId },
+			control: { terminate: true },
+		};
+	},
+});
+
+/**
+ * 执行门禁：工具真正执行前确认「本次执行」还允许这次调用，被拒时以失败结果交回模型。
+ * 未绑定执行（legacy）的会话在这里是空操作，行为与接入门禁之前一致。
+ */
+const effectGateHook = hook(ToolTask, {
+	beforeTool: async (call, api) => {
+		const binding = effectBindingOf(api.conversationId);
+		if (readOnlyEffectTools.has(call.name)) await assertReadable(binding);
+		else if (sourceWriteEffectTools.has(call.name) || buildEffectTools.has(call.name)) await assertWritable(binding);
+		return undefined;
+	},
+	afterTool: (call, result, api) => {
+		if (result.isError !== true && sourceWriteEffectTools.has(call.name)) markDirty(effectBindingOf(api.conversationId));
+		return undefined;
+	},
+});
+
+/**
+ * 内环次数预算（docs/plans/archive/harness-reliability.md §4）：模型 24 次（生成 + 压缩共享）、工具 400 次（所有工具共享）、
+ * buildPreview 自检构建 2 次。预算记在产品的 generation_attempt 账本里，按执行行锁串行预留；
+ * 没绑定执行的旧会话（legacy）完全不写账、不限预算，和 effect gate 的语义一致。
+ */
+const modelCallLimit = 24;
+const toolCallLimit = 400;
+const selfCheckBuildLimit = 2;
+
+/** 同一次调用跨 before/after 的关联只活在当前进程；重启后 attempt 保持 sent，不做不安全的补记。 */
+const modelAttempts = new Map<string, string>();
+const toolAttempts = new Map<string, { tool: string; build?: string }>();
+
+function attemptKey(conversationId: number, localId: string | number): string {
+	return `${conversationId}:${String(localId)}`;
+}
+
+function describeBudgetError(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * 预算绑定优先用本进程的 effect 绑定；harness 重启后内存表为空时，从会话文档恢复。
+ * 不能用产品库按 conversationId 反查：SDK 会话号只在 harness 存储里唯一，会和产品执行号撞车。
+ */
+async function budgetExecutionId(api: HookApi): Promise<string | undefined> {
+	const bound = effectBindingOf(api.conversationId);
+	if (bound) return bound.executionId;
+	const state = await api.snapshot(effectBindingDoc, api.conversationId, context);
+	return effectTargetFrom(api.conversationId, state)?.executionId;
+}
+/** buildPreview 用 isError=false 返回诊断；构建失败要看 details.status，不能只看工具是否执行。 */
+function buildPreviewFailed(result: ToolExecutionResult): boolean {
+	const details = result.details;
+	return typeof details === "object" && details !== null && (details as { status?: unknown }).status === "failed";
+}
+
+const modelBudgetHook = hook(GenerationTask, {
+	beforeRequest: async (_request, api) => {
+		const executionId = await budgetExecutionId(api);
+		if (!executionId) return undefined;
+		const attempt = await reserveAttempt({
+			executionId,
+			kind: "model",
+			scope: "generation",
+			limit: modelCallLimit,
+			requestSummary: { task: "generation" },
+		});
+		modelAttempts.set(attemptKey(api.conversationId, api.taskId), attempt.id);
+		return undefined;
+	},
+	afterResponse: async (_message, api) => {
+		const key = attemptKey(api.conversationId, api.taskId);
+		const attemptId = modelAttempts.get(key);
+		if (!attemptId) return;
+		modelAttempts.delete(key);
+		await completeAttempt({ attemptId, status: "succeeded" }).catch((error) => {
+			log(`model attempt complete failed attempt=${attemptId}: ${describeBudgetError(error)}`);
+		});
+	},
+});
+
+/** 压缩也是模型请求，计入同一个 24 次上限；压缩没有 after 钩子，attempt 保持 sent。 */
+const compactionBudgetHook = hook(CompactionTask, {
+	beforeCompact: async (_compaction, api) => {
+		const executionId = await budgetExecutionId(api);
+		if (!executionId) return undefined;
+		await reserveAttempt({
+			executionId,
+			kind: "model",
+			scope: "compaction",
+			limit: modelCallLimit,
+			requestSummary: { task: "compaction" },
+		});
+		return undefined;
+	},
+});
+
+const toolBudgetHook = hook(ToolTask, {
+	beforeTool: async (call, api) => {
+		const executionId = await budgetExecutionId(api);
+		if (!executionId) return undefined;
+		const toolAttempt = await reserveAttempt({
+			executionId,
+			kind: "tool",
+			scope: call.name,
+			limit: toolCallLimit,
+			requestSummary: { tool: call.name },
+		});
+		let buildAttemptId: string | undefined;
+		try {
+			if (call.name === "buildPreview") {
+				const buildAttempt = await reserveAttempt({
+					executionId,
+					kind: "build",
+					scope: "self-check",
+					limit: selfCheckBuildLimit,
+					requestSummary: { tool: "buildPreview" },
+				});
+				buildAttemptId = buildAttempt.id;
+			}
+		} catch (error) {
+			await completeAttempt({ attemptId: toolAttempt.id, status: "failed", result: { error: describeBudgetError(error) } }).catch(() => undefined);
+			throw error;
+		}
+		toolAttempts.set(attemptKey(api.conversationId, call.id), { tool: toolAttempt.id, ...(buildAttemptId ? { build: buildAttemptId } : {}) });
+		return undefined;
+	},
+	afterTool: async (call, result, api) => {
+		const key = attemptKey(api.conversationId, call.id);
+		const attempts = toolAttempts.get(key);
+		if (!attempts) return undefined;
+		toolAttempts.delete(key);
+		const toolFailed = result.isError === true;
+		await completeAttempt({
+			attemptId: attempts.tool,
+			status: toolFailed ? "failed" : "succeeded",
+			result: toolFailed ? { isError: true } : { ok: true },
+		}).catch((error) => {
+			log(`tool attempt complete failed attempt=${attempts.tool}: ${describeBudgetError(error)}`);
+		});
+		if (attempts.build) {
+			const buildFailed = toolFailed || buildPreviewFailed(result);
+			await completeAttempt({
+				attemptId: attempts.build,
+				status: buildFailed ? "failed" : "succeeded",
+				result: buildFailed ? { status: "failed" } : { status: "ok" },
+			}).catch((error) => {
+				log(`build attempt complete failed attempt=${attempts.build}: ${describeBudgetError(error)}`);
+			});
+		}
+		return undefined;
+	},
+});
+
 const listFilesTool = defineTool({
 	name: "listFiles",
 	description: "递归列出当前应用的源文件（相对路径，目录带 / 结尾）。",
@@ -241,7 +443,8 @@ const buildPreviewTool = defineTool({
 			progress = progress.then(() => api.details({ stage, status, ms, at: Date.now() }, context)).catch(() => undefined);
 		};
 		try {
-			await buildApp({ id: app.id, codeGenType: app.codeGenType }, context.abortSignal, note);
+			const root = workspaces.get(api.conversationId);
+			await buildApp(root ? projectAt({ id: app.id, codeGenType: app.codeGenType }, root) : { id: app.id, codeGenType: app.codeGenType }, context.abortSignal, note);
 			await progress;
 			const at = Date.now();
 			const result: BuildResult = { status: "ok", milestone: args.milestone, ms: at - startedAt, stages, note: "预览已更新为这次构建的产物。继续开发下一个功能，有明显增量时再调用一次。" };
@@ -313,8 +516,8 @@ const gitTool = defineTool({
 		assertGitSubcommand(args.args);
 		// 第一次显式使用 git 时才初始化仓库：此前的文件就是仓库的初始内容。
 		await ensureVersionRepo(app);
-		const tree = workspace(app);
-		const outcome = await runGit(tree, args.args);
+		const tree = workspaces.get(api.conversationId) ?? workspace(app);
+		const outcome = await runGit(tree, ["--git-dir", join(workspace(app), ".git"), "--work-tree", tree, ...args.args]);
 		const text = outcome.exitCode === 0 ? outcome.text : `退出码 ${outcome.exitCode}\n${outcome.text}`;
 		return {
 			output: [{ type: "text", text }],
@@ -465,7 +668,7 @@ if (process.env.DURABLE_HARNESS_RESET === "1") {
 // 脚本桩（DURABLE_FAUX_*）需要一次可写脚本、可被中途打断的工具调用；真实模型不提供 m1_wait。
 const stubTools: ToolRegistration[] = fauxModelEnabled() || fauxFixtureEnabled() ? [waitTool] : [];
 
-const productTools = [...fileTools, listFilesTool, buildPreviewTool, gitTool, ...stubTools, ...webToolsForConfig()];
+const productTools = [...fileTools, listFilesTool, buildPreviewTool, gitTool, askTool, ...stubTools, ...webToolsForConfig()];
 
 const { harness, models } = await openPgHarness({
 	codingTools: false,
@@ -473,10 +676,12 @@ const { harness, models } = await openPgHarness({
 		defineExtension({
 			name: "product.tools",
 			tools: productTools,
-			hooks: [workspacePathHook],
+			hooks: [effectGateHook, workspacePathHook, modelBudgetHook, compactionBudgetHook, toolBudgetHook],
 		}),
 	],
-	settings: { stream: { timeoutMs: 300_000 } },
+	// 单次模型请求用配置的回复期限；产品 deadline 更早到点时由 Next 的观察者先 abort。
+	// 只保留阻塞压缩；后台压缩不在产品生成内环里跑，避免额外模型调用抢预算。
+	settings: { stream: { timeoutMs: getConfig().modelReplyTimeoutMs }, compaction: { backgroundTokens: 0 } },
 });
 await sweepOrphanBuildContainers();
 const root = await harness.root(context, { agent: { cwd: rootWorkspace } });
@@ -528,6 +733,28 @@ async function persistRunModel(conversationId: ConversationId, descriptor: RunMo
 
 async function storedRunModel(conversationId: ConversationId): Promise<RunModelDescriptor | null> {
 	return runModelOf(await harness.snapshot(runModelDoc, conversationId, context));
+}
+
+/** 执行绑定也写进会话文档：重启后还能知道这条会话属于哪次执行（内存 Map 会丢）。 */
+async function persistEffectBinding(conversationId: ConversationId, target: EffectTarget): Promise<void> {
+	await harness.commit(async tx => {
+		(await tx.doc(effectBindingDoc, conversationId)).binding = { appId: target.appId, generationId: target.generationId, executionId: target.executionId } as unknown as JsonValue;
+	}, context);
+}
+
+/** 本进程第一次看到这条会话时，从文档里恢复执行绑定；没有文档就是 legacy。 */
+async function ensureEffectBinding(conversation: Conversation): Promise<void> {
+	if (effectBindingOf(conversation.id)) return;
+	let target: EffectTarget | null;
+	try {
+		target = effectTargetFrom(conversation.id, await harness.snapshot(effectBindingDoc, conversation.id, context));
+	} catch (error) {
+		log(`effect binding restore failed conversation=${conversation.id}: ${String(error)}`);
+		return;
+	}
+	if (!target) return;
+	restoreEffectBinding(target);
+	log(`effect binding restored conversation=${conversation.id} app=${target.appId} generation=${target.generationId} execution=${target.executionId} dirty=true`);
 }
 
 async function conversationRunning(conversation: Conversation): Promise<boolean> {
@@ -622,6 +849,7 @@ async function restoreConversationModels(rootConversation: Conversation): Promis
 	}
 	for (const [id, conversation] of conversations) {
 		try {
+			await ensureEffectBinding(conversation);
 			const ref = (await conversation.agent(context)).model;
 			if (!ref) continue;
 			if (models.getModel(ref.provider, ref.modelId)) continue;
@@ -634,6 +862,10 @@ async function restoreConversationModels(rootConversation: Conversation): Promis
 }
 
 await restoreConversationModels(root);
+const parked = (await harness.inspect(context)).tasks.filter((task) => task.state.kind === "blocked" && task.state.reason === "restart_limit");
+if (parked.length > 0) {
+	log(`parked tasks (不自动重试，需人工检查): ${parked.map((task) => `${task.record.id}/${task.record.kind}@${task.record.conversationId}`).join(", ")}`);
+}
 harness.resume();
 log(`harness open conversation=${root.id} workspace=${rootWorkspace} storage=postgres`);
 
@@ -643,6 +875,7 @@ async function conversationOf(id: ConversationId): Promise<Conversation | undefi
 	const found = await harness.conversation(id, context);
 	if (!found) return undefined;
 	handles.set(id, found);
+	await ensureEffectBinding(found);
 	const cwd = (await found.agent(context)).cwd;
 	if (cwd) {
 		workspaces.set(id, cwd);
@@ -684,6 +917,22 @@ function parseDisplayEntry(kind: unknown, data: unknown): EntryDraft {
 	return { kind: displayKind(kind), data: displayData(data) };
 }
 
+/**
+ * `/conversations` 的 app 绑定可以带上「本次执行」：generationId 与 executionId 要么都给，要么都不给。
+ * 都不给就是旧会话（legacy），门禁不启用；绑定本身不在这里验证，工具调用时才问控制面。
+ */
+function effectBindingFields(app: { generationId?: unknown; executionId?: unknown }): { generationId?: string; executionId?: string } {
+	const read = (value: unknown, label: string): string | undefined => {
+		if (value === undefined || value === null) return undefined;
+		if (typeof value !== "string" || value.trim() === "") throw new BusinessError(400, 40000, `app.${label} 必须是非空字符串`);
+		return value.trim();
+	};
+	const generationId = read(app.generationId, "generationId");
+	const executionId = read(app.executionId, "executionId");
+	if ((generationId === undefined) !== (executionId === undefined)) throw new BusinessError(400, 40000, "app 的 generationId 与 executionId 必须同时提供");
+	return { ...(generationId === undefined ? {} : { generationId }), ...(executionId === undefined ? {} : { executionId }) };
+}
+
 async function transcriptEntries(conversation: Conversation) {
 	const entries: { id: number; kind: string; model?: readonly unknown[]; data?: unknown }[] = [];
 	let cursor: Cursor | undefined;
@@ -700,13 +949,38 @@ async function inspection() {
 	return {
 		pid: process.pid,
 		scheduling: snapshot.scheduling,
-		tasks: snapshot.tasks.map((task) => ({ kind: task.record.kind, state: task.state.kind, abortRequested: task.record.abortRequested })),
+		sessions: effectSessions(),
+		tasks: snapshot.tasks.map((task) => ({
+			id: task.record.id,
+			kind: task.record.kind,
+			conversationId: task.record.conversationId,
+			state: task.state.kind,
+			status: task.record.state.status,
+			...(task.record.state.status === "sleeping" ? { until: task.record.state.until } : {}),
+			restarts: task.record.restarts ?? 0,
+			...(task.state.kind === "blocked" ? { blocked: task.state.reason, blockedMessage: errorText(task.state.error) } : {}),
+			abortRequested: task.record.abortRequested,
+		})),
 		submissions: snapshot.submissions.map((submission) => ({
 			id: submission.id,
 			requestId: submission.requestId,
 			status: submission.status,
 		})),
 	};
+}
+
+function errorText(error: unknown): string | undefined {
+	if (error === undefined) return undefined;
+	return error instanceof Error ? error.message : String(error);
+}
+
+/** 每条已知会话的执行绑定与 dirty：`/inspection` 和 SSE 快照都带上，出问题不用去猜。 */
+function effectSessions() {
+	const ids = new Set<number>([...handles.keys(), ...effectTargets().map((target) => target.conversationId)]);
+	return [...ids].sort((left, right) => left - right).map((conversationId) => {
+		const target = effectBindingOf(conversationId);
+		return { conversationId, ...(target ? { appId: target.appId } : {}), ...effectSnapshot(target) };
+	});
 }
 
 async function stateBody(conversation: Conversation) {
@@ -759,6 +1033,21 @@ const server = createServer(async (request, response) => {
 			return;
 		}
 
+		if (request.method === "GET" && url.pathname === "/inspection") {
+			sendJson(response, 200, await inspection());
+			return;
+		}
+
+		if (request.method === "GET" && url.pathname === "/effect") {
+			const conversation = await conversationOf(conversationIdFrom(url.searchParams.get("conversationId")) ?? root.id);
+			if (!conversation) {
+				sendJson(response, 404, { error: "conversation not found" });
+				return;
+			}
+			sendJson(response, 200, { conversationId: conversation.id, ...effectSnapshot(effectBindingOf(conversation.id)) });
+			return;
+		}
+
 		if (request.method === "POST" && url.pathname === "/model") {
 			try {
 				const { token, binding } = await admitModel();
@@ -789,13 +1078,20 @@ const server = createServer(async (request, response) => {
 		}
 
 		if (request.method === "POST" && url.pathname === "/conversations") {
-			const body = JSON.parse((await readBody(request)) || "{}") as { workspace?: string; instructions?: string; title?: string; app?: AppRef; binding?: unknown };
+			const body = JSON.parse((await readBody(request)) || "{}") as {
+				workspace?: string;
+				instructions?: string;
+				title?: string;
+				app?: AppRef & { generationId?: unknown; executionId?: unknown };
+				binding?: unknown;
+			};
 			if (!body.workspace) {
 				sendJson(response, 400, { error: "workspace is required" });
 				return;
 			}
 			try {
 				const token = bindingToken(body.binding);
+				const effect = body.app ? effectBindingFields(body.app) : {};
 				const binding = token === undefined ? await admitGenerationModel() : admittedBinding(token);
 				const conversation = await harness.createConversation({
 					ownership: { kind: "ownerless" },
@@ -805,8 +1101,15 @@ const server = createServer(async (request, response) => {
 				await persistRunModel(conversation.id, binding.descriptor);
 				handles.set(conversation.id, conversation);
 				workspaces.set(conversation.id, body.workspace);
-				if (body.app) apps.set(conversation.id, body.app);
-				else {
+				if (body.app) {
+					apps.set(conversation.id, { id: body.app.id, codeGenType: body.app.codeGenType });
+					if (effect.generationId !== undefined && effect.executionId !== undefined) {
+						const target = bindEffect({ conversationId: conversation.id, appId: body.app.id, generationId: effect.generationId, executionId: effect.executionId });
+						// 文档写入是尽力而为：内存绑定已经生效，写文档只为重启后还能恢复。
+						await persistEffectBinding(conversation.id, target).catch((error) => log(`effect binding persist failed conversation=${conversation.id}: ${String(error)}`));
+						log(`effect binding conversation=${conversation.id} app=${target.appId} generation=${target.generationId} execution=${target.executionId}`);
+					}
+				} else {
 					const ref = appRefFromWorkspace(body.workspace);
 					if (ref) apps.set(conversation.id, ref);
 				}

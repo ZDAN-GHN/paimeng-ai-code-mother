@@ -10,7 +10,7 @@ import { chatRateLimitKey } from '@/server/rate-limit';
 import { closeRateLimitRedis, rateLimitRedis } from '@/server/redis';
 import { publicUser } from '@/server/auth';
 import { cancelGeneration } from '@/server/agent';
-import { beginGeneration, finishGeneration, generationFor, heartbeat, setGeneration, withAppWriter } from '@/server/generation-store';
+import { beginGeneration, finishGeneration, generationFor, heartbeat, setGeneration, sweepStaleLeases, withAppWriter } from '@/server/generation-store';
 import { deleteApp, getApp, listApps, updateApp, download, publish } from '@/server/business';
 import type { User } from '@/shared/contracts';
 
@@ -108,6 +108,7 @@ describe('后端关键不变量（独立 Postgres 测试库）', () => {
     await setGeneration(old, 'cancelled', '生成已取消');
     await db().update(leases).set({ expiresAt: '2020-01-01 00:00:00.000' }).where(eq(leases.appId, BigInt(appId)));
     await expect(heartbeat(old)).rejects.toMatchObject({ status: 409 });
+    await sweepStaleLeases();
     expect(await generationFor(appId)).toMatchObject({ status: 'cancelled' });
     expect(await db().select().from(leases).where(eq(leases.appId, BigInt(appId)))).toEqual([]);
     await clearRateLimit();

@@ -10,6 +10,7 @@ describe('任务级停止原因', () => {
     expect(stopReasonOf({ current: 'model-error', cancelled: false, abortedReason: new Error('生成超时') })).toBe('timeout');
     expect(stopReasonOf({ current: 'model-error', cancelled: false, abortedReason: new Error('单次回复超时（900 秒）') })).toBe('timeout');
     expect(stopReasonOf({ current: 'model-error', cancelled: false, abortedReason: new Error('生成任务已失效') })).toBe('lease-lost');
+    expect(stopReasonOf({ current: 'model-error', cancelled: false, abortedReason: new Error('生成已停止写入') })).toBe('lease-lost');
     expect(stopReasonOf({ current: 'model-error', cancelled: false, abortedReason: new Error('上游断开') })).toBe('model-error');
   });
 

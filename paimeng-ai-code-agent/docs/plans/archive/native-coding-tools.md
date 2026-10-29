@@ -1,6 +1,6 @@
 # Native coding tools migration
 
-> 归档：记录当时的设计、迁移与验收。当前行为见[部署说明](../pi-durable-deployment.md)与[模型配置](../provider-convergence.md)。
+> 归档：记录当时的设计、迁移与验收。当前行为见[部署说明](../../pi-durable-deployment.md)与[模型配置](../../provider-convergence.md)。
 
 Target branch `refactor/pi-durable-migration`, base `f9f4d64`. Replace generation file operations with pi-durable read/write/edit, omit bash, and let build validation reject invalid projects. Preserve custom listFiles/buildPreview and web tools. Do not touch main or archived code. Commit only after acceptance.
 

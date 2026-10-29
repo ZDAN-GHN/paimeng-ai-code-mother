@@ -1,11 +1,11 @@
 # Pi Durable 部署形态与收尾设计
 
-> 归档：记录当时的设计、迁移与验收。当前行为见[部署说明](../pi-durable-deployment.md)与[模型配置](../provider-convergence.md)。
+> 归档：记录当时的设计、迁移与验收。当前行为见[部署说明](../../pi-durable-deployment.md)与[模型配置](../../provider-convergence.md)。
 
 状态：**设计稿 + 同日的收尾记录**（2026-10-18）。分支 `feat/pi-durable-migration`，
 基线 `0f10f70`（M4 之后，产品库已是 Postgres）。前面四步的记录见
-[data-model](./pi-durable-data-model.md)、[m1](./pi-durable-m1.md)、[m2](./pi-durable-m2.md)、
-[m3](./pi-durable-m3.md)、[m4](./pi-durable-m4.md)。
+[data-model](pi-durable-data-model.md)、[m1](pi-durable-m1.md)、[m2](pi-durable-m2.md)、
+[m3](pi-durable-m3.md)、[m4](pi-durable-m4.md)。
 
 本机的收尾项（§4 第 1/3/4/5/6/7/9 条）已在同日实现并有真实证据（§7）；**生产编排与剩余待办**逐条写在 §8。
 
@@ -152,7 +152,7 @@ harness 只认 `DURABLE_MODEL_*` 环境变量（m3 §7.6 第 3 条的已知缺�
 
 > 这条缺口的现状证据（`generation_step` 里 `model_alias=codegen.default` 但 `provider_id=durable`）、
 > 三个后果（生成模型、`settings.reasoning`、密钥）与两条收敛方案（harness 读产品库 / 每轮下推绑定）
-> 见 [provider-convergence.md](./provider-convergence-design.md)。
+> 见 [provider-convergence.md](provider-convergence-design.md)。
 
 ## 2. 启动与健康
 

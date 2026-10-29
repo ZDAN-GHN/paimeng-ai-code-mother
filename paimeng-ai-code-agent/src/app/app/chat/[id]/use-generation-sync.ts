@@ -3,8 +3,8 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type RefObject
 import type { MessageInstance } from 'antd/es/message/interface';
 import { adoptPending, adoptTranscript, dropShownInputs, emptySentInputs, transcriptSignature, unresolvedInputs, type LostInput, type SentInputs } from '@/components/chat/chat-inputs';
 import { settleProgress, type ProgressState } from '@/components/chat/generation-feedback';
-import type { Generation } from '@/shared/contracts';
-import type { ChatMessage, ChatRuntime } from '@/shared/chat-runtime';
+import type { Generation, GenerationHandoff, GenerationQuestion } from '@/shared/contracts';
+import type { ChatMessage, ChatRuntime, GenerationInputView } from '@/shared/chat-runtime';
 
 /**
  * 生成同步域：本地输入队列（`inputs`）、待重发区（`lostInputs`）与运行态/任务终态如何汇入
@@ -47,6 +47,13 @@ export function useGenerationSync({
   awaitingHistory: boolean;
   runtimeBusy: boolean;
   applyRuntime: (runtime: ChatRuntime) => void;
+  /** 服务端持久输入（`runtime.inputs`）；后端还没返回这个字段时为 null，页面回退到旧的队列展示。 */
+  runtimeInputs: GenerationInputView[] | null;
+  /** 草稿交接状态（`runtime.handoff`）；没有交接时为 null。 */
+  handoff: GenerationHandoff | null;
+  /** 正在等回答的提问（`runtime.question`）；旧后端缺省为 null。 */
+  question: GenerationQuestion | null;
+  setQuestion: Dispatch<SetStateAction<GenerationQuestion | null>>;
   settledGenerations: RefObject<Set<string>>;
   shownMessageIds: RefObject<Set<string>>;
 } {
@@ -54,6 +61,9 @@ export function useGenerationSync({
   const [lostInputs, setLostInputs] = useState<LostInput[]>([]);
   const [awaitingHistory, setAwaitingHistory] = useState(false);
   const [runtimeBusy, setRuntimeBusy] = useState(false);
+  const [runtimeInputs, setRuntimeInputs] = useState<GenerationInputView[] | null>(null);
+  const [handoff, setHandoff] = useState<GenerationHandoff | null>(null);
+  const [question, setQuestion] = useState<GenerationQuestion | null>(null);
   const inputsRef = useRef(inputs);
   const lostRef = useRef(lostInputs);
   const liveSignature = useRef('');
@@ -68,6 +78,10 @@ export function useGenerationSync({
    */
   const applyRuntime = useCallback((runtime: ChatRuntime) => {
     setRuntimeBusy(runtime.busy);
+    // 持久输入与草稿交接是新增的可选字段：缺省时置空，页面据此回退到旧的队列展示与文案。
+    setRuntimeInputs(Array.isArray(runtime.inputs) ? runtime.inputs : null);
+    setHandoff(runtime.handoff ?? null);
+    setQuestion(runtime.question ?? null);
     const shown = new Set(runtime.messages.map(message => message.id));
     // 待重发区里的输入后来还是进了对话（例如取消后服务端仍把它交给了模型）：转录接管它的显示。
     setLostInputs(current => {
@@ -112,6 +126,8 @@ export function useGenerationSync({
       // pi 在模型失败后保留 inbox；仍在原生队列里的消息不能被当成丢失输入重新提交。
       const runtime = terminal === 'failed' ? await fetchRuntime() : null;
       if (!mounted.current || (terminal === 'failed' && !runtime)) return;
+      // 提问暂停也走 failed 终态：这一次读运行态顺便把「等待回答」拿下来，不靠下一轮轮询。
+      setQuestion(runtime?.question ?? null);
       // 读回期间又开始了新一轮（用户又发了一条）：这份历史已经过期，不能覆盖新的流。
       if (activeGenerationId.current !== settling) return;
       const authoritative = runtime?.messages ?? history;
@@ -129,7 +145,7 @@ export function useGenerationSync({
       message.warning(`${lost.length} 条输入没有进入对话，已放进输入框上方的待重发区`);
       setLostInputs(current => [...current, ...lost.filter(item => !current.some(entry => entry.id === item.id))]);
     })();
-  }, [task, status, stop, fetchHistory, fetchRuntime, setMessages, message, activeGenerationId, setProgress, mounted]);
+  }, [task, status, stop, fetchHistory, fetchRuntime, setMessages, message, activeGenerationId, setProgress, mounted, setQuestion]);
   // 异步收尾要读最新队列而不是渲染闭包里的旧值，所以镜像成 ref；效果在渲染后同步。
   useEffect(() => { inputsRef.current = inputs; }, [inputs]);
   useEffect(() => { lostRef.current = lostInputs; }, [lostInputs]);
@@ -142,6 +158,10 @@ export function useGenerationSync({
     awaitingHistory,
     runtimeBusy,
     applyRuntime,
+    runtimeInputs,
+    handoff,
+    question,
+    setQuestion,
     settledGenerations,
     shownMessageIds,
   };

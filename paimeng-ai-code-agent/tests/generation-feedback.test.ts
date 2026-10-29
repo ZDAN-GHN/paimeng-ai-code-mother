@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   composerAction,
+  handoffWaitingText,
   initialProgress,
   interruptedStreamMessage,
+  interruptionText,
   parseProgressEvent,
   progressReducer,
   settleProgress,
@@ -197,5 +199,41 @@ describe('连接中断的可读文案', () => {
     expect(interruptedStreamMessage({ message: '模型响应失败', status: 'failed' })).toBeNull();
     expect(interruptedStreamMessage({ message: '生成或构建失败，请查看任务状态', status: 'failed' })).toBeNull();
     expect(interruptedStreamMessage({ message: '当前没有正在生成的步骤，插话不适用', status: 'generating' })).toBeNull();
+  });
+});
+
+describe('草稿交接与中断文案', () => {
+  it('draining / sealing 都给出封存等待文案，没有交接时不显示', () => {
+    expect(handoffWaitingText(null)).toBeNull();
+    expect(handoffWaitingText(undefined)).toBeNull();
+    for (const state of ['draining', 'sealing'] as const) {
+      const text = handoffWaitingText({ state, reason: null });
+      expect(text).toContain('正在封存上一轮草稿');
+    }
+    expect(handoffWaitingText({ state: 'sealing', reason: '取消' })).toContain('正在封存上一轮草稿');
+  });
+
+  it('失败且有草稿交接时说明从草稿继续，不承诺从旧版本继续', () => {
+    for (const draft of [{ draftPending: true, handoff: null }, { draftPending: false, handoff: { state: 'sealing' as const, reason: null } }]) {
+      const text = interruptionText({ cancelledByUser: false, error: '模型响应失败', canPreview: true, ...draft });
+      expect(text).toBe('生成中断：模型响应失败。源码草稿已保留，下一轮会从草稿继续。');
+      expect(text).not.toContain('已有预览由之前的代码构建');
+    }
+  });
+
+  it('取消且有草稿交接时同样说明草稿已保留', () => {
+    expect(interruptionText({ cancelledByUser: true, error: '你取消了这次生成', canPreview: false, draftPending: true, handoff: null }))
+      .toBe('你取消了这次生成。源码草稿已保留，下一轮会从草稿继续。');
+  });
+
+  it('没有草稿时保留原有文案（有预览 / 没有预览）', () => {
+    expect(interruptionText({ cancelledByUser: false, error: '构建失败', canPreview: true, draftPending: false, handoff: null }))
+      .toBe('生成中断：构建失败。已有预览由之前的代码构建，可以直接预览、编辑或部署；重新发送需求可继续。');
+    expect(interruptionText({ cancelledByUser: false, error: '构建失败', canPreview: false, draftPending: false, handoff: null }))
+      .toBe('生成中断：构建失败。重新发送需求可继续。');
+  });
+
+  it('没有错误就没有中断文案', () => {
+    expect(interruptionText({ cancelledByUser: false, error: null, canPreview: true, draftPending: true, handoff: { state: 'draining', reason: null } })).toBeNull();
   });
 });

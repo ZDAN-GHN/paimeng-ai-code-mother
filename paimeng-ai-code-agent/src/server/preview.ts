@@ -1,10 +1,11 @@
 import 'server-only';
 import { createServer } from 'node:http';
 import { readFile, lstat, realpath } from 'node:fs/promises';
-import { join, relative, isAbsolute, extname } from 'node:path';
+import { join, relative, isAbsolute, extname, resolve } from 'node:path';
 import { getConfig } from './config';
-import { ensureRuntime, validateDeployKey } from './workspace';
-import { isProjectCodeGenType } from '@/shared/contracts';
+import { ensureSafeDirectory, validateDeployKey } from './workspace';
+import { currentDelivery, legacyDelivery, resolveDelivery } from './delivery-store';
+import type { CodeGenType } from '@/shared/contracts';
 import { maxSelectedElements } from '@/shared/element-selection';
 
 const mime: Record<string, string> = {
@@ -119,10 +120,18 @@ function editorBridge(parentOrigin: string) {
 })();</script>`;
 }
 
-export async function createPreviewServer() {
+/** `/preview|delivery/<codeGenType>_<appId>/...` 里的应用标识。 */
+function appFromKey(key: string): { id: string; codeGenType: CodeGenType } {
+  const match = key.match(/^(html|multi_file|vue_project|react_project)_([1-9]\d{0,19})$/);
+  if (!match) throw new Error('应用标识不合法');
+  return { codeGenType: match[1] as CodeGenType, id: match[2] };
+}
+
+export async function createPreviewServer(options: { runtimeRoot?: string } = {}) {
   const config = getConfig();
   const origin = new URL(config.previewOrigin);
-  const root = await ensureRuntime();
+  // 测试可以指向临时运行目录；生产默认仍是 getConfig().runtimeRoot。
+  const root = await ensureSafeDirectory(resolve(options.runtimeRoot ?? config.runtimeRoot));
   return createServer(async (req, res) => {
     try {
       if (!['GET', 'HEAD'].includes(req.method ?? '')) { res.writeHead(405); res.end(); return; }
@@ -135,18 +144,32 @@ export async function createPreviewServer() {
       const cover = path.match(/^\/covers\/([^/]+)\.png$/);
       if (cover) { directory = join(root, 'covers'); asset = validateDeployKey(cover[1]) + '.png'; }
       else {
-        const match = path.match(/^\/(preview|deploy)\/([^/]+)(\/.*)?$/);
+        const fixed = path.match(/^\/delivery\/([^/]+)\/([^/]+)(\/.*)?$/);
+        const match = fixed ?? path.match(/^\/(preview|deploy)\/([^/]+)(\/.*)?$/);
         if (!match) { res.writeHead(404); res.end(); return; }
-        const key = match[2];
-        if (match[1] === 'deploy') directory = join(root, 'deploy', validateDeployKey(key));
-        else {
-          const project = key.match(/^(html|multi_file|vue_project|react_project)_([1-9]\d{0,19})$/);
-          if (!project) throw new Error('应用标识不合法');
-          const needsDist = isProjectCodeGenType(project[1]);
-          directory = join(root, 'code_output', key, ...(needsDist ? ['dist'] : []));
-        }
-        if (!match[3]) { res.writeHead(308, { Location: url.pathname + '/' }); res.end(); return; }
-        asset = match[3].slice(1) || 'index.html';
+        const rest = match[3];
+        const key = fixed ? fixed[1] : match[2];
+        // 先校验标识再重定向，保持 deploy 与 preview 原有的 400 语义。
+        const deployKey = !fixed && match[1] === 'deploy' ? validateDeployKey(key) : null;
+        const app = deployKey === null ? appFromKey(key) : null;
+        if (!rest) { res.writeHead(308, { Location: url.pathname + '/' }); res.end(); return; }
+        if (deployKey !== null) {
+          directory = join(root, 'deploy', deployKey);
+        } else if (app && fixed) {
+          // 固定交付路由：只看这一个不可变目录，不跟随指针。
+          const resolved = await resolveDelivery({ app, deliveryId: fixed[2], runtimeRoot: root });
+          if (!resolved) { res.writeHead(404, { 'Cache-Control': 'no-store' }); res.end('交付不存在'); return; }
+          directory = resolved.directory;
+        } else if (app) {
+          // 预览入口：有指针就服务该交付；没有指针才回退旧 code_output（legacy），两者不混用。
+          const pointer = await currentDelivery({ app, runtimeRoot: root });
+          if (pointer) {
+            const resolved = await resolveDelivery({ app, deliveryId: pointer.deliveryId, runtimeRoot: root });
+            if (!resolved) { res.writeHead(404, { 'Cache-Control': 'no-store' }); res.end('交付不存在'); return; }
+            directory = resolved.directory;
+          } else directory = legacyDelivery(app, root).directory;
+        } else throw new Error('应用标识不合法');
+        asset = rest.slice(1) || 'index.html';
       }
       const segments = asset.split('/');
       if (segments.some(part => !part || part === '.' || part === '..' || part.startsWith('.') || part === 'node_modules')) throw new Error('路径被拒绝');

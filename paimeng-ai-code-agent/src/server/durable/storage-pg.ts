@@ -247,6 +247,15 @@ const MIGRATIONS: readonly { version: number; statements: readonly string[] }[] 
 			`CREATE INDEX document_revisions_by_kind ON ${TABLE_NAMES.documentRevisions} (document_id, kind, seq DESC)`,
 		],
 	},
+	// pi-durable 1.4.0 的 durable sleep：任务可以不带调用地停在 `sleeping`，等 Harness 时钟到点再续跑。
+	// 旧库的 CHECK 不认这个状态，升级时只扩约束；已有的 v1 迁移保持原样，不重建表、不丢执行数据。
+	{
+		version: 2,
+		statements: [
+			`ALTER TABLE ${TABLE_NAMES.tasks} DROP CONSTRAINT tasks_status_check`,
+			`ALTER TABLE ${TABLE_NAMES.tasks} ADD CONSTRAINT tasks_status_check CHECK (status IN ('pending', 'running', 'waiting', 'sleeping', 'completing', 'terminal'))`,
+		],
+	},
 ];
 
 export type PostgresStorageOptions = {

@@ -1,6 +1,6 @@
 # Pi Durable 学习笔记（面试复盘用）
 
-> 归档：记录当时的设计、迁移与验收。当前行为见[部署说明](../pi-durable-deployment.md)与[模型配置](../provider-convergence.md)。
+> 归档：记录当时的设计、迁移与验收。当前行为见[部署说明](../../pi-durable-deployment.md)与[模型配置](../../provider-convergence.md)。
 
 状态：学习笔记（2026-10-18）。不是设计稿，不改代码。基线分支 `feat/pi-durable-migration`。
 上游权威文档：`node_modules/@earendil-works/pi-durable/README.md`（768 行，字段级语义都在这）。

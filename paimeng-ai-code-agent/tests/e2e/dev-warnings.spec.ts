@@ -78,8 +78,8 @@ test('管理端与模型配置弹窗在 dev 模式下没有告警', async ({ pag
   await includeUsage.click();
   await expect(includeUsage).toHaveAttribute('aria-checked', 'true');
   await providerDialog.getByRole('button', { name: /取\s*消$/ }).click();
-  const alias = page.getByRole('row').filter({ has: page.getByRole('cell', { name: 'codegen.default' }) });
-  await alias.getByRole('button', { name: /^编\s*辑$/ }).click();
+  const codegenSlot = page.getByRole('region', { name: '代码生成槽位' });
+  await codegenSlot.getByRole('button', { name: /^配\s*置$/ }).click();
   const aliasDialog = page.getByRole('dialog');
   await expect(aliasDialog.getByLabel('上游模型名', { exact: true })).toBeVisible();
   await aliasDialog.getByRole('button', { name: /取\s*消$/ }).click();
