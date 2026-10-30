@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>派蒙 · 应用工坊 — 原型</title>
+<meta name="description" content="把一句中文描述，变成可预览、可修改、可发布的网站。界面原型，不连接真实服务。">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 22'%3E%3Crect width='22' height='22' rx='5' fill='%231d201a'/%3E%3Crect y='0' width='22' height='7.5' fill='%23e9ede2'/%3E%3Crect y='7.5' width='22' height='4.8' fill='%237a806f'/%3E%3Crect y='12.3' width='22' height='6.6' fill='%23b08c34'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-nav="off" data-screen="home">
+
+<svg class="sr" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+  <defs>
+    <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.4" fill="none" stroke="currentColor"/><path d="M10.4 10.4L14 14" stroke="currentColor" stroke-linecap="round"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-linecap="round"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3.1" fill="none" stroke="currentColor"/><path d="M8 1.4v1.7M8 12.9v1.7M1.4 8h1.7M12.9 8h1.7M3.5 3.5l1.2 1.2M11.3 11.3l1.2 1.2M12.5 3.5l-1.2 1.2M4.7 11.3l-1.2 1.2" stroke="currentColor" stroke-linecap="round"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 16 16"><path d="M13 9.6A5.6 5.6 0 016.4 3 5.7 5.7 0 108 13.7a5.6 5.6 0 005-4.1z" fill="none" stroke="currentColor" stroke-linejoin="round"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 16 16"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-up" viewBox="0 0 16 16"><path d="M8 13V3.4M4.2 7.2L8 3.4l3.8 3.8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-code" viewBox="0 0 16 16"><path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-screen" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="8" rx="1" fill="none" stroke="currentColor"/><path d="M6 13.2h4" stroke="currentColor" stroke-linecap="round"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 16 16"><rect x="4.6" y="1.8" width="6.8" height="12.4" rx="1.6" fill="none" stroke="currentColor"/><path d="M7.2 12.2h1.6" stroke="currentColor" stroke-linecap="round"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.2 8a5.2 5.2 0 11-1.9-4" fill="none" stroke="currentColor" stroke-linecap="round"/><path d="M13.4 1.6v3.2h-3.2" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-external" viewBox="0 0 16 16"><path d="M9.4 3h3.6v3.6M13 3L7.6 8.4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/><path d="M11.6 9.4V12a1 1 0 01-1 1H4a1 1 0 01-1-1V5.4a1 1 0 011-1h2.6" fill="none" stroke="currentColor" stroke-linecap="round"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.6" y="5.6" width="8" height="8" rx="1.2" fill="none" stroke="currentColor"/><path d="M10.4 5.6V3.4a1 1 0 00-1-1H3.4a1 1 0 00-1 1v6a1 1 0 001 1h2.2" fill="none" stroke="currentColor" stroke-linecap="round"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.4" fill="none" stroke="currentColor"/><path d="M8 4.8V8l2.2 1.4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-image" viewBox="0 0 16 16"><rect x="2.2" y="3.2" width="11.6" height="9.6" rx="1.2" fill="none" stroke="currentColor"/><circle cx="5.8" cy="6.4" r="1" fill="none" stroke="currentColor"/><path d="M3.2 11.6l3.2-3.2 2.4 2.4 1.8-1.8 2.2 2.2" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 16 16"><rect x="5.9" y="2" width="4.2" height="7" rx="2.1" fill="none" stroke="currentColor"/><path d="M3.8 7.6a4.2 4.2 0 008.4 0M8 11.8v2.2" fill="none" stroke="currentColor" stroke-linecap="round"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 16 16"><path d="M8 2.2l5.6 2.9L8 8 2.4 5.1z" fill="none" stroke="currentColor" stroke-linejoin="round"/><path d="M3 8.2l5 2.6 5-2.6M3 11.1l5 2.6 5-2.6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-work" viewBox="0 0 16 16"><rect x="2.2" y="2.6" width="11.6" height="10.8" rx="1.4" fill="none" stroke="currentColor"/><path d="M2.2 6.2h11.6M6.4 6.2v7.2" fill="none" stroke="currentColor"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 16 16"><path d="M2.6 5h10.8M2.6 11h10.8" stroke="currentColor" stroke-linecap="round"/><circle cx="6" cy="5" r="1.7" fill="var(--surface)" stroke="currentColor"/><circle cx="10.4" cy="11" r="1.7" fill="var(--surface)" stroke="currentColor"/></symbol>
+    <symbol id="i-x" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-linecap="round"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 16 16"><path d="M2.6 4.4h10.8M2.6 8h10.8M2.6 11.6h10.8" stroke="currentColor" stroke-linecap="round"/></symbol>
+    <symbol id="i-more" viewBox="0 0 16 16"><circle cx="3.6" cy="8" r="1.1" fill="currentColor"/><circle cx="8" cy="8" r="1.1" fill="currentColor"/><circle cx="12.4" cy="8" r="1.1" fill="currentColor"/></symbol>
+    <symbol id="i-leaf" viewBox="0 0 24 24"><path d="M12 20V9" stroke-linecap="round"/><path d="M12 12c0-3.3 2.7-6 6-6 0 3.3-2.7 6-6 6z"/><path d="M12 15c0-2.8-2.2-5-5-5 0 2.8 2.2 5 5 5z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.6 8.4l2.8 2.8 6-6.4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 16 16"><path d="M8 2.4l1.5 4.1L13.6 8l-4.1 1.5L8 13.6 6.5 9.5 2.4 8l4.1-1.5z" fill="none" stroke="currentColor" stroke-linejoin="round"/></symbol>
+  </defs>
+</svg>
+
+<div class="app" id="app" data-view="home" data-ins="off">
+
+  <!-- ============ sidebar ============ -->
+  <aside class="side" id="side" aria-label="工作区">
+    <div class="side-top">
+      <div class="brand">
+        <span class="mark" aria-hidden="true"><s></s><s></s><s></s><s></s></span>
+        <span><b>派蒙</b><em>应用工坊</em></span>
+      </div>
+      <button class="newbtn" id="new-app" type="button">
+        <svg width="14" height="14"><use href="#i-plus"/></svg> 新建应用
+        <span class="kbd">⌘K</span>
+      </button>
+      <label class="search">
+        <svg><use href="#i-search"/></svg>
+        <input type="search" id="app-search" placeholder="搜索应用" aria-label="搜索应用" autocomplete="off">
+      </label>
+    </div>
+
+    <nav class="nav" aria-label="主导航">
+      <button type="button" data-goto="home" aria-current="page">
+        <svg><use href="#i-layers"/></svg> 首页
+      </button>
+      <button type="button" data-goto="work">
+        <svg><use href="#i-work"/></svg> 工作台
+        <span class="count" id="open-count">1</span>
+      </button>
+      <button type="button" data-goto="templates">
+        <svg><use href="#i-image"/></svg> 模板
+        <span class="count">12</span>
+      </button>
+      <button type="button" data-goto="settings">
+        <svg><use href="#i-sliders"/></svg> 设置
+      </button>
+    </nav>
+
+    <div class="scroll">
+      <section class="sec">
+        <div class="sec-h"><span>最近</span><button type="button">全部</button></div>
+        <div id="recent-list">
+          <p class="empty" id="search-empty" hidden>没有匹配的应用</p>
+          <div class="item" data-open="taoci" aria-current="true">
+            <span class="item-th"><i style="background:linear-gradient(180deg,#1a2a23 0 52%,#c9a35a 52% 58%,#1a2a23 58% 100%)"></i></span>
+            <span style="min-width:0"><span class="item-n">紫笋茶铺</span><span class="item-s"><span class="st st--ok"><i></i>可预览</span><b>v4</b></span></span>
+            <span class="item-x">12 分钟前</span>
+          </div>
+          <div class="item" data-open="beian">
+            <span class="item-th"><i style="background:linear-gradient(180deg,#101314 0 60%,#4a5a63 60% 100%)"></i></span>
+            <span style="min-width:0"><span class="item-n">北岸摄影</span><span class="item-s"><span class="st"><i></i>草稿</span><b>v1</b></span></span>
+            <span class="item-x">昨天 18:40</span>
+          </div>
+          <div class="item" data-open="chaoxi">
+            <span class="item-th"><i style="background:linear-gradient(180deg,#eef1f4 0 46%,#2f5d7a 46% 54%,#eef1f4 54% 100%)"></i></span>
+            <span style="min-width:0"><span class="item-n">潮汐 SaaS</span><span class="item-s"><span class="st st--ok"><i></i>已发布</span><b>v7</b></span></span>
+            <span class="item-x">10 月 28 日</span>
+          </div>
+          <div class="item" data-open="zhishang">
+            <span class="item-th"><i style="background:linear-gradient(180deg,#f5f2e9 0 62%,#7a6a4f 62% 100%)"></i></span>
+            <span style="min-width:0"><span class="item-n">纸上博客</span><span class="item-s"><span class="st"><i></i>草稿</span><b>v3</b></span></span>
+            <span class="item-x">10 月 26 日</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sec-h"><span>已发布</span></div>
+        <div class="item"><span class="item-th"><i style="background:linear-gradient(180deg,#eef1f4 0 46%,#2f5d7a 46% 54%,#eef1f4 54% 100%)"></i></span>
+          <span style="min-width:0"><span class="item-n">chaoxi.paimeng.app</span><span class="item-s"><b>v7</b> · 3 天前</span></span>
+          <span class="item-x"><svg width="12" height="12" style="color:var(--ink-4)"><use href="#i-external"/></svg></span>
+        </div>
+        <div class="item"><span class="item-th"><i style="background:linear-gradient(180deg,#1a2a23 0 52%,#c9a35a 52% 58%,#1a2a23 58% 100%)"></i></span>
+          <span style="min-width:0"><span class="item-n">zisun.paimeng.app</span><span class="item-s"><b>v4</b> · 今天</span></span>
+          <span class="item-x"><svg width="12" height="12" style="color:var(--ink-4)"><use href="#i-external"/></svg></span>
+        </div>
+      </section>
+    </div>
+
+    <div class="side-foot">
+      <button class="who" type="button">
+        <span class="avatar">Z</span>
+        <span style="min-width:0"><b>zdan</b><span>本地环境 · 演示</span></span>
+      </button>
+      <button class="themebtn" id="theme-btn" type="button" aria-label="切换明暗主题" title="切换明暗主题（T）">
+        <svg class="ic-sun"><use href="#i-sun"/></svg>
+        <svg class="ic-moon" style="display:none"><use href="#i-moon"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <!-- ============ main pane ============ -->
+  <main class="pane" id="pane">
+
+    <!-- ---------- home ---------- -->
+    <section class="home" id="view-home">
+      <div class="bar">
+        <button class="btn btn--icon mobile-only" type="button" data-action="nav" aria-label="打开导航">
+          <svg><use href="#i-menu"/></svg>
+        </button>
+        <span class="crumb"><s>工作台</s> <svg width="11" height="11" style="color:var(--ink-4)"><use href="#i-chev"/></svg> <b>新的应用</b></span>
+        <span style="flex:1"></span>
+        <button class="btn btn--icon bar-theme" type="button" data-action="theme-inline" aria-label="切换明暗主题" title="切换明暗主题（T）">
+          <svg class="ic-sun"><use href="#i-sun"/></svg>
+          <svg class="ic-moon" style="display:none"><use href="#i-moon"/></svg>
+        </button>
+      </div>
+
+      <div class="home-body">
+        <div class="home-inner hero">
+          <h1>把你想要的说清楚，<br>先出一版能点开的。</h1>
+          <p>描述你要的网站或应用。第一版能点开就能改，之后一句一句往下改；每一版都留着，随时退回去。做完发布，地址归你。</p>
+
+          <form class="composer" id="create-form" novalidate>
+            <textarea class="composer-field" id="prompt" rows="3" maxlength="1000"
+              placeholder="例如：一家只做一季茶的茶铺，安静、克制，有茶单、山场介绍和下单。"></textarea>
+            <div class="composer-foot">
+              <button class="ico ico--label" type="button" title="上传图片" aria-label="上传图片"><svg><use href="#i-image"/></svg> <span>图片</span></button>
+              <button class="ico ico--label" type="button" title="语音输入" aria-label="语音输入"><svg><use href="#i-mic"/></svg> <span>语音</span></button>
+              <button class="ico ico--label" type="button" title="从模板开始" aria-label="从模板开始"><svg><use href="#i-layers"/></svg> <span>模板</span></button>
+              <div class="stackmenu">
+                <button class="ico ico--label" type="button" id="stack-btn" aria-haspopup="menu" aria-expanded="false" aria-label="技术栈">
+                  <svg><use href="#i-sliders"/></svg> <span id="stack-hint">自动</span>
+                  <svg width="10" height="10" style="opacity:.55"><use href="#i-chev"/></svg>
+                </button>
+                <div class="menu" id="stack-menu" role="menu" hidden>
+                  <button type="button" role="menuitemradio" aria-checked="true" data-stack="auto">自动<em>由派蒙挑选</em></button>
+                  <button type="button" role="menuitemradio" aria-checked="false" data-stack="vue">Vue 3<em>Vue 3 工程</em></button>
+                  <button type="button" role="menuitemradio" aria-checked="false" data-stack="react">React<em>React 工程</em></button>
+                  <button type="button" role="menuitemradio" aria-checked="false" data-stack="html">HTML<em>单文件 HTML</em></button>
+                </div>
+              </div>
+              <span class="sp"></span>
+              <span class="tally" id="tally">0 / 1000</span>
+              <button class="send" id="create-btn" type="submit" disabled>
+                生成 <kbd>↵</kbd>
+              </button>
+            </div>
+          </form>
+
+          <div class="sugg" id="sugg">
+            <button type="button">个人博客</button>
+            <button type="button">在线商店</button>
+            <button type="button">作品集</button>
+            <button type="button">经营看板</button>
+            <button type="button">企业官网</button>
+          </div>
+        </div>
+
+        <div class="home-inner shots">
+          <div class="block-h"><h2>精选案例</h2><span>3 个 · 都在公开访问</span><span class="sp"></span><button type="button">看全部</button></div>
+          <div class="shots-row">
+            <button class="shot" type="button" data-open="taoci">
+              <span class="shot-f">
+                <span class="mp mp--tea">
+                  <span class="h"><b>紫笋</b><span>顾渚山</span><u>袋 2</u></span>
+                  <span class="t">今年的明前，<br>只做<em>两百斤</em>。</span>
+                  <p>一年只采七天。不做拼配，也不卖陈茶。</p>
+                  <ul>
+                    <li><s></s>紫笋 · 特级<b>¥ 380</b></li>
+                    <li><s></s>阳羡雪芽<b>¥ 260</b></li>
+                    <li><s></s>顾渚红<b>¥ 220</b></li>
+                  </ul>
+                </span>
+              </span>
+              <span class="shot-c"><b>紫笋茶铺</b><span>v4 · 12 个文件 · 今天</span></span>
+            </button>
+            <button class="shot" type="button" data-open="taoci">
+              <span class="shot-f">
+                <span class="mp mp--pot">
+                  <span class="h"><b>陶土</b><span>器物 · 关于</span><u>袋 0</u></span>
+                  <span class="t">手作的器物，<br>有<em>它自己的温度</em>。</span>
+                  <span class="list3">
+                    <span><i>粗陶杯</i>¥ 158</span>
+                    <span><i>灰釉花瓶</i>¥ 328</span>
+                    <span><i>手捏茶碗</i>¥ 248</span>
+                  </span>
+                </span>
+              </span>
+              <span class="shot-c"><b>陶土商店</b><span>v6 · 14 个文件</span></span>
+            </button>
+            <button class="shot" type="button" data-open="chaoxi">
+              <span class="shot-f">
+                <span class="mp mp--sas">
+                  <span class="h"><b>TIDE</b><span>生态 · 定价</span><u>控制台</u></span>
+                  <span class="t">把发布节奏<br>交给<em>潮汐</em>。</span>
+                  <span class="mono"><s></s><s></s><s></s></span>
+                </span>
+              </span>
+              <span class="shot-c"><b>潮汐 SaaS</b><span>v7 · 16 个文件</span></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="home-inner home-lists">
+          <section>
+            <div class="block-h"><h2>已经发布</h2><span>2 个应用 · 任何人可访问</span><span class="sp"></span><button type="button">查看全部</button></div>
+            <div class="rowlist rowlist--apps">
+              <div class="row" data-open="chaoxi">
+                <span class="row-th"><i style="background:linear-gradient(180deg,#eef1f4 0 46%,#2f5d7a 46% 54%,#eef1f4 54% 100%)"></i></span>
+                <span class="row-main"><b>潮汐 SaaS</b><span class="item-url">chaoxi.paimeng.app</span></span>
+                <span class="row-tag">v7 · 3 天前</span>
+                <span class="row-go"><svg><use href="#i-external"/></svg></span>
+              </div>
+              <div class="row" data-open="taoci">
+                <span class="row-th"><i style="background:linear-gradient(180deg,#1a2a23 0 52%,#c9a35a 52% 58%,#1a2a23 58% 100%)"></i></span>
+                <span class="row-main"><b>紫笋茶铺</b><span class="item-url">zisun.paimeng.app</span></span>
+                <span class="row-tag">v4 · 今天</span>
+                <span class="row-go"><svg><use href="#i-external"/></svg></span>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <div class="block-h"><h2>从模板开始</h2><span>12 个模板 · 可改</span><span class="sp"></span><button type="button">全部</button></div>
+            <div class="rowlist rowlist--tpl">
+              <div class="row" data-tpl="陶土商店：一家卖手作陶瓷的小店，安静、温暖，有商品列表、详情页和购物袋。">
+                <span class="row-main"><b>陶土商店</b><span>器物陈列、商品详情、购物袋与关于页。宋体、陶土色。</span></span>
+                <span class="row-tag">12 个文件</span>
+                <span class="row-go"><svg><use href="#i-chev"/></svg></span>
+              </div>
+              <div class="row" data-tpl="企业官网：一家做工业零件的公司，需要产品目录、资质和联系表单。">
+                <span class="row-main"><b>企业官网</b><span>产品目录、资质与联系表单。克制、可信。</span></span>
+                <span class="row-tag">8 个文件</span>
+                <span class="row-go"><svg><use href="#i-chev"/></svg></span>
+              </div>
+              <div class="row" data-tpl="纸上博客：一个写字的地方，长文优先，有分类、归档和关于。">
+                <span class="row-main"><b>纸上博客</b><span>为长文阅读而排，分类、归档与关于。</span></span>
+                <span class="row-tag">9 个文件</span>
+                <span class="row-go"><svg><use href="#i-chev"/></svg></span>
+              </div>
+              <div class="row" data-tpl="经营看板：给一家小店看的每日经营概览，趋势、渠道和导出。">
+                <span class="row-main"><b>经营看板</b><span>概览、趋势、渠道与导出，为每天五分钟而设计。</span></span>
+                <span class="row-tag">10 个文件</span>
+                <span class="row-go"><svg><use href="#i-chev"/></svg></span>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- workspace ---------- -->
+    <section class="work" id="view-work" hidden>
+      <div class="work-top">
+        <button class="btn btn--icon mobile-only" type="button" data-action="nav" aria-label="打开导航">
+          <svg><use href="#i-menu"/></svg>
+        </button>
+        <span class="apptitle">
+          <b>紫笋茶铺</b>
+          <span class="vchip" id="ver-chip">v4</span>
+          <span class="st st--ok" id="top-state"><i></i><span id="top-state-t">可预览</span></span>
+        </span>
+        <span class="sp"></span>
+        <button class="btn btn--sm btn--ghost" type="button" data-action="versions">
+          <svg><use href="#i-clock"/></svg> 版本
+        </button>
+        <button class="btn btn--sm btn--ghost mobile-only" type="button" data-action="toggle-ins">
+          <svg><use href="#i-screen"/></svg> 预览
+        </button>
+        <button class="btn btn--sm btn--ghost" type="button" data-action="export">导出</button>
+        <button class="btn btn--sm btn--ink" type="button" data-action="deploy">发布</button>
+      </div>
+
+      <div class="work-body">
+        <div class="chat">
+          <div class="chat-scroll" id="chat-scroll">
+            <div class="chat-inner" id="chat-inner">
+
+              <div class="hist">
+                <div class="hist-h"><span>更早 3 轮 · 10.25 – 10.29</span><span class="sp"></span>
+                  <button type="button" data-action="versions">查看版本</button></div>
+                <div class="hist-row"><span class="st st--err"><i></i>构建失败</span>
+                  <span>生成 #109 · 缺一个路由文件</span><span class="hist-t">10.27 22:40</span></div>
+                <div class="hist-row"><span class="st st--ok"><i></i>已归档</span>
+                  <span>生成 #111 · 主色换成更深的松绿</span><span class="hist-t">10.29 21:14</span></div>
+              </div>
+
+              <div class="msg msg--user">
+                <div class="msg-h"><b>你</b><span>今天 23:06</span></div>
+                <div class="body">做一个只做一季茶的茶铺：明前紫笋，安静、克制，要有茶单、山场介绍和下单。不要那种电商模板的感觉。</div>
+              </div>
+
+              <div class="msg">
+                <div class="msg-h"><b>派蒙</b><span>今天 23:06 · 自动挑了 Vue 3</span></div>
+                <div class="prose">
+                  <p>先把需求拆成三页：茶单、山场、下单。视觉上单栏、松绿配金线、正文用宋体，避开电商模板感。右侧切到手机看看。</p>
+                </div>
+              </div>
+
+              <div class="gen" id="gen-card">
+                <div class="gen-h">
+                  <b>生成 #112</b><span>·</span><span>派蒙引擎</span><span>·</span><span>23:06</span>
+                  <span class="sp"></span>
+                  <span class="num">12 个文件 · v4</span>
+                </div>
+                <div class="gen-body">
+                  <div class="gen-metabar">
+                    <span class="st st--ok"><i></i>已完成</span>
+                    <span class="pbar"><i id="pbar" style="width:100%"></i></span>
+                    <span id="pbar-t">100%</span>
+                  </div>
+                  <div class="phases" id="phases">
+                    <div class="ph" data-state="done">
+                      <span class="ph-spine"><span class="ph-dot"></span></span>
+                      <span><span class="ph-n">理解需求</span><span class="ph-sub">三页、茶单与山场、松绿</span></span>
+                      <span class="ph-t">0.6s</span>
+                    </div>
+                    <div class="ph" data-state="done">
+                      <span class="ph-spine"><span class="ph-dot"></span></span>
+                      <span><span class="ph-n">写入文件</span><span class="ph-sub">read templates/vue-ts · write src/App.vue</span></span>
+                      <span class="ph-t">9.2s</span>
+                    </div>
+                    <div class="ph" data-state="done">
+                      <span class="ph-spine"><span class="ph-dot"></span></span>
+                      <span><span class="ph-n">构建与校核</span><span class="ph-sub">vite build · 0 个错误</span></span>
+                      <span class="ph-t">2.1s</span>
+                    </div>
+                    <div class="ph" data-state="done">
+                      <span class="ph-spine"><span class="ph-dot"></span></span>
+                      <span><span class="ph-n">打开预览</span><span class="ph-sub">v4 · 桌面与手机都已就位</span></span>
+                      <span class="ph-t">0.4s</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="msg">
+                <div class="msg-h"><b>派蒙</b><span>今天 23:06 · 共 12.3s</span></div>
+                <div class="prose">
+                  <p><strong>v4 已经就绪。</strong>首页是这一季的茶单，山场一段配了等高线，下单做成侧边抽屉。右侧切到手机看看。</p>
+                  <p class="muted" style="font-size:12px;margin-top:8px">不确定的地方我标出来：购物袋只在桌面点过，没在真机上试。</p>
+                </div>
+                <div class="follows" style="margin-top:12px">
+                  <button type="button" data-say="把主色换成墨绿">把主色换成墨绿</button>
+                  <button type="button" data-say="加一个关于页，讲一讲工作室的故事">加一个关于页</button>
+                  <button type="button" data-say="再安静一点，减少颜色，留更多空白">更安静一点</button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <div class="chat-foot">
+            <div class="chat-foot-inner">
+              <form class="chat-box" id="chat-form" novalidate>
+                <textarea id="followup" rows="2" maxlength="1000" placeholder="继续描述要改的地方，例如：把主色换成更深的松绿，再加一段山场故事。"></textarea>
+                <div class="foot">
+                  <button class="ico" type="button" title="上传图片"><svg><use href="#i-image"/></svg></button>
+                  <button class="ico" type="button" title="语音输入"><svg><use href="#i-mic"/></svg></button>
+                  <span class="sp"></span>
+                  <span class="tally" id="chat-tally">0 / 1000</span>
+                  <button class="send" id="chat-send" type="submit" disabled>
+                    <svg><use href="#i-up"/></svg> 发送
+                  </button>
+                </div>
+              </form>
+              <div class="chat-note">
+                <span>Enter 发送 · Shift+Enter 换行</span>
+                <span class="sp"></span>
+                <span>断线不会取消任务</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ inspector ============ -->
+  <aside class="ins" id="ins" aria-label="预览">
+    <div class="ins-top">
+      <div class="seg" role="tablist" aria-label="视图">
+        <button type="button" role="tab" aria-selected="true" data-pane="preview">
+          <svg width="13" height="13"><use href="#i-screen"/></svg> 预览
+        </button>
+        <button type="button" role="tab" aria-selected="false" data-pane="code">
+          <svg width="13" height="13"><use href="#i-code"/></svg> 代码 <span class="badge">12</span>
+        </button>
+      </div>
+      <span class="sp"></span>
+      <div class="seg" role="group" aria-label="画布宽度">
+        <button type="button" data-w="desktop" aria-selected="true" aria-label="桌面宽度"><svg width="13" height="13"><use href="#i-screen"/></svg></button>
+        <button type="button" data-w="phone" aria-selected="false" aria-label="手机宽度"><svg width="13" height="13"><use href="#i-phone"/></svg></button>
+      </div>
+      <button class="btn btn--icon mobile-only" type="button" data-action="toggle-ins" aria-label="关闭预览"><svg><use href="#i-x"/></svg></button>
+      <button class="btn btn--icon" type="button" data-action="reload" aria-label="重新加载预览" title="重新加载（R）">
+        <svg><use href="#i-refresh"/></svg>
+      </button>
+      <button class="btn btn--icon" type="button" data-action="open-url" aria-label="在新窗口打开" title="新窗口打开">
+        <svg><use href="#i-external"/></svg>
+      </button>
+    </div>
+
+    <div class="ins-body">
+      <div class="canvas" id="canvas">
+        <div class="frame" id="frame" data-w="desktop">
+          <div class="frame-chrome">
+            <span class="dots"><i></i><i></i><i></i></span>
+            <span class="frame-url">zisun.paimeng.app</span>
+            <span class="frame-v" id="frame-v">v4</span>
+          </div>
+          <div class="viewport" id="viewport">
+
+            <!-- demo: 紫笋 · 顾渚山 -->
+            <div class="demo" id="demo">
+              <div class="d-top">
+                <div class="d-logo">紫笋<small>ZISUN · 顾渚山</small></div>
+                <nav class="d-nav"><b>茶单</b><span>山场</span><span>冲泡</span><span>关于</span></nav>
+                <button class="d-bag" type="button" id="d-bag" aria-haspopup="dialog">袋 <span id="d-count">0</span></button>
+              </div>
+              <div class="d-hero">
+                <p class="d-kick">明前 · 特级 · 二〇二六</p>
+                <h1 class="d-h1">今年的明前，<br>只做<em>两百斤</em>。</h1>
+                <p class="d-lede">顾渚山的紫笋，一年只采七天。不做拼配，也不卖陈茶。卖完就等明年。</p>
+                <button class="d-cta" type="button" id="d-cta">看这一季的茶单 <i>→</i></button>
+              </div>
+              <div class="d-list" id="d-list">
+                <button class="d-row" type="button" data-name="紫笋 · 特级" data-price="380">
+                  <span class="d-mark"><svg viewBox="0 0 24 24"><use href="#i-leaf"/></svg></span>
+                  <span><b>紫笋 · 特级</b><span>顾渚山 · 一芽一叶 · 50g</span></span>
+                  <span class="d-price">¥ 380</span>
+                </button>
+                <button class="d-row" type="button" data-name="阳羡雪芽" data-price="260">
+                  <span class="d-mark"><svg viewBox="0 0 24 24"><use href="#i-leaf"/></svg></span>
+                  <span><b>阳羡雪芽</b><span>顾渚山 · 明前头采 · 50g</span></span>
+                  <span class="d-price">¥ 260</span>
+                </button>
+                <button class="d-row" type="button" data-name="顾渚红" data-price="220">
+                  <span class="d-mark"><svg viewBox="0 0 24 24"><use href="#i-leaf"/></svg></span>
+                  <span><b>顾渚红</b><span>顾渚山 · 日晒 · 50g</span></span>
+                  <span class="d-price">¥ 220</span>
+                </button>
+                <button class="d-row" type="button" data-name="山泉煮茶器" data-price="480">
+                  <span class="d-mark"><svg viewBox="0 0 24 24"><use href="#i-leaf"/></svg></span>
+                  <span><b>山泉煮茶器</b><span>宜兴 · 粗陶 · 1 件</span></span>
+                  <span class="d-price">¥ 480</span>
+                </button>
+              </div>
+              <div class="d-sec">
+                <h2>山场</h2>
+                <p>海拔二百四十米，朝北的一片坡。土是紫砂土，水从山上下来。这一片只种紫笋，别的一概不种。</p>
+                <svg class="d-contour" viewBox="0 0 320 66" preserveAspectRatio="none" aria-hidden="true">
+                  <path d="M0 52C40 44 64 50 96 40s52-22 84-16 56 18 84 12 44-10 56-8"/>
+                  <path d="M0 40C42 32 66 38 98 28s52-22 84-16 56 18 84 12 44-10 54-8"/>
+                  <path d="M0 28C44 20 68 26 100 16S152-6 184 0s56 18 84 12 44-10 52-8"/>
+                </svg>
+              </div>
+              <div class="d-cart" id="d-cart" hidden role="dialog" aria-label="购物袋">
+                <div class="d-cart-top"><b>购物袋</b><button type="button" id="d-cart-x" aria-label="关闭购物袋"><svg width="12" height="12"><use href="#i-x"/></svg></button></div>
+                <ul id="d-cart-list"></ul>
+                <div class="d-cart-sum"><span>合计</span><b id="d-total">¥ 0</b></div>
+                <p class="d-cart-note">演示用购物袋，不会真的下单。</p>
+              </div>
+              <div class="d-foot">
+                <span>顾渚山 · 长兴</span><span>微信 zisun-tea</span><span>二〇二六</span>
+              </div>
+            </div>
+
+            <div class="veil" id="veil" hidden>
+              <div class="veil-in">
+                <span class="veil-bar"><i></i></span>
+                <span id="veil-t">正在构建预览</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="code" id="code-pane" hidden>
+        <div class="code-h"><b>src/App.vue</b><span>·</span><span>Vue 3 SFC</span><span>·</span><span>142 行</span></div>
+<pre><span class="ln">1</span><span class="tk-k">&lt;script</span> <span class="tk-a">setup</span> <span class="tk-a">lang</span>=<span class="tk-s">"ts"</span><span class="tk-k">&gt;</span>
+<span class="ln">2</span><span class="tk-k">import</span> { ref, computed } <span class="tk-k">from</span> <span class="tk-s">'vue'</span>
+<span class="ln">3</span><span class="tk-k">import</span> Hero <span class="tk-k">from</span> <span class="tk-s">'./components/Hero.vue'</span>
+<span class="ln">4</span><span class="tk-k">import</span> Shelf <span class="tk-k">from</span> <span class="tk-s">'./components/Shelf.vue'</span>
+<span class="ln">5</span><span class="tk-k">import</span> Cart <span class="tk-k">from</span> <span class="tk-s">'./components/CartDrawer.vue'</span>
+<span class="ln">6</span>
+<span class="ln">7</span><span class="tk-k">const</span> cart = ref&lt;Item[]&gt;([])
+<span class="ln">8</span><span class="tk-k">const</span> open = ref(<span class="tk-k">false</span>)
+<span class="ln">9</span><span class="tk-k">const</span> count = computed(() =&gt; cart.value.length)
+<span class="ln">10</span><span class="tk-k">&lt;/script&gt;</span>
+<span class="ln">11</span>
+<span class="ln">12</span><span class="tk-k">&lt;template&gt;</span>
+<span class="ln">13</span>  &lt;main class=<span class="tk-s">"shop"</span>&gt;
+<span class="ln">14</span>    &lt;Hero :count=<span class="tk-s">"count"</span> @open=<span class="tk-s">"open = true"</span> /&gt;
+<span class="ln">15</span>    &lt;Shelf @add=<span class="tk-s">"add"</span> /&gt;
+<span class="ln">16</span>    &lt;Cart :items=<span class="tk-s">"cart"</span> v-model:open=<span class="tk-s">"open"</span> /&gt;
+<span class="ln">17</span>  &lt;/main&gt;
+<span class="ln">18</span><span class="tk-k">&lt;/template&gt;</span>
+<span class="ln">19</span>
+<span class="ln">20</span><span class="tk-c">/* 陶土色，宋体，留白优先 */</span>
+<span class="ln">21</span><span class="tk-t">.shop</span> { <span class="tk-a">--clay</span>: #8e5b45; <span class="tk-a">--paper</span>: #f7f1e6; }
+</pre>
+      </div>
+    </div>
+
+    <div class="ins-status" id="ins-status">
+      <span class="st st--ok" id="ins-state"><i></i><span id="ins-state-t">预览就绪</span></span>
+      <span id="ins-files">12 个文件</span>
+      <span class="sp"></span>
+      <span id="ins-build">构建 2.1s</span>
+      <span>v4 · 23:06</span>
+    </div>
+  </aside>
+</div>
+
+<!-- ============ overlays ============ -->
+<div class="scrim" id="scrim" hidden></div>
+
+<aside class="drawer" id="versions" role="dialog" aria-modal="true" aria-labelledby="v-title" hidden>
+  <div class="drawer-h">
+    <b id="v-title">版本历史</b>
+    <span class="dim" style="font-size:11px">4 版 · 全部可回到</span>
+    <span class="sp"></span>
+    <button class="btn btn--icon" type="button" data-close aria-label="关闭"><svg><use href="#i-x"/></svg></button>
+  </div>
+  <div class="drawer-b">
+    <div class="vlist" id="vlist">
+      <div class="v" data-v="4" aria-current="true">
+        <span class="v-id">v4</span>
+        <span class="v-main"><b>购物袋改成侧边抽屉，加一件煮茶器</b><span>茶单 · 山场 · 购物袋 · 12 个文件</span></span>
+        <span class="v-t">今天 23:06</span>
+      </div>
+      <div class="v" data-v="3">
+        <span class="v-id">v3</span>
+        <span class="v-main"><b>主色换成更深的松绿，加一段山场故事</b><span>10 个文件 · 生成 #111</span></span>
+        <span class="v-t">昨天 21:14</span>
+      </div>
+      <div class="v" data-v="2">
+        <span class="v-id">v2</span>
+        <span class="v-main"><b>改成单栏，正文换成宋体</b><span>8 个文件 · 生成 #110</span></span>
+        <span class="v-t">10.27</span>
+      </div>
+      <div class="v" data-v="1">
+        <span class="v-id">v1</span>
+        <span class="v-main"><b>初版</b><span>6 个文件 · 生成 #108</span></span>
+        <span class="v-t">10.25</span>
+      </div>
+    </div>
+    <p class="muted" style="font-size:12.5px;margin-top:14px;line-height:1.7">选一个版本可以只看它、在它上面继续改，或者把它发布出去。旧版本不会消失。</p>
+  </div>
+  <div class="drawer-f">
+    <button class="btn btn--sm btn--ghost" type="button" data-close>关闭</button>
+    <span class="sp" style="flex:1"></span>
+    <button class="btn btn--sm btn--ink" type="button" id="use-version" disabled>使用这一版本</button>
+  </div>
+</aside>
+
+<div class="modal" id="deploy" role="dialog" aria-modal="true" aria-labelledby="d-title" hidden>
+  <div class="modal-b">
+    <h2 id="d-title">已经发布到公网。</h2>
+    <p>任何人打开这个地址都能看到 v4。之后再发布，会覆盖成新的版本，旧版本仍然留着。</p>
+    <div class="urlbox">
+      <code id="d-url">https://zisun.paimeng.app</code>
+      <button class="btn btn--sm" type="button" id="d-copy"><svg><use href="#i-copy"/></svg> 复制</button>
+    </div>
+    <div class="meta-row"><span>v4</span><span>构建 2.1s</span><span>发布 8.2s</span><span>42 MB</span></div>
+  </div>
+  <div class="modal-f">
+    <button class="btn btn--sm" type="button" data-close>留在工作台</button>
+    <span class="sp" style="flex:1"></span>
+    <button class="btn btn--sm btn--ghost" type="button" data-action="open-url"><svg><use href="#i-external"/></svg> 打开看看</button>
+    <button class="btn btn--sm btn--ink" type="button" data-close>好</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<div class="proto" role="group" aria-label="原型切换">
+  <b>PROTOTYPE</b>
+  <button type="button" data-goto="home" aria-pressed="true">首页</button>
+  <button type="button" data-goto="work" aria-pressed="false">工作台</button>
+  <button type="button" id="proto-theme" aria-pressed="false">深色</button>
+  <button type="button" id="proto-replay">↺ 重播</button>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

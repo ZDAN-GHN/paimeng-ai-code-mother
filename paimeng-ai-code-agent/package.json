@@ -73,8 +73,6 @@
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
-    "@reticlehq/next": "^3.8.2",
-    "@reticlehq/react": "^3.8.2",
     "@types/archiver": "6.0.3",
     "@types/node": "24.10.1",
     "@types/pg": "8.23.1",

@@ -1,0 +1,767 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>派蒙应用工坊 · 把想法，显影成东西。</title>
+  <meta name="description" content="描述你要的网站或应用。派蒙先出一版，再陪你一版一版改到能用。">
+  <meta name="theme-color" content="#e7e6e1">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23c8322a'/%3E%3Ctext x='32' y='45' text-anchor='middle' font-size='38' fill='%23f6f5f0' font-family='serif'%3E%E6%B4%BE%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-screen="home">
+  <a class="skip" href="#home">跳到主要内容</a>
+
+  <header class="letterhead" id="letterhead">
+    <div class="letterhead__inner wrap">
+      <a class="brand" href="#home" data-screen-link="home" aria-label="派蒙应用工坊首页">
+        <span class="seal seal--brand" aria-hidden="true">派</span>
+        <span class="brand__type">
+          <strong>派蒙</strong><span>应用工坊</span>
+          <small>PAIMENG APPLICATION WORKSHOP</small>
+        </span>
+      </a>
+      <nav class="nav" aria-label="主导航">
+        <a href="#specimens">样品</a>
+        <a href="#archive">档案</a>
+        <a href="#notes">工坊</a>
+        <a href="#workspace" data-screen-link="workspace">工作台</a>
+      </nav>
+      <div class="letterhead__right">
+        <span class="open-dot"><i aria-hidden="true"></i>接单中</span>
+        <button class="btn btn--ink btn--small" type="button" data-action="focus-order">写委托</button>
+        <button class="menu" type="button" aria-label="打开菜单" aria-expanded="false" aria-controls="nav-sheet" data-action="nav">
+          <span></span><span></span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="nav-sheet" id="nav-sheet" hidden>
+    <nav aria-label="移动端导航">
+      <a href="#specimens">样品 <span>Specimens</span></a>
+      <a href="#archive">档案 <span>Archive</span></a>
+      <a href="#notes">工坊 <span>Workshop</span></a>
+      <a href="#workspace" data-screen-link="workspace">工作台 <span>Workspace</span></a>
+    </nav>
+    <button class="btn btn--ink" type="button" data-action="focus-order">写一张委托 <span>→</span></button>
+    <p class="mono">第 041 卷 / 接单中</p>
+  </div>
+
+  <main id="home">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="sheet" id="contact-sheet">
+        <div class="sheet-top">
+          <div class="sheet-title">
+            <h1 id="hero-title" tabindex="-1">把想法，<br>显影成东西<span class="red-dot" aria-hidden="true"></span></h1>
+            <p class="sheet-sub">描述你要的网站或应用。派蒙先出一版，再陪你一版一版改到能用。</p>
+          </div>
+          <aside class="sheet-side" aria-label="第 041 卷试片">
+            <span class="seal seal--stamp" aria-hidden="true">派</span>
+            <p class="mono">第 041 卷<br>六张试片 / CONTACT PRINT</p>
+            <span class="pencil">红圈是这一版</span>
+          </aside>
+        </div>
+
+        <div class="frames">
+          <figure class="frame frame--picked" data-sample="bookstore">
+            <div class="film-edge film-edge--top" aria-hidden="true"><span>041</span><span>04A</span><span>PAIMENG 400</span></div>
+            <div class="frame-window">
+              <div class="site site--bookstore" data-theme="amber" aria-hidden="true">
+                <div class="bs-top">
+                  <div class="bs-brand"><strong>夜航</strong><span>NIGHT FLIGHT BOOKS</span></div>
+                  <nav class="bs-nav" aria-label="夜航书店导航"><span>书目</span><span>活动</span><span>关于</span></nav>
+                  <div class="bs-hours">营业至 02:00</div>
+                </div>
+                <div class="bs-hero">
+                  <div class="bs-copy">
+                    <p class="bs-kicker">城市尽头 / 旧书与夜</p>
+                    <div class="bs-title">夜航<br><em>书店</em></div>
+                    <p class="bs-lede">一家只卖旧书的店。没有畅销榜，只有从别人手里接过来的故事。</p>
+                    <span class="bs-link">浏览本周书目 <i>→</i></span>
+                  </div>
+                  <div class="bs-feature">
+                    <div class="bs-feature-head"><span>本周选书 / 04</span><span>10.31</span></div>
+                    <div class="bs-cover"><span class="bs-cover-no">04</span><strong>夜航船</strong><small>张岱 / 文学</small></div>
+                    <p class="bs-quote">“夜航船，是旧时江南的夜行船。船上的人，什么都聊。”</p>
+                  </div>
+                </div>
+                <div class="bs-shelf">
+                  <div class="bs-shelf-head"><span>本周书目</span><span>12 本 / 每周五更新</span></div>
+                  <div class="bs-book"><span>01</span><div><strong>夜航船</strong><small>张岱 / 文学</small></div><span>¥ 68</span></div>
+                  <div class="bs-book"><span>02</span><div><strong>看不见的城市</strong><small>卡尔维诺 / 小说</small></div><span>¥ 54</span></div>
+                  <div class="bs-book"><span>03</span><div><strong>漫长的告别</strong><small>钱德勒 / 小说</small></div><span>¥ 62</span></div>
+                </div>
+                <div class="bs-bottom"><span>10.31 / 深夜朗读</span><span>城市尽头，沿河路 17 号</span><span>02:00 打烊</span></div>
+              </div>
+              <div class="frame-mark" aria-hidden="true">
+                <svg viewBox="0 0 100 100" preserveAspectRatio="none"><path pathLength="1" d="M1 50C1 23 22 2 50 2c28 0 49 21 49 48S78 98 50 98C22 98 1 77 1 50c0-11 3-20 9-28Z" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>
+              </div>
+            </div>
+            <div class="film-edge film-edge--bottom" aria-hidden="true"><span>NIGHT FLIGHT BOOKS</span><span>04</span></div>
+            <figcaption class="frame-cap"><span>夜航书店</span><span class="mono">VUE 3</span><span class="pencil-note">04 / 选这版</span></figcaption>
+          </figure>
+
+          <figure class="frame" data-sample="guesthouse">
+            <div class="film-edge film-edge--top" aria-hidden="true"><span>041</span><span>04B</span><span>PAIMENG 400</span></div>
+            <div class="frame-window">
+              <div class="site site--guesthouse" aria-hidden="true">
+                <div class="gh-top">
+                  <div class="gh-brand">山雾<span>SHANWU HOUSE / 松阳</span></div>
+                  <nav class="gh-nav" aria-label="山雾民宿导航"><span>房间</span><span>山</span><span>到店</span></nav>
+                </div>
+                <div class="gh-hero">
+                  <div class="gh-copy">
+                    <p class="gh-kicker">海拔 840 米 / 六间房</p>
+                    <div class="gh-title">山雾<br><em>民宿</em></div>
+                    <p class="gh-lede">一张长桌，一场不赶时间的早饭。</p>
+                  </div>
+                  <div class="gh-book">
+                    <span class="gh-date">10.29 — 11.02</span>
+                    <div class="gh-line"><span>大床房</span><b>¥ 680</b></div>
+                    <div class="gh-line"><span>山景房</span><b>¥ 880</b></div>
+                    <span class="gh-cta">查空房 <i>→</i></span>
+                  </div>
+                  <svg class="gh-contour" viewBox="0 0 300 200" aria-hidden="true">
+                    <path d="M-20 160C40 130 70 160 104 137s66-54 116-32 70 20 108-8" fill="none" stroke="currentColor"/>
+                    <path d="M-20 142C36 113 68 143 101 121s69-52 119-30 71 18 108-10" fill="none" stroke="currentColor"/>
+                    <path d="M-20 124C32 96 65 125 98 104s72-50 122-28 72 16 108-12" fill="none" stroke="currentColor"/>
+                    <path d="M-20 106C28 80 62 108 95 88s75-48 125-26 73 14 108-14" fill="none" stroke="currentColor"/>
+                    
+                  </svg>
+                </div>
+                <div class="gh-bottom"><span>早饭 08:00–10:00</span><span>沿坑岭头村</span><span>可带狗</span></div>
+              </div>
+            </div>
+            <div class="film-edge film-edge--bottom" aria-hidden="true"><span>SHANWU HOUSE</span><span>04B</span></div>
+            <figcaption class="frame-cap"><span>山雾民宿</span><span class="mono">VUE 3</span></figcaption>
+          </figure>
+
+          <figure class="frame" data-sample="toys">
+            <div class="film-edge film-edge--top" aria-hidden="true"><span>041</span><span>04C</span><span>PAIMENG 400</span></div>
+            <div class="frame-window">
+              <div class="site site--toys" aria-hidden="true">
+                <div class="ty-top">
+                  <div class="ty-brand">铁皮<span>TIN TOYS / EST. 1987</span></div>
+                  <nav class="ty-nav" aria-label="铁皮玩具导航"><span>上弦</span><span>发条</span><span>跑</span></nav>
+                </div>
+                <div class="ty-hero">
+                  <div class="ty-copy">
+                    <p class="ty-kicker">01 / 发条与旧铁皮</p>
+                    <div class="ty-title">铁皮<br><em>玩具</em></div>
+                    <p class="ty-lede">拧三圈，跑一下午。</p>
+                  </div>
+                  <div class="ty-shapes" aria-hidden="true"><span class="ty-sq"></span><span class="ty-ci"></span><span class="ty-re"></span></div>
+                  <div class="ty-list">
+                    <div><span>01 机器人</span><b>128</b></div>
+                    <div><span>02 火箭</span><b>96</b></div>
+                    <div><span>03 青蛙</span><b>48</b></div>
+                  </div>
+                </div>
+                <div class="ty-bottom"><span>周末 10:00–19:00</span><span>旧城 / 铁皮巷 3 号</span><span>只收现金</span></div>
+              </div>
+            </div>
+            <div class="film-edge film-edge--bottom" aria-hidden="true"><span>TIN TOYS</span><span>04C</span></div>
+            <figcaption class="frame-cap"><span>铁皮玩具</span><span class="mono">REACT</span></figcaption>
+          </figure>
+
+          <figure class="frame" data-sample="tea">
+            <div class="film-edge film-edge--top" aria-hidden="true"><span>041</span><span>04D</span><span>PAIMENG 400</span></div>
+            <div class="frame-window">
+              <div class="site site--tea" aria-hidden="true">
+                <div class="te-top">
+                  <div class="te-brand">白露<span>WHITE DEW TEA</span></div>
+                  <nav class="te-nav" aria-label="白露茶室导航"><span>茶单</span><span>到店</span><span>关于</span></nav>
+                </div>
+                <div class="te-hero">
+                  <div class="te-copy">
+                    <p class="te-kicker">一席三泡 / 申时</p>
+                    <div class="te-title">白露<br><em>茶室</em></div>
+                    <p class="te-lede">只煮当季的茶。来的人，自己带故事。</p>
+                  </div>
+                  <div class="te-menu">
+                    <div><span>明前龙井</span><b>48</b></div>
+                    <div><span>碧螺春</span><b>58</b></div>
+                    <div><span>武夷岩茶</span><b>68</b></div>
+                  </div>
+                  <div class="te-ring" aria-hidden="true"><span>白露</span></div>
+                </div>
+                <div class="te-bottom"><span>每日 13:00–21:00</span><span>需提前一日预约</span><span>只设六席</span></div>
+              </div>
+            </div>
+            <div class="film-edge film-edge--bottom" aria-hidden="true"><span>WHITE DEW TEA</span><span>04D</span></div>
+            <figcaption class="frame-cap"><span>白露茶室</span><span class="mono">HTML</span></figcaption>
+          </figure>
+
+          <figure class="frame" data-sample="radio">
+            <div class="film-edge film-edge--top" aria-hidden="true"><span>041</span><span>04E</span><span>PAIMENG 400</span></div>
+            <div class="frame-window">
+              <div class="site site--radio" aria-hidden="true">
+                <div class="ra-top">
+                  <div class="ra-brand">声音档案<span>SOUND ARCHIVE</span></div>
+                  <nav class="ra-nav" aria-label="声音档案导航"><span>订阅</span><span>全部节目</span></nav>
+                </div>
+                <div class="ra-hero">
+                  <div class="ra-copy">
+                    <p class="ra-kicker">EP. 042 / 42 MIN</p>
+                    <div class="ra-title">夜班<br><em>电台</em></div>
+                    <p class="ra-lede">城市睡着以后，还有一些声音醒着。</p>
+                  </div>
+                  <div class="ra-wave" aria-hidden="true">
+                    <i style="--h:28%"></i><i style="--h:56%"></i><i style="--h:34%"></i><i style="--h:72%"></i><i style="--h:44%"></i><i style="--h:88%"></i><i style="--h:62%"></i><i style="--h:38%"></i><i style="--h:74%"></i><i style="--h:50%"></i><i style="--h:92%"></i><i style="--h:46%"></i><i style="--h:66%"></i><i style="--h:32%"></i><i style="--h:80%"></i><i style="--h:54%"></i><i style="--h:70%"></i><i style="--h:40%"></i><i style="--h:60%"></i><i style="--h:26%"></i><i style="--h:48%"></i><i style="--h:36%"></i>
+                  </div>
+                  <span class="ra-play" aria-hidden="true">▶</span>
+                </div>
+                <div class="ra-list">
+                  <div><span>041</span><b>凌晨四点的面包房</b><span>38:12</span></div>
+                  <div><span>040</span><b>一场没有观众的演出</b><span>41:09</span></div>
+                </div>
+                <div class="ra-bottom"><span>每周三更新</span><span>在城市边缘录音</span><span>戴上耳机</span></div>
+              </div>
+            </div>
+            <div class="film-edge film-edge--bottom" aria-hidden="true"><span>SOUND ARCHIVE</span><span>04E</span></div>
+            <figcaption class="frame-cap"><span>声音档案</span><span class="mono">REACT</span></figcaption>
+          </figure>
+
+          <figure class="frame" data-sample="exhibition">
+            <div class="film-edge film-edge--top" aria-hidden="true"><span>041</span><span>04F</span><span>PAIMENG 400</span></div>
+            <div class="frame-window">
+              <div class="site site--exhibition" aria-hidden="true">
+                <div class="ex-top">
+                  <div class="ex-brand">纸上<span>ON PAPER / 2026</span></div>
+                  <nav class="ex-nav" aria-label="纸上展览导航"><span>展览</span><span>日程</span><span>关于</span></nav>
+                </div>
+                <div class="ex-hero">
+                  <div class="ex-dates">10.18 — 11.30 / 三层展厅</div>
+                  <div class="ex-title">纸上<br><em>展览</em></div>
+                  <div class="ex-blocks" aria-hidden="true"><span class="ex-blue"></span><span class="ex-red"></span></div>
+                  <p class="ex-lede">十二位纸上工作者。免费入场。</p>
+                </div>
+                <div class="ex-list"><span>01 陈彧君</span><span>02 何翔宇</span><span>03 梁硕</span><span>04 孙逊</span></div>
+                <div class="ex-bottom"><span>周二至周日 10:00–18:00</span><span>西岸 / 龙腾大道 2555</span></div>
+              </div>
+            </div>
+            <div class="film-edge film-edge--bottom" aria-hidden="true"><span>ON PAPER</span><span>04F</span></div>
+            <figcaption class="frame-cap"><span>纸上展览</span><span class="mono">VUE 3</span></figcaption>
+          </figure>
+        </div>
+
+        <div class="sheet-foot mono" aria-hidden="true">
+          <span>PAIMENG 400 / 041 / 2026</span>
+          <span>PROOF — NOT FINAL</span>
+          <span>CONTACT SHEET</span>
+        </div>
+
+        <form class="order" id="order-form" novalidate>
+          <span class="order-copy" aria-hidden="true"><span>工坊联 / STUB</span><span>041</span></span>
+          <div class="order-paper">
+            <header class="order-head"><span>送洗单 <em>JOB ORDER</em></span><span class="mono">NO. 041</span></header>
+            <div class="order-body">
+              <label class="field-label" for="prompt">要做什么 <span>DESCRIBE THE JOB</span></label>
+              <textarea id="prompt" name="prompt" rows="4" maxlength="500" required placeholder="比如：一家只卖旧书的夜航书店，深蓝色，营业到凌晨两点……">一家只卖旧书的夜航书店，深蓝色，营业到凌晨两点。要有书目、作者和到店时间，气质像一张旧唱片。</textarea>
+              <div class="order-meta">
+                <fieldset class="stack">
+                  <legend>结构 <span>STRUCTURE</span></legend>
+                  <div class="stack__options">
+                    <label><input type="radio" name="stack" value="auto" checked><span>自动</span></label>
+                    <label><input type="radio" name="stack" value="vue"><span>Vue</span></label>
+                    <label><input type="radio" name="stack" value="react"><span>React</span></label>
+                    <label><input type="radio" name="stack" value="html"><span>HTML</span></label>
+                  </div>
+                </fieldset>
+                <p class="order-hint" id="order-note">第一版先看，再改。</p>
+              </div>
+            </div>
+            <footer class="order-foot">
+              <span class="order-ticket mono">PAIMENG / 041</span>
+              <button class="btn btn--make" type="submit">开始制作 <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M3 15L15 3M6 3h9v9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+            </footer>
+          </div>
+          <span class="order-stamp" aria-hidden="true">已收件</span>
+          <svg class="binder" viewBox="0 0 48 28" aria-hidden="true">
+            <path d="M10 10h28v10a4 4 0 0 1-4 4H14a4 4 0 0 1-4-4z" fill="#171715"/>
+            <path d="M6 6h36v9H6z" fill="#2b2b27"/>
+            <path d="M14 1h8v7h-8zM26 1h8v7h-8z" fill="#171715"/>
+            <path d="M6 6h36v2H6z" fill="#8c8b83"/>
+          </svg>
+        </form>
+      </div>
+      <p class="hero-foot mono"><span>接单中 / NOW BOOKING</span><span>一间虚构的工坊 / 演示原型</span></p>
+    </section>
+
+    <section class="manifesto" aria-labelledby="manifesto-title">
+      <div class="wrap manifesto__inner">
+        <div class="manifesto__lead">
+          <h2 id="manifesto-title">第一版，<br>只是一次曝光。</h2>
+          <p>好应用不是一次生成的。它要被看见、被点开、被改过，才慢慢定影。派蒙把每一次打样都留下来，你随时可以回到上一张。</p>
+          <a class="link-red" href="#notes">看工坊怎么做 <span>→</span></a>
+        </div>
+        <div class="process">
+          <div class="process-step"><span class="mono">01</span><div><h3>曝光</h3><p>你说清楚要什么。</p></div></div>
+          <div class="process-step"><span class="mono">02</span><div><h3>显影</h3><p>工坊搭出第一版，能点开。</p></div></div>
+          <div class="process-step"><span class="mono">03</span><div><h3>定影</h3><p>校验、修改，再把它送上线。</p></div></div>
+          <div class="process-step"><span class="mono">04</span><div><h3>水洗</h3><p>抬出样张，检查手机上的那一眼。</p></div></div>
+          <span class="stamp stamp--paper">每一版都留下</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="specimens" id="specimens" aria-labelledby="specimens-title">
+      <div class="wrap">
+        <header class="section-head">
+          <h2 id="specimens-title">样品</h2>
+          <p>六张试片。红圈那张，已经接进工作台。</p>
+        </header>
+        <div class="lighttable">
+          <figure class="proof">
+            <div class="proof-paper">
+              <div class="proof-screen" id="proof-screen" aria-hidden="true">
+                <noscript><p class="proof-fallback">请启用 JavaScript 查看样张。</p></noscript>
+              </div>
+              <span class="proof-grease" aria-hidden="true">04 / 可拆改</span>
+            </div>
+            <figcaption class="proof-cap">
+              <div><strong id="proof-name">夜航书店</strong><span id="proof-meta">第 041 卷 / 深蓝 + 琥珀 / Vue 3</span></div>
+              <a class="btn btn--open" href="#workspace" data-screen-link="workspace" id="proof-open">打开第 041 卷 <span>→</span></a>
+            </figcaption>
+          </figure>
+          <div class="film-index" role="tablist" aria-label="样品列表">
+            <button class="film-item is-active" role="tab" aria-selected="true" data-sample="bookstore"><span class="film-no">04</span><span class="film-chip chip--bookstore"></span><span class="film-name">夜航书店<small>VUE 3</small></span><span class="film-mark">●</span></button>
+            <button class="film-item" role="tab" aria-selected="false" data-sample="guesthouse"><span class="film-no">04B</span><span class="film-chip chip--guesthouse"></span><span class="film-name">山雾民宿<small>VUE 3</small></span><span class="film-mark"></span></button>
+            <button class="film-item" role="tab" aria-selected="false" data-sample="toys"><span class="film-no">04C</span><span class="film-chip chip--toys"></span><span class="film-name">铁皮玩具<small>REACT</small></span><span class="film-mark"></span></button>
+            <button class="film-item" role="tab" aria-selected="false" data-sample="tea"><span class="film-no">04D</span><span class="film-chip chip--tea"></span><span class="film-name">白露茶室<small>HTML</small></span><span class="film-mark"></span></button>
+            <button class="film-item" role="tab" aria-selected="false" data-sample="radio"><span class="film-no">04E</span><span class="film-chip chip--radio"></span><span class="film-name">声音档案<small>REACT</small></span><span class="film-mark"></span></button>
+            <button class="film-item" role="tab" aria-selected="false" data-sample="exhibition"><span class="film-no">04F</span><span class="film-chip chip--exhibition"></span><span class="film-name">纸上展览<small>VUE 3</small></span><span class="film-mark"></span></button>
+          </div>
+        </div>
+        <p class="section-note">演示只展开第 041 卷；其余五张是样片，用来选方向。</p>
+      </div>
+    </section>
+
+    <section class="archive" id="archive" aria-labelledby="archive-title">
+      <div class="wrap">
+        <header class="section-head">
+          <h2 id="archive-title">档案</h2>
+          <p>已出片 05 卷。演示档案，名称、日期与委托方均为虚构。</p>
+        </header>
+        <div class="ledger-wrap">
+          <table class="ledger">
+            <thead><tr><th scope="col">卷号</th><th scope="col">项目</th><th scope="col">委托方</th><th scope="col">出片</th><th scope="col">状态</th><th><span class="visually-hidden">打开</span></th></tr></thead>
+            <tbody>
+              <tr data-app="041" tabindex="0">
+                <td data-label="卷号" class="mono">041</td>
+                <td data-label="项目"><strong>夜航书店</strong><span>独立书店 / 深蓝</span></td>
+                <td data-label="委托方">苏</td>
+                <td data-label="出片" class="mono">2026.10.29</td>
+                <td data-label="状态"><span class="stamp stamp--red">已出片</span></td>
+                <td><span class="row-arrow">→</span></td>
+              </tr>
+              <tr data-app="039" tabindex="0">
+                <td data-label="卷号" class="mono">039</td>
+                <td data-label="项目"><strong>山雾民宿</strong><span>民宿 / 森林绿</span></td>
+                <td data-label="委托方">林</td>
+                <td data-label="出片" class="mono">2026.10.27</td>
+                <td data-label="状态"><span class="stamp stamp--red">已出片</span></td>
+                <td><span class="row-arrow">→</span></td>
+              </tr>
+              <tr data-app="038" tabindex="0">
+                <td data-label="卷号" class="mono">038</td>
+                <td data-label="项目"><strong>铁皮玩具</strong><span>零售 / 红黄蓝</span></td>
+                <td data-label="委托方">周</td>
+                <td data-label="出片" class="mono">2026.10.24</td>
+                <td data-label="状态"><span class="stamp stamp--red">已出片</span></td>
+                <td><span class="row-arrow">→</span></td>
+              </tr>
+              <tr data-app="036" tabindex="0">
+                <td data-label="卷号" class="mono">036</td>
+                <td data-label="项目"><strong>声音档案</strong><span>播客 / 黑与荧光</span></td>
+                <td data-label="委托方">陈</td>
+                <td data-label="出片" class="mono">2026.10.21</td>
+                <td data-label="状态"><span class="stamp stamp--red">已出片</span></td>
+                <td><span class="row-arrow">→</span></td>
+              </tr>
+              <tr data-app="034" tabindex="0">
+                <td data-label="卷号" class="mono">034</td>
+                <td data-label="项目"><strong>纸上展览</strong><span>展览 / 纸白与钴蓝</span></td>
+                <td data-label="委托方">许</td>
+                <td data-label="出片" class="mono">2026.10.18</td>
+                <td data-label="状态"><span class="stamp stamp--red">已出片</span></td>
+                <td><span class="row-arrow">→</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="section-note">第 041 卷可以打开；其余是演示条目。</p>
+      </div>
+    </section>
+
+    <section class="notes" id="notes" aria-labelledby="notes-title">
+      <div class="wrap">
+        <header class="section-head">
+          <h2 id="notes-title">工坊</h2>
+          <p>一间把描述变成可用网站的小工坊。</p>
+        </header>
+        <div class="notes-grid">
+          <article class="letter">
+            <span class="letter-label mono">工坊笔记 / 2026</span>
+            <h3>我们不追求<br>一次生成。</h3>
+            <p>第一版只是曝光。它需要被打开、被点、被改，才慢慢定影。</p>
+            <p>所以每一版都留下，每次修改都能回头。你可以从任意一张重新开始，也可以把上一张取回来。</p>
+            <p>上线不是结束。它只是这卷片子，终于可以交到你手里。</p>
+            <div class="letter-sign"><span>派蒙工坊</span><span class="mono">2026.10</span><span class="seal" aria-hidden="true">派</span></div>
+            <button class="btn btn--ink" type="button" data-action="focus-order">写一张委托 <span>→</span></button>
+          </article>
+          <div class="rules">
+            <h3>工坊规则</h3>
+            <ol>
+              <li><span class="rule-dot" aria-hidden="true"></span><div><strong>先做出来</strong><p>第一版不用完美，它得先能被打开。</p></div></li>
+              <li><span class="rule-dot" aria-hidden="true"></span><div><strong>再改准确</strong><p>主色、字体、页面结构，都可以在对话里改。</p></div></li>
+              <li><span class="rule-dot" aria-hidden="true"></span><div><strong>每一版都留下</strong><p>打样记录可回看、可取回，不覆盖上一张。</p></div></li>
+              <li><span class="rule-dot" aria-hidden="true"></span><div><strong>最后定影</strong><p>上线前走一遍，发布后也能回来。</p></div></li>
+            </ol>
+            <span class="stamp stamp--red">每一版都留下</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="colophon">
+      <div class="film-edge film-edge--footer" aria-hidden="true"><span>PAIMENG 400</span><span>041 / END</span><span>2026</span></div>
+      <div class="wrap colophon__inner">
+        <div class="colophon__brand">
+          <span class="seal" aria-hidden="true">派</span>
+          <div><strong>派蒙应用工坊</strong><span>PAIMENG APPLICATION WORKSHOP</span></div>
+        </div>
+        <p class="colophon__note">本页是一份交互原型。项目、委托方、日期与网址均为演示数据，不对应真实服务。</p>
+        <div class="colophon__links"><a href="#specimens">样品</a><a href="#archive">档案</a><a href="#notes">工坊</a><a href="#workspace" data-screen-link="workspace">工作台</a></div>
+        <p class="colophon__meta mono">字体 / NOTO SERIF SC · NOTO SANS SC · ARCHIVO · SPLINE SANS MONO<br>一间虚构的工坊 / A FICTIONAL WORKSHOP</p>
+      </div>
+    </footer>
+  </main>
+
+  <section id="screen-workspace" class="workspace" hidden aria-label="派蒙暗房工作台">
+    <div class="ws" id="ws">
+      <aside class="rail" id="rail">
+        <div class="rail__film" aria-hidden="true"></div>
+        <div class="rail__inner">
+          <div class="rail__top">
+            <a class="rail__brand" href="#home" data-screen-link="home" aria-label="回到派蒙应用工坊首页">
+              <span class="seal seal--rail" aria-hidden="true">派</span>
+              <span><strong>派蒙</strong><small>暗房 / DARKROOM</small></span>
+            </a>
+            <button class="rail__new" type="button" data-action="new-order"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v10M1 6h10" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>新委托</button>
+          </div>
+          <nav class="rail__rolls" aria-label="工单列表">
+            <p class="rail__label">今日 <span>IN PROGRESS</span></p>
+            <button class="roll is-active" type="button" data-app="041" aria-current="true">
+              <span class="roll__no">041</span>
+              <span class="roll__name">夜航书店<small class="js-rail-run">第 04 次打样</small></span>
+              <span class="roll__state">已出片</span>
+            </button>
+            <button class="roll" type="button" data-app="039">
+              <span class="roll__no">039</span>
+              <span class="roll__name">山雾民宿<small>10.27</small></span>
+              <span class="roll__state">已出片</span>
+            </button>
+            <button class="roll" type="button" data-app="038">
+              <span class="roll__no">038</span>
+              <span class="roll__name">铁皮玩具<small>10.24</small></span>
+              <span class="roll__state">已出片</span>
+            </button>
+            <p class="rail__label rail__label--gap">档案 <span>ARCHIVE</span></p>
+            <button class="roll roll--muted" type="button" data-app="036">
+              <span class="roll__no">036</span>
+              <span class="roll__name">声音档案<small>10.21</small></span>
+              <span class="roll__state">已出片</span>
+            </button>
+            <button class="roll roll--muted" type="button" data-app="034">
+              <span class="roll__no">034</span>
+              <span class="roll__name">纸上展览<small>10.18</small></span>
+              <span class="roll__state">已出片</span>
+            </button>
+          </nav>
+          <div class="rail__foot">
+            <a class="rail__home" href="#home" data-screen-link="home"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M9 2L4 7l5 5" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>回到工坊</a>
+            <button class="rail__user" type="button" data-toast="演示账号。真实的委托方信息会在登录后出现。">
+              <span class="seal seal--user" aria-hidden="true">苏</span>
+              <span><strong>委托方 / 苏</strong><small>演示账号</small></span>
+              <svg class="rail__more" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3" cy="8" r="1" fill="currentColor"/><circle cx="8" cy="8" r="1" fill="currentColor"/><circle cx="13" cy="8" r="1" fill="currentColor"/></svg>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <div class="ws__main">
+        <header class="ws__head">
+          <button class="ws__menu" type="button" data-action="rail" aria-label="打开工单列表" aria-expanded="false" aria-controls="rail"><span></span><span></span></button>
+          <div class="ws__id">
+            <span class="ws__no mono">041</span>
+            <h1 tabindex="-1" id="ws-title">夜航书店</h1>
+            <span class="stamp stamp--red js-status">已出片</span>
+            <p class="mono">PM-041 / 2026.10.29 / 委托方 苏</p>
+          </div>
+          <div class="ws__actions">
+            <button class="ws__action" type="button" data-action="versions"><span>版本</span><small class="mono">PROOFS</small></button>
+            <button class="ws__action ws__action--hide" type="button" data-toast="演示原型：导出会在这里生成源码压缩包。"><span>导出</span><small class="mono">EXPORT</small></button>
+            <button class="btn btn--ink ws__deploy" type="button" data-action="dispatch"><span>发布</span><small class="mono">DISPATCH</small></button>
+            <button class="ws__more" type="button" data-toast="演示原型：更多操作暂未接入。" aria-label="更多操作"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3" cy="8" r="1" fill="currentColor"/><circle cx="8" cy="8" r="1" fill="currentColor"/><circle cx="13" cy="8" r="1" fill="currentColor"/></svg></button>
+          </div>
+        </header>
+
+        <div class="ws__body" id="ws-body">
+          <section class="corr" aria-label="对话">
+            <header class="corr__head"><span>往来 / CORRESPONDENCE</span><span class="mono js-run-label">第 04 次打样</span></header>
+            <div class="corr__scroll" id="chat-scroll">
+              <article class="slip slip--user">
+                <div class="slip__head"><span>委托方 / 苏</span><span class="mono">21:02</span></div>
+                <p id="chat-seed">一家只卖旧书的夜航书店，深蓝色，营业到凌晨两点。要有书目、作者和到店时间，气质像一张旧唱片。</p>
+                <svg class="slip__clip" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 12.8V7.6a3.5 3.5 0 0 1 7 0v8.1a5.2 5.2 0 0 1-10.4 0V9.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+              </article>
+              <article class="slip slip--lab">
+                <div class="slip__head"><span><span class="seal seal--mini" aria-hidden="true">派</span>工坊 / 派蒙</span><span class="mono">21:05</span></div>
+                <p>收到。先给你一版 <strong>夜航书店</strong> 的粗样：深蓝底，琥珀色标题，书目页留了 12 本的位置。先看样张，再告诉我要改哪里。</p>
+                <div class="slip__facts"><span>深蓝 / 琥珀</span><span>12 文件</span><span>V4</span></div>
+                <span class="slip__stamp" aria-hidden="true">已显影</span>
+              </article>
+
+              <article class="develop" id="develop" aria-label="显影记录">
+                <header class="develop__head"><span>显影记录 / PROCESS</span><span class="mono js-run-no">04</span></header>
+                <div class="develop__steps" id="develop-steps">
+                  <div class="step is-done" data-phase="0"><span class="step__no mono">01</span><span class="step__name">曝光</span><span class="step__note">收件</span><span class="step__time mono">21:02</span></div>
+                  <div class="step is-done" data-phase="1"><span class="step__no mono">02</span><span class="step__name">显影</span><span class="step__note">写入 12 文件</span><span class="step__time mono">21:03</span></div>
+                  <div class="step is-done" data-phase="2"><span class="step__no mono">03</span><span class="step__name">定影</span><span class="step__note">构建与校验通过</span><span class="step__time mono">21:04</span></div>
+                  <div class="step is-done" data-phase="3"><span class="step__no mono">04</span><span class="step__name">水洗</span><span class="step__note">预览就绪</span><span class="step__time mono">21:05</span></div>
+                </div>
+                <div class="develop__foot"><span class="mono">PAIMENG / 041</span><span class="mono js-develop-state">已定影</span></div>
+              </article>
+
+              <div class="quick" id="quick-replies">
+                <span class="mono">快速批注</span>
+                <button type="button" data-fill="把主色换成墨绿">把主色换成墨绿</button>
+                <button type="button" data-fill="加一页活动">加一页活动</button>
+                <button type="button" data-fill="换个字体">换个字体</button>
+              </div>
+
+              <article class="file-card" aria-label="本卷资料">
+                <header class="file-card__head"><span class="mono">本卷 / FILE 041</span><span class="mono">NIGHT FLIGHT</span></header>
+                <div class="file-card__grid">
+                  <div><span class="mono">项目</span><strong>夜航书店</strong></div>
+                  <div><span class="mono">打样</span><strong class="js-run-label">第 04 次</strong></div>
+                  <div><span class="mono">主色</span><span class="swatch" aria-hidden="true"><i></i><i></i><i></i></span></div>
+                  <div><span class="mono">结构</span><strong>Vue 3 / 12 文件</strong></div>
+                </div>
+                <p>发布前，先在手机上走一遍。</p>
+                <span class="stamp stamp--red">存</span>
+              </article>
+            </div>
+            <form class="composer" id="chat-form">
+              <div class="composer__label"><label for="note">批注 / NOTE</label><span class="mono">ENTER 发送 · SHIFT+ENTER 换行</span></div>
+              <div class="composer__row">
+                <textarea id="note" rows="2" placeholder="告诉工坊要改哪里……"></textarea>
+                <button class="composer__send" type="submit">发送 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8h11M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
+              </div>
+              <div class="composer__tools">
+                <button type="button" data-toast="演示原型：附件暂未接入。" aria-label="添加附件"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v10M1 6h10" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></button>
+                <span>文字 / 图片 / 语音</span><span class="mono js-composer-version">041 / V4</span>
+              </div>
+            </form>
+          </section>
+
+          <div class="splitter" id="splitter" role="separator" aria-orientation="vertical" aria-valuemin="30" aria-valuemax="55" aria-valuenow="42" tabindex="0" aria-label="调整对话与样张宽度"><span></span></div>
+
+          <section class="lighttable" aria-label="样张预览">
+            <header class="lt__head">
+              <div class="lt__label"><span class="mono">样张 / PROOF</span><strong class="js-proof-no">04</strong><span class="stamp stamp--red js-live">实时</span></div>
+              <div class="lt__tabs" role="tablist" aria-label="预览视图">
+                <button class="lt__tab is-active" type="button" role="tab" aria-selected="true" data-view="preview">正片</button>
+                <button class="lt__tab" type="button" role="tab" aria-selected="false" data-view="code">负片</button>
+              </div>
+              <div class="lt__device" role="group" aria-label="预览尺寸">
+                <button class="is-active" type="button" data-device="desktop" aria-pressed="true">桌面</button>
+                <button type="button" data-device="mobile" aria-pressed="false">手机</button>
+              </div>
+            </header>
+            <div class="lt__stage" id="lt-stage">
+              <div class="rule-line rule-line--x" aria-hidden="true"></div>
+              <div class="rule-line rule-line--y" aria-hidden="true"></div>
+              <figure class="print" id="print">
+                <div class="print__screen" id="print-screen">
+                  <div class="site site--bookstore" data-theme="amber" id="preview-site">
+                    <div class="bs-top">
+                      <div class="bs-brand"><strong>夜航</strong><span>NIGHT FLIGHT BOOKS</span></div>
+                      <nav class="bs-nav" aria-label="夜航书店导航"><span>书目</span><span>活动</span><span>关于</span></nav>
+                      <div class="bs-hours">营业至 02:00</div>
+                    </div>
+                    <div class="bs-hero">
+                      <div class="bs-copy">
+                        <p class="bs-kicker">城市尽头 / 旧书与夜</p>
+                        <div class="bs-title">夜航<br><em>书店</em></div>
+                        <p class="bs-lede">一家只卖旧书的店。没有畅销榜，只有从别人手里接过来的故事。</p>
+                        <span class="bs-link">浏览本周书目 <i>→</i></span>
+                      </div>
+                      <div class="bs-feature">
+                        <div class="bs-feature-head"><span>本周选书 / 04</span><span>10.31</span></div>
+                        <div class="bs-cover"><span class="bs-cover-no">04</span><strong>夜航船</strong><small>张岱 / 文学</small></div>
+                        <p class="bs-quote">“夜航船，是旧时江南的夜行船。船上的人，什么都聊。”</p>
+                      </div>
+                    </div>
+                    <div class="bs-shelf">
+                      <div class="bs-shelf-head"><span>本周书目</span><span>12 本 / 每周五更新</span></div>
+                      <div class="bs-book"><span>01</span><div><strong>夜航船</strong><small>张岱 / 文学</small></div><span>¥ 68</span></div>
+                      <div class="bs-book"><span>02</span><div><strong>看不见的城市</strong><small>卡尔维诺 / 小说</small></div><span>¥ 54</span></div>
+                      <div class="bs-book"><span>03</span><div><strong>漫长的告别</strong><small>钱德勒 / 小说</small></div><span>¥ 62</span></div>
+                    </div>
+                    <div class="bs-event">
+                      <div class="bs-event__head"><span>10.31 / 深夜朗读</span><span>02:00 打烊</span></div>
+                      <div class="bs-event__row"><strong>带一本你读不完的书来。</strong><span>留个位置 →</span></div>
+                    </div>
+                    <div class="bs-bottom"><span>10.31 / 深夜朗读</span><span>城市尽头，沿河路 17 号</span><span>02:00 打烊</span></div>
+                  </div>
+                  <div class="print__loading" id="print-loading" hidden>
+                    <span class="mono">显影中 / PROCESSING</span>
+                    <strong id="print-loading-title">第 05 次打样</strong>
+                    <div class="print__bar"><i id="print-bar"></i></div>
+                    <p id="print-loading-note">正在写入文件…</p>
+                  </div>
+                </div>
+                <figcaption class="print__cap"><span class="mono js-print-caption">041-04 / 夜航书店</span><span class="mono js-print-meta">1440 × 900 / 实时</span></figcaption>
+                <span class="print__stamp js-print-stamp" aria-hidden="true">样张</span>
+              </figure>
+
+              <div class="negative" id="negative" hidden>
+                <header class="negative__head"><span class="mono">负片 / NEGATIVE</span><span class="mono">SRC / V4</span></header>
+                <div class="negative__body">
+                  <div class="negative__files">
+                    <span class="mono">FILES</span>
+                    <button class="is-active" type="button" data-file="App.vue">src/App.vue</button>
+                    <button type="button" data-file="Hero.vue">components/Hero.vue</button>
+                    <button type="button" data-file="books.ts">data/books.ts</button>
+                  </div>
+                  <pre class="negative__code" id="code-view" aria-label="源码"></pre>
+                </div>
+                <footer class="negative__foot"><span class="mono">VUE 3 / 12 FILES</span><span class="mono">FRAME 04</span></footer>
+              </div>
+            </div>
+            <footer class="lt__foot"><span class="mono" id="lt-status"><i class="live-dot"></i>预览就绪 / 21:05</span><span class="mono">构建 2.1s</span><span class="mono js-lt-state">1440 × 900</span></footer>
+          </section>
+        </div>
+
+        <div class="ws__mobile-tabs" role="group" aria-label="切换面板">
+          <button type="button" data-pane="chat">对话 <span class="mono">01</span></button>
+          <button type="button" data-pane="preview" class="is-active">样张 <span class="mono">02</span></button>
+        </div>
+        <footer class="ws__status">
+          <span class="mono"><i class="live-dot"></i>已保存 21:06</span><span class="mono js-current-version">12 文件 / V4</span><span class="mono">构建 2.1s</span><span class="mono ws__status-right">VUE 3 / 自动保存</span>
+        </footer>
+      </div>
+    </div>
+    <div class="rail-scrim" id="rail-scrim" hidden></div>
+  </section>
+
+  <div class="scrim" id="scrim" hidden></div>
+
+  <aside class="drawer" id="versions" role="dialog" aria-modal="true" aria-labelledby="versions-title" aria-hidden="true">
+    <div class="drawer__head">
+      <div>
+        <span class="mono">印样 / PROOFS</span>
+        <h2 id="versions-title">打样记录</h2>
+        <p class="mono js-proof-count">041 / 夜航书店 / 4 张 + 1 张废片</p>
+      </div>
+      <button class="drawer__close" type="button" data-close aria-label="关闭打样记录"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" fill="none" stroke="currentColor" stroke-width="1.2"/></svg></button>
+    </div>
+    <div class="drawer__body">
+      <article class="proof-card is-current" data-version="4" data-type="serif" data-extra="0">
+        <div class="proof-card__thumb"><div class="thumb thumb--amber"><span>夜航</span><em>书店</em><small>NIGHT FLIGHT</small></div><span class="proof-card__current">当前</span></div>
+        <div class="proof-card__meta">
+          <header><strong>V4</strong><span class="mono">10.29 / 21:05</span></header>
+          <p>加深夜蓝，书目改为三列；封面字重加到 900。</p>
+          <button type="button" data-restore="4">取回这一版</button>
+        </div>
+      </article>
+      <article class="proof-card" data-version="3" data-type="serif" data-extra="0">
+        <div class="proof-card__thumb"><div class="thumb thumb--moss"><span>夜航</span><em>书店</em><small>NIGHT FLIGHT</small></div></div>
+        <div class="proof-card__meta">
+          <header><strong>V3</strong><span class="mono">10.29 / 20:41</span></header>
+          <p>试了墨绿。像旧书封皮，但夜里不够亮。</p>
+          <button type="button" data-restore="3">取回这一版</button>
+        </div>
+      </article>
+      <article class="proof-card" data-version="2" data-type="serif" data-extra="0">
+        <div class="proof-card__thumb"><div class="thumb thumb--cobalt"><span>夜航</span><em>书店</em><small>NIGHT FLIGHT</small></div></div>
+        <div class="proof-card__meta">
+          <header><strong>V2</strong><span class="mono">10.29 / 20:18</span></header>
+          <p>把标题换成了钴蓝，书封保留纸色。</p>
+          <button type="button" data-restore="2">取回这一版</button>
+        </div>
+      </article>
+      <article class="proof-card" data-version="1" data-type="serif" data-extra="0">
+        <div class="proof-card__thumb"><div class="thumb thumb--paper"><span>夜航</span><em>书店</em><small>NIGHT FLIGHT</small></div></div>
+        <div class="proof-card__meta">
+          <header><strong>V1</strong><span class="mono">10.29 / 19:52</span></header>
+          <p>第一版。米白纸感，像一张旧唱片的内页。</p>
+          <button type="button" data-restore="1">取回这一版</button>
+        </div>
+      </article>
+      <article class="proof-card proof-card--void" data-version="0" data-void="1">
+        <div class="proof-card__thumb"><div class="thumb thumb--void"><span>废片</span><em>×</em><small>BUILD FAILED</small></div><span class="proof-card__current">作废</span></div>
+        <div class="proof-card__meta">
+          <header><strong>废片</strong><span class="mono">10.29 / 20:02</span></header>
+          <p>校验没有通过，已作废。上一版还在。</p>
+          <button type="button" data-retry>重新打样</button>
+        </div>
+      </article>
+
+    </div>
+    <div class="drawer__foot">
+      <span class="mono">每一版都留下 / NO OVERWRITE</span>
+      <span class="stamp stamp--paper">041</span>
+    </div>
+  </aside>
+
+  <div class="modal" id="dispatch" role="dialog" aria-modal="true" aria-labelledby="dispatch-title" hidden>
+    <div class="receipt" role="document">
+      <header class="receipt__head">
+        <span class="mono">出片单 / DISPATCH</span>
+        <button class="receipt__close" type="button" data-close aria-label="关闭出片单"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" fill="none" stroke="currentColor" stroke-width="1.2"/></svg></button>
+      </header>
+      <div class="receipt__body">
+        <div class="receipt__top">
+          <div>
+            <p class="mono">PM-041 / 2026.10.29</p>
+            <h2 id="dispatch-title">夜航书店</h2>
+            <p class="receipt__lede">第 041 卷已经压好。地址在下面，取件口 24 小时开着。</p>
+          </div>
+          <span class="receipt__stamp" aria-hidden="true">已出片</span>
+        </div>
+        <label class="receipt__label" for="dispatch-url">取件地址</label>
+        <div class="receipt__url">
+          <code id="dispatch-url">https://yewhang.paimeng.workshop</code>
+          <button type="button" data-copy>复制</button>
+        </div>
+        <div class="receipt__lower">
+          <div class="receipt__qr-wrap">
+            <svg class="receipt__qr" id="dispatch-qr" viewBox="0 0 21 21" aria-label="演示二维码"></svg>
+            <span class="mono">SCAN / DEMO</span>
+          </div>
+          <dl class="receipt__meta">
+            <div><dt>版本</dt><dd class="mono" id="dispatch-version">V4</dd></div>
+            <div><dt>帧号</dt><dd class="mono">041-04</dd></div>
+            <div><dt>状态</dt><dd class="mono">已出片</dd></div>
+            <div><dt>委托方</dt><dd>苏</dd></div>
+          </dl>
+        </div>
+        <p class="receipt__note">这是演示原型，不会真的发布到公网。地址、二维码与单号均为虚构。</p>
+      </div>
+      <footer class="receipt__foot">
+        <button class="btn btn--ink" type="button" data-action="dispatch-go">去取件 <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M3 15L15 3M6 3h9v9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
+        <button class="btn" type="button" data-close>稍后再看</button>
+      </footer>
+      <div class="receipt__barcode" id="dispatch-barcode" aria-hidden="true"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -38,7 +38,9 @@ build/
 
 ## Trae ##
 .trae/
+
 ## Pi ##
 .pi/
 
 .archify/
+.impeccable/

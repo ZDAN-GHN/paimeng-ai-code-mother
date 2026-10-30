@@ -21,8 +21,4 @@ Only invariants that are not obvious from the source, scripts, or tests belong h
 ## Scope and data
 
 - The repository-root `archive/` Java and Vue code is read-only reference material.
-- Reticle/end-to-end evidence uses the running development app and its real databases. The Vitest integration harness resets storage and must stay on the isolated `_test` databases; never point a resetting suite at the development databases.
-
-## Tooling
-
-- If re-running Reticle `init`, pass `--no-mcp`; the default recreates `CLAUDE.md`, re-adds the Reticle block to this file, and restores the `/reticle` command.
+- End-to-end evidence uses the running development app and its real databases. The Vitest integration harness resets storage and must stay on the isolated `_test` databases; never point a resetting suite at the development databases.

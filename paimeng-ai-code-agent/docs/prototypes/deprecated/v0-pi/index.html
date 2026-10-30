@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>派蒙 AI 应用工坊 · 界面原型</title>
+  <meta name="description" content="派蒙 AI 应用工坊的界面原型：v0 的布局，pi.dev 的视觉语言。">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23252f3d'/%3E%3Cpath d='M8 7h11v5H13v3h6v5h-6v5H8z' fill='%23ebe7e4'/%3E%3Crect x='20' y='19' width='5' height='6' fill='%23b86b52'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <script defer src="app.js"></script>
+</head>
+<body data-screen="home" id="top">
+
+  <div class="marketing-chrome" id="marketing-chrome">
+      <aside class="announcement">
+        <p>派蒙 1.0：从一句话到可访问的网站。<a href="#templates">看看能做出什么</a> · 原型界面，非真实生成。</p>
+      </aside>
+    <header class="site-header">
+      <div class="nav-wrap">
+        <nav class="nav" aria-label="主导航">
+          <a class="brand" href="#top" data-screen-link="home" aria-label="派蒙 AI 应用工坊，返回首页">
+            <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+              <rect x="2" y="2" width="14" height="7" fill="currentColor"></rect>
+              <rect x="2" y="2" width="6" height="28" fill="currentColor"></rect>
+              <rect x="16" y="9" width="9" height="8" fill="currentColor" opacity=".72"></rect>
+              <rect x="20" y="20" width="7" height="7" class="mark-accent"></rect>
+            </svg>
+            <span class="brand-text">
+              <strong>派蒙</strong>
+              <small>AI APPLICATION WORKSHOP</small>
+            </span>
+          </a>
+
+          <div class="nav-links" id="nav-links">
+            <a href="#templates">模板</a>
+            <a href="#showcase">作品</a>
+            <a href="#" data-toast="文档：原型未接入">文档</a>
+            <a href="#" data-toast="模型管理：原型未接入">模型</a>
+          </div>
+
+          <div class="nav-actions">
+            <button class="icon-btn theme-toggle" type="button" aria-label="切换深浅主题" title="切换深浅主题">
+              <svg class="icon-sun" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                <circle cx="10" cy="10" r="3.4" fill="none" stroke="currentColor" stroke-width="1.2"></circle>
+                <path d="M10 1.5v2.2M10 16.3v2.2M1.5 10h2.2M16.3 10h2.2M4 4l1.6 1.6M14.4 14.4L16 16M16 4l-1.6 1.6M5.6 14.4L4 16" fill="none" stroke="currentColor" stroke-width="1.2"></path>
+              </svg>
+              <svg class="icon-moon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                <path d="M15.8 12.6A6.6 6.6 0 0 1 7.4 4.2a6.6 6.6 0 1 0 8.4 8.4Z" fill="none" stroke="currentColor" stroke-width="1.2"></path>
+              </svg>
+            </button>
+            <button class="btn btn--ghost" type="button" data-screen-link="workspace">进入工作台 <span aria-hidden="true">→</span></button>
+            <button class="icon-btn nav-burger" type="button" aria-label="展开导航" aria-expanded="false" aria-controls="nav-links">
+              <span class="burger-line" aria-hidden="true"></span>
+              <span class="burger-line" aria-hidden="true"></span>
+            </button>
+          </div>
+        </nav>
+      </div>
+    </header>
+
+    <main class="page page--home" id="screen-home">
+      <div class="shell">
+        <section class="hero" aria-labelledby="hero-title">
+          <p class="eyebrow"><span class="eyebrow-rule" aria-hidden="true"></span>PAIMENG · AI APPLICATION WORKSHOP<span class="eyebrow-rule" aria-hidden="true"></span></p>
+          <h1 class="hero-title" id="hero-title">许多 AI 都能写页面，<br>但这一间工坊，<span class="accent">是你的。</span></h1>
+          <p class="hero-sub">把一个想法交给派蒙：它挑选技术栈、写出页面、构建并打开预览。<br class="br-desktop">之后，用一句话继续改。</p>
+          <p class="hero-mono mono">NO CODE <span>·</span> TALK TO EDIT <span>·</span> LIVE PREVIEW <span>·</span> DEPLOY</p>
+        </section>
+
+        <form class="composer" id="create-form" novalidate>
+          <div class="composer-tabs" role="tablist" aria-label="技术栈">
+            <span class="composer-tabs-label mono">技术栈</span>
+            <button class="tech-tab is-active" type="button" role="tab" aria-selected="true" data-tech="auto">自动</button>
+            <button class="tech-tab" type="button" role="tab" aria-selected="false" data-tech="vue">Vue 3</button>
+            <button class="tech-tab" type="button" role="tab" aria-selected="false" data-tech="react">React</button>
+            <button class="tech-tab" type="button" role="tab" aria-selected="false" data-tech="html">HTML</button>
+            <span class="composer-step mono" id="tech-hint">AI 选择</span>
+          </div>
+
+          <div class="composer-body">
+            <label class="sr-only" for="prompt">描述你想做的应用</label>
+            <textarea class="composer-input" id="prompt" name="prompt" rows="4" maxlength="1000"
+              placeholder="描述你想做的应用。例如：一家卖手作陶器的小店，安静、温暖，有商品列表、详情页和购物袋。"></textarea>
+            <div class="composer-foot">
+              <div class="composer-tools">
+                <button class="text-btn" type="button" data-toast="图片附件：原型未接入">＋ 图片</button>
+                <button class="text-btn" type="button" data-toast="语音输入：原型未接入">◉ 语音</button>
+                <button class="text-btn" type="button" data-toast="模板选择：下方可直接挑一个">▤ 模板</button>
+                <span class="composer-count mono" id="prompt-count">0 / 1000</span>
+              </div>
+              <div class="composer-submit">
+                <span class="composer-key mono">⌘ ↵</span>
+                <button class="btn btn--primary" type="submit" id="create-button">生成应用 <span aria-hidden="true">→</span></button>
+              </div>
+            </div>
+          </div>
+        </form>
+
+        <div class="quick-chips" aria-label="快速开始">
+          <button class="chip" type="button" data-prompt="创建一个安静的个人博客，包含文章列表、详情页、分类标签和关于我。排版要像一本纸质刊物，支持响应式布局和 Markdown 文章。">个人博客</button>
+          <button class="chip" type="button" data-prompt="设计一个专业的企业官网，包含公司介绍、产品服务、新闻资讯和联系我们。风格克制、可信，有轮播图、客户案例和在线客服入口。">企业官网</button>
+          <button class="chip" type="button" data-prompt="做一个手作陶器在线商店，包含商品列表、商品详情、购物袋和关于页。视觉温暖、安静，像一本器物图录，不要常见的电商模板感。">在线商店</button>
+          <button class="chip" type="button" data-prompt="制作一个摄影作品集网站，包含瀑布流作品墙、项目详情和联系方式。深色背景，让照片自己说话，支持图片放大预览。">作品集</button>
+          <button class="chip" type="button" data-prompt="做一个轻量的经营数据看板，包含今日概览、趋势图、渠道明细和导出。信息密度高但可读，适合每天打开看一眼。">数据看板</button>
+        </div>
+
+        <p class="hero-note mono"><span class="dot dot--ok" aria-hidden="true"></span>任务在服务端继续，关掉页面不会中断 <span>·</span> 生成频率 60s / 次 <span>·</span> 模型 codegen.default</p>
+      </div>
+
+      <section class="section shell" id="templates" aria-labelledby="templates-title">
+        <div class="section-head">
+          <div class="section-heading">
+            <p class="section-label mono">01 / TEMPLATES</p>
+            <h2 id="templates-title">从模板开始</h2>
+            <p class="section-sub">选一个起点，再告诉派蒙要改成什么样。<em>Start with something solid.</em></p>
+          </div>
+          <div class="filters" role="group" aria-label="模板分类">
+            <button class="filter is-active" type="button" data-filter="all" aria-pressed="true">全部</button>
+            <button class="filter" type="button" data-filter="shop" aria-pressed="false">商店</button>
+            <button class="filter" type="button" data-filter="personal" aria-pressed="false">个人</button>
+            <button class="filter" type="button" data-filter="tool" aria-pressed="false">工具</button>
+            <button class="filter" type="button" data-filter="event" aria-pressed="false">活动</button>
+          </div>
+        </div>
+
+        <div class="card-grid" id="template-grid">
+          <article class="tcard" data-category="shop" data-prompt="做一个手作陶器在线商店，包含商品列表、商品详情、购物袋和关于页。视觉温暖、安静，像一本器物图录，不要常见的电商模板感。">
+            <div class="figure-head"><span class="live-dot" aria-hidden="true"></span><span>FIG. 01 — 陶土商店</span><span class="figure-head-end mono">VUE 3</span></div>
+            <div class="tcard-stage">
+              <div class="mini mini--clay" aria-hidden="true">
+                <div class="mini-nav"><span class="mini-word">陶土</span><span class="mini-links">器物&nbsp;&nbsp;工作室&nbsp;&nbsp;关于</span></div>
+                <div class="mini-hero">
+                  <div class="mini-copy"><span class="mini-kicker">HANDMADE</span><span class="mini-h">手作的器物，<br>有它自己的温度。</span><span class="mini-btn">浏览器物 →</span></div>
+                  <div class="mini-art"><span class="mini-vase mv1"></span><span class="mini-vase mv2"></span><span class="mini-vase mv3"></span></div>
+                </div>
+                <div class="mini-row"><span></span><span></span><span></span></div>
+              </div>
+              <button class="tcard-use" type="button">使用模板 <span aria-hidden="true">→</span></button>
+            </div>
+            <div class="tcard-body">
+              <div class="tcard-title-row"><h3>陶土商店</h3><span class="mono">12 文件</span></div>
+              <p>器物陈列、商品详情、购物袋与关于页。宋体 + 陶土色。</p>
+              <div class="tcard-meta mono"><span>构建 2.1s</span><span>可部署</span><span>响应式</span></div>
+            </div>
+          </article>
+
+          <article class="tcard" data-category="personal" data-prompt="创建一个安静的个人博客，包含文章列表、详情页、分类标签和关于我。排版要像一本纸质刊物，支持响应式布局和 Markdown 文章。">
+            <div class="figure-head"><span class="live-dot" aria-hidden="true"></span><span>FIG. 02 — 纸上博客</span><span class="figure-head-end mono">VUE 3</span></div>
+            <div class="tcard-stage">
+              <div class="mini mini--paper" aria-hidden="true">
+                <div class="mini-masthead"><span>纸 上</span><span class="mini-masthead-meta">ON PAPER · 2026</span></div>
+                <div class="mini-rule"></div>
+                <div class="mini-feature"><div class="mini-feature-text"><span class="mini-kicker">随笔 / 01</span><span class="mini-h">慢一点的<br>阅读方式</span><span class="mini-lines"><i></i><i></i><i></i></span></div><div class="mini-photo"></div></div>
+                <div class="mini-row mini-row--text"><span></span><span></span><span></span></div>
+              </div>
+              <button class="tcard-use" type="button">使用模板 <span aria-hidden="true">→</span></button>
+            </div>
+            <div class="tcard-body">
+              <div class="tcard-title-row"><h3>纸上博客</h3><span class="mono">9 文件</span></div>
+              <p>刊头、文章流、分类与关于页。为长文阅读而排。</p>
+              <div class="tcard-meta mono"><span>构建 1.6s</span><span>可部署</span><span>Markdown</span></div>
+            </div>
+          </article>
+
+          <article class="tcard" data-category="tool" data-prompt="设计一个 SaaS 产品落地页，包含导航、价值主张、功能分区、价格表和常见问题。视觉简洁、有秩序，适合 B2B 产品，包含等待名单表单。">
+            <div class="figure-head"><span class="live-dot" aria-hidden="true"></span><span>FIG. 03 — 潮汐 SaaS</span><span class="figure-head-end mono">REACT</span></div>
+            <div class="tcard-stage">
+              <div class="mini mini--saas" aria-hidden="true">
+                <div class="mini-nav mini-nav--dark"><span class="mini-word">TIDE</span><span class="mini-links">Product&nbsp;&nbsp;Pricing&nbsp;&nbsp;Docs</span><span class="mini-pill">Start →</span></div>
+                <div class="mini-saas-hero"><span class="mini-kicker">SHIP FASTER</span><span class="mini-h">把发布节奏<br>交给潮汐。</span><span class="mini-btn mini-btn--light">加入等待名单 →</span></div>
+                <div class="mini-dash"><div class="mini-chart"><i style="--h:38%"></i><i style="--h:58%"></i><i style="--h:46%"></i><i style="--h:78%"></i><i style="--h:64%"></i><i style="--h:90%"></i></div><div class="mini-stat"><span>+38%</span><small>DEPLOY FREQUENCY</small></div></div>
+              </div>
+              <button class="tcard-use" type="button">使用模板 <span aria-hidden="true">→</span></button>
+            </div>
+            <div class="tcard-body">
+              <div class="tcard-title-row"><h3>潮汐 SaaS</h3><span class="mono">14 文件</span></div>
+              <p>价值主张、功能、价格表与等待名单。冷色、陡峭。</p>
+              <div class="tcard-meta mono"><span>构建 2.8s</span><span>可部署</span><span>深浅色</span></div>
+            </div>
+          </article>
+
+          <article class="tcard" data-category="personal" data-prompt="制作一个摄影作品集网站，包含瀑布流作品墙、项目详情和联系方式。深色背景，让照片自己说话，支持图片放大预览。">
+            <div class="figure-head"><span class="live-dot" aria-hidden="true"></span><span>FIG. 04 — 北岸摄影</span><span class="figure-head-end mono">HTML</span></div>
+            <div class="tcard-stage">
+              <div class="mini mini--photo" aria-hidden="true">
+                <div class="mini-nav mini-nav--dark"><span class="mini-word">北岸</span><span class="mini-links">WORK&nbsp;&nbsp;ABOUT&nbsp;&nbsp;CONTACT</span></div>
+                <div class="mini-photo-grid">
+                  <div class="mini-photo p1"></div><div class="mini-photo p2"></div><div class="mini-photo p3"></div><div class="mini-photo p4"></div><div class="mini-photo p5"></div>
+                </div>
+                <span class="mini-photo-caption">舟山 · 2026 · 35MM</span>
+              </div>
+              <button class="tcard-use" type="button">使用模板 <span aria-hidden="true">→</span></button>
+            </div>
+            <div class="tcard-body">
+              <div class="tcard-title-row"><h3>北岸摄影</h3><span class="mono">6 文件</span></div>
+              <p>暗色作品墙、项目页与联系方式。图片优先。</p>
+              <div class="tcard-meta mono"><span>构建 1.1s</span><span>可部署</span><span>单文件</span></div>
+            </div>
+          </article>
+
+          <article class="tcard" data-category="tool" data-prompt="做一个轻量的经营数据看板，包含今日概览、趋势图、渠道明细和导出。信息密度高但可读，适合每天打开看一眼。">
+            <div class="figure-head"><span class="live-dot" aria-hidden="true"></span><span>FIG. 05 — 经营看板</span><span class="figure-head-end mono">REACT</span></div>
+            <div class="tcard-stage">
+              <div class="mini mini--dash" aria-hidden="true">
+                <div class="mini-dash-side"><span class="mini-logo">◫</span><i></i><i></i><i></i><i></i></div>
+                <div class="mini-dash-main">
+                  <div class="mini-dash-head"><span>今日概览</span><span class="mini-date">10 / 29</span></div>
+                  <div class="mini-stats"><div><b>¥ 12.8k</b><small>成交额</small></div><div><b>324</b><small>订单</small></div><div><b>2.4%</b><small>转化率</small></div></div>
+                  <div class="mini-chart mini-chart--wide"><i style="--h:32%"></i><i style="--h:48%"></i><i style="--h:40%"></i><i style="--h:66%"></i><i style="--h:58%"></i><i style="--h:80%"></i><i style="--h:72%"></i><i style="--h:94%"></i></div>
+                </div>
+              </div>
+              <button class="tcard-use" type="button">使用模板 <span aria-hidden="true">→</span></button>
+            </div>
+            <div class="tcard-body">
+              <div class="tcard-title-row"><h3>经营看板</h3><span class="mono">18 文件</span></div>
+              <p>概览、趋势、渠道与导出。为每天五分钟而设计。</p>
+              <div class="tcard-meta mono"><span>构建 3.2s</span><span>可部署</span><span>数据图表</span></div>
+            </div>
+          </article>
+
+          <article class="tcard" data-category="event" data-prompt="做一个秋日书展的活动页，包含活动介绍、参展方、日程表和报名表单。像一张印刷海报，暖黄色调，有明确的日期和地点。">
+            <div class="figure-head"><span class="live-dot" aria-hidden="true"></span><span>FIG. 06 — 秋日书展</span><span class="figure-head-end mono">VUE 3</span></div>
+            <div class="tcard-stage">
+              <div class="mini mini--event" aria-hidden="true">
+                <span class="mini-event-kicker">AUTUMN BOOK FAIR · 2026</span>
+                <span class="mini-event-title">秋日<br>书展</span>
+                <span class="mini-event-date">10.31 — 11.02</span>
+                <span class="mini-event-place">杭州 · 天目里 · 11:00—20:00</span>
+                <div class="mini-event-rule"></div>
+                <div class="mini-event-foot"><span>36 家独立出版</span><span>报名 →</span></div>
+              </div>
+              <button class="tcard-use" type="button">使用模板 <span aria-hidden="true">→</span></button>
+            </div>
+            <div class="tcard-body">
+              <div class="tcard-title-row"><h3>秋日书展</h3><span class="mono">8 文件</span></div>
+              <p>海报式首屏、参展方、日程与报名表单。</p>
+              <div class="tcard-meta mono"><span>构建 1.4s</span><span>可部署</span><span>表单</span></div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section shell" id="showcase" aria-labelledby="showcase-title">
+        <div class="section-head">
+          <div class="section-heading">
+            <p class="section-label mono">02 / SHOWCASE</p>
+            <h2 id="showcase-title">别人已经做出来的</h2>
+            <p class="section-sub">同一个提示词，不同的人会得到不同的东西。<em>Made with Paimeng.</em></p>
+          </div>
+          <button class="btn btn--bracket" type="button" data-toast="作品广场：原型未接入">浏览全部作品 →</button>
+        </div>
+
+        <div class="showcase-grid">
+          <article class="work">
+            <div class="work-cover mini mini--clay" aria-hidden="true">
+              <div class="mini-nav"><span class="mini-word">陶土</span><span class="mini-links">器物&nbsp;&nbsp;工作室</span></div>
+              <div class="mini-hero"><div class="mini-copy"><span class="mini-kicker">HANDMADE</span><span class="mini-h">手作的器物</span></div><div class="mini-art"><span class="mini-vase mv1"></span><span class="mini-vase mv2"></span></div></div>
+              <div class="mini-row"><span></span><span></span><span></span></div>
+            </div>
+            <div class="work-body">
+              <div class="work-title-row"><h3>陶土商店</h3><span class="mono">V4</span></div>
+              <div class="work-by"><span class="avatar avatar--a">岚</span><span>阿岚</span><span class="work-meta mono">1.2K 浏览 · 已部署</span></div>
+            </div>
+          </article>
+          <article class="work">
+            <div class="work-cover mini mini--photo" aria-hidden="true">
+              <div class="mini-nav mini-nav--dark"><span class="mini-word">北岸</span><span class="mini-links">WORK</span></div>
+              <div class="mini-photo-grid"><div class="mini-photo p1"></div><div class="mini-photo p2"></div><div class="mini-photo p3"></div><div class="mini-photo p4"></div><div class="mini-photo p5"></div></div>
+            </div>
+            <div class="work-body">
+              <div class="work-title-row"><h3>北岸摄影</h3><span class="mono">V2</span></div>
+              <div class="work-by"><span class="avatar avatar--b">北</span><span>北岸</span><span class="work-meta mono">860 浏览 · 已部署</span></div>
+            </div>
+          </article>
+          <article class="work">
+            <div class="work-cover mini mini--saas" aria-hidden="true">
+              <div class="mini-nav mini-nav--dark"><span class="mini-word">TIDE</span><span class="mini-links">Product</span></div>
+              <div class="mini-saas-hero"><span class="mini-kicker">SHIP FASTER</span><span class="mini-h">把发布节奏<br>交给潮汐。</span></div>
+              <div class="mini-dash"><div class="mini-chart"><i style="--h:38%"></i><i style="--h:58%"></i><i style="--h:46%"></i><i style="--h:78%"></i><i style="--h:64%"></i><i style="--h:90%"></i></div><div class="mini-stat"><span>+38%</span><small>DEPLOY</small></div></div>
+            </div>
+            <div class="work-body">
+              <div class="work-title-row"><h3>潮汐分析</h3><span class="mono">V7</span></div>
+              <div class="work-by"><span class="avatar avatar--c">林</span><span>林一</span><span class="work-meta mono">2.3K 浏览 · 已部署</span></div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <footer class="site-footer shell">
+        <div class="footer-mark">
+          <svg class="footer-glyph" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+            <rect x="2" y="2" width="14" height="7" fill="currentColor"></rect>
+            <rect x="2" y="2" width="6" height="28" fill="currentColor"></rect>
+            <rect x="16" y="9" width="9" height="8" fill="currentColor" opacity=".72"></rect>
+            <rect x="20" y="20" width="7" height="7" class="mark-accent"></rect>
+          </svg>
+          <div><strong>派蒙 AI 应用工坊</strong><span class="mono">界面原型 · V0 LAYOUT × PI.DEV</span></div>
+        </div>
+        <p class="footer-note mono">这是静态原型：生成、部署、版本与登录均为演示数据，不会调用真实模型。</p>
+        <div class="footer-links mono"><a href="#" data-toast="文档：原型未接入">文档</a><a href="#" data-toast="模型：原型未接入">模型</a><a href="#" data-toast="管理端：原型未接入">管理端</a></div>
+      </footer>
+    </main>
+  </div>
+
+  <div class="app" id="screen-workspace" hidden>
+    <aside class="app-sidebar" id="app-sidebar" aria-label="应用列表">
+      <div class="sidebar-head">
+        <a class="brand brand--sm" href="#top" data-screen-link="home" aria-label="返回首页">
+          <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+            <rect x="2" y="2" width="14" height="7" fill="currentColor"></rect>
+            <rect x="2" y="2" width="6" height="28" fill="currentColor"></rect>
+            <rect x="16" y="9" width="9" height="8" fill="currentColor" opacity=".72"></rect>
+            <rect x="20" y="20" width="7" height="7" class="mark-accent"></rect>
+          </svg>
+          <span class="brand-text"><strong>派蒙</strong><small>WORKSHOP</small></span>
+        </a>
+        <button class="icon-btn sidebar-close" type="button" aria-label="收起侧栏" data-action="toggle-sidebar">×</button>
+      </div>
+
+      <button class="new-app" type="button" data-action="new-app">＋ 新建应用 <kbd class="mono">⌘ K</kbd></button>
+
+      <label class="search">
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="4.4" fill="none" stroke="currentColor" stroke-width="1.2"></circle><path d="m10.4 10.4 3 3" fill="none" stroke="currentColor" stroke-width="1.2"></path></svg>
+        <input type="search" id="app-search" placeholder="搜索应用" autocomplete="off">
+        <kbd class="mono">/</kbd>
+      </label>
+
+      <div class="sidebar-scroll">
+        <p class="side-label mono">最近 <span id="recent-count">5</span></p>
+        <ul class="app-list" id="app-list">
+          <li><button class="app-row is-active" type="button" data-app="陶土商店">
+            <span class="app-thumb app-thumb--clay" aria-hidden="true"><i></i></span>
+            <span class="app-row-text"><strong>陶土商店</strong><small class="mono">v4 · 刚刚</small></span>
+            <span class="app-row-dot dot dot--ok" aria-label="预览就绪"></span>
+          </button></li>
+          <li><button class="app-row" type="button" data-app="北岸摄影">
+            <span class="app-thumb app-thumb--photo" aria-hidden="true"><i></i></span>
+            <span class="app-row-text"><strong>北岸摄影</strong><small class="mono">v2 · 12 分钟前</small></span>
+          </button></li>
+          <li><button class="app-row" type="button" data-app="潮汐 SaaS 落地页">
+            <span class="app-thumb app-thumb--saas" aria-hidden="true"><i></i></span>
+            <span class="app-row-text"><strong>潮汐 SaaS 落地页</strong><small class="mono">v7 · 昨天 18:40</small></span>
+          </button></li>
+          <li><button class="app-row" type="button" data-app="纸上博客">
+            <span class="app-thumb app-thumb--paper" aria-hidden="true"><i></i></span>
+            <span class="app-row-text"><strong>纸上博客</strong><small class="mono">v1 · 10 月 26 日</small></span>
+          </button></li>
+          <li><button class="app-row" type="button" data-app="经营看板">
+            <span class="app-thumb app-thumb--dash" aria-hidden="true"><i></i></span>
+            <span class="app-row-text"><strong>经营看板</strong><small class="mono">v3 · 10 月 24 日</small></span>
+          </button></li>
+        </ul>
+
+        <p class="side-label mono">已部署</p>
+        <ul class="deploy-list">
+          <li><a class="deploy-row" href="#" data-toast="原型：不会真的打开外部站点"><span class="dot dot--ok" aria-hidden="true"></span><span>taoci.paimeng.app</span><span class="mono">↗</span></a></li>
+          <li><a class="deploy-row" href="#" data-toast="原型：不会真的打开外部站点"><span class="dot dot--ok" aria-hidden="true"></span><span>beian.paimeng.app</span><span class="mono">↗</span></a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-foot">
+        <div class="runtime-line mono"><span class="dot dot--ok" aria-hidden="true"></span>HARNESS 在线 · PI-DURABLE</div>
+        <button class="user-row" type="button" data-toast="账户菜单：原型未接入">
+          <img class="avatar-img" src="assets/paimeng-avatar.png" alt="" width="28" height="28">
+          <span class="user-text"><strong>zdan</strong><small class="mono">管理员 · 本地环境</small></span>
+          <span aria-hidden="true">⋯</span>
+        </button>
+      </div>
+    </aside>
+
+    <div class="sidebar-scrim" id="sidebar-scrim" hidden></div>
+
+    <div class="app-main">
+      <header class="app-head">
+        <button class="icon-btn sidebar-toggle" type="button" aria-label="展开侧栏" data-action="toggle-sidebar">☰</button>
+        <div class="crumbs">
+          <span class="mono">我的应用</span>
+          <span class="crumb-sep" aria-hidden="true">/</span>
+          <strong id="app-title">陶土商店</strong>
+          <span class="status-pill" id="app-status"><span class="dot dot--ok" aria-hidden="true"></span><span id="status-text">可预览 v4</span></span>
+        </div>
+        <div class="head-actions">
+          <button class="icon-btn theme-toggle" type="button" aria-label="切换深浅主题" title="切换深浅主题">
+            <svg class="icon-sun" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+              <circle cx="10" cy="10" r="3.4" fill="none" stroke="currentColor" stroke-width="1.2"></circle>
+              <path d="M10 1.5v2.2M10 16.3v2.2M1.5 10h2.2M16.3 10h2.2M8.6 3.4l.6 1.4M10.8 15.2l.6 1.4M3.4 8.6L4.8 9.2M15.2 10.8l1.4.6M3.4 11.4l1.4-.6M15.2 9.2l1.4-.6M8.6 16.6l.6-1.4M10.8 4.8l.6-1.4" fill="none" stroke="currentColor" stroke-width="1.1"></path>
+            </svg>
+            <svg class="icon-moon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+              <path d="M15.8 12.6A6.6 6.6 0 0 1 7.4 4.2a6.6 6.6 0 1 0 8.4 8.4Z" fill="none" stroke="currentColor" stroke-width="1.2"></path>
+            </svg>
+          </button>
+          <button class="btn btn--plain" type="button" data-open="versions"><span class="mono">版本</span> v4 <span aria-hidden="true">▾</span></button>
+          <button class="btn btn--plain" type="button" data-toast="导出：原型会打包 12 个文件">导出</button>
+          <button class="btn btn--primary" type="button" data-open="deploy">部署 <span aria-hidden="true">↗</span></button>
+          <button class="icon-btn" type="button" aria-label="更多操作" data-toast="更多操作：原型未接入">⋯</button>
+        </div>
+        <div class="mobile-pane-toggle" role="group" aria-label="移动端面板">
+          <button type="button" class="is-active" data-pane="chat" aria-pressed="true">对话</button>
+          <button type="button" data-pane="preview" aria-pressed="false">预览</button>
+        </div>
+      </header>
+
+      <div class="app-body" id="app-body" data-pane="chat">
+        <section class="chat-panel" aria-label="对话">
+          <div class="chat-scroll" id="chat-scroll"></div>
+          <form class="chat-composer" id="chat-form">
+            <div class="chat-composer-box">
+              <label class="sr-only" for="followup">继续描述要改的地方</label>
+              <textarea id="followup" rows="2" maxlength="1000" placeholder="继续描述要改的地方，例如：把主色换成墨绿，再加一个关于页。"></textarea>
+              <div class="chat-composer-foot">
+                <div class="chat-tools">
+                  <button class="text-btn" type="button" data-toast="图片附件：原型未接入">＋</button>
+                  <button class="text-btn" type="button" data-toast="图片附件：原型未接入">图片</button>
+                  <button class="text-btn" type="button" data-toast="语音输入：原型未接入">语音</button>
+                  <span class="model-pill mono"><span class="dot dot--ok" aria-hidden="true"></span>codegen.default</span>
+                </div>
+                <div class="chat-send">
+                  <span class="mono hint">↵ 发送</span>
+                  <button class="btn btn--primary btn--icon" type="submit" aria-label="发送">↑</button>
+                </div>
+              </div>
+            </div>
+            <p class="composer-note mono" id="chat-note">Enter 发送 · Shift+Enter 换行 · 每 60 秒 1 次 · 断连不会取消任务</p>
+          </form>
+        </section>
+
+        <div class="splitter" aria-hidden="true"></div>
+
+        <section class="preview-panel" aria-label="预览与代码">
+          <div class="preview-tools">
+            <div class="preview-tabs" role="tablist" aria-label="预览或代码">
+              <button class="preview-tab is-active" type="button" role="tab" aria-selected="true" data-view="preview">预览</button>
+              <button class="preview-tab" type="button" role="tab" aria-selected="false" data-view="code">代码 <span class="tab-count mono">12</span></button>
+            </div>
+            <div class="device-toggle" role="group" aria-label="预览设备">
+              <button class="device-btn is-active" type="button" data-device="desktop" aria-pressed="true" aria-label="桌面预览" title="桌面预览">
+                <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="1.5" y="3" width="13" height="8.5" rx=".5" fill="none" stroke="currentColor" stroke-width="1.1"></rect><path d="M6 14h4M8 11.5V14" stroke="currentColor" stroke-width="1.1"></path></svg>
+              </button>
+              <button class="device-btn" type="button" data-device="mobile" aria-pressed="false" aria-label="手机预览" title="手机预览">
+                <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="4.5" y="1.5" width="7" height="13" rx="1" fill="none" stroke="currentColor" stroke-width="1.1"></rect><path d="M7.2 12.7h1.6" stroke="currentColor" stroke-width="1.1"></path></svg>
+              </button>
+            </div>
+            <div class="preview-actions">
+              <button class="icon-btn" type="button" aria-label="刷新预览" title="刷新预览" data-action="refresh">↻</button>
+              <button class="icon-btn" type="button" aria-label="新窗口打开" title="新窗口打开" data-toast="原型：不会真的打开外部页面">↗</button>
+            </div>
+          </div>
+
+          <div class="preview-body">
+            <div class="preview-canvas" id="preview-canvas">
+              <figure class="preview-figure">
+                <div class="browser" id="browser">
+                  <div class="browser-bar">
+                    <span class="browser-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span class="browser-url mono" id="browser-url">taoci.paimeng.app</span>
+                    <span class="browser-tools mono" aria-hidden="true">V4 · 200</span>
+                  </div>
+                  <div class="browser-viewport" id="browser-viewport">
+                    <div class="mock" id="mock-site">
+                      <header class="m-nav">
+                        <span class="m-brand">陶土<span>CLAY &amp; CO.</span></span>
+                        <nav class="m-links" aria-label="示例站点导航"><span>器物</span><span>工作室</span><span>关于</span></nav>
+                        <span class="m-bag">购物袋 <b>2</b></span>
+                      </header>
+
+                      <section class="m-hero">
+                        <div class="m-copy">
+                          <p class="m-kicker">HANDMADE · JINGDEZHEN · 2026</p>
+                          <h1>手作的器物，<br><em>有它自己的温度。</em></h1>
+                          <p class="m-lede">每一件都在工作室里慢慢成形。我们不追求一模一样，只留下手留下的痕迹。</p>
+                          <div class="m-actions"><span class="m-btn">浏览本季器物 <span aria-hidden="true">→</span></span><span class="m-link">关于陶土</span></div>
+                        </div>
+                        <div class="m-art" aria-label="陶器静物">
+                          <div class="m-arch"></div>
+                          <div class="m-vase v-a"></div>
+                          <div class="m-vase v-b"></div>
+                          <div class="m-vase v-c"></div>
+                          <div class="m-shadow"></div>
+                          <p class="m-art-label">FIG. 01 — STONEWARE, 2026</p>
+                        </div>
+                      </section>
+
+                      <section class="m-products">
+                        <div class="m-sec-head"><h2>本季新作</h2><span>VIEW ALL <span aria-hidden="true">→</span></span></div>
+                        <div class="m-grid">
+                          <article class="m-product">
+                            <div class="m-thumb th-a"><div class="m-pot p-a"></div></div>
+                            <div class="m-p-row"><h3>粗陶马克杯</h3><span>¥ 168</span></div>
+                            <p>砂岩釉 · 280ml</p>
+                          </article>
+                          <article class="m-product">
+                            <div class="m-thumb th-b"><div class="m-pot p-b"></div></div>
+                            <div class="m-p-row"><h3>灰釉花器</h3><span>¥ 320</span></div>
+                            <p>灰釉 · 高 18cm</p>
+                          </article>
+                          <article class="m-product">
+                            <div class="m-thumb th-c"><div class="m-pot p-c"></div></div>
+                            <div class="m-p-row"><h3>手捏茶碗</h3><span>¥ 240</span></div>
+                            <p>柴烧 · 口径 12cm</p>
+                          </article>
+                        </div>
+                      </section>
+
+                      <footer class="m-foot"><span>陶土工作室 · 景德镇</span><span>SHIPPING WORLDWIDE</span></footer>
+                    </div>
+                    <div class="preview-loading" id="preview-loading" hidden>
+                      <span class="loading-label mono">正在构建预览</span>
+                      <span class="loading-serif">把你的描述变成页面</span>
+                      <span class="loading-bar"><i></i></span>
+                      <span class="loading-count mono" id="loading-count">03 / 12 FILES</span>
+                    </div>
+                  </div>
+                </div>
+                <figcaption class="figure-caption">
+                  <span class="live-dot" aria-hidden="true"></span>
+                  <span>FIG. 04 — 实时预览</span>
+                  <span class="figure-caption-meta mono" id="preview-meta">V4 · 1440 × 900 · 预览就绪</span>
+                </figcaption>
+              </figure>
+            </div>
+
+            <div class="code-pane" id="code-pane" hidden>
+              <div class="file-tree">
+                <p class="tree-root mono">TAOCI-SHOP /</p>
+                <p class="tree-group mono">SRC</p>
+                <button class="tree-file is-active" type="button"><span>App.vue</span><span class="tree-mark tree-mark--m">M</span></button>
+                <button class="tree-file" type="button" data-toast="原型只展示 App.vue"><span>components/</span></button>
+                <button class="tree-file tree-file--indent" type="button" data-toast="原型只展示 App.vue"><span>SiteNav.vue</span></button>
+                <button class="tree-file tree-file--indent" type="button" data-toast="原型只展示 App.vue"><span>VesselStage.vue</span></button>
+                <button class="tree-file tree-file--indent" type="button" data-toast="原型只展示 App.vue"><span>ProductGrid.vue</span></button>
+                <button class="tree-file" type="button" data-toast="原型只展示 App.vue"><span>data/products.ts</span><span class="tree-mark tree-mark--a">A</span></button>
+                <button class="tree-file" type="button" data-toast="原型只展示 App.vue"><span>styles/theme.css</span><span class="tree-mark tree-mark--m">M</span></button>
+                <p class="tree-group mono">PUBLIC</p>
+                <button class="tree-file" type="button" data-toast="原型只展示 App.vue"><span>uploads/mood.jpg</span></button>
+                <p class="tree-foot mono">12 FILES · VUE 3</p>
+              </div>
+              <div class="code-scroll">
+                <div class="code-head mono"><span>src/App.vue</span><span>UTF-8 · LF</span></div>
+<pre class="code"><code><span class="c-com">&lt;script setup lang="ts"&gt;</span>
+<span class="c-key">import</span> SiteNav <span class="c-key">from</span> <span class="c-str">'./components/SiteNav.vue'</span>
+<span class="c-key">import</span> VesselStage <span class="c-key">from</span> <span class="c-str">'./components/VesselStage.vue'</span>
+<span class="c-key">import</span> ProductGrid <span class="c-key">from</span> <span class="c-str">'./components/ProductGrid.vue'</span>
+<span class="c-key">import</span> { products } <span class="c-key">from</span> <span class="c-str">'./data/products'</span>
+
+<span class="c-key">const</span> title = <span class="c-str">'手作的器物，有它自己的温度。'</span>
+<span class="c-key">const</span> lede = <span class="c-str">'每一件都在工作室里慢慢成形。'</span>
+<span class="c-com">&lt;/script&gt;</span>
+
+<span class="c-tag">&lt;template&gt;</span>
+  <span class="c-tag">&lt;main</span> <span class="c-attr">class</span>=<span class="c-str">"clay"</span><span class="c-tag">&gt;</span>
+    <span class="c-tag">&lt;SiteNav</span> <span class="c-attr">:bag</span>=<span class="c-str">"2"</span> <span class="c-tag">/&gt;</span>
+
+    <span class="c-tag">&lt;section</span> <span class="c-attr">class</span>=<span class="c-str">"hero"</span><span class="c-tag">&gt;</span>
+      <span class="c-tag">&lt;div</span> <span class="c-attr">class</span>=<span class="c-str">"copy"</span><span class="c-tag">&gt;</span>
+        <span class="c-tag">&lt;p</span> <span class="c-attr">class</span>=<span class="c-str">"kicker"</span><span class="c-tag">&gt;</span>HANDMADE · 2026<span class="c-tag">&lt;/p&gt;</span>
+        <span class="c-tag">&lt;h1&gt;</span>{{ title }}<span class="c-tag">&lt;/h1&gt;</span>
+        <span class="c-tag">&lt;p</span> <span class="c-attr">class</span>=<span class="c-str">"lede"</span><span class="c-tag">&gt;</span>{{ lede }}<span class="c-tag">&lt;/p&gt;</span>
+        <span class="c-tag">&lt;a</span> <span class="c-attr">class</span>=<span class="c-str">"cta"</span> <span class="c-attr">href</span>=<span class="c-str">"/shop"</span><span class="c-tag">&gt;</span>浏览本季器物 →<span class="c-tag">&lt;/a&gt;</span>
+      <span class="c-tag">&lt;/div&gt;</span>
+      <span class="c-tag">&lt;VesselStage</span> <span class="c-attr">tone</span>=<span class="c-str">"clay"</span> <span class="c-tag">/&gt;</span>
+    <span class="c-tag">&lt;/section&gt;</span>
+
+    <span class="c-tag">&lt;ProductGrid</span> <span class="c-attr">:items</span>=<span class="c-str">"products"</span> <span class="c-tag">/&gt;</span>
+  <span class="c-tag">&lt;/main&gt;</span>
+<span class="c-tag">&lt;/template&gt;</span>
+
+<span class="c-tag">&lt;style</span> <span class="c-attr">scoped</span><span class="c-tag">&gt;</span>
+.clay { background: <span class="c-num">#f7f2e9</span>; color: <span class="c-num">#2f2a26</span>; }
+.hero { display: grid; grid-template-columns: <span class="c-num">1.05fr</span> <span class="c-num">.95fr</span>; }
+.m-btn { border-bottom: <span class="c-num">1px</span> solid currentColor; }
+<span class="c-tag">&lt;/style&gt;</span></code></pre>
+              </div>
+            </div>
+          </div>
+
+          <div class="preview-statusbar mono" id="preview-statusbar">
+            <span><span class="dot dot--ok" aria-hidden="true"></span><span id="statusbar-state">预览就绪</span></span>
+            <span>12 文件</span><span>VUE 3</span><span>构建 2.1s</span><span class="statusbar-right">V4 · 21:04</span>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <nav class="proto-nav" aria-label="原型页面">
+    <span class="proto-label mono"><span class="dot" aria-hidden="true"></span>PROTOTYPE</span>
+    <button class="proto-btn is-active" type="button" data-screen-link="home" aria-current="page">首页</button>
+    <button class="proto-btn" type="button" data-screen-link="workspace">工作台</button>
+    <button class="proto-btn proto-btn--replay" type="button" id="replay-btn" hidden>↺ 重播</button>
+  </nav>
+
+  <div class="toast mono" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <div class="scrim" id="scrim" hidden></div>
+
+  <aside class="drawer" id="versions-drawer" role="dialog" aria-modal="true" aria-labelledby="versions-title" hidden>
+    <header class="drawer-head">
+      <div>
+        <p class="mono">HISTORY · 04</p>
+        <h2 id="versions-title">版本历史</h2>
+      </div>
+      <button class="icon-btn" type="button" aria-label="关闭版本历史" data-close="versions">×</button>
+    </header>
+    <p class="drawer-note">使用旧版本只会把页面换回去，不会删掉任何一版。原型中切换只改预览的示意状态，不会真的重建工程。</p>
+    <ol class="version-list" id="version-list">
+      <li class="version is-current">
+        <div class="vthumb vthumb--clay" aria-hidden="true"><span></span></div>
+        <div class="version-body">
+          <div class="version-title"><strong>上线首页与商品详情</strong><span class="tag tag--current">正在使用</span></div>
+          <p class="version-meta mono">V4 · 今天 21:04 · 12 文件 · +412 −0</p>
+          <div class="version-actions"><button class="btn btn--tiny" type="button" data-action="restore" disabled>当前版本</button><button class="btn btn--tiny btn--plain" type="button" data-toast="版本对比：原型未接入">和上一版比</button></div>
+        </div>
+      </li>
+      <li class="version">
+        <div class="vthumb vthumb--clay2" aria-hidden="true"><span></span></div>
+        <div class="version-body">
+          <div class="version-title"><strong>换成陶土色与宋体</strong></div>
+          <p class="version-meta mono">V3 · 今天 20:48 · 9 文件 · +186 −42</p>
+          <div class="version-actions"><button class="btn btn--tiny" type="button" data-action="restore">使用这一版本</button><button class="btn btn--tiny btn--plain" type="button" data-toast="版本对比：原型未接入">和上一版比</button></div>
+        </div>
+      </li>
+      <li class="version">
+        <div class="vthumb vthumb--paper" aria-hidden="true"><span></span></div>
+        <div class="version-body">
+          <div class="version-title"><strong>加一个关于页</strong></div>
+          <p class="version-meta mono">V2 · 今天 20:39 · 7 文件 · +88 −6</p>
+          <div class="version-actions"><button class="btn btn--tiny" type="button" data-action="restore">使用这一版本</button><button class="btn btn--tiny btn--plain" type="button" data-toast="版本对比：原型未接入">和上一版比</button></div>
+        </div>
+      </li>
+      <li class="version">
+        <div class="vthumb vthumb--first" aria-hidden="true"><span></span></div>
+        <div class="version-body">
+          <div class="version-title"><strong>第一版：商品列表</strong></div>
+          <p class="version-meta mono">V1 · 今天 20:31 · 5 文件 · +240 −0</p>
+          <div class="version-actions"><button class="btn btn--tiny" type="button" data-action="restore">使用这一版本</button><button class="btn btn--tiny btn--plain" type="button" disabled>最早一版</button></div>
+        </div>
+      </li>
+    </ol>
+    <footer class="drawer-foot mono"><span class="dot dot--ok" aria-hidden="true"></span>每个版本都有缩略图，随时可以切回来。</footer>
+  </aside>
+
+  <div class="modal" id="deploy-modal" role="dialog" aria-modal="true" aria-labelledby="deploy-title" hidden>
+    <div class="modal-panel">
+      <div class="figure-head"><span class="live-dot" aria-hidden="true"></span><span>DEPLOY — 2026.10.29</span><span class="figure-head-end mono">200 OK</span></div>
+      <div class="modal-body">
+        <p class="modal-kicker mono">DEPLOYMENT SUCCEEDED</p>
+        <h2 id="deploy-title">已经部署到公网。</h2>
+        <p class="modal-copy">网站可以从下面的地址访问。之后每次生成新版本，都可以再部署一次；旧版本仍然保留在版本历史里。</p>
+        <div class="url-row">
+          <code class="mono" id="deploy-url">https://taoci.paimeng.app</code>
+          <button class="btn btn--tiny" type="button" id="copy-url">复制</button>
+        </div>
+        <div class="deploy-meta mono"><span id="deploy-version">V4</span><span>构建 2.1s</span><span>部署 8.2s</span><span>42 MB</span></div>
+        <div class="modal-actions">
+          <button class="btn btn--primary" type="button" data-toast="原型：不会真的打开外部页面">访问网站 ↗</button>
+          <button class="btn btn--plain" type="button" data-close="deploy">稍后再看</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

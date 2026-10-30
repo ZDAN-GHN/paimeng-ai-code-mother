@@ -1,4 +1,3 @@
-import { withReticle } from '@reticlehq/next';
 import type { NextConfig } from 'next';
 const config: NextConfig = {
   poweredByHeader: false,
@@ -26,4 +25,4 @@ const config: NextConfig = {
   serverExternalPackages: ['archiver', 'playwright'],
   experimental: { cpus: 2 },
 };
-export default withReticle(config);
+export default config;
