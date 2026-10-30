@@ -90,4 +90,4 @@ harness 失联或重启后从持久任务恢复。Next 启动时先做一次恢�
 
 测试使用 `paimeng_app_test`、`paimeng_agent_test` 与 Redis DB15。隔离 E2E 启动器自行起夹具 harness、Next 与预览，检查健康状态并统一清理进程；不复用开发 harness。会重置存储的测试必须保持串行，E2E、system 与容器构建也不能并发压机器。
 
-备份用 `pg_dump` 保存两个数据库，连同运行目录与主密钥保管。不要删除旧 MySQL 容器或归档卷。一次性导入/旧 UI 对照脚本的适用条件见 [scripts/README.md](../scripts/README.md)。
+备份用 `pg_dump` 保存两个数据库，连同运行目录与主密钥保管。不要删除旧 MySQL 容器或归档卷。一次性导入/旧 UI 对照脚本的适用条件见 [scripts/AGENTS.md](../scripts/AGENTS.md)。

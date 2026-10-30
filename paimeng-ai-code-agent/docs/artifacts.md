@@ -72,11 +72,3 @@ ZIP 下载包含经过路径校验的真实源文件，不包含 `dist/`、`node
 `captureCover` 只接受有效发布键，不接受任意 URL。Chromium 启用浏览器沙箱，禁用 service worker，并拦截目标发布路径以外的请求。截图先写入临时 PNG，再重命名到 `runtime/covers/{deployKey}.png`。
 
 截图失败不会撤销已经完成的发布，服务端记录失败并保留原封面。封面目前存储在本地，未配置 COS 上传，也未验证外部对象存储。
-
-## 已执行的验证
-
-`tests/workspace.test.ts` 验证真实路径、符号链接、单文件大小、总字节与文件数上限。`tests/artifacts.test.ts` 使用真实 Docker 构建，验证生成的安装和构建脚本不执行、平台环境变量不可见，以及执行配置时不存在非回环网络接口。
-
-`tests/preview.test.ts` 使用真实 HTTP 和 Chromium，验证请求边界、旧六字符发布键、PNG 文件头及封面访问。浏览器场景验证 HTML、多文件 JavaScript 交互、Vue 构建预览、元素选择、下载与发布。
-
-这些测试证明列出的行为，不替代内核、Docker、Chromium 或 npm 供应链的独立安全审计。

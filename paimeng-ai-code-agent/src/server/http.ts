@@ -26,7 +26,10 @@ export async function withHeartbeat(work:()=>Promise<Response>){
   },
  }),{headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Accel-Buffering':'no','X-Content-Type-Options':'nosniff'}});
 }
+// JSON 通道的请求体上限，按实际 UTF-8 字节数算，不认 content-length 的声明。
+// multipart 通道（附件上传、语音转写）在 guardRequest 之前分流，上限各自实现。
 const maxBodyBytes=100000;
+// 读写都要求精确匹配 APP_ORIGIN：预览跑在另一个主机名，127.0.0.1 这类别名也不能发起写请求。
 export function guardRequest(req:Request){
  const config=getConfig();
  if(new URL(req.url).origin!==config.appOrigin) throw new BusinessError(403,40300,'管理接口来源不合法');

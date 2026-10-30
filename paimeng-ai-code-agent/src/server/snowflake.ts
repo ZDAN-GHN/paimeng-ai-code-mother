@@ -4,6 +4,11 @@ import { eq, sql } from 'drizzle-orm';
 import { db, type Transaction } from './db';
 import { snowflakeState } from './schema';
 
+/**
+ * 兼容旧 Java 发号器（MyBatis Flex 1.11.1）的布局：41 位时间 + 5 位数据中心 + 5 位机器 + 12 位序列。
+ * epoch 与位宽一旦改动，新号段就会和已迁移的历史 ID 落在同一列里重叠，所以这组看起来像遗留常量的值不能顺手"清理"。
+ * 节点固定 0：跨进程唯一性由 id_sequence 的行锁，加上 reserveImportedSnowflakeIds 抬高的已提交下界保证，不再从 MAC/PID 推导。
+ */
 export const SNOWFLAKE_EPOCH = 1680411660000n;
 export const SNOWFLAKE_NODE = 0n;
 const maxTimestamp = (1n << 41n) - 1n;

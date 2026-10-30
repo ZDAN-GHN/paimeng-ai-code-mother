@@ -8,7 +8,7 @@ web
 
 ## Stack
 
-现有代码库是 `paimeng-ai-code-agent/` 下的 Next.js + React + TypeScript 应用；界面原型是 `docs/prototypes/` 下的静态 HTML/CSS/JS，不进入生产构建。原型按生命周期分三档：`docs/prototypes/in-progress/`（正在推进实现）、`docs/prototypes/deprecated/`（生成过但不采纳）、`docs/prototypes/archive/`（实现后归档），生命周期规则见 `docs/README.md`。旧 Vue/Java 实现位于仓库根的 `archive/`（与 `docs/prototypes/archive/` 是两回事），只作为迁移参考，不是当前产品事实。
+现有代码库是 `paimeng-ai-code-agent/` 下的 Next.js + React + TypeScript 应用；界面原型是 `docs/prototypes/` 下的静态 HTML/CSS/JS，不进入生产构建。原型按生命周期分三档：`docs/prototypes/in-progress/`（正在推进实现）、`docs/prototypes/deprecated/`（生成过但不采纳）、`docs/prototypes/archive/`（实现后归档），生命周期规则见 `docs/AGENTS.md`。旧 Vue/Java 实现位于仓库根的 `archive/`（与 `docs/prototypes/archive/` 是两回事），只作为迁移参考，不是当前产品事实。
 
 ## Users
 
