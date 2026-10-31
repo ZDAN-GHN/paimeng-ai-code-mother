@@ -1,17 +1,7 @@
-Generating route types...
-✓ Types generated successfully
- Test Files  49 passed (49)
+npm run type-check              ✓ Types generated successfully
       Tests  470 passed (470)
-   Start at  19:10:52
-   Duration  5.24s (import 72%, tests 16%, transform 8%, setup 3%, worker 1%)
-
-
  Test Files  58 passed | 1 skipped (59)
       Tests  468 passed | 1 skipped (469)
-   Start at  19:10:58
-   Duration  238.29s (tests 89%, import 7%, setup 3%, transform 1%)
-
-> paimeng-ai-code-agent@0.1.0 verify:boundary
-> tsx scripts/verify/verify-boundary.ts
-
 项目目录外的未提交改动与基线一致
+UI 写法检查通过（34 个 tsx）
+E2E 写法检查通过（24 个 spec）
