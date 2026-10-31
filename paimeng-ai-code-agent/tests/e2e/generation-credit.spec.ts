@@ -50,8 +50,13 @@ async function setup(page: Page) {
     json: { code: 0, data: { id: 'gen-1', status: 'ready', error: null, stopReason: 'completed' }, message: 'ok' },
   }));
   await page.route('**/api/app/generation/accounts?*', route => route.fulfill({ json: { code: 0, data: [], message: 'ok' } }));
+  // 摘要现在还带当期配额与北京时间有效期（票 91）：少这两个字段额度条会印出空的到期时间。
   await page.route('**/api/billing/summary', route => route.fulfill({
-    json: { code: 0, data: { quota: 88, balance: 40, total: 128, purchasedCredits60d: 0, overdraft: 0 }, message: 'ok' },
+    json: {
+      code: 0,
+      data: { quota: 88, balance: 40, total: 128, purchasedCredits60d: 0, overdraft: 0, period: '2026-11', quotaExpiresAt: '2026-11-30 16:00:00.000' },
+      message: 'ok',
+    },
   }));
   await page.route('**/api/billing/charges?*', route => route.fulfill({ json: { code: 0, data: charges, message: 'ok' } }));
 }
