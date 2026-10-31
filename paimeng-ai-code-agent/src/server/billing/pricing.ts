@@ -18,6 +18,8 @@ const tokensPerMillion = 1_000_000;
 const usdRateScale = 1_000_000;
 
 export type PricedStep = {
+  /** `generation_step.id`：补结算据此去重（93），同一行只计一次。 */
+  stepId: string | null;
   providerId: string | null;
   modelName: string | null;
   /** 上游实际服务的模型；别名查不到费率时它是最后一条回退键。 */
@@ -42,6 +44,8 @@ export type PricingResult = {
   estimatedSteps: number;
   unpricedSteps: number;
   steps: UsageSnapshotStep[];
+  /** 与 `steps` 一一对应的未取整分子（token × 费率之和）：补结算按它算新增步骤的差额。 */
+  stepCredits: number[];
   /** 本次实际用到的费率行原样副本，按首次使用顺序去重，落 `credit_charge.rate_card_snapshot`。 */
   rates: RateCardView[];
 };
@@ -122,6 +126,7 @@ export function priceSteps(steps: readonly RatedStep[]): PricingResult {
 
   const snapshots: UsageSnapshotStep[] = [];
   const rates: RateCardView[] = [];
+  const stepCredits: number[] = [];
   let sumCredit = 0;
   let sumUsdMicro = 0;
   let usdSteps = 0;
@@ -134,6 +139,7 @@ export function priceSteps(steps: readonly RatedStep[]): PricingResult {
     // 估算要有样本：没有样本的缺失步骤不可估算，与「没有费率」一样进待处理。
     if (!rate || (missing && sampleInput === null)) {
       unpricedSteps += 1;
+      stepCredits.push(0);
       snapshots.push(snapshotOf(step, null, { estimated: false, sampleSteps: samples.length }));
       continue;
     }
@@ -146,9 +152,11 @@ export function priceSteps(steps: readonly RatedStep[]): PricingResult {
     const billedCacheRead = estimated ? sampleCacheRead : step.cacheRead;
     const billedOutput = estimated ? sampleOutput : step.output;
 
-    sumCredit += (billedInput ?? 0) * rate.creditInputMiss
+    const stepMicro = (billedInput ?? 0) * rate.creditInputMiss
       + (billedCacheRead ?? 0) * rate.creditInputHit
       + (billedOutput ?? 0) * rate.creditOutput;
+    sumCredit += stepMicro;
+    stepCredits.push(stepMicro);
 
     const usdInputMiss = usdMicroRate(rate.usdInputMiss);
     const usdInputHit = usdMicroRate(rate.usdInputHit);
@@ -175,6 +183,7 @@ export function priceSteps(steps: readonly RatedStep[]): PricingResult {
     estimatedSteps,
     unpricedSteps,
     steps: snapshots,
+    stepCredits,
     rates,
   };
 }
@@ -203,6 +212,7 @@ function snapshotOf(
   },
 ): UsageSnapshotStep {
   return {
+    stepId: step.stepId,
     providerId: step.providerId,
     modelName: step.modelName,
     upstreamModelId: step.upstreamModelId,

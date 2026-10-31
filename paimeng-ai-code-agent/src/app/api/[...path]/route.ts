@@ -7,12 +7,13 @@ import { chatRuntime, generationStatus, harnessCancelGeneration, harnessCancelIn
 import { applyModelConfigNow, deleteModelAlias, deleteModelProvider, probeProviderModels, readModelAdminConfig, upsertModelAlias, upsertModelProvider } from '@/server/models/admin';
 import { grantCredits } from '@/server/billing/admin';
 import { accountSnapshot, chargesOf } from '@/server/billing/ledger';
+import { pendingSettlements, reconcileSettlements } from '@/server/billing/settlement';
 import { uploadImages } from '@/server/generation/image-upload';
 import { appendRate, readRateCardList } from '@/server/billing/rate-card';
 import { transcribeEnabled, transcribeSpeech } from '@/server/generation/speech';
 import { readAttachmentOriginal } from '@/server/generation/attachment-store';
 import { idSchema } from '@/shared/contracts';
-import { grantRequestSchema } from '@/shared/billing';
+import { grantRequestSchema, reconcileRequestSchema } from '@/shared/billing';
 import { versionIdSchema } from '@/shared/versioning';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
@@ -44,6 +45,7 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/versions/thumbnail'){const user=await requireUser(req);const png=await business.readAppVersionThumbnail({appId:idSchema.parse(query.get('appId')),versionId:versionIdSchema.parse(query.get('versionId'))},user);if(!png)return new Response(null,{status:404});return new Response(new Uint8Array(png),{headers:{'content-type':'image/png','content-length':String(png.length),'cache-control':'private, max-age=3600','x-content-type-options':'nosniff'}});}
    if(path.startsWith('app/download/')){const user=await requireUser(req);const id=idSchema.parse(path.slice('app/download/'.length));return await business.download(id,user);}
    if(path==='admin/billing/rate-card'){await requireAdmin(req);return success(await readRateCardList());}
+   if(path==='admin/billing/reconcile'){await requireAdmin(req);const limit=z.coerce.number().int().min(1).max(200).default(50).parse(query.get('limit')??undefined);return success({items:await pendingSettlements({limit})});}
    if(path==='billing/summary'){const user=await requireUser(req);return success(await accountSnapshot(user.id));}
    if(path==='billing/charges'){const user=await requireUser(req);const appId=idSchema.parse(query.get('appId'));await business.getApp(appId,user,true);const limit=z.coerce.number().int().min(1).max(20).default(10).parse(query.get('limit')??undefined);return success(await chargesOf({appId,limit,includeCost:user.userRole==='admin'}));}
   }
@@ -81,6 +83,7 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/admin/update')return success(await business.updateApp(value,user,true));
    if(path==='app/admin/delete')return success(await business.deleteApp(value,user));
    if(path==='admin/billing/grant'){const request=grantRequestSchema.parse(value);return success(await grantCredits({...request,grantedBy:admin.id}));}
+   if(path==='admin/billing/reconcile')return success(await reconcileSettlements(reconcileRequestSchema.parse(value)));
   }
   throw new BusinessError(404,40400,'接口不存在');
  }catch(error){return failure(error);}

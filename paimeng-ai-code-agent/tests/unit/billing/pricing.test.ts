@@ -31,6 +31,7 @@ function rate(providerId: string, modelName: string, overrides: Partial<RateCard
 
 function step(overrides: Partial<PricedStep> = {}): PricedStep {
   return {
+    stepId: null,
     providerId: 'env-default',
     modelName: 'deepseek-flash',
     upstreamModelId: null,
@@ -228,5 +229,28 @@ describe('费率快照', () => {
       'env-default/deepseek-flash',
       'env-default/deepseek-v4-pro',
     ]);
+  });
+});
+
+describe('逐步骤金额（补结算用）', () => {
+  it('stepCredits 与 steps 一一对应，未定价步骤记 0，取整只发生在总额层', () => {
+    const result = priceSteps([
+      rated(step({ input: 1_000_000 })),
+      rated(step({ input: 1, output: 1 })),
+      rated(step({ modelName: 'no-rate' }), null),
+    ]);
+    expect(result.stepCredits).toHaveLength(3);
+    // 分子 = token × 费率，不做除法；1M × 600 = 6e8，第二个步骤是 1 × 600 + 1 × 2500 = 3100
+    expect(result.stepCredits[0]).toBe(600_000_000);
+    expect(result.stepCredits[1]).toBe(3_100);
+    expect(result.stepCredits[2]).toBe(0);
+    // 只在总额层四舍五入一次：(6e8 + 3100) / 1e6 = 600.0031 → 600
+    expect(result.credits).toBe(600);
+    expect(result.steps[2]).toMatchObject({ priced: false, rate: null });
+  });
+
+  it('快照带上步骤身份：同一 generation_step 在补结算里只计一次', () => {
+    const result = priceSteps([rated(step({ stepId: '42', input: 1_000_000 }))]);
+    expect(result.steps[0]).toMatchObject({ stepId: '42', priced: true });
   });
 });

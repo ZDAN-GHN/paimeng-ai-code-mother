@@ -224,6 +224,8 @@ export const chargeStatusLabels: Record<ChargeStatus, string> = {
  * 估算绝不写回 `input`/`output`：账单要能区分「上游说用了多少」与「我们按均值推了多少」。
  */
 export type UsageSnapshotStep = {
+  /** `generation_step.id` 的字符串形式：补结算按它判断「这一步是否已经进过账」（93）。 */
+  stepId: string | null;
   providerId: string | null;
   modelName: string | null;
   upstreamModelId: string | null;
@@ -286,4 +288,55 @@ export type BillingChargeView = {
   entries: ChargeEntryView[];
   /** 冲正分录；没被冲正时是空数组。退款去向（哪个池、退了多少）只能从这里读。 */
   reversals: ChargeReversalView[];
+};
+
+// ---- 补结算与余额核对（issue #93，src/server/billing/settlement.ts）----
+
+/**
+ * 一次对账扫描里单项的处理结果：`settled` 新建账单并完成扣款、`retried` 给已有账单补记差额、
+ * `skipped` 没有可做的事（已结算、仍缺费率、已退还、生成已删除）、`failed` 处理时抛错。
+ */
+export const reconcileOutcomes = ['settled', 'retried', 'skipped', 'failed'] as const;
+export type ReconcileOutcome = (typeof reconcileOutcomes)[number];
+export const reconcileOutcomeLabels: Record<ReconcileOutcome, string> = {
+  settled: '已结算',
+  retried: '已补记',
+  skipped: '仍待处理',
+  failed: '失败',
+};
+
+/** `reconcileSettlements` 的逐项结果；`reason` 是给人看的处理依据或待处理原因。 */
+export type ReconcileItem = { generationId: string; outcome: ReconcileOutcome; reason?: string };
+
+/** `reconcileSettlements` 的汇总：`settled`/`skipped` 只数新建与未变动的条目，补记与失败看 `results`。 */
+export type ReconcileRun = { scanned: number; settled: number; skipped: number; results: ReconcileItem[] };
+
+/** `POST admin/billing/reconcile` 的请求体：默认全库扫 50 条；`generationId` 用于后台单条重试。 */
+export const reconcileRequestSchema = z.object({
+  limit: z.number().int().min(1).max(200).optional(),
+  generationId: z.string().trim().min(1).max(36).optional(),
+});
+export type ReconcileRequest = z.infer<typeof reconcileRequestSchema>;
+
+/** 后台「待处理」列表的一行：终态缺账的 Generation，或已有账单但还有步骤没进账。 */
+export type PendingSettlementItem = {
+  generationId: string;
+  appId: string | null;
+  userId: string | null;
+  generationStatus: GenerationStatus | null;
+  stopReason: GenerationStopReason | null;
+  chargeStatus: ChargeStatus | null;
+  credits: number | null;
+  /** 快照里还没有身份的模型步骤数；终态缺账时整张账单都没写，记 0。 */
+  missingSteps: number;
+  reason: string;
+};
+
+export type PendingSettlementList = { items: PendingSettlementItem[] };
+
+/** 余额核对结果：`diff = actual - expected`。只报告，不改账本事实；修复见 `rebuildAccount`。 */
+export type AccountAudit = {
+  expected: { quota: number; balance: number };
+  actual: { quota: number; balance: number };
+  diff: { quota: number; balance: number };
 };

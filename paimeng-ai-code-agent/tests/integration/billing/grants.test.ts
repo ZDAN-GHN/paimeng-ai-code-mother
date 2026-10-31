@@ -7,6 +7,7 @@ import {
 import { db, getPool } from '@/server/infra/db';
 import { creditAccounts, creditGrants, sessions, users } from '@/server/infra/schema';
 import { accountSnapshot, lockAccounts, recordGrant, rebuildAccount } from '@/server/billing/ledger';
+import { periodOf } from '@/server/billing/period';
 import { grantCredits } from '@/server/billing/admin';
 import type { AccountSnapshot, GrantReceipt } from '@/shared/billing';
 
@@ -138,7 +139,8 @@ describe('Credit 发放与双池余额快照', () => {
   it('余额快照可以只由 grant 事实重建', async () => {
     const owner = await newUser();
     await recordGrant({ userId: owner.id, pool: 'balance', credits: 40, source: 'purchase' });
-    await recordGrant({ userId: owner.id, pool: 'quota', credits: 500, source: 'monthly_quota', period: '2026-10' });
+    // 配额池只认当前账期：重算按当前北京月筛选，不能拿写死的月份赌运行日期。
+    await recordGrant({ userId: owner.id, pool: 'quota', credits: 500, source: 'monthly_quota', period: periodOf(new Date()) });
 
     await db().delete(creditAccounts).where(eq(creditAccounts.userId, BigInt(owner.id)));
     expect(await accountSnapshot(owner.id)).toMatchObject({ quota: 0, balance: 0, total: 0 });
