@@ -10,7 +10,9 @@
 | `billing/admission-chat.png` | App chat 新请求被拦住，消息原文保留在输入框 |
 | `billing/owner-balance.png` | Owner 额度条：配额池 / 余额池 / 透支线 |
 | `billing/admin-grant.png` | Admin 发放与回执 |
-| `billing/owner-ledger.png` | Owner `/billing`：金额、分池明细、面额说明、窄屏 |
+| `billing/owner-ledger-wide.png` | Owner `/billing`：金额、分池明细、面额说明 |
+| `billing/owner-ledger-narrow.png` | 窄屏（480px）：表格横向滚动，页面不溢出 |
+| `billing/credit-summary-bar.png` | Credit 概览元素图：双池、有效期、透支线 |
 | `billing/admin-usage-reversal.png` | Admin 用量面板与整笔冲正 |
 | `billing/rate-card-versions.png` | Rate card 多版本，历史版本仍在表里 |
 | `billing/overdraft-abort.png` | 透支熔断中止后的中断说明 + 停止原因 + 最终账单 |
