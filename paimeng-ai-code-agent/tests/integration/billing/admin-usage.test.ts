@@ -28,6 +28,7 @@ const createdGenerations: string[] = [];
 beforeAll(async () => {
   await applyBillingMigrations(
     '008_credit_rate_card.sql', '010_credit_grant_account.sql', '012_credit_charge_entry.sql', '014_credit_entry_audit.sql',
+    '018_credit_entry_reason_length.sql',
   );
   await seedBillingRate({ modelName: model });
 });
@@ -262,6 +263,23 @@ describe('POST admin/billing/charge/:id/reverse：人工整笔冲正', () => {
       { pool: 'quota', credits: 40 }, { pool: 'balance', credits: 20 },
       { pool: 'quota', credits: -40 }, { pool: 'balance', credits: -20 },
     ]);
+  });
+
+  it('长理由（257..500 字）能整笔冲正并完整落库，>500 字是 400 而不是 500', async () => {
+    const admin = await newUser('admin');
+    const { owner, appId } = await fixture();
+    await grantBillingCredits(owner.id, 'balance', 100);
+    const chargeId = await settledCharge({ owner, appId });
+
+    // 300 字：超过 014 建表时的 256 宽度，靠 018 加宽到 500 才落得下
+    const reason = '冲正理由'.repeat(75);
+    expect(reason).toHaveLength(300);
+    const envelope = await reverseEnvelope(admin.cookie, chargeId, reason);
+    expect(envelope.code).toBe(0);
+    expect(envelope.data).toMatchObject({ reversed: true, status: 'reversed', effectiveCredits: 0 });
+    expect(await billingBalancesOf(owner.id)).toEqual({ quota: 0, balance: 100 });
+    const reversal = (await entryRows(chargeId)).find(entry => entry.reversalOf !== null);
+    expect(reversal?.reason).toBe(reason);
   });
 
   it('零金额/待处理账单给明确反馈，不改任何分录', async () => {
