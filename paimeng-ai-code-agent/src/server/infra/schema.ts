@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { bigint, bigserial, char, index, integer, jsonb, pgTable, primaryKey, smallint, text, timestamp, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
+import { bigint, bigserial, char, index, integer, jsonb, numeric, pgTable, primaryKey, smallint, text, timestamp, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
 import type { CreditPool, GrantSource } from '@/shared/billing';
 
 const times = { createTime: timestamp('create_time', { mode: 'string' }).notNull(), updateTime: timestamp('update_time', { mode: 'string' }).notNull() };
@@ -151,6 +151,28 @@ export const appDeployments = pgTable('app_deployment', {
   error: text('error'),
   ...controlTimes,
 }, t => [uniqueIndex('uk_app_deployment_request').on(t.appId, t.requestId), uniqueIndex('uk_app_deployment_app_running').on(t.appId).where(sql`status = 'running'`)]);
+
+// ---- 计费（migrations/008_credit_rate_card.sql）----
+/** 上游成本口径：峰时/谷时价可追溯，不知道就留 unknown，不拿售价折算冒充真实成本。 */
+export type RateCostBasis = 'peak' | 'off-peak' | 'unknown';
+
+// 费率表：只追加。同一 (provider_id, model_name) 可以在不同 effective_from 上有多个版本，改价只加行。
+export const creditRateCard = pgTable('credit_rate_card', {
+  providerId: varchar('provider_id', { length: 64 }).notNull(),
+  modelName: varchar('model_name', { length: 256 }).notNull(),
+  effectiveFrom: timestamp('effective_from', { mode: 'string', precision: 3 }).notNull(),
+  creditInputMiss: integer('credit_input_miss').notNull(),
+  creditInputHit: integer('credit_input_hit').notNull(),
+  creditOutput: integer('credit_output').notNull(),
+  usdInputMiss: numeric('usd_input_miss', { precision: 12, scale: 6 }),
+  usdInputHit: numeric('usd_input_hit', { precision: 12, scale: 6 }),
+  usdOutput: numeric('usd_output', { precision: 12, scale: 6 }),
+  costBasis: varchar('cost_basis', { length: 16 }).$type<RateCostBasis>(),
+  costSource: varchar('cost_source', { length: 512 }),
+  note: text('note'),
+  createdBy: bigint('created_by', { mode: 'bigint' }),
+  createTime: timestamp('create_time', { mode: 'string', precision: 3 }).notNull(),
+}, t => [index('idx_credit_rate_card_model').on(t.providerId, t.modelName, t.effectiveFrom.desc())]);
 
 // ---- 计费（migrations/010_credit_grant_account.sql）----
 // 账本事实（credit_grant）只追加；credit_account 是唯一允许 UPDATE 的余额快照，
