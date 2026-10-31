@@ -22,6 +22,7 @@ import {
 import { generationControl, lockGenerationControl, type GenerationControl } from './generation-store';
 // 计费只从 generation 侧 import billing：billing 反向 import 本模块会成环。
 import { settleGenerationBilling } from '../billing/settlement';
+import { assertCanStartGeneration } from '../billing/quota';
 import {
   closeExecutionAndDrain, openExecution, prepareExecution, sealExecution,
   type ExecutionBaseline, type ExecutionRef,
@@ -665,6 +666,12 @@ export async function startGeneration(input: StartGenerationInput): Promise<Star
 
   // 保持对外契约：UUID requestId 直接当 generation.id；更长的幂等键退回随机 ID，不撑破 varchar(36)。
   const generationId = requestId.length <= 36 ? requestId : randomUUID();
+
+  // 准入：权限与提问状态都通过之后、抢写权限之前判定可用额度。
+  // 放在这里有两个理由：被拒的请求不建 generation/authority/execution 行，也不启动上游模型；
+  // 而且不占住写权限——额度不足的一方不能把正在生成的 holder 顶掉。重放已在上面返回，不走这里。
+  await assertCanStartGeneration(String(userId));
+
   let epoch: number | null = null;
   let created = false;
   try {
