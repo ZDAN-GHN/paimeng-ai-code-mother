@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, char, index, integer, jsonb, numeric, pgTable, primaryKey, smallint, text, timestamp, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
+import type { CreditPool, GrantSource } from '@/shared/billing';
 
 const times = { createTime: timestamp('create_time', { mode: 'string' }).notNull(), updateTime: timestamp('update_time', { mode: 'string' }).notNull() };
 export const users = pgTable('app_user', { id: bigint('id', { mode: 'bigint' }).primaryKey(), userAccount: varchar('user_account', { length: 256 }).notNull(), userPassword: varchar('user_password', { length: 512 }).notNull(), userName: varchar('user_name', { length: 256 }), userAvatar: varchar('user_avatar', { length: 1024 }), userProfile: varchar('user_profile', { length: 512 }), userRole: varchar('user_role', { length: 256 }).notNull().default('user'), ...times, isDelete: integer('is_delete').notNull().default(0) }, t => [uniqueIndex('uk_app_user_account').on(t.userAccount)]);
@@ -172,3 +173,32 @@ export const creditRateCard = pgTable('credit_rate_card', {
   createdBy: bigint('created_by', { mode: 'bigint' }),
   createTime: timestamp('create_time', { mode: 'string', precision: 3 }).notNull(),
 }, t => [index('idx_credit_rate_card_model').on(t.providerId, t.modelName, t.effectiveFrom.desc())]);
+
+// ---- 计费（migrations/010_credit_grant_account.sql）----
+// 账本事实（credit_grant）只追加；credit_account 是唯一允许 UPDATE 的余额快照，
+// 任何时候都能由 grant 减 entry 重算，所以对账时它是对账对象，不是真相来源。
+export const creditGrants = pgTable('credit_grant', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  userId: bigint('user_id', { mode: 'bigint' }).notNull(),
+  pool: varchar('pool', { length: 16 }).$type<CreditPool>().notNull(),
+  credits: bigint('credits', { mode: 'number' }).notNull(),
+  source: varchar('source', { length: 16 }).$type<GrantSource>().notNull(),
+  externalRef: varchar('external_ref', { length: 128 }),
+  requestId: varchar('request_id', { length: 128 }),
+  grantedBy: bigint('granted_by', { mode: 'bigint' }),
+  period: varchar('period', { length: 7 }),
+  note: text('note'),
+  createTime: timestamp('create_time', { mode: 'string', precision: 3 }).notNull(),
+}, t => [
+  uniqueIndex('uk_credit_grant_request').on(t.userId, t.requestId).where(sql`request_id IS NOT NULL`),
+  uniqueIndex('uk_credit_grant_external').on(t.source, t.externalRef).where(sql`external_ref IS NOT NULL`),
+  uniqueIndex('uk_credit_grant_monthly').on(t.userId, t.period).where(sql`source = 'monthly_quota'`),
+  index('idx_credit_grant_user_time').on(t.userId, t.createTime),
+]);
+
+export const creditAccounts = pgTable('credit_account', {
+  userId: bigint('user_id', { mode: 'bigint' }).notNull(),
+  pool: varchar('pool', { length: 16 }).$type<CreditPool>().notNull(),
+  balance: bigint('balance', { mode: 'number' }).notNull().default(0),
+  updateTime: timestamp('update_time', { mode: 'string', precision: 3 }).notNull(),
+}, t => [primaryKey({ columns: [t.userId, t.pool] })]);

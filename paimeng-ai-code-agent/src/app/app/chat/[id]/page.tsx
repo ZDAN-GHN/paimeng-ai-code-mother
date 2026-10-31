@@ -16,6 +16,7 @@ import { ImageAttachments, MessageImages, messageAttachments, outgoingParts, use
 import { VoiceInput, appendTranscript } from '@/components/chat/voice-input';
 import { MarkdownMessage } from '@/components/chat/markdown-message';
 import { GenerationUsage } from '@/components/chat/generation-usage';
+import { CreditBalance } from '@/components/billing/credit-balance';
 import { BuildProgress } from '@/components/chat/build-progress';
 import { composerAction, handoffWaitingText, initialProgress, interruptedStreamMessage, interruptionText, parseProgressEvent, parseSteerLanded, progressReducer, projectGenerationInputs, type ProjectedInput, type ProgressState } from '@/components/chat/generation-feedback';
 import { admitInput, applyBoundary, forgetInput, messageSegments, placeInput, placedInputs, queuedInputs, type InputEntry, type LostInput, type PlacedInput, type QueuedInput } from '@/components/chat/chat-inputs';
@@ -761,6 +762,7 @@ function Chat({ id }: { id: string }) {
       {app?.codeGenType && <Tag color="blue">{formatCodeGenType(app.codeGenType)}</Tag>}
       {task && statusLabel && <Tag color={statusColor}>{statusLabel}</Tag>}
       <Space wrap>
+        <CreditBalance />
         {!previewShown && <Button icon={<DesktopOutlined aria-hidden="true" />} onClick={togglePreview}>网页展示</Button>}
         <Button icon={<InfoCircleOutlined aria-hidden="true" />} disabled={!app} onClick={() => setDetailOpen(true)}>应用详情</Button>
         <Button icon={<HistoryOutlined aria-hidden="true" />} disabled={!app} onClick={() => setVersionOpen(true)}>版本</Button>
