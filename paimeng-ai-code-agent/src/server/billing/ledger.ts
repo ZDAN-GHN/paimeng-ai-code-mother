@@ -146,17 +146,32 @@ export async function rebuildAccount(userId: string, tx?: Transaction): Promise<
   return tx ? write(tx) : db().transaction(write);
 }
 
+/**
+ * 可用 Credit = 配额池 + 余额池，不做任何透支折算：Overdraft 是运行期熔断线，不是能拿来启动新生成的余额。
+ *
+ * 两池在同一条 select 里读出，所以 `total` 一定来自同一个快照，不会出现「配额读到扣减前、余额读到扣减后」。
+ * 传 `tx` 时跟随调用方的事务语义（结算与对账在自有事务里复用）。
+ */
+export async function availableCredits(
+  userId: string, tx?: Transaction,
+): Promise<CreditAccountBalances & { total: number }> {
+  const run = tx ?? db();
+  const rows = await run.select({ pool: creditAccounts.pool, balance: creditAccounts.balance })
+    .from(creditAccounts).where(eq(creditAccounts.userId, BigInt(userId)));
+  const quota = rows.find(row => row.pool === 'quota')?.balance ?? 0;
+  const balance = rows.find(row => row.pool === 'balance')?.balance ?? 0;
+  return { quota, balance, total: quota + balance };
+}
+
 /** 只读快照：两池余额、合计、近 60 天购买额与由此推导的透支线。 */
 export async function accountSnapshot(userId: string): Promise<AccountSnapshot> {
   const id = BigInt(userId);
-  const accounts = await db().select().from(creditAccounts).where(eq(creditAccounts.userId, id));
-  const quota = accounts.find(row => row.pool === 'quota')?.balance ?? 0;
-  const balance = accounts.find(row => row.pool === 'balance')?.balance ?? 0;
+  const { quota, balance, total } = await availableCredits(userId);
   const [purchased] = await db().select({ credits: sql<string>`coalesce(sum(${creditGrants.credits}), 0)` })
     .from(creditGrants)
     .where(and(eq(creditGrants.userId, id), eq(creditGrants.source, 'purchase'), gt(creditGrants.createTime, purchaseWindowStart())));
   const purchasedCredits60d = Number(purchased?.credits ?? 0);
-  return { quota, balance, total: quota + balance, purchasedCredits60d, overdraft: overdraftOf(purchasedCredits60d) };
+  return { quota, balance, total, purchasedCredits60d, overdraft: overdraftOf(purchasedCredits60d) };
 }
 
 /** 冲突后的定位：三个幂等键各自对应一条部分唯一索引，按 requestId → 外部单号 → 月度账期依次找。 */
@@ -361,12 +376,20 @@ export async function reverseChargeTx(tx: Transaction, chargeId: string, input: 
 }
 
 /**
- * `GET billing/charges` 的读模型：一个 App 最近的 Charge + 分池分录 + 所属 Generation 的终态。
+ * `GET billing/charges` 的读模型：最近的 Charge + 分池分录 + 所属 Generation 的终态。
+ * 范围是**一个人**：`appId` 给了就只看那个 App（HTTP 层已先校验所有权），缺省就是此人的全部 App
+ * （Owner 账单页）。`userId` 始终参与过滤——有无 appId 都只返回自己的，管理员也不能借此读别人的账。
+ *
  * `messageId` 由服务端 join generation 带出——它是把账单单挂到助手气泡上的唯一关联键；
  * 它为 null 的 Charge（没有助手气泡的终态：初始化失败、进程中断后恢复）照样在列表里，
  * 界面靠 `generationId` 在状态区取到它。generation 行被删掉的账单也保留金额与分录。
  */
-export async function chargesOf(input: { appId: string; limit: number; includeCost: boolean }): Promise<BillingChargeView[]> {
+export async function chargesOf(input: {
+  appId?: string;
+  userId: string;
+  limit: number;
+  includeCost: boolean;
+}): Promise<BillingChargeView[]> {
   const rows = await db().select({
     generationId: creditCharges.generationId,
     appId: creditCharges.appId,
@@ -374,13 +397,17 @@ export async function chargesOf(input: { appId: string; limit: number; includeCo
     costUsd: creditCharges.costUsd,
     status: creditCharges.status,
     estimatedSteps: creditCharges.estimatedSteps,
+    usageSnapshot: creditCharges.usageSnapshot,
     createTime: creditCharges.createTime,
     messageId: generations.messageId,
     generationStatus: generations.status,
     stopReason: generations.stopReason,
   }).from(creditCharges)
     .leftJoin(generations, eq(generations.id, creditCharges.generationId))
-    .where(eq(creditCharges.appId, BigInt(input.appId)))
+    .where(and(
+      eq(creditCharges.userId, BigInt(input.userId)),
+      ...(input.appId ? [eq(creditCharges.appId, BigInt(input.appId))] : []),
+    ))
     .orderBy(desc(creditCharges.createTime), desc(creditCharges.generationId))
     .limit(input.limit);
   if (!rows.length) return [];
@@ -397,6 +424,9 @@ export async function chargesOf(input: { appId: string; limit: number; includeCo
       effectiveCredits: charges.reduce((sum, entry) => sum + entry.credits, 0),
       status: row.status,
       estimatedSteps: row.estimatedSteps,
+      // 两个质量标记读快照而不是 status：冲正会把 status 投影成 reversed，估算与未定价的事实不能丢。
+      estimated: row.estimatedSteps > 0 || row.usageSnapshot.some(step => step.estimated),
+      unpriced: row.usageSnapshot.some(step => !step.priced),
       createTime: row.createTime,
       generationStatus: row.generationStatus as BillingChargeView['generationStatus'],
       stopReason: stopReasonFrom(row.stopReason),

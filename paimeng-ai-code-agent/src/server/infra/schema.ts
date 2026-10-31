@@ -224,14 +224,15 @@ export const creditCharges = pgTable('credit_charge', {
 ]);
 
 // 出账分录：正数为扣减、负数为退还/冲正；冲正只追加反向行（reversal_of 指向被冲正的行），绝不改历史行。
-// reason / operator_id 是冲正审计（migrations/014_credit_entry_audit.sql）：自动冲正写固定原因、operator 为空。
+// reason / operator_id 是冲正审计（migrations/014_credit_entry_audit.sql，reason 宽度由 018 加宽到 500）：
+// 自动冲正写固定原因、operator 为空，人工冲正写管理员填写的理由与操作人。
 export const creditEntries = pgTable('credit_entry', {
   id: bigserial('id', { mode: 'bigint' }).primaryKey(),
   chargeId: varchar('charge_id', { length: 36 }).notNull(),
   pool: varchar('pool', { length: 16 }).$type<CreditPool>().notNull(),
   credits: bigint('credits', { mode: 'number' }).notNull(),
   reversalOf: bigint('reversal_of', { mode: 'bigint' }),
-  reason: varchar('reason', { length: 256 }),
+  reason: varchar('reason', { length: 500 }),
   operatorId: bigint('operator_id', { mode: 'bigint' }),
   createTime: timestamp('create_time', { mode: 'string', precision: 3 }).notNull(),
 }, t => [index('idx_credit_entry_charge').on(t.chargeId, t.id)]);

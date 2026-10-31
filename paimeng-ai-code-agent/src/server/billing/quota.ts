@@ -2,9 +2,10 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { and, asc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import { db, now, type Transaction } from '@/server/infra/db';
+import { BusinessError } from '@/server/infra/http';
 import { creditAccounts, creditGrants, users } from '@/server/infra/schema';
-import { monthlyQuotaCredits, type AccountSummary } from '@/shared/billing';
-import { accountSnapshot, lockAccounts } from './ledger';
+import { monthlyQuotaCredits, insufficientCreditsCode, insufficientCreditsMessage, type AccountSummary } from '@/shared/billing';
+import { accountSnapshot, availableCredits, lockAccounts } from './ledger';
 import { naiveTime, periodOf, periodRange } from './period';
 
 /**
@@ -92,6 +93,25 @@ export async function ensurePeriodQuota(userId: string, at: Date = new Date()): 
     await rebuildQuotaPool(tx, id, period);
     return { granted: true, period };
   });
+}
+
+/**
+ * 新 Generation 的准入：先补当前账期的配额，再按「配额池 + 余额池」判定，可用 Credit ≤ 0 就拒绝。
+ *
+ * 两条边界：
+ * - 不看 Overdraft：透支线是运行期熔断线，不是能拿来启动新生成的余额。
+ * - 不预扣：准入只读，扣费留到终态结算（已定规则）。因此并发的两笔请求可能都通过准入，
+ *   真正的互斥由写权限（同一 App）与运行中熔断负责；余额不足的那一笔会在结算时变成欠款，
+ *   而不是在这里靠预扣来防。
+ *
+ * 调用方负责把它放在任何一个状态写入（generation / authority / execution）之前：被拒的请求
+ * 不启动上游模型，也不占住写权限。
+ */
+export async function assertCanStartGeneration(userId: string, at: Date = new Date()): Promise<void> {
+  await ensurePeriodQuota(userId, at);
+  const available = await availableCredits(userId);
+  if (available.total > 0) return;
+  throw new BusinessError(402, insufficientCreditsCode, insufficientCreditsMessage(available));
 }
 
 /**

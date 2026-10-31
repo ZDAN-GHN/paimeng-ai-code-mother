@@ -5,7 +5,7 @@ import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
 import { App, Button, Input, Alert, Tag, Space, Spin, Tooltip } from 'antd';
 import { SendOutlined, DownloadOutlined, CloudUploadOutlined, EditOutlined, StopOutlined, InfoCircleOutlined, ExportOutlined, PictureOutlined, HistoryOutlined, DesktopOutlined, MobileOutlined, RightOutlined } from '@ant-design/icons';
-import { api } from '@/client/api';
+import { api, isInsufficientCredits, streamingRequest } from '@/client/api';
 import { useAuth } from '@/components/providers';
 import { type AppInfo, type Generation, type GenerationAccount, isProjectCodeGenType } from '@/shared/contracts';
 import type { ChatInputMode, ChatInputReceipt, ChatMessage, ChatRuntime } from '@/shared/chat-runtime';
@@ -19,6 +19,7 @@ import { MarkdownMessage } from '@/components/chat/markdown-message';
 import { GenerationUsage } from '@/components/chat/generation-usage';
 import { GenerationCredit } from '@/components/chat/generation-credit';
 import { CreditBalance } from '@/components/billing/credit-balance';
+import { InsufficientCreditsAlert } from '@/components/billing/insufficient-credits';
 import { BuildProgress } from '@/components/chat/build-progress';
 import { composerAction, handoffWaitingText, initialProgress, interruptedStreamMessage, interruptionText, parseProgressEvent, parseSteerLanded, progressReducer, projectGenerationInputs, type ProjectedInput, type ProgressState } from '@/components/chat/generation-feedback';
 import { admitInput, applyBoundary, forgetInput, messageSegments, placeInput, placedInputs, queuedInputs, type InputEntry, type LostInput, type PlacedInput, type QueuedInput } from '@/components/chat/chat-inputs';
@@ -141,6 +142,8 @@ function Chat({ id }: { id: string }) {
   const [usageByMessage, setUsageByMessage] = useState<Map<string, GenerationAccount>>(new Map());
   const [creditByMessage, setCreditByMessage] = useState<Map<string, BillingChargeView>>(new Map());
   const [error, setError] = useState('');
+  /** 额度不足：单独一条，显示可用 Credit 与下一步；不清掉输入，发送前先看它。 */
+  const [creditError, setCreditError] = useState('');
   const [historyError, setHistoryError] = useState('');
   const [appLoaded, setAppLoaded] = useState(false);
   const [historySettled, setHistorySettled] = useState(false);
@@ -176,6 +179,8 @@ function Chat({ id }: { id: string }) {
   const followedScrollTop = useRef(0);
   const mounted = useRef(false);
   const submitting = useRef(false);
+  /** `onError` 是异步回调，`submit` 要同步知道这一轮是不是被准入拦下（决定要不要把输入放回去）。 */
+  const creditRejected = useRef(false);
   const rebuildCount = useRef(0);
   const rebuildAt = useRef(0);
   const rebuildTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -261,6 +266,8 @@ function Chat({ id }: { id: string }) {
   }, [id]);
   const transport = useMemo(() => new DefaultChatTransport<ChatMessage>({
     api: '/api/app/chat/gen/code',
+    // 非 2xx 先按信封解析再抛出：界面要靠业务 code（如额度不足的 40201）决定怎么提示。
+    fetch: streamingRequest,
     // 本地回显挂在 metadata 上的附件在这里变成契约的 attachment part；排队消息自动发送走的是同一条路。
     prepareSendMessagesRequest: ({ messages }) => {
       const requestId = crypto.randomUUID();
@@ -294,7 +301,18 @@ function Chat({ id }: { id: string }) {
     id, transport,
     // 流结束只重新取任务状态：断流后任务可能仍在跑，这里不乐观标 ready，统一由下面的终态收尾。
     onFinish: async () => { await refresh(); },
-    onError: e => { if (mounted.current) setError(e.message); },
+    onError: e => {
+      if (!mounted.current) return;
+      // 额度不足单独渲染：它有自己的下一步（联系管理员补充额度），盖掉普通的请求失败文案。
+      if (isInsufficientCredits(e)) {
+        creditRejected.current = true;
+        setCreditError(e.message);
+        setError('');
+        return;
+      }
+      creditRejected.current = false;
+      setError(e.message);
+    },
     onData: part => {
       if (part.type === 'data-memory') setMemoryBusy(isConsolidating(part.data));
       if (part.type === 'data-build') setRepairing(repairingOf(part.data));
@@ -547,10 +565,17 @@ function Chat({ id }: { id: string }) {
     setProgress(initialProgress());
     setPreviewVersion(null);
     setError(''); clearError();
+    setCreditError('');
+    creditRejected.current = false;
     if (!options.keepDraft) { setInput(''); setSelected([]); setEditing(false); clearSentImages(attachments); }
     try {
       const expectedQuestionId = questionRef.current;
       await sendMessage({ text, metadata: attachments.length ? { attachments: [...attachments] } : undefined });
+      // 被准入拦下：这一轮没有启动，把用户刚才写的放回输入框（问题也继续等着回答）。
+      if (creditRejected.current) {
+        if (!options.keepDraft) setInput(current => current.trim() ? current : original);
+        return false;
+      }
       // 回答已经发出去：问题气泡不必等到下一次轮询才消失，新一轮的流式回答会紧接着展示。
       if (expectedQuestionId) setQuestion(current => current?.id === expectedQuestionId ? null : current);
       await refresh();
@@ -698,7 +723,8 @@ function Chat({ id }: { id: string }) {
     message.id === taskCredit.messageId || message.metadata?.generationId === taskCredit.generationId);
   const sourceAvailable = app?.sourceAvailable ?? !!app?.previewUrl;
   const canPreview = !!app?.previewUrl;
-  const rawRequestError = error || chatError?.message || null;
+  // 额度不足已经有专门的错误条（含可用额度与下一步），不再在对话里重复一遍「请求失败」。
+  const rawRequestError = creditError ? null : error || chatError?.message || null;
   // 响应流被浏览器/网络层切断时的原文（如 `Error in input stream`）换成可读文案。
   const interrupted = rawRequestError ? interruptedStreamMessage({ message: rawRequestError, status: task?.status ?? null }) : null;
   const requestError = interrupted ? null : rawRequestError;
@@ -863,6 +889,7 @@ function Chat({ id }: { id: string }) {
           onDrop={event => { if (!canAttachImages || !draggingFiles(event.dataTransfer)) return; event.preventDefault(); setDragging(false); addImages(filesFromDrop(event.dataTransfer)); }}>
           {dragging && <p className="composer-hint" role="status" style={{ marginBottom: 8 }}>松开鼠标即可添加图片（JPEG / PNG / WebP，最多 {imageLimits.maxImages} 张）</p>}
           {handoffText && <p className="composer-hint" role="status" style={{ marginBottom: 8 }}>{handoffText}</p>}
+          {creditError && <InsufficientCreditsAlert message={creditError} onClose={() => setCreditError('')} />}
           {awaitingAnswer && <p className="composer-hint" role="status" style={{ marginBottom: 8 }}>正在等待你回答问题：直接在下方输入回答，发送后会从当前草稿继续。</p>}
           {/* 输入框上方按种类分开的队列：只有真的在服务端队列里等着的输入才出现（没有排队状态的
               任务不会闪出队列面板），已经进 pi 上下文的直接作为气泡出现在对话里；没进对话的输入
