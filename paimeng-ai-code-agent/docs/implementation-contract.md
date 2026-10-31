@@ -4,8 +4,8 @@
 
 ## 传输与标识
 
-- 信封 `{code,data,message}`：成功 `code:0` 且 `Cache-Control: no-store`；`BusinessError` 用自己的 code/status；`ZodError` → 400/40000；其他 → 500/50000。收发两端都依赖这个形状，实现在 `src/server/http.ts`。
-- 业务 ID 对外一律十进制字符串，库里 BIGINT，主键由 `src/server/snowflake.ts` 发号，不走数据库序列（只有 `generation_step.id` 自增）。
+- 信封 `{code,data,message}`：成功 `code:0` 且 `Cache-Control: no-store`；`BusinessError` 用自己的 code/status；`ZodError` → 400/40000；其他 → 500/50000。收发两端都依赖这个形状，实现在 `src/server/infra/http.ts`。
+- 业务 ID 对外一律十进制字符串，库里 BIGINT，主键由 `src/server/infra/snowflake.ts` 发号，不走数据库序列（只有 `generation_step.id` 自增）。
 - 生成任务以请求 UUID 为主键，同一 UUID 不重复执行；UI 消息 id 用雪花 ID 或由请求 UUID 派生的确定性 id。
 
 ## 权限
@@ -28,4 +28,4 @@
 - 生成、发布、下载由写入租约互斥。
 - `previewUrl` 以实际构建入口是否有效判断，不以任务 ready 为门槛：取消或失败后既有产物仍可预览。
 - `sourceAvailable` 独立表示可下载源码；Vue 每次发布都在写锁内重建源码，失败保留旧预览并拒绝本次发布。
-- 预览是独立进程、独立主机名（`src/server/preview.ts`、`scripts/dev/preview.ts`），与平台页面不同源，因此写请求的来源校验必须同时覆盖两侧。
+- 预览是独立进程、独立主机名（`src/server/delivery/preview.ts`、`scripts/dev/preview.ts`），与平台页面不同源，因此写请求的来源校验必须同时覆盖两侧。

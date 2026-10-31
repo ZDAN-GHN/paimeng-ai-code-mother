@@ -2,7 +2,7 @@
 
 状态：已集成产品库模型域；历史验收记录见 [provider-redis-convergence](plans/archive/provider-redis-convergence.md)。生成由常驻 harness 执行，Next 负责鉴权、任务准入和 attach；生成模型默认来自管理端配置的 `codegen.default`。
 
-表结构、字段校验与错误码以 `src/server/schema.ts`、`src/shared/model-config.ts`、`src/server/models/` 为准，本文只写跨模块规则。
+表结构、字段校验与错误码以 `src/server/infra/schema.ts`、`src/shared/model-config.ts`、`src/server/models/` 为准，本文只写跨模块规则。
 
 ## 每轮模型准入
 
@@ -85,9 +85,9 @@ DeepSeek 的 Responses 格式把思考文本放在 `output[].content`（`reasoni
 
 ## 实现与验证落点
 
-- 运行描述、凭据与适配：`src/server/durable/model-domain.ts`。
+- 运行描述、凭据与适配：`src/server/generation/durable/model-domain.ts`。
 - 公开 HTTP schema：`src/shared/durable-model.ts`。
-- 准入、持久化与恢复：`src/server/durable/harness-server.ts`。
-- 产品任务、attach、记账与实时 metadata：`src/server/durable-engine.ts`。
-- 请求契约单测：`tests/models/durable-model-domain.test.ts`。
-- 热更新、忙碌拒绝、凭据隔离与重启：`tests/integration/durable-m1/model-config.test.ts`。
+- 准入、持久化与恢复：`src/server/generation/durable/harness-server.ts`。
+- 产品任务、attach、记账与实时 metadata：`src/server/generation/durable-engine.ts`。
+- 请求契约单测：`tests/unit/models/durable-model-domain.test.ts`。
+- 热更新、忙碌拒绝、凭据隔离与重启：`tests/integration/harness/model-config.test.ts`。

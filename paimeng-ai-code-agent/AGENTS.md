@@ -19,13 +19,13 @@ paimeng-ai-code-agent/
 ├── AGENTS.md          # this file: layout + invariants
 ├── src/
 │   ├── app/           # App Router pages and HTTP entries: api/[...path] business dispatch, api/durable harness attach/SSE
-│   ├── server/        # Node domain: auth, business, generation lifecycle, version/delivery stores, workspaces, durable/ harness
+│   ├── server/        # Node domain modules; see src/server/AGENTS.md
 │   ├── components/    # React UI the pages compose
 │   ├── shared/        # zod contracts and types imported by both sides
 │   └── client/        # browser API client and response envelope
 ├── templates/         # versioned skeletons copied into new apps: html, multi-file, react-ts, vue-ts
 ├── migrations/        # SQL; applied files are immutable history
-├── tests/             # *.test.ts unit, integration/, e2e/ Playwright, system/, models/
+├── tests/             # suites split by allowed resources; see tests/AGENTS.md
 ├── scripts/           # reusable entry points only; prerequisites, ports, rules in scripts/AGENTS.md
 ├── docs/              # contracts, ADRs, plans, prototypes; placement rules in docs/AGENTS.md
 ├── runtime/           # local runtime data, never source
@@ -35,6 +35,7 @@ paimeng-ai-code-agent/
 ## Read next
 
 - Run it, prerequisites, ports: `scripts/AGENTS.md`
+- Server module boundaries: `src/server/AGENTS.md`
 - Cross-module invariants: `docs/implementation-contract.md`
 
 ## UI

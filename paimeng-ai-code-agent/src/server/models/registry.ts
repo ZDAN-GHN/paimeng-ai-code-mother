@@ -1,8 +1,8 @@
 import 'server-only';
 import type { LanguageModel } from 'ai';
 import { ZodError } from 'zod';
-import { getConfig } from '../config';
-import { BusinessError } from '../http';
+import { getConfig } from '../infra/config';
+import { BusinessError } from '../infra/http';
 import {
   baseModelApiKeyEnv,
   capabilitiesForSlot,

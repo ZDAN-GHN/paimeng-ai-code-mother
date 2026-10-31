@@ -2,11 +2,11 @@ import { resolve, relative, isAbsolute } from 'node:path';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { users, apps } from '../../src/server/schema';
-import { reserveImportedSnowflakeIds } from '../../src/server/snowflake';
-import { legacySnapshotSchema } from '../../src/server/legacy-import';
-import { getConfig } from '../../src/server/config';
-import { planLegacyArtifacts, applyLegacyArtifactPlan, rollbackLegacyArtifacts } from '../../src/server/legacy-artifacts';
+import { users, apps } from '../../src/server/infra/schema';
+import { reserveImportedSnowflakeIds } from '../../src/server/infra/snowflake';
+import { legacySnapshotSchema } from '../../src/server/infra/legacy-import';
+import { getConfig } from '../../src/server/infra/config';
+import { planLegacyArtifacts, applyLegacyArtifactPlan, rollbackLegacyArtifacts } from '../../src/server/workspace/legacy-artifacts';
 
 const url = new URL(process.env.DATABASE_URL ?? '');
 if (!/^paimeng_app(?:_test)?$/.test(url.pathname.slice(1))) throw new Error('导入仅支持独立的 paimeng_app 库');

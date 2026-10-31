@@ -159,7 +159,7 @@ Exa 免费 MCP 可作次级文本搜索来源：重测已恢复正常，但本�
 
 | 单元 | 负责人、输入与写入边界 | 完成目标与验收 | 交接 |
 | --- | --- | --- | --- |
-| U1 工具契约与网络边界 | 主实施者；本文与基线；新增 `src/server/web-access/{types,http,config}.ts`、修改 `config.ts` 与 `.env.example`，以及对应单测 | Zod 结果契约、配置、取消、超时、体积、代理和地址策略；覆盖 IPv4/IPv6、映射地址、DNS 重绑定、跳转到内网、流式超限；所有失败有稳定错误码且无密钥 | 给 U2 提供可执行网络层、实际 diff、单测日志和未解决的网络假设 |
+| U1 工具契约与网络边界 | 主实施者；本文与基线；新增 `src/server/generation/tools/web/{types,http,config}.ts`、修改 `config.ts` 与 `.env.example`，以及对应单测 | Zod 结果契约、配置、取消、超时、体积、代理和地址策略；覆盖 IPv4/IPv6、映射地址、DNS 重绑定、跳转到内网、流式超限；所有失败有稳定错误码且无密钥 | 给 U2 提供可执行网络层、实际 diff、单测日志和未解决的网络假设 |
 | U2 搜索与正文 | 主实施者；U1；`web-access/{search,read,tools}.ts`、`agent.ts` 与相关测试 | 四类状态正确区分；免密钥模式零配置跑通真实搜索与读正文，配置 key 后同一路径仍通过；429/`Retry-After`、免密钥限额与上游业务失败都映射为可区分错误；Jina 关闭/开启、共享超时与取消均正确；schema 开销与单次输出裁剪生效；关闭工具后带历史工具消息仍能继续生成 | 给 U3 交付可注册的工具与单次上限；日志不含 key 与完整正文 |
 | U3 图片与构建 | 主实施者；U1/U2；`web-access/{images,import}.ts`、`workspace.ts`、`artifacts.ts` 及素材测试 | 两档来源都按契约导入；用真实「泉此方」类查询下载成功；扩展名按字节签名判定（`.png` 实为 webp）；单个候选 404 时换候选；越界 URL/路径、NC/ND、伪图片、超限、重复导入、取消/租约过期都符合契约；严格许可开关生效；二进制写入不放宽文本上限；大于 256 KiB 的合法图片能构建，改变图片字节使指纹变化 | 给 U4 提交含图片与署名页的可预览样例，以及构建/下载/发布测试记录 |
 | U4 合并验收 | 主实施者负责最终验收；U2/U3；`tests/integration/*web-access*`、`tests/e2e/*web-access*`、更新本文 | HTML、Vue、React 各生成一例，真实浏览器图片 `naturalWidth > 0`、引用与署名可访问；预览、测试发布副本与 ZIP 均有资源；断网、429、工具关闭和取消不产生伪成功；模型供应商支持这些工具调用；执行所需回归 | 交付最终 diff、真实检查与剩余限制；仅在实际证据齐全后标记完成 |
@@ -189,25 +189,25 @@ Exa 免费 MCP 可作次级文本搜索来源：重测已恢复正常，但本�
 
 | 文件 | 内容 |
 | --- | --- |
-| `src/server/web-access/types.ts` | 错误码、工具结果状态（ok/empty/error）、工具输出类型 |
-| `src/server/web-access/network.ts` | 地址策略：永远拒绝的类别、可放行的显式网段清单、逐地址校验、可信端点与代理解析 |
-| `src/server/web-access/http.ts` | 传输层：undici、地址绑定、逐跳重定向、超时、按字节限流、状态码映射 |
-| `src/server/web-access/config.ts` | 端点常量与单次调用上限 |
-| `src/server/web-access/tavily.ts` | 免密钥/带 key 搜索与正文提取，zod 校验上游响应 |
-| `src/server/web-access/read.ts` | 网页正文与可选 Jina Reader 回退 |
-| `src/server/web-access/images.ts` | 候选模型、许可白名单、Tavily 图片与 Openverse 两个来源 |
-| `src/server/web-access/import.ts` | 下载、签名校验、素材目录、清单与署名页 |
-| `src/server/web-access/tools.ts` | 四个模型工具、缓存、指令文本、会话状态 |
-| `src/server/binary.ts` | 图片签名与二进制判定（workspace 与 web-access 共用） |
-| `src/server/config.ts` | 7 个 `WEB_ACCESS_*` 环境变量、代理与网段校验 |
-| `src/server/agent.ts` | 按开关注册工具；校验用工具超集；`readFile` 改用二进制安全读取 |
-| `src/server/workspace.ts` | `readProjectFileBytes`、`writeProjectFileBytes`、`readProjectFileAsText`、`writePlatformAssetFile`、平台素材文件保护 |
-| `src/server/artifacts.ts` | 构建指纹按字节计算；源码导出包按字节读取 |
+| `src/server/generation/tools/web/types.ts` | 错误码、工具结果状态（ok/empty/error）、工具输出类型 |
+| `src/server/generation/tools/web/network.ts` | 地址策略：永远拒绝的类别、可放行的显式网段清单、逐地址校验、可信端点与代理解析 |
+| `src/server/generation/tools/web/http.ts` | 传输层：undici、地址绑定、逐跳重定向、超时、按字节限流、状态码映射 |
+| `src/server/generation/tools/web/config.ts` | 端点常量与单次调用上限 |
+| `src/server/generation/tools/web/tavily.ts` | 免密钥/带 key 搜索与正文提取，zod 校验上游响应 |
+| `src/server/generation/tools/web/read.ts` | 网页正文与可选 Jina Reader 回退 |
+| `src/server/generation/tools/web/images.ts` | 候选模型、许可白名单、Tavily 图片与 Openverse 两个来源 |
+| `src/server/generation/tools/web/import.ts` | 下载、签名校验、素材目录、清单与署名页 |
+| `src/server/generation/tools/web/tools.ts` | 四个模型工具、缓存、指令文本、会话状态 |
+| `src/server/infra/binary.ts` | 图片签名与二进制判定（workspace 与 web-access 共用） |
+| `src/server/infra/config.ts` | 7 个 `WEB_ACCESS_*` 环境变量、代理与网段校验 |
+| `src/server/generation/agent.ts` | 按开关注册工具；校验用工具超集；`readFile` 改用二进制安全读取 |
+| `src/server/workspace/workspace.ts` | `readProjectFileBytes`、`writeProjectFileBytes`、`readProjectFileAsText`、`writePlatformAssetFile`、平台素材文件保护 |
+| `src/server/delivery/artifacts.ts` | 构建指纹按字节计算；源码导出包按字节读取 |
 | `.env.example` | 联网配置与 fake-IP 双网段说明 |
 
 ### 与方案的差异（都是有依据的调整）
 
-1. **网络层依赖**：直接用 `undici` + `ipaddr.js`（两者已在 `package.json` 中且已安装），未引入 `file-type`，自带签名判定（`src/server/binary.ts`）。
+1. **网络层依赖**：直接用 `undici` + `ipaddr.js`（两者已在 `package.json` 中且已安装），未引入 `file-type`，自带签名判定（`src/server/infra/binary.ts`）。
 2. **服务商端点与模型地址分开校验**：Tavily/Jina/Openverse 是部署者固定的 HTTPS 端点，跳过本地地址校验（免密钥通道在 fake-IP 机器上才可用）；模型给的网页与图片地址做完整逐跳校验。带凭据的 POST 一律不跟随重定向，避免密钥被转发。
 3. **`readWebPage` 先本地校验再交给服务商**：否则会把内网地址转发给第三方（实现中发现并修正，有测试覆盖）。
 4. **可放行网段用显式白名单而非地址类别**：`ipaddr.js` 把 `198.18.0.0/15` 归在 `reserved`，按类别放行会连私网一起放开；现在只能放行 benchmarking/documentation 网段内的子网。
@@ -217,7 +217,7 @@ Exa 免费 MCP 可作次级文本搜索来源：重测已恢复正常，但本�
 8. **源码导出包改为按字节读取**：`downloadApp` 原来按 UTF-8 读所有文件，加入图片后 ZIP 里的图片会损坏（集成测试发现并修复）。
 9. **`ensureWritable` 上移**：`importImage` 需要在下载完成后、落盘前复核生成租约；下载仍在写入锁外。
 10. **工具校验收集**：模型只看到已启用的工具，`validateUIMessages` 与会话转换用超集，关闭开关后历史里的工具结果仍可读取。
-11. **素材名称改用来源页标题（方案 B）**：Tavily 图片项带 `title`（页面名，如 `Konata Izumi | Lucky Star Wiki`）与 `description`（服务商生成的机器翻译，实测出现过俄文）。原实现把描述当名称，署名页会出现俄文或 `image.jpg` 之类的名字；现在名称优先用页面标题、描述单独保留给模型参考，并新增 `sourceIsPage` 区分「有来源页」与「只有图片地址」（`tests/web-access-images.test.ts` 覆盖）。方案 A（优先带落地页的候选）未做，仍按 Tavily 原始顺序（顶层图片在前）。
+11. **素材名称改用来源页标题（方案 B）**：Tavily 图片项带 `title`（页面名，如 `Konata Izumi | Lucky Star Wiki`）与 `description`（服务商生成的机器翻译，实测出现过俄文）。原实现把描述当名称，署名页会出现俄文或 `image.jpg` 之类的名字；现在名称优先用页面标题、描述单独保留给模型参考，并新增 `sourceIsPage` 区分「有来源页」与「只有图片地址」（`tests/unit/tools/web/web-access-images.test.ts` 覆盖）。方案 A（优先带落地页的候选）未做，仍按 Tavily 原始顺序（顶层图片在前）。
 12. **取消自设调用额度（2026-10-19）**：实测生成时应用会转述「本轮图片检索配额只有 2 次」「联网返回内容已达上限」并因此不再找素材。删掉 `webAccessLimits.budgets` 与累计计数（`turn.outputChars`、`turn.maxImageBytes`）、连带删掉 `budget-exceeded` 错误码与 `importedBytes` 参数；`search`/`page` 的字符上限改为纯单次调用裁剪。保留 `WEB_ACCESS_*` 与工程配额不变。
 
 ### 验证证据
@@ -231,7 +231,7 @@ Exa 免费 MCP 可作次级文本搜索来源：重测已恢复正常，但本�
 | 真实正文读取 | 证据 `runtime/evidence/web-access/u2-live-read.txt` | 日文维基正文 1.56 秒（8000 字符截断）；example.com 782 毫秒 |
 | 内网地址拒绝 | 同上 | 云元数据地址在发出请求前被拒（blocked-url） |
 | 真实图片检索与导入 | 证据 `runtime/evidence/web-access/u3-live-probe.txt` | 6 个候选；3 个中 2 个成功落盘（122 KB / 29 KB），1 个失效页面被拒；清单与署名页生成，标注授权未知 |
-| 浏览器与交付 | `npx vitest run tests/integration/web-access-images.test.ts` | 真实 Chromium 中 `naturalWidth > 0`；署名页可访问；发布目录与 ZIP 内图片字节一致 |
+| 浏览器与交付 | `npx vitest run tests/system/web-access-images.test.ts` | 真实 Chromium 中 `naturalWidth > 0`；署名页可访问；发布目录与 ZIP 内图片字节一致 |
 | 素材名称（方案 B） | 真实调用，证据 `runtime/evidence/web-access/u3b-title-probe.txt` | 名称由俄文描述变为 `Konata Izumi \| Lucky Star Wiki \| Fandom`、`泉こなた - Moegirlpedia`；无落地页的候选标为 `sourceIsPage=false` |
 
 ### 尚未完成（U4 剩余部分）

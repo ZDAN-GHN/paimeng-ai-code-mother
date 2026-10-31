@@ -3,12 +3,12 @@ import { copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, r
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { and, eq, inArray, sql } from 'drizzle-orm';
-import { db, getPool, now, type Transaction } from '@/server/db';
+import { db, getPool, now, type Transaction } from '@/server/infra/db';
 import {
   appAuthority, appPreviewPointers, apps, generationDeliveries, generationExecutions, sourceSnapshots,
-} from '@/server/schema';
-import { createDelivery, currentDelivery, deliveryRoot, setCurrentDelivery } from '@/server/delivery-store';
-import { ensureSafeDirectory, type WorkspaceApp } from '@/server/workspace';
+} from '@/server/infra/schema';
+import { createDelivery, currentDelivery, deliveryRoot, setCurrentDelivery } from '@/server/delivery/delivery-store';
+import { ensureSafeDirectory, type WorkspaceApp } from '@/server/workspace/workspace';
 import { codeGenTypes, isProjectCodeGenType } from '@/shared/contracts';
 
 /**

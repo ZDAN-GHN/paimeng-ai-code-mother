@@ -10,7 +10,7 @@ const unitWorkers = Math.max(1, Math.min(
 export default defineConfig({
   resolve: { alias: {
     '@': fileURLToPath(new URL('./src', import.meta.url)),
-    'server-only': fileURLToPath(new URL('./tests/server-only.ts', import.meta.url)),
+    'server-only': fileURLToPath(new URL('./tests/support/server-only.ts', import.meta.url)),
   } },
   test: {
     testTimeout: 30000,
@@ -23,18 +23,17 @@ export default defineConfig({
     // These suites share storage resets and fixed ports; never run projects together.
     projects: [
       { extends: true, test: {
-        name: 'unit', sequence: { groupOrder: 0 }, include: ['tests/**/*.test.ts'],
-        exclude: ['tests/integration/**', 'tests/system/**'],
-        setupFiles: ['tests/unit-boundaries.ts'],
+        name: 'unit', sequence: { groupOrder: 0 }, include: ['tests/unit/**/*.test.ts', 'tests/support/**/*.test.ts'],
+        setupFiles: ['tests/support/unit-boundaries.ts'],
         fileParallelism: true, maxWorkers: unitWorkers,
       } },
       { extends: true, test: {
         name: 'integration', sequence: { groupOrder: 1 }, include: ['tests/integration/**/*.test.ts'], fileParallelism: false,
-        setupFiles: ['tests/integration-resources.ts'],
+        setupFiles: ['tests/support/integration-resources.ts'],
       } },
       { extends: true, test: {
         name: 'system', sequence: { groupOrder: 2 }, include: ['tests/system/**/*.test.ts'], fileParallelism: false,
-        setupFiles: ['tests/integration-resources.ts'],
+        setupFiles: ['tests/support/integration-resources.ts'],
       } },
     ],
   },

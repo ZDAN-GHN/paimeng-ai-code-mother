@@ -2,7 +2,7 @@ import 'server-only';
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { getConfig } from '../config';
+import { getConfig } from '../infra/config';
 import { ModelConfigInvalidError } from './errors';
 
 /** 直接输入密钥的加密版本；将来更换算法时递增，旧密文仍可解密。 */

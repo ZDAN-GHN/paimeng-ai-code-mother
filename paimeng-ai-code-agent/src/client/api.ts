@@ -1,7 +1,7 @@
 'use client';
 import { z } from 'zod';
 
-/** `/api` 信封的服务端契约（`src/server/http.ts` 的 success/failure）：成功恒带 data，失败 data 为 null。 */
+/** `/api` 信封的服务端契约（`src/server/infra/http.ts` 的 success/failure）：成功恒带 data，失败 data 为 null。 */
 const envelopeSchema = z.object({ code: z.number(), message: z.string().default(''), data: z.unknown() });
 
 /** 信封不合法、业务失败或网络失败；status 为 0 表示请求根本没到服务端。 */

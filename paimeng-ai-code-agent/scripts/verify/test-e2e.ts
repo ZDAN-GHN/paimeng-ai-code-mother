@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createConnection, createServer } from 'node:net';
 import { loadEnvFile } from 'node:process';
-import { storageTestDatabaseUrl, testDatabaseUrl } from '../../tests/test-database-url';
+import { storageTestDatabaseUrl, testDatabaseUrl } from '../../tests/support/test-database-url';
 
 function testPort(name: string, fallback: number) {
   const port = Number(process.env[name] ?? fallback);
@@ -182,7 +182,7 @@ try {
     exitCode = await withinBudget(start('npm', ['run', 'build'], fixtureEnv).completion);
     if (exitCode !== 0) throw new Error(`构建失败，退出码 ${exitCode}`);
   }
-  start(process.execPath, ['--import', 'tsx', '--conditions=react-server', 'src/server/durable/harness-server.ts'], fixtureEnv, true);
+  start(process.execPath, ['--import', 'tsx', '--conditions=react-server', 'src/server/generation/durable/harness-server.ts'], fixtureEnv, true);
   await withinBudget(waitForHarnessHealth());
   if (appMode === 'dev') {
     // dev 模式跳过生产构建：antd/React 的告警只在开发构建里存在，生产构建会把它们剥离。

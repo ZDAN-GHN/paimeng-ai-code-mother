@@ -24,7 +24,7 @@
 
 用户看到的是一个 App chat，跨越多次 Generation。一次 Generation 在隔离 Execution 及其 Execution conversation 中运行，Harness 保存原始 Transcript。Next 侧负责准入、业务编排和消息投影；模型/工具循环由 pi-durable 驱动。用户、助手、工具原始记录与浏览器显示气泡不是一对一关系。
 
-有源码变化的 Generation 通过验证后，平台封存 Source snapshot，接受为 Version 和不可变 Delivery，更新当前预览指针；这叫 Publish。无源码变化的纯对话可以成功收束而不新增 Version。用户再点原型“发布”调用 `/app/deploy`，形成 Deployment 副本；当前默认是本机路径地址，公网运行还需部署配置。术语以根目录 [GLOSSARY.md](../../../../GLOSSARY.md) 为参考，已发现的文档/代码口径冲突见文末。
+有源码变化的 Generation 通过验证后，平台封存 Source snapshot，接受为 Version 和不可变 Delivery，更新当前预览指针；这叫 Publish。无源码变化的纯对话可以成功收束而不新增 Version。用户再点原型“发布”调用 `/app/deploy`，形成 Deployment 副本；当前默认是本机路径地址，公网运行还需部署配置。术语以根目录 [GLOSSARY.md](../../../../../GLOSSARY.md) 为参考，已发现的文档/代码口径冲突见文末。
 
 ```mermaid
 flowchart LR
@@ -49,9 +49,9 @@ flowchart LR
 5. 模型结束后，平台执行最终验证；可修复错误会开启同一 Generation 内的 Repair。新的输入可能使旧 Candidate 失效，回到编辑，不能假设“构建一次就结束”。
 6. 成功 Publish 原子记录 Version / Delivery / 预览指针 / Generation 终态；失败、取消或 Question 则走相应草稿交接。刷新依赖服务端快照重新投影，不能靠浏览器定时器补出历史。
 
-还需区分 SDK run 与产品 Generation：当前生成中的 `followUp` 输入经 [harnessSubmitInput](../../../src/server/durable-engine.ts#L1393) 写入当前 `task.id`，后续 SDK run 仍被同一产品 Generation 验证和收束，不是自动新建一条 Generation。空闲时普通发送或 Question 的回答才走新的准入路径。新活动卡不能按气泡数或 SDK run 数分轮。
+还需区分 SDK run 与产品 Generation：当前生成中的 `followUp` 输入经 [harnessSubmitInput](../../../../src/server/generation/durable-engine.ts) 写入当前 `task.id`，后续 SDK run 仍被同一产品 Generation 验证和收束，不是自动新建一条 Generation。空闲时普通发送或 Question 的回答才走新的准入路径。新活动卡不能按气泡数或 SDK run 数分轮。
 
-入口和投影见 [业务路由](../../../src/app/api/[...path]/route.ts)、[durable-engine](../../../src/server/durable-engine.ts#L561)、[前端同步](../../../src/app/app/chat/[id]/use-generation-sync.ts)。
+入口和投影见 [业务路由](../../../../src/app/api/[...path]/route.ts)、[durable-engine](../../../../src/server/generation/durable-engine.ts)、[前端同步](../../../../src/app/app/chat/[id]/use-generation-sync.ts)。
 
 ### 2.3 数据目前能证明到哪里
 
@@ -64,7 +64,7 @@ flowchart LR
 | `generation_attempt` / transition | 调用预算、可能发生的外部动作、控制面状态变化 | 用户界面上的“需求理解 / 素材收集”进度条 |
 | Version 与 Delivery 指针 | 已接受源码和当前预览/下载来源 | 未接受草稿就是当前预览；每次回复必然新增 Version |
 
-特别注意：`BuildProgress` 按阶段 `kind` 合并，多次同类构建/修复会覆盖同一行；文件计数累计 `paths.length`，不是去重后的文件数。Version 的 `fileCount` 是该版完整源码树文件数，`changedFiles` 才是相对变化。三者不应共用一个“修改 N 个文件”标签。[进度归约](../../../src/components/chat/generation-feedback.ts#L88)、[版本统计](../../../src/server/version-store.ts#L407)。
+特别注意：`BuildProgress` 按阶段 `kind` 合并，多次同类构建/修复会覆盖同一行；文件计数累计 `paths.length`，不是去重后的文件数。Version 的 `fileCount` 是该版完整源码树文件数，`changedFiles` 才是相对变化。三者不应共用一个“修改 N 个文件”标签。[进度归约](../../../../src/components/chat/generation-feedback.ts#L88)、[版本统计](../../../../src/server/versioning/version-store.ts)。
 
 ## 3. 全量差异矩阵
 
@@ -84,7 +84,7 @@ flowchart LR
 | 首页图片、语音 | 聊天支持附件；上传要求 App 归属；语音转写由配置决定 | 部分支持。首页图片需先创建 App 再上传、保留草稿并交给首条输入；当前 `/app/add` 不接图片。语音可先转成文字 |
 | 用户、登录、主题、导航、移动抽屉 | 已有登录/Owner 权限；原型没有完整身份流程 | 身份流需补 UI；主题与布局为前端工作，不能把演示用户名当真实用户 |
 
-依据：[路由](../../../src/app/api/[...path]/route.ts#L24)、[应用查询](../../../src/server/business.ts#L39)、[四个 Template](../../../src/shared/templates.ts#L11)、[附件绑定](../../../src/server/attachment-store.ts#L27)。
+依据：[路由](../../../../src/app/api/[...path]/route.ts#L24)、[应用查询](../../../../src/server/business.ts)、[四个 Template](../../../../src/shared/templates.ts#L11)、[附件绑定](../../../../src/server/generation/attachment-store.ts)。
 
 ### 3.2 工作台、版本与部署
 
@@ -107,7 +107,7 @@ flowchart LR
 | `zisun.paimeng.app` | 当前 URL 是 `PREVIEW_ORIGIN/deploy/<key>/` | 基础设施缺口。先显示真实路径 URL；子域名/自定义域名另作范围 |
 | 明暗主题、分栏宽度、手机全屏、快捷键 | 原型局部 JS；现有聊天已有部分布局持久化 | 纯前端。保留输入法、焦点、键盘与 iframe 状态 |
 
-依据：[运行态与消息投影](../../../src/server/durable-engine.ts#L1169)、[取消](../../../src/server/durable-engine.ts#L1628)、[生成收束](../../../src/server/generation-lifecycle.ts#L803)、[版本类型](../../../src/shared/versioning.ts#L10)、[下载与部署](../../../src/server/business.ts#L249)、[URL](../../../src/server/artifacts.ts#L224)。
+依据：[运行态与消息投影](../../../../src/server/generation/durable-engine.ts)、[取消](../../../../src/server/generation/durable-engine.ts)、[生成收束](../../../../src/server/generation/generation-lifecycle.ts)、[版本类型](../../../../src/shared/versioning.ts#L10)、[下载与部署](../../../../src/server/business.ts)、[URL](../../../../src/server/delivery/artifacts.ts)。
 
 ## 4. 必须保留的架构约束（Why）
 
@@ -115,11 +115,11 @@ flowchart LR
 
 | 原有理由及证据 | 本次设计约束 |
 | --- | --- |
-| [ADR-0001](../../adr/0001-single-writer-authority.md)：Next 与 Harness 生命周期不同，旧共享 Workspace 和 lease 使写者身份含混 | Work activity 不能取得另一份 App 写权限；写入绑定当前 Execution / epoch。浏览器断流不等于活动或 Generation 取消 |
-| [ADR-0002](../../adr/0002-immutable-delivery.md)：预览、下载、部署曾读到不同源码状态 | 代码页和导出统一解析当前 Delivery 对应 Source snapshot；活动“完成”不能切预览指针 |
-| [ADR-0003](../../adr/0003-sdk-as-engine.md)：产品需要自己的副作用控制，但不应 fork SDK 循环 | 新的语义记录经宿主扩展接入；不重写模型/工具调度。平台控制面与 SDK 存储仍独立演进 |
+| [ADR-0001](../../../adr/0001-single-writer-authority.md)：Next 与 Harness 生命周期不同，旧共享 Workspace 和 lease 使写者身份含混 | Work activity 不能取得另一份 App 写权限；写入绑定当前 Execution / epoch。浏览器断流不等于活动或 Generation 取消 |
+| [ADR-0002](../../../adr/0002-immutable-delivery.md)：预览、下载、部署曾读到不同源码状态 | 代码页和导出统一解析当前 Delivery 对应 Source snapshot；活动“完成”不能切预览指针 |
+| [ADR-0003](../../../adr/0003-sdk-as-engine.md)：产品需要自己的副作用控制，但不应 fork SDK 循环 | 新的语义记录经宿主扩展接入；不重写模型/工具调度。平台控制面与 SDK 存储仍独立演进 |
 | 提交 `b86fca1` 记录删除 `app.assistant` 展示副本，并说明常驻 Harness 与 Next 只重启一半曾导致助手回复消失 | 保留原始文本/工具的单一来源；Work activity 引用它们，不复制消息正文另存一份 |
-| [词汇表](../../../../GLOSSARY.md) 与 [迁移 006](../../../migrations/006_harness_control.sql#L151) 明确 Generation phase 是内部四相位 | 新展示概念叫 Work activity；不把“素材收集”等加进控制面 phase。有限的活动生命周期和独立注释记录本身并未被禁止 |
+| [词汇表](../../../../../GLOSSARY.md) 与 [迁移 006](../../../../migrations/006_harness_control.sql#L151) 明确 Generation phase 是内部四相位 | 新展示概念叫 Work activity；不把“素材收集”等加进控制面 phase。有限的活动生命周期和独立注释记录本身并未被禁止 |
 
 **Preserve**：Transcript 的原始叙事、authority 与输入结算、平台验证/Publish、Delivery 一致性、现有断线与草稿交接。
 
@@ -286,14 +286,14 @@ function projectWork(
 | --- | --- |
 | `src/shared/work-activity.ts` | 视图/报告协议与边界校验；活动业务名是文本，生命周期操作有有限协议 |
 | `src/server/work-activity.ts` | `reportWork` / `projectWork`，内部规则与一致性检查；不存第二份助手正文 |
-| `src/server/durable/harness-server.ts`（现有） | 注册 model-only、sequential 的报告工具；构造可信调用上下文，经既有预算与执行准入 |
+| `src/server/generation/durable/harness-server.ts`（现有） | 注册 model-only、sequential 的报告工具；构造可信调用上下文，经既有预算与执行准入 |
 | Harness Transcript 新增 `app.work.v1` 条目（提案 kind） | 唯一新增的活动声明源，包含宿主绑定、来源 callId、宿主时间和命令；省略 model 字段，不污染模型历史正文 |
-| `src/server/durable-engine.ts`（现有） | 保留原生身份与新条目，实时/刷新/历史都调用同一投影；不能先合并气泡再猜活动 |
+| `src/server/generation/durable-engine.ts`（现有） | 保留原生身份与新条目，实时/刷新/历史都调用同一投影；不能先合并气泡再猜活动 |
 | `src/components/chat/generation-work-card.tsx` | 大卡与活动行、折叠和未分类内容；复用原文本/工具渲染能力；不内置业务阶段列表 |
 
 条目写入优先使用当前 SDK 的 Session / ToolExecutionApi 提交能力，不 fork 调度循环。当前普通 `/entries` 会排队并等待写入落地，不能由正在执行的工具同步回调并等待，以免等自己结束。`HookApi` 也没有 `commit()`；具体适配只能使用已确认存在的宿主能力。第一步应验证这些边界，而不是直接把草图当作可复制实现。
 
-读取也必须改源适配：目前 Next 的 `transcriptEntrySchema` 及 Harness `/messages` 输出没有完整保留 conversation / task 身份。应从 `/runtime` 的原生记录及已授权 Execution 关联中解码，或明确扩展相应 schema，再进入气泡合并与活动投影。仅给 `RunTranslator` 增加 `entry_appended` 分支不够；事件类型存在也不证明断流后的完整回放和 safe 工具恢复已经验证。[当前转录解析](../../../src/server/durable-engine.ts#L1152)、[Harness 读取入口](../../../src/server/durable/harness-server.ts#L937)。
+读取也必须改源适配：目前 Next 的 `transcriptEntrySchema` 及 Harness `/messages` 输出没有完整保留 conversation / task 身份。应从 `/runtime` 的原生记录及已授权 Execution 关联中解码，或明确扩展相应 schema，再进入气泡合并与活动投影。仅给 `RunTranslator` 增加 `entry_appended` 分支不够；事件类型存在也不证明断流后的完整回放和 safe 工具恢复已经验证。[当前转录解析](../../../../src/server/generation/durable-engine.ts)、[Harness 读取入口](../../../../src/server/generation/durable/harness-server.ts)。
 
 ### 6.5 首版必须明确的行为
 
@@ -437,7 +437,7 @@ async function readAppSource(
 
 子域名、自定义域名、真正的全栈数据库/订单支付托管、通用 DAG 工作流引擎不纳入上述接入。它们没有被界面布局自动授权为本期功能。
 
-**不使用前面聊天中的“后端 2–3 天 / 动态阶段 3–4 天”作为承诺。** 语义活动涉及 SDK 写入/重放与内容归属，必须先完成接入验证才能估期。配置默认值也不是压测结论：`GENERATION_MAX_CONCURRENT=4`、按用户 60 秒 1 次只是默认准入策略；真实吞吐、容器用时和模型效果本次没有测量。[配置](../../../src/server/config.ts#L26)。
+**不使用前面聊天中的“后端 2–3 天 / 动态阶段 3–4 天”作为承诺。** 语义活动涉及 SDK 写入/重放与内容归属，必须先完成接入验证才能估期。配置默认值也不是压测结论：`GENERATION_MAX_CONCURRENT=4`、按用户 60 秒 1 次只是默认准入策略；真实吞吐、容器用时和模型效果本次没有测量。[配置](../../../../src/server/infra/config.ts)。
 
 ## 9. 可验证的验收条件（待实现）
 
@@ -467,7 +467,7 @@ async function readAppSource(
 
 ```bash
 cd paimeng-ai-code-agent
-npm test -- tests/generation-feedback.test.ts tests/tool-call-view.test.ts tests/chat-inputs.test.ts
+npm test -- tests/unit/chat/generation-feedback.test.ts tests/unit/chat/tool-call-view.test.ts tests/unit/chat/chat-inputs.test.ts
 ```
 
 结果：**3 个测试文件、53 项测试通过**。这些测试支持对当前进度归约、工具展示和输入归属的描述，不验证尚未实现的 Work activity 协议。
@@ -496,22 +496,22 @@ npm test -- tests/generation-feedback.test.ts tests/tool-call-view.test.ts tests
 
 ### 接入时需复核的现有边缘行为
 
-[ADR-0002](../../adr/0002-immutable-delivery.md) 要求有 Delivery 后各消费者不读活动 Workspace。下载路径在交付源码不可用时会拒绝；但当前 [deployApp](../../../src/server/artifacts.ts#L272) 会吞掉指针/交付解析错误，并可能回退 `Workspace/dist` 或静态源码。这里将“统一内容来源”作为接入约束，不把它泛称为所有边缘情况已经满足的保证；新增源码浏览不能复制这种静默回退。
+[ADR-0002](../../../adr/0002-immutable-delivery.md) 要求有 Delivery 后各消费者不读活动 Workspace。下载路径在交付源码不可用时会拒绝；但当前 [deployApp](../../../../src/server/delivery/artifacts.ts) 会吞掉指针/交付解析错误，并可能回退 `Workspace/dist` 或静态源码。这里将“统一内容来源”作为接入约束，不把它泛称为所有边缘情况已经满足的保证；新增源码浏览不能复制这种静默回退。
 
-此外，[versionThumbnail](../../../src/server/version-thumbnail.ts#L100) 对无已有截图缓存的 Vue/React Version 返回空，不能承诺 workbench 中每种 Generation type 都自动有历史缩略图。这些是代码核对发现的范围边界，本次没有修复或扩大为运行故障结论。
+此外，[versionThumbnail](../../../../src/server/versioning/version-thumbnail.ts) 对无已有截图缓存的 Vue/React Version 返回空，不能承诺 workbench 中每种 Generation type 都自动有历史缩略图。这些是代码核对发现的范围边界，本次没有修复或扩大为运行故障结论。
 
 ### 代码与证据索引
 
 | 主题 | 入口 |
 | --- | --- |
 | 原型行为和演示边界 | [README](README.md)、[原型状态与 PHASES](app.js#L131)、[原型大卡](index.html#L332) |
-| API 是否存在、身份校验 | [业务路由](../../../src/app/api/[...path]/route.ts)、[durable 代理](../../../src/app/api/durable/[...path]/route.ts) |
-| 公共字段与固定进度集合 | [contracts](../../../src/shared/contracts.ts#L14)、[chat runtime](../../../src/shared/chat-runtime.ts)、[progress reducer](../../../src/components/chat/generation-feedback.ts#L31) |
-| 流式与历史投影 | [RunTranslator](../../../src/server/durable-engine.ts#L908)、[transcriptMessages](../../../src/server/durable-engine.ts#L1180)、[mergedRuntime](../../../src/server/durable-engine.ts#L1311) |
-| 当前工具、结构化构建结果 | [harness tools](../../../src/server/durable/harness-server.ts#L205)、[buildPreview](../../../src/server/durable/harness-server.ts#L419)、[ToolCall 展示](../../../src/components/chat/tool-call.tsx#L137) |
-| 发布、取消与提问 | [Publish 事务](../../../src/server/generation-lifecycle.ts#L803)、[取消入口](../../../src/server/durable-engine.ts#L1628)、[Question 交接](../../../src/server/generation-lifecycle.ts#L1274) |
-| 版本与用量 | [versioning](../../../src/shared/versioning.ts)、[版本台账](../../../src/server/version-ledger.ts)、[文件统计](../../../src/server/version-store.ts#L407)、[accounts](../../../src/server/generation-accounting.ts#L173) |
-| 源码、下载和 URL | [workspace](../../../src/server/workspace.ts#L135)、[交付源码读取](../../../src/server/business.ts#L249)、[URL](../../../src/server/artifacts.ts#L224) |
-| 运行与历史背景 | [运行文档](../../pi-durable-deployment.md)、[ADR 目录](../../adr/)、git 提交 `b86fca1` / `fc06eab` / `c8c9efc` |
+| API 是否存在、身份校验 | [业务路由](../../../../src/app/api/[...path]/route.ts)、[durable 代理](../../../../src/app/api/durable/[...path]/route.ts) |
+| 公共字段与固定进度集合 | [contracts](../../../../src/shared/contracts.ts#L14)、[chat runtime](../../../../src/shared/chat-runtime.ts)、[progress reducer](../../../../src/components/chat/generation-feedback.ts#L31) |
+| 流式与历史投影 | [RunTranslator](../../../../src/server/generation/durable-engine.ts)、[transcriptMessages](../../../../src/server/generation/durable-engine.ts)、[mergedRuntime](../../../../src/server/generation/durable-engine.ts) |
+| 当前工具、结构化构建结果 | [harness tools](../../../../src/server/generation/tools/)、[buildPreview](../../../../src/server/generation/tools/build-preview-tool.ts)、[ToolCall 展示](../../../../src/components/chat/tool-call.tsx#L137) |
+| 发布、取消与提问 | [Publish 事务](../../../../src/server/generation/generation-lifecycle.ts)、[取消入口](../../../../src/server/generation/durable-engine.ts)、[Question 交接](../../../../src/server/generation/generation-lifecycle.ts) |
+| 版本与用量 | [versioning](../../../../src/shared/versioning.ts)、[版本台账](../../../../src/server/versioning/version-ledger.ts)、[文件统计](../../../../src/server/versioning/version-store.ts)、[accounts](../../../../src/server/generation/generation-accounting.ts) |
+| 源码、下载和 URL | [workspace](../../../../src/server/workspace/workspace.ts)、[交付源码读取](../../../../src/server/business.ts)、[URL](../../../../src/server/delivery/artifacts.ts) |
+| 运行与历史背景 | [运行文档](../../../pi-durable-deployment.md)、[ADR 目录](../../../adr/)、git 提交 `b86fca1` / `fc06eab` / `c8c9efc` |
 
 `docs/implementation-contract.md` 中“每 App 一条会话”“构建后忽略取消”“租约释放”的部分表述与当前实现不一致；`GLOSSARY.md` 将 Follow-up 描述为开启下一产品 Generation，也与当前生成中输入仍绑定 `task.id` 的代码存在口径差异。本次以代码说明现状，保留这些文档冲突作为接入时需统一的契约问题，没有顺手改写词汇表或旧段落。

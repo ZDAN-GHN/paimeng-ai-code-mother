@@ -4,7 +4,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { LanguageModelV4, LanguageModelV4Middleware } from '@ai-sdk/provider';
 import { customProvider, defaultSettingsMiddleware, wrapLanguageModel, type LanguageModel, type LanguageModelMiddleware } from 'ai';
-import { getConfig } from '../config';
+import { getConfig } from '../infra/config';
 import {
   isAllowedModelApiKeyEnv,
   requiredModelAliases,

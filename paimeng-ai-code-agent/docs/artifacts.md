@@ -2,11 +2,11 @@
 
 ## 文件工作目录
 
-生成模型的文件工具由 `src/server/durable/harness-server.ts` 注册，直接使用 `@earendil-works/pi-durable/tools` 的 `createCodingTools()` 中的 `read`、`write`、`edit`。`read` 支持 offset/limit，使用内置的 2000 行 / 50KB 双限截断；`write` 和 `edit` 使用内置文件写入队列。`write` 一次写一个 `{ path, content }`，`edit` 使用 `{ path, edits: [{ oldText, newText }] }`。`listFiles`、`buildPreview` 和四个联网工具继续由产品提供。
+生成模型的文件工具在 `src/server/generation/tools/file-tools.ts` 用 `@earendil-works/pi-durable/tools` 的 `createCodingTools()` 取 `read`、`write`、`edit`，由 harness 注册。`read` 支持 offset/limit，使用内置的 2000 行 / 50KB 双限截断；`write` 和 `edit` 使用内置文件写入队列。`write` 一次写一个 `{ path, content }`，`edit` 使用 `{ path, edits: [{ oldText, newText }] }`。`listFiles`、`buildPreview`、`git`、`ask` 与四个联网工具的定义在 `src/server/generation/tools/`，同样由 harness 注册。
 
 应用目录固定为 `runtime/code_output/{codeGenType}_{appId}/`，类型限于 `html`、`multi_file`、`vue_project` 和 `react_project`。应用 ID 与工具 cwd 由服务端绑定；文件工具入口拒绝绝对路径和 `..`。未注册 `bash`：工具在宿主机应用工作区运行，开放 shell 等于允许以宿主用户身份执行任意命令。
 
-`src/server/workspace.ts` 仍服务附件、源码导出和构建。它的写入辅助函数限制单文件 256 KiB、总计 16 MiB、最多 256 个文件，并使用临时文件与重命名；路径校验拒绝敏感文件、符号链接和特殊文件。这些辅助函数的限制不包装生成模型的原生工具，构建与导出仍通过它们检查源码。
+`src/server/workspace/workspace.ts` 仍服务附件、源码导出和构建。它的写入辅助函数限制单文件 256 KiB、总计 16 MiB、最多 256 个文件，并使用临时文件与重命名；路径校验拒绝敏感文件、符号链接和特殊文件。这些辅助函数的限制不包装生成模型的原生工具，构建与导出仍通过它们检查源码。
 
 应用生成、源码工具、构建、下载、发布与删除使用数据库中的应用写入锁及任务租约。旧任务失去租约后不能继续写入。文件安全假设运行目录不被另一个具有宿主文件权限的进程恶意修改。它不是用于抵御已获得宿主账号权限的攻击者的隔离机制。
 
@@ -18,7 +18,7 @@ HTML 与多文件类型没有构建步骤，源码目录直接静态托管。新
 
 ## Vue 构建依赖
 
-`BUILD_DEPENDENCIES` 在 `src/server/build-contract.ts` 中固定允许依赖和版本。生成工程只能使用以下版本。
+`BUILD_DEPENDENCIES` 在 `src/server/delivery/build-contract.ts` 中固定允许依赖和版本。生成工程只能使用以下版本。
 
 - `vue` 使用 `3.5.17`。
 - `vite` 使用 `7.0.0`。
@@ -55,7 +55,7 @@ ZIP 下载包含经过路径校验的真实源文件，不包含 `dist/`、`node
 
 ## 独立预览服务
 
-`src/server/preview.ts` 创建 HTTP 服务，`scripts/dev/preview.ts` 负责在配置的回环地址启动它。该服务不提供管理 API，也不授予管理端 Cookie 或跨域凭据权限。
+`src/server/delivery/preview.ts` 创建 HTTP 服务，`scripts/dev/preview.ts` 负责在配置的回环地址启动它。该服务不提供管理 API，也不授予管理端 Cookie 或跨域凭据权限。
 
 - `/preview/{类型}_{ID}/` 提供生成源码或 Vue 的 `dist/`。
 - `/deploy/{deployKey}/` 提供已发布副本。

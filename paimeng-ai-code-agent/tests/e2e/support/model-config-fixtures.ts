@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { testDatabaseUrl } from '../../test-database-url';
+import { testDatabaseUrl } from '../../support/test-database-url';
 
 export async function testConnection(): Promise<pg.Client> {
   const raw = process.env.DATABASE_URL;

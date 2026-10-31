@@ -4,7 +4,7 @@ import { rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { loadEnvFile } from 'node:process';
 import pg from 'pg';
-import { testDatabaseUrl } from '../test-database-url';
+import { testDatabaseUrl } from '../support/test-database-url';
 import { appOrigin } from './support/app-origin';
 import { evidenceDir } from './support/evidence';
 import { loginAsProofAccount, proofAccount } from './support/proof-account';

@@ -1,4 +1,4 @@
-import { getPool } from '../../src/server/db';
+import { getPool } from '../../src/server/infra/db';
 import { initializeModelConfigFromEnv } from '../../src/server/models/store';
 
 const result = await initializeModelConfigFromEnv();

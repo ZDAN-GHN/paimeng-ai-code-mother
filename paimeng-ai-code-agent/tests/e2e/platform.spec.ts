@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { loadEnvFile } from 'node:process';
-import { testDatabaseUrl } from '../test-database-url';
+import { testDatabaseUrl } from '../support/test-database-url';
 import type { CodeGenType } from '@/shared/contracts';
 import { appOrigin, previewOrigin as serverPreviewOrigin } from './support/app-origin';
 import { evidencePath } from './support/evidence';

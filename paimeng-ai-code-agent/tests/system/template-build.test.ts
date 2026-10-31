@@ -1,10 +1,10 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { initializeTemplate } from '@/server/template-workspace';
-import { resolveTemplate, readTemplateFile } from '@/server/templates';
-import { workspace, writeProjectFile, readProjectFile } from '@/server/workspace';
-import { buildApp, hasPreview } from '@/server/artifacts';
+import { initializeTemplate } from '@/server/workspace/template-workspace';
+import { resolveTemplate, readTemplateFile } from '@/server/templates/templates';
+import { workspace, writeProjectFile, readProjectFile } from '@/server/workspace/workspace';
+import { buildApp, hasPreview } from '@/server/delivery/artifacts';
 const cases = [
   { id: 'vue-ts', type: 'vue_project' as const },
   { id: 'react-ts', type: 'react_project' as const },

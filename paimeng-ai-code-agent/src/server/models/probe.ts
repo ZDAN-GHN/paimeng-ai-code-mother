@@ -1,6 +1,6 @@
 import 'server-only';
 import { z } from 'zod';
-import { BusinessError } from '../http';
+import { BusinessError } from '../infra/http';
 import { providerModelListLimit, type ProviderApiFormat } from '@/shared/model-config';
 
 export type ProviderModel = { id: string; label: string };

@@ -1,9 +1,9 @@
 import 'server-only';
 import { eq } from 'drizzle-orm';
-import { getConfig } from '../config';
-import { db, now, type Transaction } from '../db';
-import { BusinessError } from '../http';
-import { modelAliases, modelConfigState, modelProviders } from '../schema';
+import { getConfig } from '../infra/config';
+import { db, now, type Transaction } from '../infra/db';
+import { BusinessError } from '../infra/http';
+import { modelAliases, modelConfigState, modelProviders } from '../infra/schema';
 import {
   baseModelApiKeyEnv,
   capabilitiesForSlot,

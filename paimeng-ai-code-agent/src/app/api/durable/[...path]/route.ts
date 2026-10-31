@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { requireUser } from '@/server/auth';
+import { requireUser } from '@/server/auth/auth';
 import { getApp } from '@/server/business';
-import { conversationIdOf } from '@/server/durable-engine';
-import { BusinessError, failure } from '@/server/http';
+import { conversationIdOf } from '@/server/generation/durable-engine';
+import { BusinessError, failure } from '@/server/infra/http';
 import { idSchema } from '@/shared/contracts';
 
 export const runtime = 'nodejs';
@@ -13,11 +13,11 @@ const harnessUrl = () => (process.env.DURABLE_HARNESS_URL ?? 'http://127.0.0.1:5
 /**
  * Attach proxy to the resident pi-durable harness: the Next.js server is a client and never
  * opens conversation storage itself. This is the read/debug surface (state / context / events);
- * the product generation entry talks to the harness from `src/server/durable-engine.ts`.
+ * the product generation entry talks to the harness from `src/server/generation/durable-engine.ts`.
  *
  * 必须保留的限界：浏览器断连只允许影响这条 SSE 视图（只有 /events 把 req.signal 传给上游），
  * 绝不能传进 POST /submit 或任务 context —— 否则「断开连接 = 取消生成」的老 bug 会回来
- * （旧实现见 src/server/agent.ts 把 req.signal 接进生成 AbortController）。
+ * （旧实现见 src/server/generation/agent.ts 把 req.signal 接进生成 AbortController）。
  *
  * 鉴权与 app/chat/gen/code、app/chat/steer 同级：必须先登录（401），且 body/query 里的 appId
  * 必须是当前用户创建的应用（403，管理员不走后门，getApp(appId, user, true)）。appId 只作授权主体。

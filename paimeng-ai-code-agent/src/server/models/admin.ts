@@ -1,6 +1,6 @@
 import 'server-only';
-import { getConfig } from '../config';
-import { BusinessError } from '../http';
+import { getConfig } from '../infra/config';
+import { BusinessError } from '../infra/http';
 import {
   allowedModelApiKeyEnvs,
   isAllowedModelApiKeyEnv,

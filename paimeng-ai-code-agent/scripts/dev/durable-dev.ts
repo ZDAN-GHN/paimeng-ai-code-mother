@@ -145,7 +145,7 @@ console.log(process.env.DURABLE_FAUX_MODEL === '1' || process.env.DURABLE_FAUX_F
   ? '生成模型：夹具/桩模型'
   : '生成模型：产品库的 codegen.default 别名（模型管理里改）' + (process.env.DURABLE_MODEL_BASE_URL || process.env.DURABLE_MODEL_API_KEY || process.env.DURABLE_MODEL_ID ? '（已设置 DURABLE_MODEL_*，三件套全覆盖）' : ''));
 const harnessEnv: NodeJS.ProcessEnv = { ...process.env, DURABLE_HARNESS_HOST: '127.0.0.1', DURABLE_HARNESS_PORT: String(harnessPort), DURABLE_PG_URL: pgUrl };
-start('harness', process.execPath, ['--import', 'tsx', '--conditions=react-server', join(root, 'src', 'server', 'durable', 'harness-server.ts')], { cwd: root, env: harnessEnv });
+start('harness', process.execPath, ['--import', 'tsx', '--conditions=react-server', join(root, 'src', 'server', 'generation', 'durable', 'harness-server.ts')], { cwd: root, env: harnessEnv });
 
 const deadline = Date.now() + 30_000;
 while (Date.now() < deadline) {

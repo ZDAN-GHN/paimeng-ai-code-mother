@@ -1,9 +1,9 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { rm, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { buildApp, loadBuildState, sourceDigest, workspace } from '@/server/artifacts';
-import { writeProjectFile } from '@/server/workspace';
-import { fixtureFiles } from '@/server/fixture-content';
+import { buildApp, loadBuildState, sourceDigest, workspace } from '@/server/delivery/artifacts';
+import { writeProjectFile } from '@/server/workspace/workspace';
+import { fixtureFiles } from '@/server/generation/durable/fixture-content';
 const vue = { id: String(Date.now() + 9000), codeGenType: 'vue_project' as const };
 afterAll(async () => { await rm(workspace(vue), { recursive: true, force: true }); });
 describe('容器构建隔离与超时', () => {
