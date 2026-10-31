@@ -25,3 +25,5 @@
 .rateCardForm{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:0 16px;border:1px solid #f0f0f0;border-radius:8px;padding:16px 16px 0}
 .rateCardActions{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-bottom:16px}
 .rateCardCost{display:flex;flex-direction:column;gap:4px}
+
+.usageLegend{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin:12px 0 16px;color:#999;font-size:12px}
