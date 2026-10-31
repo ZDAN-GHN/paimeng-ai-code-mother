@@ -22,6 +22,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { ApiResponseError, readApiResponse } from '@/client/api';
 import { AdminGuard } from './providers';
+import { RateCardPanel } from './billing/rate-card-panel';
 import styles from './admin-view.module.css';
 import {
   baseModelApiKeyEnv,
@@ -586,6 +587,9 @@ function ModelConfigManager() {
           </div>
         </>
       )}
+
+      {/* 费率表与模型配置相互独立：模型配置没初始化时也照样要能看到与维护价格。 */}
+      <RateCardPanel />
 
       {providerEditor ? (
         <Modal

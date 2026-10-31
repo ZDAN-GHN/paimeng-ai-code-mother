@@ -6,6 +6,7 @@ import { generationAccounts } from '@/server/generation/generation-accounting';
 import { chatRuntime, generationStatus, harnessCancelGeneration, harnessCancelInput, harnessChatResponse, harnessSteerGeneration, harnessSubmitInput, loadMessages } from '@/server/generation/durable-engine';
 import { applyModelConfigNow, deleteModelAlias, deleteModelProvider, probeProviderModels, readModelAdminConfig, upsertModelAlias, upsertModelProvider } from '@/server/models/admin';
 import { uploadImages } from '@/server/generation/image-upload';
+import { appendRate, readRateCardList } from '@/server/billing/rate-card';
 import { transcribeEnabled, transcribeSpeech } from '@/server/generation/speech';
 import { readAttachmentOriginal } from '@/server/generation/attachment-store';
 import { idSchema } from '@/shared/contracts';
@@ -39,6 +40,7 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/versions/diff'){const user=await requireUser(req);return success(await business.diffAppVersions({appId:idSchema.parse(query.get('appId')),base:versionIdSchema.parse(query.get('base')),target:versionIdSchema.parse(query.get('target'))},user));}
    if(path==='app/versions/thumbnail'){const user=await requireUser(req);const png=await business.readAppVersionThumbnail({appId:idSchema.parse(query.get('appId')),versionId:versionIdSchema.parse(query.get('versionId'))},user);if(!png)return new Response(null,{status:404});return new Response(new Uint8Array(png),{headers:{'content-type':'image/png','content-length':String(png.length),'cache-control':'private, max-age=3600','x-content-type-options':'nosniff'}});}
    if(path.startsWith('app/download/')){const user=await requireUser(req);const id=idSchema.parse(path.slice('app/download/'.length));return await business.download(id,user);}
+   if(path==='admin/billing/rate-card'){await requireAdmin(req);return success(await readRateCardList());}
   }
   if(method==='POST'){
    if(path==='user/register')return success(await register(value));
@@ -59,6 +61,7 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/chat/input/cancel'){const input=z.object({appId:idSchema,submissionId:z.number().int().positive()}).parse(value);return success(await harnessCancelInput(input.appId,input.submissionId,user));}
    if(path==='app/chat/steer'){const steer=z.object({appId:idSchema,text:z.string().trim().min(1).max(1000)}).parse(value);return success(await harnessSteerGeneration(steer.appId,user,steer.text));}
    await requireAdmin(req);
+   if(path==='admin/billing/rate-card')return success(await appendRate(value,user.id));
    if(path==='model/admin/config')return success(await readModelAdminConfig(value));
    if(path==='model/admin/provider/upsert')return success(await upsertModelProvider(value));
    if(path==='model/admin/provider/models')return success(await probeProviderModels(value));
