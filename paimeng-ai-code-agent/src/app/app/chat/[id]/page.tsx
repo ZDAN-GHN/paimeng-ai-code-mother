@@ -10,12 +10,14 @@ import { useAuth } from '@/components/providers';
 import { type AppInfo, type Generation, type GenerationAccount, isProjectCodeGenType } from '@/shared/contracts';
 import type { ChatInputMode, ChatInputReceipt, ChatMessage, ChatRuntime } from '@/shared/chat-runtime';
 import { imageLimits, type AttachmentPart } from '@/shared/attachments';
+import type { BillingChargeView } from '@/shared/billing';
 import { maxSelectedElements, selectedElementsSchema, selectionContext, type SelectedElement } from '@/shared/element-selection';
 import { draggingFiles, filesFromClipboard, filesFromDrop } from '@/components/clipboard-images';
 import { ImageAttachments, MessageImages, messageAttachments, outgoingParts, useImageAttachments } from '@/components/chat/image-attachments';
 import { VoiceInput, appendTranscript } from '@/components/chat/voice-input';
 import { MarkdownMessage } from '@/components/chat/markdown-message';
 import { GenerationUsage } from '@/components/chat/generation-usage';
+import { GenerationCredit } from '@/components/chat/generation-credit';
 import { CreditBalance } from '@/components/billing/credit-balance';
 import { BuildProgress } from '@/components/chat/build-progress';
 import { composerAction, handoffWaitingText, initialProgress, interruptedStreamMessage, interruptionText, parseProgressEvent, parseSteerLanded, progressReducer, projectGenerationInputs, type ProjectedInput, type ProgressState } from '@/components/chat/generation-feedback';
@@ -137,6 +139,7 @@ function Chat({ id }: { id: string }) {
   const [input, setInput] = useState('');
   const [task, setTask] = useState<Generation | null>(null);
   const [usageByMessage, setUsageByMessage] = useState<Map<string, GenerationAccount>>(new Map());
+  const [creditByMessage, setCreditByMessage] = useState<Map<string, BillingChargeView>>(new Map());
   const [error, setError] = useState('');
   const [historyError, setHistoryError] = useState('');
   const [appLoaded, setAppLoaded] = useState(false);
@@ -361,10 +364,22 @@ function Chat({ id }: { id: string }) {
       ])));
     } catch { if (mounted.current) setUsageByMessage(new Map()); }
   }, [id]);
+  // 账单与用量同一时机取一次：结算发生在终态写入之后，按消息 id 与 generationId 两种键挂到气泡上。
+  const refreshCredit = useCallback(async () => {
+    try {
+      const charges = await api<BillingChargeView[]>('billing/charges?appId=' + encodeURIComponent(id));
+      if (!mounted.current) return;
+      setCreditByMessage(new Map(charges.flatMap(charge => [
+        [charge.generationId, charge] as [string, BillingChargeView],
+        ...(charge.messageId ? [[charge.messageId, charge] as [string, BillingChargeView]] : []),
+      ])));
+    } catch { if (mounted.current) setCreditByMessage(new Map()); }
+  }, [id]);
   useEffect(() => {
     if (!task?.id || taskStatus === 'generating' || taskStatus === 'building') return;
     void refreshUsage();
-  }, [task?.id, taskStatus, refreshUsage]);
+    void refreshCredit();
+  }, [task?.id, taskStatus, refreshUsage, refreshCredit]);
   useEffect(() => { if (!generating) { setMemoryBusy(false); setRepairing(null); } }, [generating]);
   const buildPending = publishing || rebuilding;
   useEffect(() => {
@@ -779,6 +794,7 @@ function Chat({ id }: { id: string }) {
             {!messages.length && <div className="message-item initial-prompt"><div className="message-role">初始需求</div><div className="message-text">{app?.initPrompt || '加载应用…'}</div></div>}
             {visibleMessages.map(item => {
               const usage = usageByMessage.get(item.id) ?? (item.metadata?.generationId ? usageByMessage.get(item.metadata.generationId) : undefined);
+              const credit = creditByMessage.get(item.id) ?? (item.metadata?.generationId ? creditByMessage.get(item.metadata.generationId) : undefined);
               if (item.role === 'user') return <div className="message-item message-user" key={item.id}>
                 <div className="message-bubble">
                   <MessageImages appId={id} attachments={messageAttachments(item)} />
@@ -798,6 +814,7 @@ function Chat({ id }: { id: string }) {
                     <div className="message-bubble">
                       <AssistantParts parts={segment.parts} assetUrl={assetUrl} />
                       {position === lastAssistantSegment && usage && <GenerationUsage usage={usage} />}
+                      {position === lastAssistantSegment && credit && <GenerationCredit charge={credit} />}
                     </div>
                   </div>)}</Fragment>;
             })}

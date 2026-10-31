@@ -9,6 +9,8 @@ import {
   generationTransitions, generations,
   type AttemptKind, type AttemptStatus, type AuthorityState, type ExecutionStatus, type InputMode, type InputStatus,
 } from '../infra/schema';
+// 计费只从控制侧 import billing：billing 反向 import 本模块会成环。
+import { settleGenerationBilling } from '../billing/settlement';
 
 /**
  * harness 控制面存储层（docs/plans/archive/harness-reliability.md §1/§3/§4，迁移 006）。
@@ -41,7 +43,13 @@ const attemptTransitions: Record<AttemptStatus, AttemptStatus[]> = {
   failed: [],
 };
 
-export type AuthorityHandle = { epoch: number; previousGenerationId: string | null; previousDraftSnapshotId: string | null };
+export type AuthorityHandle = {
+  epoch: number;
+  previousGenerationId: string | null;
+  previousDraftSnapshotId: string | null;
+  /** 这次接管收束掉的 generation（一次可能多条）：每一条都要各结算一次，否则只结最新那条会漏账。 */
+  closedGenerationIds: string[];
+};
 export type HeartbeatState = 'active' | 'draining' | 'lost';
 export type AuthorityRecord = {
   appId: string; epoch: number; holder: string | null; processId: string | null; expiresAt: string | null;
@@ -215,7 +223,7 @@ export async function ensureAuthority(appId: string): Promise<AuthorityRecord> {
 export async function acquireAuthority(acquire: { appId: string; generationId: string; holder: string; ttlMs?: number }): Promise<AuthorityHandle> {
   const ttl = ttlValue(acquire.ttlMs);
   requiredText(acquire.holder, '缺少持有者标识');
-  return db().transaction(async tx => {
+  const handle = await db().transaction(async tx => {
     const app = await lockApp(tx, acquire.appId);
     const authority = await lockAuthority(tx, app.id);
     const [claim] = await tx.select({
@@ -247,6 +255,7 @@ export async function acquireAuthority(acquire: { appId: string; generationId: s
       .where(and(eq(generations.appId, app.id), inArray(generations.status, activeGenerationStatuses), ne(generations.id, acquire.generationId)))
       .orderBy(desc(generations.createTime), desc(generations.id)).for('update');
 
+    const closedGenerationIds: string[] = [];
     let previousGenerationId: string | null = null;
     for (const generation of stale) {
       await tx.update(generations)
@@ -256,6 +265,7 @@ export async function acquireAuthority(acquire: { appId: string; generationId: s
         appId: app.id, generationId: generation.id, fromState: generation.status, toState: 'failed',
         reason: '应用写权限过期，由新持有者接管', createTime: now(),
       });
+      closedGenerationIds.push(generation.id);
     }
     previousGenerationId = stale[0]?.id ?? null;
 
@@ -263,6 +273,7 @@ export async function acquireAuthority(acquire: { appId: string; generationId: s
     const fenced = await tx.update(generationExecutions).set({ status: 'failed', updateTime: now() })
       .where(and(eq(generationExecutions.appId, app.id), inArray(generationExecutions.status, openExecutionStatuses), sql`${generationExecutions.epoch} < ${epoch}`))
       .returning({ generationId: generationExecutions.generationId });
+    closedGenerationIds.push(...fenced.map(row => row.generationId));
     previousGenerationId ??= fenced[0]?.generationId ?? null;
 
     const [updated] = await tx.update(appAuthority)
@@ -270,8 +281,16 @@ export async function acquireAuthority(acquire: { appId: string; generationId: s
       .where(and(eq(appAuthority.appId, app.id), eq(appAuthority.ownerEpoch, authority.ownerEpoch)))
       .returning({ epoch: appAuthority.ownerEpoch });
     if (!updated) throw new BusinessError(409, 40900, '应用写权限已被接管');
-    return { epoch, previousGenerationId, previousDraftSnapshotId: authority.draftSnapshotId };
+    return {
+      epoch,
+      previousGenerationId,
+      previousDraftSnapshotId: authority.draftSnapshotId,
+      closedGenerationIds: [...new Set(closedGenerationIds)],
+    };
   });
+  // 提交之后逐个结算被收束的 generation：它们已经是终态，缺一次结算就是一笔漏账。
+  for (const generationId of handle.closedGenerationIds) await settleGenerationBilling(generationId);
+  return handle;
 }
 
 /** 心跳只续自己那一份未过期的 active 租约；不会被当成回收入口。 */

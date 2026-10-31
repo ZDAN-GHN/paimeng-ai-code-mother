@@ -169,7 +169,7 @@ describe('harness 控制面存储', () => {
     await expireAuthority(appId);
     const next = await newGeneration(appId);
     const recovered = await acquireAuthority({ appId, generationId: next, holder: 'process-b' });
-    expect(recovered).toEqual({ epoch: 2, previousGenerationId: stale, previousDraftSnapshotId: draftId });
+    expect(recovered).toEqual({ epoch: 2, previousGenerationId: stale, previousDraftSnapshotId: draftId, closedGenerationIds: [stale] });
 
     const [interrupted] = await db().select().from(generations).where(eq(generations.id, stale));
     expect(interrupted).toMatchObject({ status: 'failed', stopReason: 'interrupted' });

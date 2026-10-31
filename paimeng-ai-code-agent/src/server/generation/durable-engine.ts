@@ -16,6 +16,8 @@ import { appForAdoption, getApp } from '../business';
 import { getConfig } from '../infra/config';
 import { db, now } from '../infra/db';
 import { generationControl, generationFor } from './generation-store';
+// 读路径的 ready 修复也要补一次结算；计费只从 generation 侧 import billing，避免成环。
+import { settleGenerationBilling } from '../billing/settlement';
 import { activeExecution, appendInput, assertAuthority, beginChecking, bindExecutionConversation, completeAttempt, heartbeatAuthority, inputsSettled, setExecutionStatus, markInputPlaced, markInputUnanswered, markInputResolved, openQuestionOf, reserveAttempt, withdrawInput, type ExecutionRecord, type InputRecord } from './control-store';
 import { CandidateInvalidatedError, failOrCancel, getInputs, pauseForQuestion, publishReady, recoverStartup, settleGeneration, startGeneration } from './generation-lifecycle';
 import { recordAssistantStep, recordBuildStep, stopReasonOf, type AccountToolCall, type EntryUsage, type GenerationStopReason, type ModelIdentity } from './generation-accounting';
@@ -1481,6 +1483,9 @@ export async function generationStatus(appId: string) {
         .where(and(eq(generations.id, task.id), inArray(generations.status, ['generating', 'building'])));
       await db().execute(sql`update generation set phase = 'finished', update_time = ${now()} where id = ${task.id}`);
       task = (await generationFor(appId)) ?? task;
+      // 状态在这里被改成 ready，没有别的路径会再通知结算；异步补一次、不阻塞这次轮询。
+      // 失败由对账扫描（93）兜底，`settleGenerationBilling` 本身不抛错。
+      void settleGenerationBilling(task.id);
     } else {
       await attachOrphanedExecution(appId, task).catch(problem => console.warn(`重新挂接 ${task?.id} 失败：`, problem));
     }
