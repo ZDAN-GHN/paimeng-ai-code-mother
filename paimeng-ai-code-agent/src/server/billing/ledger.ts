@@ -110,17 +110,32 @@ export async function rebuildAccount(userId: string, tx?: Transaction): Promise<
   return { quota, balance };
 }
 
+/**
+ * 可用 Credit = 配额池 + 余额池，不做任何透支折算：Overdraft 是运行期熔断线，不是能拿来启动新生成的余额。
+ *
+ * 两池在同一条 select 里读出，所以 `total` 一定来自同一个快照，不会出现「配额读到扣减前、余额读到扣减后」。
+ * 传 `tx` 时跟随调用方的事务语义（结算与对账在自有事务里复用）。
+ */
+export async function availableCredits(
+  userId: string, tx?: Transaction,
+): Promise<CreditAccountBalances & { total: number }> {
+  const run = tx ?? db();
+  const rows = await run.select({ pool: creditAccounts.pool, balance: creditAccounts.balance })
+    .from(creditAccounts).where(eq(creditAccounts.userId, BigInt(userId)));
+  const quota = rows.find(row => row.pool === 'quota')?.balance ?? 0;
+  const balance = rows.find(row => row.pool === 'balance')?.balance ?? 0;
+  return { quota, balance, total: quota + balance };
+}
+
 /** 只读快照：两池余额、合计、近 60 天购买额与由此推导的透支线。 */
 export async function accountSnapshot(userId: string): Promise<AccountSnapshot> {
   const id = BigInt(userId);
-  const accounts = await db().select().from(creditAccounts).where(eq(creditAccounts.userId, id));
-  const quota = accounts.find(row => row.pool === 'quota')?.balance ?? 0;
-  const balance = accounts.find(row => row.pool === 'balance')?.balance ?? 0;
+  const { quota, balance, total } = await availableCredits(userId);
   const [purchased] = await db().select({ credits: sql<string>`coalesce(sum(${creditGrants.credits}), 0)` })
     .from(creditGrants)
     .where(and(eq(creditGrants.userId, id), eq(creditGrants.source, 'purchase'), gt(creditGrants.createTime, purchaseWindowStart())));
   const purchasedCredits60d = Number(purchased?.credits ?? 0);
-  return { quota, balance, total: quota + balance, purchasedCredits60d, overdraft: overdraftOf(purchasedCredits60d) };
+  return { quota, balance, total, purchasedCredits60d, overdraft: overdraftOf(purchasedCredits60d) };
 }
 
 /** 冲突后的定位：三个幂等键各自对应一条部分唯一索引，按 requestId → 外部单号 → 月度账期依次找。 */

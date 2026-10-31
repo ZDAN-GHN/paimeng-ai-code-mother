@@ -298,3 +298,23 @@ export type BillingChargeView = {
   /** 冲正分录；没被冲正时是空数组。退款去向（哪个池、退了多少）只能从这里读。 */
   reversals: ChargeReversalView[];
 };
+
+// ---- 准入（票 94；不需要迁移）----
+
+/**
+ * 额度不足的唯一错误码：`BusinessError(402, insufficientCreditsCode, …)`。
+ * 界面按它识别（不复用 40900 / 40300），服务端只有准入这一处会抛出。
+ */
+export const insufficientCreditsCode = 40201;
+
+/**
+ * 额度不足的完整文案：说清当前可用 Credit 与下一步。服务端（402 的 message）与界面（首页预检）
+ * 共用这一处措辞，界面不再自己拼一遍数字。
+ *
+ * 支付通道尚未开通，所以唯一可执行的下一步是「联系管理员补充额度」——不给充值/购买入口，
+ * 那是兑现不了的按钮。
+ */
+export function insufficientCreditsMessage(available: { quota: number; balance: number; total: number }): string {
+  return `当前可用 Credit 为 ${available.total}（${poolLabels.quota} ${available.quota} + ${poolLabels.balance} ${available.balance}），`
+    + '不足以开始新的生成。请联系管理员补充额度后再提交。';
+}
