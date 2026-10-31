@@ -242,8 +242,28 @@ export type UsageSnapshotStep = {
   rate: RateCardVersionKey | null;
 };
 
-/** 一笔 Charge 的一条分录（分池）：正数为扣减，负数为退还。 */
-export type ChargeEntryView = { pool: CreditPool; credits: number; reversalOf: string | null };
+/** 一笔 Charge 的原始扣减分录（按池拆分）：正数为扣减金额。 */
+export type ChargeEntryView = { pool: CreditPool; credits: number };
+
+/**
+ * 一条冲正分录：按原分录的池同额退回，`credits` 为负数（退了多少），`reason` 说明退还原因
+ * ——自动冲正固定写 `platformReversalReason`，人工冲正写管理员填的原因（92）。
+ */
+export type ChargeReversalView = { pool: CreditPool; credits: number; reason: string | null; createTime: string };
+
+/**
+ * 平台自身故障导致的终止：先按实收结算，再由 90 自动整笔冲正，用户实际不承担费用
+ * （04-settlement-design.md §4）。其余终态一律按实收——`interrupted` 也是：进程崩溃时 token 确实烧掉了。
+ */
+export const platformFaultStopReasons = ['initialization-failed', 'lease-lost'] as const satisfies readonly GenerationStopReason[];
+
+/** 归责判定的唯一实现处：服务端结算与界面文案都读它，不各自再写一份停止原因列表。 */
+export function isPlatformFault(stopReason: GenerationStopReason | null): boolean {
+  return stopReason !== null && (platformFaultStopReasons as readonly string[]).includes(stopReason);
+}
+
+/** 自动冲正写进 `credit_entry.reason` 的固定文案：界面与对账据此区分自动退还与人工冲正。 */
+export const platformReversalReason = '平台故障自动退还';
 
 /**
  * `GET billing/charges` 的一行：用户账单上那一条。
@@ -262,5 +282,8 @@ export type BillingChargeView = {
   createTime: string;
   generationStatus: GenerationStatus | null;
   stopReason: GenerationStopReason | null;
+  /** 原始扣减分录（按池）；冲正后仍然保留，账单才能说清「原来扣了多少」。 */
   entries: ChargeEntryView[];
+  /** 冲正分录；没被冲正时是空数组。退款去向（哪个池、退了多少）只能从这里读。 */
+  reversals: ChargeReversalView[];
 };

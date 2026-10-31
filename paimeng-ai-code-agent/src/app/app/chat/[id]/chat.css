@@ -332,6 +332,9 @@ body.chat-resizing .chat-page .preview-frame { pointer-events: none; }
 /* 图标走伪元素：读屏不念它，断言拿到的文本也只有原因本身。 */
 .chat-page .message-note::before { content: '⏹'; margin-right: 8px; font-size: 11px; }
 .chat-page .message-note-failed { color: #a2614c; }
+/* 没有助手气泡的终态账单：沿用状态区的排版，但不继承中断记录的图标。 */
+.chat-page .message-note-credit::before { content: none; }
+.chat-page .message-note-credit .generation-credit { margin: 0; }
 .chat-page .preview-placeholder,
 .chat-page .preview-loading {
   flex: 1;

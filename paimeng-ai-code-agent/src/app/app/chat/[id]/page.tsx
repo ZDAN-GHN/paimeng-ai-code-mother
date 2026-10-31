@@ -690,6 +690,12 @@ function Chat({ id }: { id: string }) {
   const failureTime = task?.updateTime ?? '';
   const failureResolved = !!failureTime && [app?.builtAt, app?.deployedTime].some(time => !!time && time > failureTime);
   const visibleMessages = messages.slice(-visibleHistory);
+  // 这一轮自己的账单：按 generation id 取，与助手气泡上那行是同一份数据。
+  // 没有助手气泡的终态（初始化失败、进程中断后恢复）只能靠这条入口看到账单。
+  const taskCredit = task ? creditByMessage.get(task.id) : undefined;
+  // 账单已经挂到看得见的助手气泡上时，不在状态区重复显示同一笔钱。
+  const taskCreditAnchored = !!taskCredit && visibleMessages.some(message =>
+    message.id === taskCredit.messageId || message.metadata?.generationId === taskCredit.generationId);
   const sourceAvailable = app?.sourceAvailable ?? !!app?.previewUrl;
   const canPreview = !!app?.previewUrl;
   const rawRequestError = error || chatError?.message || null;
@@ -829,6 +835,10 @@ function Chat({ id }: { id: string }) {
                 顺序与原先一致：错误 → 构建/部署进度 → 历史读取失败。 */}
             {interruption && <div className={'message-item message-note' + (interruptionFailed ? ' message-note-failed' : '')} role="status">
               {interruption}
+            </div>}
+            {/* 没有助手气泡的终态也要能查到这一轮的账单：按 task.id 从账单 Map 取，已有气泡时不重复显示。 */}
+            {taskCredit && !taskCreditAnchored && <div className="message-item message-note message-note-credit">
+              <GenerationCredit charge={taskCredit} />
             </div>}
             {buildPending && <Alert className="chat-stream-alert" type="info" title={publishing ? `正在部署：容器内安装依赖并打包，已用时 ${busySeconds} 秒（通常 1-5 分钟），完成后会弹出部署链接` : `正在构建预览：容器内安装依赖并打包，已用时 ${busySeconds} 秒（通常 1-5 分钟）`} />}
             {historyError && <Alert className="chat-stream-alert" type="warning" title={'对话历史暂不可读取：' + historyError} />}

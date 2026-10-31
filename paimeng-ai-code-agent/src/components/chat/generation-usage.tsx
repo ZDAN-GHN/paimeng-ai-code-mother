@@ -1,7 +1,8 @@
 'use client';
 import type { AccountStep, GenerationAccount, GenerationStopReason } from '@/shared/contracts';
 
-const stopReasonLabels: Record<GenerationStopReason, string> = {
+/** 停止原因的中文文案：用量块与 Credit 行共用同一份，别在两处各写一套词。 */
+export const stopReasonLabels: Record<GenerationStopReason, string> = {
   completed: '已完成',
   'no-changes': '模型没有修改文件',
   'step-limit': '步数用尽',

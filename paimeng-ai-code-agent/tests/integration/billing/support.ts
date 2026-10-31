@@ -1,10 +1,17 @@
+import { randomUUID } from 'node:crypto';
 import { loadEnvFile } from 'node:process';
 import { readFile } from 'node:fs/promises';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { testDatabaseUrl } from '../../support/test-database-url';
 import { GET, POST } from '@/app/api/[...path]/route';
-import { db, getPool } from '@/server/infra/db';
-import { users } from '@/server/infra/schema';
+import { db, getPool, now } from '@/server/infra/db';
+import { nextSnowflakeId } from '@/server/infra/snowflake';
+import {
+  apps, creditAccounts, creditRateCard, generationSteps, generations, users,
+} from '@/server/infra/schema';
+import { recordGrant } from '@/server/billing/ledger';
+import type { CreditPool } from '@/shared/billing';
+import type { WorkspaceApp } from '@/server/workspace/workspace';
 
 /**
  * 计费集成测试的共享入口：只操作隔离的 `_test` 库，迁移可重复执行。
@@ -82,4 +89,107 @@ export async function createBillingUser(options: { role?: 'user' | 'admin' } = {
     await db().update(users).set({ userRole: 'admin' }).where(eq(users.id, BigInt(registered.data)));
   }
   return { id: registered.data, account, cookie };
+}
+
+// ---- 账单夹具 ----
+//
+// 结算与归责用例只需要「一个 App + 若干终态 Generation + 步骤行 + 费率 + 余额」，
+// 这些造数助手放在这里复用，避免每个账单测试文件各抄一份（00-brief.md「不要复制粘贴第三份」）。
+// 它们只写数据、不做断言；清理由各文件的 afterAll 负责（费率行除外，见 purgeBillingRateCards）。
+
+export const billingRateProvider = 'billing-fixture';
+const seededRateProviders = new Set<string>([billingRateProvider]);
+let seededApps = 0;
+
+/** 直接插一个 App（不起工作区/执行）：结算用例不需要真实文件系统。 */
+export async function seedBillingApp(ownerUserId: string): Promise<WorkspaceApp> {
+  const id = await nextSnowflakeId();
+  seededApps += 1;
+  await db().insert(apps).values({
+    id, appName: `账单测试 ${seededApps}`, initPrompt: 'billing', codeGenType: 'html',
+    userId: BigInt(ownerUserId), createTime: now(), updateTime: now(),
+  });
+  return { id: String(id), codeGenType: 'html' };
+}
+
+/** 直接插一条终态 generation：核心结算用例不经过生命周期，只关心账本结果。 */
+export async function seedBillingGeneration(input: {
+  appId: string; userId: string; status?: string; stopReason?: string | null; messageId?: string | null;
+}): Promise<string> {
+  const id = randomUUID();
+  await db().insert(generations).values({
+    id, appId: BigInt(input.appId), userId: BigInt(input.userId), status: input.status ?? 'ready',
+    stopReason: input.stopReason ?? 'completed', messageId: input.messageId ?? null,
+    createTime: now(), updateTime: now(),
+  });
+  return id;
+}
+
+/** 步骤行：默认一个正常的模型步骤；token 传 null 表示上游没给用量。 */
+export async function seedBillingStep(generationId: string, input: {
+  kind?: string; modelName: string; providerId?: string; upstreamModelId?: string | null;
+  input?: number | null; cacheRead?: number | null; cacheWrite?: number | null; output?: number | null;
+  reasoning?: number | null; round?: number; stepNumber?: number;
+}): Promise<void> {
+  await db().insert(generationSteps).values({
+    generationId,
+    kind: input.kind ?? 'model',
+    round: input.round ?? 1,
+    stepNumber: input.stepNumber ?? 0,
+    providerId: input.providerId ?? billingRateProvider,
+    modelName: input.modelName,
+    upstreamModelId: input.upstreamModelId ?? null,
+    inputTokens: input.input === undefined ? 0 : input.input,
+    cacheReadTokens: input.cacheRead === undefined ? 0 : input.cacheRead,
+    cacheWriteTokens: input.cacheWrite === undefined ? 0 : input.cacheWrite,
+    outputTokens: input.output === undefined ? 0 : input.output,
+    reasoningTokens: input.reasoning ?? null,
+    status: 'ok',
+    createTime: now(),
+  });
+}
+
+/** 费率版本按 modelName 区分用例，避免相互影响；生效时间固定在 2020，早于任何步骤。 */
+export async function seedBillingRate(input: {
+  modelName: string; providerId?: string; creditInputMiss?: number; creditInputHit?: number; creditOutput?: number;
+  usdInputMiss?: string | null; usdInputHit?: string | null; usdOutput?: string | null;
+}): Promise<void> {
+  const providerId = input.providerId ?? billingRateProvider;
+  seededRateProviders.add(providerId);
+  await db().insert(creditRateCard).values({
+    providerId,
+    modelName: input.modelName,
+    effectiveFrom: '2020-01-01 00:00:00.000',
+    creditInputMiss: input.creditInputMiss ?? 600,
+    creditInputHit: input.creditInputHit ?? 12,
+    creditOutput: input.creditOutput ?? 2500,
+    usdInputMiss: input.usdInputMiss ?? null,
+    usdInputHit: input.usdInputHit ?? null,
+    usdOutput: input.usdOutput ?? null,
+    costBasis: input.usdInputMiss ? 'peak' : 'unknown',
+    createTime: now(),
+  });
+}
+
+/** 造余额：quota 池走月度配额来源，balance 池走管理员发放。 */
+export async function grantBillingCredits(userId: string, pool: CreditPool, credits: number): Promise<void> {
+  await recordGrant({
+    userId, pool, credits,
+    source: pool === 'quota' ? 'monthly_quota' : 'admin_grant',
+    period: pool === 'quota' ? '2026-01' : null,
+  });
+}
+
+export async function billingBalancesOf(userId: string): Promise<{ quota: number; balance: number }> {
+  const rows = await db().select().from(creditAccounts).where(eq(creditAccounts.userId, BigInt(userId)));
+  return {
+    quota: rows.find(row => row.pool === 'quota')?.balance ?? 0,
+    balance: rows.find(row => row.pool === 'balance')?.balance ?? 0,
+  };
+}
+
+/** 删除本进程插入过的全部费率版本：`_test` 库跨文件共享，费率行会互相影响。 */
+export async function purgeBillingRateCards(): Promise<void> {
+  const providers = [...seededRateProviders];
+  await db().delete(creditRateCard).where(inArray(creditRateCard.providerId, providers));
 }
