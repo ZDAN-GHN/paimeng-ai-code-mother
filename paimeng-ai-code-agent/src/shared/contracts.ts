@@ -29,8 +29,8 @@ export type GenerationPhase = 'editing'|'checking'|'publishing'|'finished';
 export type GenerationQuestion = {id:string;prompt:string;generationId:string};
 export type Generation = {id:string;appId:string;status:GenerationStatus;error:string|null;stopReason:string|null;createTime:string;updateTime:string;phase?:GenerationPhase;handoff?:GenerationHandoff|null;draftPending?:boolean;question?:GenerationQuestion|null};
 export type ChatHistory = {id:string;appId:string;userId:string;message:string;messageType:'user'|'ai';createTime:string};
-/** 任务级停止原因（D2 记账，设计见 docs/plans/archive/agent-design-review.md §9）。`step-limit` 是历史值：步数上限已于 2026-10-16 取消，新代码不再产生它，但旧行仍要能读回与展示。 */
-export const generationStopReasons = ['completed','no-changes','step-limit','verification-failed','timeout','cancelled','lease-lost','model-error','initialization-failed','interrupted','question'] as const;
+/** 任务级停止原因（D2 记账，设计见 docs/plans/archive/agent-design-review.md §9）。`step-limit` 是历史值：步数上限已于 2026-10-16 取消，新代码不再产生它，但旧行仍要能读回与展示。`overdraft` 是运行期熔断（95）：欠款超过透支线时中止，与普通失败区分。 */
+export const generationStopReasons = ['completed','no-changes','step-limit','verification-failed','timeout','cancelled','lease-lost','model-error','initialization-failed','interrupted','question','overdraft'] as const;
 export type GenerationStopReason = typeof generationStopReasons[number];
 /**
  * 生成过程中的瞬时进度事件（`data-progress`，服务端写、客户端读；不落库、不进 UI 消息 parts）。

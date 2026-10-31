@@ -17,7 +17,7 @@ import { getConfig } from '../infra/config';
 import { db, now } from '../infra/db';
 import { generationControl, generationFor } from './generation-store';
 // 读路径的 ready 修复也要补一次结算；计费只从 generation 侧 import billing，避免成环。
-import { settleGenerationBilling } from '../billing/settlement';
+import { settleGenerationBilling, evaluateRunningOverdraft } from '../billing/settlement';
 import { activeExecution, appendInput, assertAuthority, beginChecking, bindExecutionConversation, completeAttempt, heartbeatAuthority, inputsSettled, setExecutionStatus, markInputPlaced, markInputUnanswered, markInputResolved, openQuestionOf, reserveAttempt, withdrawInput, type ExecutionRecord, type InputRecord } from './control-store';
 import { CandidateInvalidatedError, failOrCancel, getInputs, pauseForQuestion, publishReady, recoverStartup, settleGeneration, startGeneration } from './generation-lifecycle';
 import { recordAssistantStep, recordBuildStep, stopReasonOf, type AccountToolCall, type EntryUsage, type GenerationStopReason, type ModelIdentity } from './generation-accounting';
@@ -621,7 +621,7 @@ async function observeHarnessRun(options: {
     let snapshot: string | null = null;
     let round = 1;
     for (;;) {
-      const run = new RunTranslator(channel, turn, anchor, requestId, model, round);
+      const run = new RunTranslator(channel, turn, anchor, requestId, model, round, { stop, appId: app.id, conversationId });
       let failureText: string | null = null;
       const response = await harnessFetch(`/agent-events?conversationId=${conversationId}`, {
         headers: { accept: 'application/x-ndjson' },
@@ -894,6 +894,15 @@ type PendingModel = {
   toolCalls: { id: string; name: string }[];
 };
 
+/**
+ * 运行期熔断要同时停两处：本进程的观察流（`stop.signal` 打断 harnessFetch）与 harness 子进程里
+ * 还在跑的 run（`abortHarnessRun`）。只 abort 本地信号，harness 会继续烧 token。
+ */
+type OverdraftGuard = { stop: AbortController; appId: string; conversationId: number };
+
+/** 熔断中止的文案：`stopReasonOf` 按其中的「透支线」判定停止原因，界面按停止原因给专用文案。 */
+const overdraftAbortMessage = '已超出透支线，生成已中止';
+
 class RunTranslator {
   #buildTimer: ReturnType<typeof setInterval> | null = null;
   #buildStage: (typeof buildStageNames)[number] | null = null;
@@ -905,7 +914,7 @@ class RunTranslator {
   #endedTools: Set<string>;
   readonly #toolOutcomes = new Map<string, { ok: boolean; ms: number | null }>();
 
-  constructor(readonly channel: ChunkChannel, private readonly turn: AssistantTurn, private readonly anchor: TranscriptAnchor, private readonly requestId: string, private readonly model: ModelIdentity, private readonly round: number) {
+  constructor(readonly channel: ChunkChannel, private readonly turn: AssistantTurn, private readonly anchor: TranscriptAnchor, private readonly requestId: string, private readonly model: ModelIdentity, private readonly round: number, private readonly overdraft: OverdraftGuard) {
     this.#seenEntries = turn.seenEntries;
     this.#endedTools = turn.endedTools;
   }
@@ -1073,6 +1082,25 @@ class RunTranslator {
       toolMs: timed.length ? timed.reduce((total, call) => total + (call.ms ?? 0), 0) : null,
       toolCalls: calls,
     });
+    await this.#stopOnOverdraft();
+  }
+
+  /**
+   * 运行期熔断（95）：这一步已经落库，再从表里现算一遍 Owner 的未结算消耗——
+   * 进程内累计与终态结算读到的行集因此完全一致，不会出现「熔断按 5 步、结算按 4 步」。
+   *
+   * 超线只 abort（不抛错）：让观察循环的 catch → failOrCancel → settleGeneration 走正常终态与账单，
+   * 已发生的用量照实收费。评估本身出错不算熔断（下一分会再评一次），不能因为计费读失败把生成报成失败。
+   */
+  async #stopOnOverdraft(): Promise<void> {
+    if (this.overdraft.stop.signal.aborted) return;
+    const verdict = await evaluateRunningOverdraft(this.requestId).catch(problem => {
+      console.warn(`运行期透支评估失败（生成 ${this.requestId}）：`, problem);
+      return null;
+    });
+    if (!verdict?.exceeded) return;
+    this.overdraft.stop.abort(new Error(overdraftAbortMessage));
+    void abortHarnessRun(this.overdraft.appId, this.overdraft.conversationId);
   }
 }
 

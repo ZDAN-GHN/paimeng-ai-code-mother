@@ -14,6 +14,7 @@ export const stopReasonLabels: Record<GenerationStopReason, string> = {
   'initialization-failed': '初始化失败',
   interrupted: '进程中断',
   question: '等待回答',
+  overdraft: '额度不足，已中止',
 };
 
 const finishReasonLabels: Record<string, string> = {
