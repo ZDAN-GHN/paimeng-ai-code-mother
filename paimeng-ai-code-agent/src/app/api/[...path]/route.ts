@@ -5,10 +5,16 @@ import * as business from '@/server/business';
 import { generationAccounts } from '@/server/generation/generation-accounting';
 import { chatRuntime, generationStatus, harnessCancelGeneration, harnessCancelInput, harnessChatResponse, harnessSteerGeneration, harnessSubmitInput, loadMessages } from '@/server/generation/durable-engine';
 import { applyModelConfigNow, deleteModelAlias, deleteModelProvider, probeProviderModels, readModelAdminConfig, upsertModelAlias, upsertModelProvider } from '@/server/models/admin';
+import { grantCredits, reverseChargeByAdmin, userUsage } from '@/server/billing/admin';
+import { chargesOf } from '@/server/billing/ledger';
+import { ensureCurrentPeriod } from '@/server/billing/quota';
+import { pendingSettlements, reconcileSettlements } from '@/server/billing/settlement';
 import { uploadImages } from '@/server/generation/image-upload';
+import { appendRate, readRateCardList } from '@/server/billing/rate-card';
 import { transcribeEnabled, transcribeSpeech } from '@/server/generation/speech';
 import { readAttachmentOriginal } from '@/server/generation/attachment-store';
 import { idSchema } from '@/shared/contracts';
+import { grantRequestSchema, chargeReversalRequestSchema, poolOfSource, reconcileRequestSchema } from '@/shared/billing';
 import { versionIdSchema } from '@/shared/versioning';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
@@ -39,6 +45,14 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/versions/diff'){const user=await requireUser(req);return success(await business.diffAppVersions({appId:idSchema.parse(query.get('appId')),base:versionIdSchema.parse(query.get('base')),target:versionIdSchema.parse(query.get('target'))},user));}
    if(path==='app/versions/thumbnail'){const user=await requireUser(req);const png=await business.readAppVersionThumbnail({appId:idSchema.parse(query.get('appId')),versionId:versionIdSchema.parse(query.get('versionId'))},user);if(!png)return new Response(null,{status:404});return new Response(new Uint8Array(png),{headers:{'content-type':'image/png','content-length':String(png.length),'cache-control':'private, max-age=3600','x-content-type-options':'nosniff'}});}
    if(path.startsWith('app/download/')){const user=await requireUser(req);const id=idSchema.parse(path.slice('app/download/'.length));return await business.download(id,user);}
+   if(path==='admin/billing/rate-card'){await requireAdmin(req);return success(await readRateCardList());}
+   if(path==='admin/billing/reconcile'){await requireAdmin(req);const limit=z.coerce.number().int().min(1).max(200).default(50).parse(query.get('limit')??undefined);return success({items:await pendingSettlements({limit})});}
+   if(path==='admin/billing/usage'){await requireAdmin(req);const limit=z.coerce.number().int().min(1).max(20).default(20).parse(query.get('limit')??undefined);return success(await userUsage({userId:idSchema.parse(query.get('userId')),limit}));}
+   if(path==='billing/summary'){const user=await requireUser(req);return success(await ensureCurrentPeriod(user.id));}
+   if(path==='billing/charges'){const user=await requireUser(req);const limit=z.coerce.number().int().min(1).max(20).default(10).parse(query.get('limit')??undefined);
+    // appId 可选：给了就只读该 App（先校验所有权），缺省就是此人的全部 App（Owner 账单页）。
+    const appId=query.get('appId')?idSchema.parse(query.get('appId')):undefined;if(appId)await business.getApp(appId,user,true);
+    return success(await chargesOf({appId,userId:user.id,limit,includeCost:user.userRole==='admin'}));}
   }
   if(method==='POST'){
    if(path==='user/register')return success(await register(value));
@@ -58,7 +72,8 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/chat/input')return success(await harnessSubmitInput(value,user));
    if(path==='app/chat/input/cancel'){const input=z.object({appId:idSchema,submissionId:z.number().int().positive()}).parse(value);return success(await harnessCancelInput(input.appId,input.submissionId,user));}
    if(path==='app/chat/steer'){const steer=z.object({appId:idSchema,text:z.string().trim().min(1).max(1000)}).parse(value);return success(await harnessSteerGeneration(steer.appId,user,steer.text));}
-   await requireAdmin(req);
+   const admin=await requireAdmin(req);
+   if(path==='admin/billing/rate-card')return success(await appendRate(value,user.id));
    if(path==='model/admin/config')return success(await readModelAdminConfig(value));
    if(path==='model/admin/provider/upsert')return success(await upsertModelProvider(value));
    if(path==='model/admin/provider/models')return success(await probeProviderModels(value));
@@ -72,6 +87,9 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/admin/list/page/vo')return success(await business.listApps(value,'admin',user));
    if(path==='app/admin/update')return success(await business.updateApp(value,user,true));
    if(path==='app/admin/delete')return success(await business.deleteApp(value,user));
+   if(path==='admin/billing/grant'){const request=grantRequestSchema.parse(value);return success(await grantCredits({...request,pool:request.pool??poolOfSource(request.source),grantedBy:admin.id}));}
+   if(path==='admin/billing/reconcile')return success(await reconcileSettlements(reconcileRequestSchema.parse(value)));
+   if(path.startsWith('admin/billing/charge/')&&path.endsWith('/reverse')){const chargeId=z.string().trim().min(1).max(36).parse(path.slice('admin/billing/charge/'.length,path.length-'/reverse'.length));const {reason}=chargeReversalRequestSchema.parse(value);return success(await reverseChargeByAdmin({chargeId,reason,operatorId:admin.id}));}
   }
   throw new BusinessError(404,40400,'接口不存在');
  }catch(error){return failure(error);}

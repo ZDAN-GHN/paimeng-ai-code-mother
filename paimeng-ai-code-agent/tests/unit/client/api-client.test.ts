@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api, ApiResponseError, readApiResponse } from '@/client/api';
+import { api, ApiResponseError, isInsufficientCredits, readApiResponse, streamingRequest } from '@/client/api';
+import { insufficientCreditsCode } from '@/shared/billing';
 
 const envelope = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
@@ -38,5 +39,38 @@ describe('/api 信封解析', () => {
   it('readApiResponse 只解析信封，data 的形状交给调用方自己的 schema', async () => {
     const response = envelope({ code: 0, message: 'ok', data: { text: 'こんにちは' } });
     await expect(readApiResponse(response)).resolves.toEqual({ text: 'こんにちは' });
+  });
+
+  it('业务 code 跟着错误对象一起抛出，额度不足按 40201 识别', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => envelope({ code: insufficientCreditsCode, message: '当前可用 Credit 为 0', data: null }, 402)));
+    const failure = await api('app/chat/gen/code', {}).catch(error => error);
+    expect(failure).toMatchObject({ code: insufficientCreditsCode, status: 402, message: '当前可用 Credit 为 0' });
+    expect(isInsufficientCredits(failure)).toBe(true);
+  });
+
+  it('成功响应的 code 是 0，不会被当成额度不足', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => envelope({ code: 0, message: 'ok', data: [] })));
+    await expect(api('billing/summary')).resolves.toEqual([]);
+    expect(isInsufficientCredits(new ApiResponseError('其他失败', 409, 40900))).toBe(false);
+  });
+});
+
+describe('流式接口的错误还原', () => {
+  it('2xx 原样返回响应，交给流式解析', async () => {
+    const ok = new Response('data: {}\n\n', { status: 200 });
+    vi.stubGlobal('fetch', vi.fn(async () => ok));
+    await expect(streamingRequest('/api/app/chat/gen/code', { method: 'POST' })).resolves.toBe(ok);
+  });
+
+  it('非 2xx 先按信封解析再抛 ApiResponseError，界面才能按 code 识别', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => envelope({ code: insufficientCreditsCode, message: '当前可用 Credit 为 0', data: null }, 402)));
+    const failure = await streamingRequest('/api/app/chat/gen/code', { method: 'POST' }).catch(error => error);
+    expect(failure).toBeInstanceOf(ApiResponseError);
+    expect(failure).toMatchObject({ code: insufficientCreditsCode, status: 402, message: '当前可用 Credit 为 0' });
+  });
+
+  it('非 2xx 且响应不是信封时也只抛 ApiResponseError', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>Bad Gateway</html>', { status: 502 })));
+    await expect(streamingRequest('/api/app/chat/gen/code')).rejects.toMatchObject({ message: '响应格式不正确', status: 502 });
   });
 });

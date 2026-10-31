@@ -227,6 +227,10 @@
   .chat-page .chat-input .prompt-actions .composer-hint { display: none; }
 }
 .chat-page .selected-element-alert { margin-bottom: 8px; }
+/* 额度不足的错误条：贴在输入区上方，与排队提示同一个间距节奏。 */
+.chat-page .insufficient-credits { margin-bottom: 8px; }
+.chat-page .insufficient-credits-next { line-height: 1.6; }
+.chat-page .insufficient-credits-next a { margin-left: 6px; color: #cb573e; text-decoration: underline; }
 .chat-page .element-details { font-size: 13px; line-height: 1.5; max-height: 132px; overflow-y: auto; }
 .chat-page .element-item { margin-top: 4px; }
 .chat-page .element-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -332,6 +336,9 @@ body.chat-resizing .chat-page .preview-frame { pointer-events: none; }
 /* 图标走伪元素：读屏不念它，断言拿到的文本也只有原因本身。 */
 .chat-page .message-note::before { content: '⏹'; margin-right: 8px; font-size: 11px; }
 .chat-page .message-note-failed { color: #a2614c; }
+/* 没有助手气泡的终态账单：沿用状态区的排版，但不继承中断记录的图标。 */
+.chat-page .message-note-credit::before { content: none; }
+.chat-page .message-note-credit .generation-credit { margin: 0; }
 .chat-page .preview-placeholder,
 .chat-page .preview-loading {
   flex: 1;
@@ -551,4 +558,12 @@ body.chat-resizing .chat-page .preview-frame { pointer-events: none; }
   color: #fff;
   font-size: 12px;
   pointer-events: none;
+}
+
+/* 每次助手回复下的 Credit 行：纯文本，不抢用量块的位置 */
+.chat-page .generation-credit {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #6f6259;
+  overflow-wrap: anywhere;
 }

@@ -7,7 +7,7 @@ Four suites, separated by the resources a test may start. A file's directory pic
 ```
 tests/
 ├── AGENTS.md              # this file: suite boundaries and scope rules
-├── support/               # shared setup, server-only stub, resource guards, _test URL helpers
+├── support/               # shared setup, server-only stub, resource guards, _test URL helpers, billing fixtures
 ├── unit/                  # isolated logic and local filesystem; parallel
 │   ├── client/            # browser API client, shared display and element-selection helpers
 │   ├── chat/              # React chat helpers: inputs, feedback, message parts, tools, voice, images

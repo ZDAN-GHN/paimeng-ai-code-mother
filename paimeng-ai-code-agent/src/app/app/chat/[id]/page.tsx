@@ -5,17 +5,21 @@ import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, type UIMessage } from 'ai';
 import { App, Button, Input, Alert, Tag, Space, Spin, Tooltip } from 'antd';
 import { SendOutlined, DownloadOutlined, CloudUploadOutlined, EditOutlined, StopOutlined, InfoCircleOutlined, ExportOutlined, PictureOutlined, HistoryOutlined, DesktopOutlined, MobileOutlined, RightOutlined } from '@ant-design/icons';
-import { api } from '@/client/api';
+import { api, isInsufficientCredits, streamingRequest } from '@/client/api';
 import { useAuth } from '@/components/providers';
 import { type AppInfo, type Generation, type GenerationAccount, isProjectCodeGenType } from '@/shared/contracts';
 import type { ChatInputMode, ChatInputReceipt, ChatMessage, ChatRuntime } from '@/shared/chat-runtime';
 import { imageLimits, type AttachmentPart } from '@/shared/attachments';
+import type { BillingChargeView } from '@/shared/billing';
 import { maxSelectedElements, selectedElementsSchema, selectionContext, type SelectedElement } from '@/shared/element-selection';
 import { draggingFiles, filesFromClipboard, filesFromDrop } from '@/components/clipboard-images';
 import { ImageAttachments, MessageImages, messageAttachments, outgoingParts, useImageAttachments } from '@/components/chat/image-attachments';
 import { VoiceInput, appendTranscript } from '@/components/chat/voice-input';
 import { MarkdownMessage } from '@/components/chat/markdown-message';
 import { GenerationUsage } from '@/components/chat/generation-usage';
+import { GenerationCredit } from '@/components/chat/generation-credit';
+import { CreditBalance } from '@/components/billing/credit-balance';
+import { InsufficientCreditsAlert } from '@/components/billing/insufficient-credits';
 import { BuildProgress } from '@/components/chat/build-progress';
 import { composerAction, handoffWaitingText, initialProgress, interruptedStreamMessage, interruptionText, parseProgressEvent, parseSteerLanded, progressReducer, projectGenerationInputs, type ProjectedInput, type ProgressState } from '@/components/chat/generation-feedback';
 import { admitInput, applyBoundary, forgetInput, messageSegments, placeInput, placedInputs, queuedInputs, type InputEntry, type LostInput, type PlacedInput, type QueuedInput } from '@/components/chat/chat-inputs';
@@ -136,7 +140,10 @@ function Chat({ id }: { id: string }) {
   const [input, setInput] = useState('');
   const [task, setTask] = useState<Generation | null>(null);
   const [usageByMessage, setUsageByMessage] = useState<Map<string, GenerationAccount>>(new Map());
+  const [creditByMessage, setCreditByMessage] = useState<Map<string, BillingChargeView>>(new Map());
   const [error, setError] = useState('');
+  /** 额度不足：单独一条，显示可用 Credit 与下一步；不清掉输入，发送前先看它。 */
+  const [creditError, setCreditError] = useState('');
   const [historyError, setHistoryError] = useState('');
   const [appLoaded, setAppLoaded] = useState(false);
   const [historySettled, setHistorySettled] = useState(false);
@@ -172,6 +179,8 @@ function Chat({ id }: { id: string }) {
   const followedScrollTop = useRef(0);
   const mounted = useRef(false);
   const submitting = useRef(false);
+  /** `onError` 是异步回调，`submit` 要同步知道这一轮是不是被准入拦下（决定要不要把输入放回去）。 */
+  const creditRejected = useRef(false);
   const rebuildCount = useRef(0);
   const rebuildAt = useRef(0);
   const rebuildTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -257,6 +266,8 @@ function Chat({ id }: { id: string }) {
   }, [id]);
   const transport = useMemo(() => new DefaultChatTransport<ChatMessage>({
     api: '/api/app/chat/gen/code',
+    // 非 2xx 先按信封解析再抛出：界面要靠业务 code（如额度不足的 40201）决定怎么提示。
+    fetch: streamingRequest,
     // 本地回显挂在 metadata 上的附件在这里变成契约的 attachment part；排队消息自动发送走的是同一条路。
     prepareSendMessagesRequest: ({ messages }) => {
       const requestId = crypto.randomUUID();
@@ -290,7 +301,18 @@ function Chat({ id }: { id: string }) {
     id, transport,
     // 流结束只重新取任务状态：断流后任务可能仍在跑，这里不乐观标 ready，统一由下面的终态收尾。
     onFinish: async () => { await refresh(); },
-    onError: e => { if (mounted.current) setError(e.message); },
+    onError: e => {
+      if (!mounted.current) return;
+      // Credit 不足单独渲染：它有自己的下一步（联系管理员补充 Credit），盖掉普通的请求失败文案。
+      if (isInsufficientCredits(e)) {
+        creditRejected.current = true;
+        setCreditError(e.message);
+        setError('');
+        return;
+      }
+      creditRejected.current = false;
+      setError(e.message);
+    },
     onData: part => {
       if (part.type === 'data-memory') setMemoryBusy(isConsolidating(part.data));
       if (part.type === 'data-build') setRepairing(repairingOf(part.data));
@@ -348,6 +370,11 @@ function Chat({ id }: { id: string }) {
   // 最后一条助手气泡：`data-steer` 只给 part 数，分段要落到那一刻正在流的那条气泡上。
   useEffect(() => { lastAssistantId.current = [...messages].reverse().find(message => message.role === 'assistant')?.id ?? null; }, [messages]);
   const taskStatus = task?.status;
+  /**
+   * 额度条的刷新键：生成进入终态后重取一次双池余额（结算发生在那之后），否则额度条会停在开跑前的数。
+   * `updateTime` 让同一任务的下一次终态（继续生成/重试）也能触发重取。
+   */
+  const creditRefreshToken = `${task?.id ?? ''}:${taskStatus ?? ''}:${task?.updateTime ?? ''}`;
   // 每次生成结束时取一次用量：一条助手回复对应一次生成，按消息 id 挂到气泡上；生成中不轮询明细。
   const assetUrl = useCallback((path: string) => '/api/app/asset?appId=' + encodeURIComponent(id) + '&path=' + encodeURIComponent(path), [id]);
   const refreshUsage = useCallback(async () => {
@@ -360,10 +387,22 @@ function Chat({ id }: { id: string }) {
       ])));
     } catch { if (mounted.current) setUsageByMessage(new Map()); }
   }, [id]);
+  // 账单与用量同一时机取一次：结算发生在终态写入之后，按消息 id 与 generationId 两种键挂到气泡上。
+  const refreshCredit = useCallback(async () => {
+    try {
+      const charges = await api<BillingChargeView[]>('billing/charges?appId=' + encodeURIComponent(id));
+      if (!mounted.current) return;
+      setCreditByMessage(new Map(charges.flatMap(charge => [
+        [charge.generationId, charge] as [string, BillingChargeView],
+        ...(charge.messageId ? [[charge.messageId, charge] as [string, BillingChargeView]] : []),
+      ])));
+    } catch { if (mounted.current) setCreditByMessage(new Map()); }
+  }, [id]);
   useEffect(() => {
     if (!task?.id || taskStatus === 'generating' || taskStatus === 'building') return;
     void refreshUsage();
-  }, [task?.id, taskStatus, refreshUsage]);
+    void refreshCredit();
+  }, [task?.id, taskStatus, refreshUsage, refreshCredit]);
   useEffect(() => { if (!generating) { setMemoryBusy(false); setRepairing(null); } }, [generating]);
   const buildPending = publishing || rebuilding;
   useEffect(() => {
@@ -531,10 +570,17 @@ function Chat({ id }: { id: string }) {
     setProgress(initialProgress());
     setPreviewVersion(null);
     setError(''); clearError();
+    setCreditError('');
+    creditRejected.current = false;
     if (!options.keepDraft) { setInput(''); setSelected([]); setEditing(false); clearSentImages(attachments); }
     try {
       const expectedQuestionId = questionRef.current;
       await sendMessage({ text, metadata: attachments.length ? { attachments: [...attachments] } : undefined });
+      // 被准入拦下：这一轮没有启动，把用户刚才写的放回输入框（问题也继续等着回答）。
+      if (creditRejected.current) {
+        if (!options.keepDraft) setInput(current => current.trim() ? current : original);
+        return false;
+      }
       // 回答已经发出去：问题气泡不必等到下一次轮询才消失，新一轮的流式回答会紧接着展示。
       if (expectedQuestionId) setQuestion(current => current?.id === expectedQuestionId ? null : current);
       await refresh();
@@ -674,9 +720,16 @@ function Chat({ id }: { id: string }) {
   const failureTime = task?.updateTime ?? '';
   const failureResolved = !!failureTime && [app?.builtAt, app?.deployedTime].some(time => !!time && time > failureTime);
   const visibleMessages = messages.slice(-visibleHistory);
+  // 这一轮自己的账单：按 generation id 取，与助手气泡上那行是同一份数据。
+  // 没有助手气泡的终态（初始化失败、进程中断后恢复）只能靠这条入口看到账单。
+  const taskCredit = task ? creditByMessage.get(task.id) : undefined;
+  // 账单已经挂到看得见的助手气泡上时，不在状态区重复显示同一笔钱。
+  const taskCreditAnchored = !!taskCredit && visibleMessages.some(message =>
+    message.id === taskCredit.messageId || message.metadata?.generationId === taskCredit.generationId);
   const sourceAvailable = app?.sourceAvailable ?? !!app?.previewUrl;
   const canPreview = !!app?.previewUrl;
-  const rawRequestError = error || chatError?.message || null;
+  // 额度不足已经有专门的错误条（含可用额度与下一步），不再在对话里重复一遍「请求失败」。
+  const rawRequestError = creditError ? null : error || chatError?.message || null;
   // 响应流被浏览器/网络层切断时的原文（如 `Error in input stream`）换成可读文案。
   const interrupted = rawRequestError ? interruptedStreamMessage({ message: rawRequestError, status: task?.status ?? null }) : null;
   const requestError = interrupted ? null : rawRequestError;
@@ -761,6 +814,7 @@ function Chat({ id }: { id: string }) {
       {app?.codeGenType && <Tag color="blue">{formatCodeGenType(app.codeGenType)}</Tag>}
       {task && statusLabel && <Tag color={statusColor}>{statusLabel}</Tag>}
       <Space wrap>
+        <CreditBalance refreshToken={creditRefreshToken} />
         {!previewShown && <Button icon={<DesktopOutlined aria-hidden="true" />} onClick={togglePreview}>网页展示</Button>}
         <Button icon={<InfoCircleOutlined aria-hidden="true" />} disabled={!app} onClick={() => setDetailOpen(true)}>应用详情</Button>
         <Button icon={<HistoryOutlined aria-hidden="true" />} disabled={!app} onClick={() => setVersionOpen(true)}>版本</Button>
@@ -777,6 +831,7 @@ function Chat({ id }: { id: string }) {
             {!messages.length && <div className="message-item initial-prompt"><div className="message-role">初始需求</div><div className="message-text">{app?.initPrompt || '加载应用…'}</div></div>}
             {visibleMessages.map(item => {
               const usage = usageByMessage.get(item.id) ?? (item.metadata?.generationId ? usageByMessage.get(item.metadata.generationId) : undefined);
+              const credit = creditByMessage.get(item.id) ?? (item.metadata?.generationId ? creditByMessage.get(item.metadata.generationId) : undefined);
               if (item.role === 'user') return <div className="message-item message-user" key={item.id}>
                 <div className="message-bubble">
                   <MessageImages appId={id} attachments={messageAttachments(item)} />
@@ -796,6 +851,7 @@ function Chat({ id }: { id: string }) {
                     <div className="message-bubble">
                       <AssistantParts parts={segment.parts} assetUrl={assetUrl} />
                       {position === lastAssistantSegment && usage && <GenerationUsage usage={usage} />}
+                      {position === lastAssistantSegment && credit && <GenerationCredit charge={credit} />}
                     </div>
                   </div>)}</Fragment>;
             })}
@@ -810,6 +866,10 @@ function Chat({ id }: { id: string }) {
                 顺序与原先一致：错误 → 构建/部署进度 → 历史读取失败。 */}
             {interruption && <div className={'message-item message-note' + (interruptionFailed ? ' message-note-failed' : '')} role="status">
               {interruption}
+            </div>}
+            {/* 没有助手气泡的终态也要能查到这一轮的账单：按 task.id 从账单 Map 取，已有气泡时不重复显示。 */}
+            {taskCredit && !taskCreditAnchored && <div className="message-item message-note message-note-credit">
+              <GenerationCredit charge={taskCredit} />
             </div>}
             {buildPending && <Alert className="chat-stream-alert" type="info" title={publishing ? `正在部署：容器内安装依赖并打包，已用时 ${busySeconds} 秒（通常 1-5 分钟），完成后会弹出部署链接` : `正在构建预览：容器内安装依赖并打包，已用时 ${busySeconds} 秒（通常 1-5 分钟）`} />}
             {historyError && <Alert className="chat-stream-alert" type="warning" title={'对话历史暂不可读取：' + historyError} />}
@@ -834,6 +894,7 @@ function Chat({ id }: { id: string }) {
           onDrop={event => { if (!canAttachImages || !draggingFiles(event.dataTransfer)) return; event.preventDefault(); setDragging(false); addImages(filesFromDrop(event.dataTransfer)); }}>
           {dragging && <p className="composer-hint" role="status" style={{ marginBottom: 8 }}>松开鼠标即可添加图片（JPEG / PNG / WebP，最多 {imageLimits.maxImages} 张）</p>}
           {handoffText && <p className="composer-hint" role="status" style={{ marginBottom: 8 }}>{handoffText}</p>}
+          {creditError && <InsufficientCreditsAlert message={creditError} onClose={() => setCreditError('')} />}
           {awaitingAnswer && <p className="composer-hint" role="status" style={{ marginBottom: 8 }}>正在等待你回答问题：直接在下方输入回答，发送后会从当前草稿继续。</p>}
           {/* 输入框上方按种类分开的队列：只有真的在服务端队列里等着的输入才出现（没有排队状态的
               任务不会闪出队列面板），已经进 pi 上下文的直接作为气泡出现在对话里；没进对话的输入

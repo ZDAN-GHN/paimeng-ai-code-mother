@@ -24,12 +24,16 @@ const messageOf = (error: unknown) => (error instanceof Error ? error.message : 
 /**
  * 任务级停止原因：模型自己的停止原因记在每个模型步骤的 finishReason 上。
  * 取消与超时从 abort 信号区分（带原因的 abort 不是用户取消）；其余情况保留调用点已经定下的原因。
+ *
+ * 「透支线」必须排在「失效」之前：熔断的 abort 文案里可能同时出现这几个字，
+ * 被自己掐断的生成不能显示成平台写权限丢失。
  */
 export function stopReasonOf(input: { current: GenerationStopReason; cancelled: boolean; abortedReason?: unknown }): GenerationStopReason {
   if (input.cancelled) return 'cancelled';
   if (input.abortedReason !== undefined) {
     const text = input.abortedReason instanceof Error ? input.abortedReason.message : String(input.abortedReason);
     if (text.includes('超时')) return 'timeout';
+    if (text.includes('透支线')) return 'overdraft';
     if (text.includes('失效') || text.includes('停止写入')) return 'lease-lost';
     return 'model-error';
   }

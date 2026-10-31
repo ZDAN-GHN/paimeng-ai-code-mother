@@ -1,7 +1,8 @@
 'use client';
 import type { AccountStep, GenerationAccount, GenerationStopReason } from '@/shared/contracts';
 
-const stopReasonLabels: Record<GenerationStopReason, string> = {
+/** 停止原因的中文文案：用量块与 Credit 行共用同一份，别在两处各写一套词。 */
+export const stopReasonLabels: Record<GenerationStopReason, string> = {
   completed: '已完成',
   'no-changes': '模型没有修改文件',
   'step-limit': '步数用尽',
@@ -13,6 +14,7 @@ const stopReasonLabels: Record<GenerationStopReason, string> = {
   'initialization-failed': '初始化失败',
   interrupted: '进程中断',
   question: '等待回答',
+  overdraft: '超出透支线，已中止',
 };
 
 const finishReasonLabels: Record<string, string> = {
@@ -31,7 +33,8 @@ const stageLabels: Record<string, string> = {
 };
 
 const statusLabels: Record<string, string> = { ok: '通过', error: '未通过', cancelled: '已取消' };
-const generationStatusLabels: Record<string, string> = { generating: '生成中', building: '构建中', ready: '已完成', failed: '失败', cancelled: '已取消' };
+/** 生成状态的中文文案：对话页用量块与 Admin 待处理列表共用。 */
+export const generationStatusLabels: Record<string, string> = { generating: '生成中', building: '构建中', ready: '已完成', failed: '失败', cancelled: '已取消' };
 
 export function formatDuration(ms: number | null) {
   if (ms === null) return '—';

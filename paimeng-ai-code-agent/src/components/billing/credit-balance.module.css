@@ -1,0 +1,4 @@
+.creditBalance{display:flex;flex-direction:column;gap:2px;color:#6f6259;font-size:12px;line-height:1.6}
+.pools,.detail{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;margin:0}
+.pools strong{color:#cb573e;font-size:14px;font-weight:600;margin-left:4px}
+.detail{color:#8c8c8c}

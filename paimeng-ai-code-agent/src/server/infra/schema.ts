@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
-import { bigint, bigserial, char, index, integer, jsonb, pgTable, primaryKey, smallint, text, timestamp, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
+import { bigint, bigserial, char, index, integer, jsonb, numeric, pgTable, primaryKey, smallint, text, timestamp, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
+import type { ChargeStatus, CreditPool, GrantSource, RateCardView, UsageSnapshotStep } from '@/shared/billing';
 
 const times = { createTime: timestamp('create_time', { mode: 'string' }).notNull(), updateTime: timestamp('update_time', { mode: 'string' }).notNull() };
 export const users = pgTable('app_user', { id: bigint('id', { mode: 'bigint' }).primaryKey(), userAccount: varchar('user_account', { length: 256 }).notNull(), userPassword: varchar('user_password', { length: 512 }).notNull(), userName: varchar('user_name', { length: 256 }), userAvatar: varchar('user_avatar', { length: 1024 }), userProfile: varchar('user_profile', { length: 512 }), userRole: varchar('user_role', { length: 256 }).notNull().default('user'), ...times, isDelete: integer('is_delete').notNull().default(0) }, t => [uniqueIndex('uk_app_user_account').on(t.userAccount)]);
@@ -150,3 +151,88 @@ export const appDeployments = pgTable('app_deployment', {
   error: text('error'),
   ...controlTimes,
 }, t => [uniqueIndex('uk_app_deployment_request').on(t.appId, t.requestId), uniqueIndex('uk_app_deployment_app_running').on(t.appId).where(sql`status = 'running'`)]);
+
+// ---- 计费（migrations/008_credit_rate_card.sql）----
+/** 上游成本口径：峰时/谷时价可追溯，不知道就留 unknown，不拿售价折算冒充真实成本。 */
+export type RateCostBasis = 'peak' | 'off-peak' | 'unknown';
+
+// 费率表：只追加。同一 (provider_id, model_name) 可以在不同 effective_from 上有多个版本，改价只加行。
+export const creditRateCard = pgTable('credit_rate_card', {
+  providerId: varchar('provider_id', { length: 64 }).notNull(),
+  modelName: varchar('model_name', { length: 256 }).notNull(),
+  effectiveFrom: timestamp('effective_from', { mode: 'string', precision: 3 }).notNull(),
+  creditInputMiss: integer('credit_input_miss').notNull(),
+  creditInputHit: integer('credit_input_hit').notNull(),
+  creditOutput: integer('credit_output').notNull(),
+  usdInputMiss: numeric('usd_input_miss', { precision: 12, scale: 6 }),
+  usdInputHit: numeric('usd_input_hit', { precision: 12, scale: 6 }),
+  usdOutput: numeric('usd_output', { precision: 12, scale: 6 }),
+  costBasis: varchar('cost_basis', { length: 16 }).$type<RateCostBasis>(),
+  costSource: varchar('cost_source', { length: 512 }),
+  note: text('note'),
+  createdBy: bigint('created_by', { mode: 'bigint' }),
+  createTime: timestamp('create_time', { mode: 'string', precision: 3 }).notNull(),
+}, t => [index('idx_credit_rate_card_model').on(t.providerId, t.modelName, t.effectiveFrom.desc())]);
+
+// ---- 计费（migrations/010_credit_grant_account.sql）----
+// 账本事实（credit_grant）只追加；credit_account 是唯一允许 UPDATE 的余额快照，
+// 任何时候都能由 grant 减 entry 重算，所以对账时它是对账对象，不是真相来源。
+export const creditGrants = pgTable('credit_grant', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  userId: bigint('user_id', { mode: 'bigint' }).notNull(),
+  pool: varchar('pool', { length: 16 }).$type<CreditPool>().notNull(),
+  credits: bigint('credits', { mode: 'number' }).notNull(),
+  source: varchar('source', { length: 16 }).$type<GrantSource>().notNull(),
+  externalRef: varchar('external_ref', { length: 128 }),
+  requestId: varchar('request_id', { length: 128 }),
+  grantedBy: bigint('granted_by', { mode: 'bigint' }),
+  period: varchar('period', { length: 7 }),
+  note: text('note'),
+  createTime: timestamp('create_time', { mode: 'string', precision: 3 }).notNull(),
+}, t => [
+  uniqueIndex('uk_credit_grant_request').on(t.userId, t.requestId).where(sql`request_id IS NOT NULL`),
+  uniqueIndex('uk_credit_grant_external').on(t.source, t.externalRef).where(sql`external_ref IS NOT NULL`),
+  uniqueIndex('uk_credit_grant_monthly').on(t.userId, t.period).where(sql`source = 'monthly_quota'`),
+  index('idx_credit_grant_user_time').on(t.userId, t.createTime),
+]);
+
+export const creditAccounts = pgTable('credit_account', {
+  userId: bigint('user_id', { mode: 'bigint' }).notNull(),
+  pool: varchar('pool', { length: 16 }).$type<CreditPool>().notNull(),
+  balance: bigint('balance', { mode: 'number' }).notNull().default(0),
+  updateTime: timestamp('update_time', { mode: 'string', precision: 3 }).notNull(),
+}, t => [primaryKey({ columns: [t.userId, t.pool] })]);
+
+// ---- 计费（migrations/012_credit_charge_entry.sql）----
+// 出账聚合根：一次 Generation 一行（generation_id 唯一）。credits / cost_usd / status 是分红推导出来的投影，
+// 每次追加 credit_entry 后在同一事务里重写；两个快照是不可变事实（费率版本 + 逐步骤用量）。
+// 账本自带 app_id / user_id 副本且不建外键：删除应用会级联删 generation，账本必须留下。
+export const creditCharges = pgTable('credit_charge', {
+  generationId: varchar('generation_id', { length: 36 }).notNull().unique(),
+  appId: bigint('app_id', { mode: 'bigint' }).notNull(),
+  userId: bigint('user_id', { mode: 'bigint' }).notNull(),
+  credits: bigint('credits', { mode: 'number' }).notNull().default(0),
+  costUsd: numeric('cost_usd', { precision: 14, scale: 6 }),
+  rateCardSnapshot: jsonb('rate_card_snapshot').$type<RateCardView[]>().notNull(),
+  usageSnapshot: jsonb('usage_snapshot').$type<UsageSnapshotStep[]>().notNull(),
+  status: varchar('status', { length: 16 }).$type<ChargeStatus>().notNull(),
+  estimatedSteps: integer('estimated_steps').notNull().default(0),
+  createTime: timestamp('create_time', { mode: 'string', precision: 3 }).notNull(),
+}, t => [
+  index('idx_credit_charge_app_time').on(t.appId, t.createTime.desc()),
+  index('idx_credit_charge_user_time').on(t.userId, t.createTime.desc()),
+]);
+
+// 出账分录：正数为扣减、负数为退还/冲正；冲正只追加反向行（reversal_of 指向被冲正的行），绝不改历史行。
+// reason / operator_id 是冲正审计（migrations/014_credit_entry_audit.sql，reason 宽度由 018 加宽到 500）：
+// 自动冲正写固定原因、operator 为空，人工冲正写管理员填写的理由与操作人。
+export const creditEntries = pgTable('credit_entry', {
+  id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+  chargeId: varchar('charge_id', { length: 36 }).notNull(),
+  pool: varchar('pool', { length: 16 }).$type<CreditPool>().notNull(),
+  credits: bigint('credits', { mode: 'number' }).notNull(),
+  reversalOf: bigint('reversal_of', { mode: 'bigint' }),
+  reason: varchar('reason', { length: 500 }),
+  operatorId: bigint('operator_id', { mode: 'bigint' }),
+  createTime: timestamp('create_time', { mode: 'string', precision: 3 }).notNull(),
+}, t => [index('idx_credit_entry_charge').on(t.chargeId, t.id)]);

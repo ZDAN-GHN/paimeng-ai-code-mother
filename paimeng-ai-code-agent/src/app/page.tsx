@@ -2,9 +2,12 @@
 import { useEffect, useState } from 'react';
 import { App, Button, Input, Pagination, Select } from 'antd';
 import { useRouter } from 'next/navigation';
-import { api } from '@/client/api';
+import { api, isInsufficientCredits } from '@/client/api';
 import { useAuth } from '@/components/providers';
 import { HomeAppCard } from '@/components/app-card';
+import { CreditBalance } from '@/components/billing/credit-balance';
+import { InsufficientCreditsAlert } from '@/components/billing/insufficient-credits';
+import { insufficientCreditsMessage, type AccountSummary } from '@/shared/billing';
 import type { AppInfo, Page } from '@/shared/contracts';
 import { codeGenTemplates } from '@/shared/templates';
 const quickTemplates=[
@@ -17,6 +20,7 @@ const emptyPage:Page<AppInfo>={records:[],totalRow:0,pageNumber:1,pageSize:6};
 export default function Home(){
  const {user}=useAuth();const {message}=App.useApp();const router=useRouter();
  const [prompt,setPrompt]=useState('');const [creating,setCreating]=useState(false);
+ const [creditError,setCreditError]=useState('');
  const [templateId,setTemplateId]=useState<string>('auto');
  const [my,setMy]=useState<Page<AppInfo>>(emptyPage);const [good,setGood]=useState<Page<AppInfo>>(emptyPage);
  async function loadMy(page=1){if(!user)return;try{setMy(await api<Page<AppInfo>>('app/my/list/page/vo',{pageNum:page,pageSize:6}));}catch(error){message.error((error as Error).message);}}
@@ -28,12 +32,25 @@ export default function Home(){
   if(!prompt.trim()){message.warning('请输入应用描述');return;}
   if(!user){router.push('/user/login');return;}
   setCreating(true);
-  try{const id=await api<string>('app/add',{initPrompt:prompt.trim(),...(templateId==='auto'?{}:{templateId})});router.push('/app/chat/'+id);}
-  catch(error){message.error((error as Error).message);}
+  try{
+   // 「创建并生成」是一件事：先按准入的同一条规则预检一次，额度不足就地拦住，
+   // 不然会先建一个注定生成不了的空应用。真正的判定仍在服务端 startGeneration 里。
+   const summary=await api<AccountSummary>('billing/summary');
+   if(summary.total<=0){setCreditError(insufficientCreditsMessage(summary));return;}
+   setCreditError('');
+   const id=await api<string>('app/add',{initPrompt:prompt.trim(),...(templateId==='auto'?{}:{templateId})});
+   router.push('/app/chat/'+id);
+  }
+  catch(error){
+   if(isInsufficientCredits(error))setCreditError(error.message);
+   else message.error((error as Error).message);
+  }
   finally{setCreating(false);}
  }
  return <div id="homePage"><div className="container">
   <div className="hero-section"><h1 className="hero-title">AI 应用生成平台</h1><p className="hero-description">一句话轻松创建网站应用</p></div>
+  <CreditBalance />
+  {creditError&&<InsufficientCreditsAlert message={creditError} onClose={()=>setCreditError('')} />}
   <div className="template-picker"><label htmlFor="project-template">技术栈</label><Select id="project-template" aria-label="技术栈" value={templateId} onChange={setTemplateId} disabled={creating} options={[{value:'auto',label:'自动选择'},...codeGenTemplates.map(template=>({value:template.id,label:template.name}))]}/><span>{templateId==='auto'?'根据需求自动选择技术栈（AI 路由）':codeGenTemplates.find(template=>template.id===templateId)?.description}</span></div>
   <div className="input-section"><Input.TextArea className="prompt-input" aria-label="应用描述" placeholder="帮我创建个人博客网站" value={prompt} onChange={e=>setPrompt(e.target.value)} rows={4} maxLength={1000}/><div className="input-actions"><Button className="create-button" type="primary" size="large" aria-label="创建应用" loading={creating} onClick={()=>{void create();}}>↑</Button></div></div>
   <div className="quick-actions">{quickTemplates.map(item=><Button key={item.label} onClick={()=>setPrompt(item.prompt)}>{item.label}</Button>)}</div>

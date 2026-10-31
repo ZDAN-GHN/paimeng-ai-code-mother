@@ -16,6 +16,8 @@ import { appForAdoption, getApp } from '../business';
 import { getConfig } from '../infra/config';
 import { db, now } from '../infra/db';
 import { generationControl, generationFor } from './generation-store';
+// 读路径的 ready 修复也要补一次结算；billing 侧不 import 本模块（否则终态路径 import 计费就成环）。
+import { evaluateRunningOverdraft, reconcileSettlements, settleGenerationBilling } from '../billing/settlement';
 import { activeExecution, appendInput, assertAuthority, beginChecking, bindExecutionConversation, completeAttempt, heartbeatAuthority, inputsSettled, setExecutionStatus, markInputPlaced, markInputUnanswered, markInputResolved, openQuestionOf, reserveAttempt, withdrawInput, type ExecutionRecord, type InputRecord } from './control-store';
 import { CandidateInvalidatedError, failOrCancel, getInputs, pauseForQuestion, publishReady, recoverStartup, settleGeneration, startGeneration } from './generation-lifecycle';
 import { recordAssistantStep, recordBuildStep, stopReasonOf, type AccountToolCall, type EntryUsage, type GenerationStopReason, type ModelIdentity } from './generation-accounting';
@@ -619,7 +621,7 @@ async function observeHarnessRun(options: {
     let snapshot: string | null = null;
     let round = 1;
     for (;;) {
-      const run = new RunTranslator(channel, turn, anchor, requestId, model, round);
+      const run = new RunTranslator(channel, turn, anchor, requestId, model, round, { stop, appId: app.id, conversationId });
       let failureText: string | null = null;
       const response = await harnessFetch(`/agent-events?conversationId=${conversationId}`, {
         headers: { accept: 'application/x-ndjson' },
@@ -892,6 +894,15 @@ type PendingModel = {
   toolCalls: { id: string; name: string }[];
 };
 
+/**
+ * 运行期熔断要同时停两处：本进程的观察流（`stop.signal` 打断 harnessFetch）与 harness 子进程里
+ * 还在跑的 run（`abortHarnessRun`）。只 abort 本地信号，harness 会继续烧 token。
+ */
+type OverdraftGuard = { stop: AbortController; appId: string; conversationId: number };
+
+/** 熔断中止的文案：`stopReasonOf` 按其中的「透支线」判定停止原因，界面按停止原因给专用文案。 */
+const overdraftAbortMessage = '已超出透支线，生成已中止';
+
 class RunTranslator {
   #buildTimer: ReturnType<typeof setInterval> | null = null;
   #buildStage: (typeof buildStageNames)[number] | null = null;
@@ -903,7 +914,8 @@ class RunTranslator {
   #endedTools: Set<string>;
   readonly #toolOutcomes = new Map<string, { ok: boolean; ms: number | null }>();
 
-  constructor(readonly channel: ChunkChannel, private readonly turn: AssistantTurn, private readonly anchor: TranscriptAnchor, private readonly requestId: string, private readonly model: ModelIdentity, private readonly round: number) {
+  /** `generationId` 就是这一轮 Generation 的 id（提交时用同一个 id 建行），不是请求幂等键。 */
+  constructor(readonly channel: ChunkChannel, private readonly turn: AssistantTurn, private readonly anchor: TranscriptAnchor, private readonly generationId: string, private readonly model: ModelIdentity, private readonly round: number, private readonly overdraft: OverdraftGuard) {
     this.#seenEntries = turn.seenEntries;
     this.#endedTools = turn.endedTools;
   }
@@ -915,7 +927,7 @@ class RunTranslator {
           const parsed = transcriptEntrySchema.safeParse(entry);
           return parsed.success ? [parsed.data] : [];
         });
-        const from = entries.findIndex(entry => entry.kind === userEntryKind && userBubbleSchema.safeParse(entry.data).data?.id === `${this.requestId}-user`);
+        const from = entries.findIndex(entry => entry.kind === userEntryKind && userBubbleSchema.safeParse(entry.data).data?.id === `${this.generationId}-user`);
         for (const entry of from < 0 ? [] : entries.slice(from)) {
           const result = toolResultMessageOf(entry);
           if (result) this.handle({ type: 'tool_execution_end', toolCallId: result.toolCallId, toolName: result.toolName, entry });
@@ -1059,7 +1071,7 @@ class RunTranslator {
     });
     const timed = calls.filter(call => call.ms !== null);
     await recordAssistantStep({
-      generationId: this.requestId,
+      generationId: this.generationId,
       round: this.round,
       stepNumber: pending.stepNumber,
       model: pending.model,
@@ -1071,6 +1083,25 @@ class RunTranslator {
       toolMs: timed.length ? timed.reduce((total, call) => total + (call.ms ?? 0), 0) : null,
       toolCalls: calls,
     });
+    await this.#stopOnOverdraft();
+  }
+
+  /**
+   * 运行期熔断（95）：这一步已经落库，再从表里现算一遍 Owner 的未结算消耗——
+   * 进程内累计与终态结算读到的行集因此完全一致，不会出现「熔断按 5 步、结算按 4 步」。
+   *
+   * 超线只 abort（不抛错）：让观察循环的 catch → failOrCancel → settleGeneration 走正常终态与账单，
+   * 已发生的用量照实收费。评估本身出错不算熔断（下一分会再评一次），不能因为计费读失败把生成报成失败。
+   */
+  async #stopOnOverdraft(): Promise<void> {
+    if (this.overdraft.stop.signal.aborted) return;
+    const verdict = await evaluateRunningOverdraft(this.generationId).catch(problem => {
+      console.warn(`运行期透支评估失败（生成 ${this.generationId}）：`, problem);
+      return null;
+    });
+    if (!verdict?.exceeded) return;
+    this.overdraft.stop.abort(new Error(overdraftAbortMessage));
+    void abortHarnessRun(this.overdraft.appId, this.overdraft.conversationId);
   }
 }
 
@@ -1432,11 +1463,20 @@ class DetachedChannel extends ChunkChannel {
 /**
  * 启动恢复只做一次：扫描过期 authority 和遗留 editing 执行，失败收束并封存草稿。
  * 读状态不再触发接管；新任务提交前必须等这次扫描完成（启动屏障）。
+ *
+ * 恢复完成后补一次对账扫描：终态事务已提交、结算没落地（或进程恰好在两者之间被杀）的记录
+ * 没有任何别的路径会再通知计费（终态钩子在 `generation-lifecycle.ts` 与 `control-store.ts`），
+ * 所以这是「重启后补结算」的落点。
+ * 只跑一次、不阻塞请求、不常驻；失败由 Admin 重试或 `npm run billing:reconcile` 兜底。
  */
+const startupReconcileLimit = 50;
 let recoveryTask: Promise<void> | undefined;
 function ensureRecovered(): Promise<void> {
   recoveryTask ??= recoverStartup({ holder: `next:${process.pid}:${randomUUID()}` })
-    .then(() => undefined)
+    .then(() => {
+      void reconcileSettlements({ limit: startupReconcileLimit })
+        .catch(problem => console.warn('启动补结算失败，稍后可用 admin/billing/reconcile 重试：', problem));
+    })
     .catch(problem => {
       recoveryTask = undefined;
       console.warn('启动恢复失败，后续请求会重试：', problem);
@@ -1481,6 +1521,9 @@ export async function generationStatus(appId: string) {
         .where(and(eq(generations.id, task.id), inArray(generations.status, ['generating', 'building'])));
       await db().execute(sql`update generation set phase = 'finished', update_time = ${now()} where id = ${task.id}`);
       task = (await generationFor(appId)) ?? task;
+      // 状态在这里被改成 ready，没有别的路径会再通知结算；异步补一次、不阻塞这次轮询。
+      // 失败由对账扫描（93）兜底，`settleGenerationBilling` 本身不抛错。
+      void settleGenerationBilling(task.id);
     } else {
       await attachOrphanedExecution(appId, task).catch(problem => console.warn(`重新挂接 ${task?.id} 失败：`, problem));
     }
