@@ -201,3 +201,15 @@ export type AccountSnapshot = {
   purchasedCredits60d: number;
   overdraft: number;
 };
+
+// ---- 月度配额（migrations/010_credit_grant_account.sql 的 (user_id, period) 唯一索引）----
+
+/** 每个北京自然月发放到配额池的 Credit。配额不累积、不结转、不折现，过期即失效。 */
+export const monthlyQuotaCredits = 500;
+
+/**
+ * `GET billing/summary` 的响应：双池快照 + 这份配额属于哪个账期、什么时候失效。
+ * `period` 是北京自然月 `YYYY-MM`（`billing/period.ts`）；`quotaExpiresAt` 是账期半开区间的终点，
+ * UTC 朴素时间戳，界面按北京时间显示。
+ */
+export type AccountSummary = AccountSnapshot & { period: string; quotaExpiresAt: string };

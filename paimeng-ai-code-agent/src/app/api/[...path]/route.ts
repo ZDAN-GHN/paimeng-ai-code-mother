@@ -6,7 +6,7 @@ import { generationAccounts } from '@/server/generation/generation-accounting';
 import { chatRuntime, generationStatus, harnessCancelGeneration, harnessCancelInput, harnessChatResponse, harnessSteerGeneration, harnessSubmitInput, loadMessages } from '@/server/generation/durable-engine';
 import { applyModelConfigNow, deleteModelAlias, deleteModelProvider, probeProviderModels, readModelAdminConfig, upsertModelAlias, upsertModelProvider } from '@/server/models/admin';
 import { grantCredits } from '@/server/billing/admin';
-import { accountSnapshot } from '@/server/billing/ledger';
+import { ensureCurrentPeriod } from '@/server/billing/quota';
 import { uploadImages } from '@/server/generation/image-upload';
 import { appendRate, readRateCardList } from '@/server/billing/rate-card';
 import { transcribeEnabled, transcribeSpeech } from '@/server/generation/speech';
@@ -44,7 +44,7 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/versions/thumbnail'){const user=await requireUser(req);const png=await business.readAppVersionThumbnail({appId:idSchema.parse(query.get('appId')),versionId:versionIdSchema.parse(query.get('versionId'))},user);if(!png)return new Response(null,{status:404});return new Response(new Uint8Array(png),{headers:{'content-type':'image/png','content-length':String(png.length),'cache-control':'private, max-age=3600','x-content-type-options':'nosniff'}});}
    if(path.startsWith('app/download/')){const user=await requireUser(req);const id=idSchema.parse(path.slice('app/download/'.length));return await business.download(id,user);}
    if(path==='admin/billing/rate-card'){await requireAdmin(req);return success(await readRateCardList());}
-   if(path==='billing/summary'){const user=await requireUser(req);return success(await accountSnapshot(user.id));}
+   if(path==='billing/summary'){const user=await requireUser(req);return success(await ensureCurrentPeriod(user.id));}
   }
   if(method==='POST'){
    if(path==='user/register')return success(await register(value));
