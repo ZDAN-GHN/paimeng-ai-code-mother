@@ -4,10 +4,12 @@ import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 import { db, now, type Transaction } from '@/server/infra/db';
 import { BusinessError } from '@/server/infra/http';
 import { creditAccounts, creditCharges, creditEntries, creditGrants, generations } from '@/server/infra/schema';
-import type {
-  AccountSnapshot, BillingChargeView, ChargeStatus, CreditPool, GrantSource, RateCardView, UsageSnapshotStep,
+import {
+  creditPools, type AccountSnapshot, type BillingChargeView, type ChargeStatus, type CreditPool, type GrantSource,
+  type RateCardView, type UsageSnapshotStep,
 } from '@/shared/billing';
 import { stopReasonFrom } from '@/server/generation/generation-accounting';
+import { isCurrentPeriod, parseNaiveTime, periodOf } from './period';
 
 export type { ChargeStatus, CreditPool, GrantSource };
 export type CreditGrantRow = typeof creditGrants.$inferSelect;
@@ -255,10 +257,78 @@ export async function reprojectCharge(tx: Transaction, chargeId: string): Promis
   return { credits, reversed };
 }
 
+// ---- 冲正（migrations/014_credit_entry_audit.sql）----
+
+export type ReversalInput = {
+  /** 为什么退：自动冲正写 `platformReversalReason`，人工冲正写管理员填的原因（92）。 */
+  reason: string;
+  /** 人工冲正的操作者；自动冲正为 null。 */
+  operatorId?: string | null;
+};
+
+export type ReversalResult = {
+  /** 本次是否追加了分录；false 表示这笔 Charge 不存在或已经全部冲正过。 */
+  reversed: boolean;
+  /** 本次追加的反向分录条数，等于被冲正的原始分录数。 */
+  entries: number;
+};
+
+/**
+ * 幂等整笔冲正：为每条还没有反向分录的 entry 追加一条同池、同额取负、`reversal_of` 指向原行的分录，
+ * 再把 charge 投影重算一次（04-settlement-design.md §4）。只追加、不改历史行。
+ *
+ * 两个容易写错的地方：
+ * - 先 `FOR UPDATE` 锁住 charge 行、再锁两池账户：两个并发冲正撞在同一笔账单上时，第二个进来
+ *   已经看不到「未冲正的分录」，不会退两次钱。
+ * - quota 池按账期归属（§5）：只有还在当前北京月的 Charge 才把配额退回去；老账期的反向分录照样落库，
+ *   但不动当前配额池余额——否则已过期的配额会复活成新额度。
+ */
+export async function reverseCharge(chargeId: string, input: ReversalInput): Promise<ReversalResult> {
+  return db().transaction(tx => reverseChargeTx(tx, chargeId, input));
+}
+
+/** `reverseCharge` 的事务本体：平台故障自动冲正在结算事务里复用，不再开新事务。 */
+export async function reverseChargeTx(tx: Transaction, chargeId: string, input: ReversalInput): Promise<ReversalResult> {
+  const [charge] = await tx.select().from(creditCharges)
+    .where(eq(creditCharges.generationId, chargeId)).limit(1).for('update');
+  if (!charge) return { reversed: false, entries: 0 };
+
+  const entries = await entriesOfCharge(chargeId, tx);
+  const reversedIds = new Set(entries.filter(entry => entry.reversalOf !== null).map(entry => entry.reversalOf));
+  const open = entries.filter(entry => entry.reversalOf === null && !reversedIds.has(entry.id));
+  if (!open.length) return { reversed: false, entries: 0 };
+
+  const createTime = now();
+  const refund = { quota: 0, balance: 0 };
+  for (const entry of open) refund[entry.pool] += entry.credits;
+  const period = periodOf(parseNaiveTime(charge.createTime));
+  const refundable = { quota: isCurrentPeriod(period, new Date()) ? refund.quota : 0, balance: refund.balance };
+
+  const balances = await lockAccounts(tx, charge.userId);
+  await tx.insert(creditEntries).values(open.map(entry => ({
+    chargeId,
+    pool: entry.pool,
+    credits: -entry.credits,
+    reversalOf: entry.id,
+    reason: input.reason,
+    operatorId: input.operatorId ? BigInt(input.operatorId) : null,
+    createTime,
+  })));
+  for (const pool of creditPools) {
+    if (refundable[pool] === 0) continue;
+    await tx.update(creditAccounts).set({ balance: balances[pool] + refundable[pool], updateTime: createTime })
+      .where(and(eq(creditAccounts.userId, charge.userId), eq(creditAccounts.pool, pool)));
+  }
+
+  const projection = await reprojectCharge(tx, chargeId);
+  return { reversed: projection.reversed, entries: open.length };
+}
+
 /**
  * `GET billing/charges` 的读模型：一个 App 最近的 Charge + 分池分录 + 所属 Generation 的终态。
- * `messageId` 由服务端 join generation 带出——它是把账单单挂到助手气泡上的唯一关联键
- * （generation 行会被删除应用清掉，此时该行仍保留金额与分录，`messageId` 为 null）。
+ * `messageId` 由服务端 join generation 带出——它是把账单单挂到助手气泡上的唯一关联键；
+ * 它为 null 的 Charge（没有助手气泡的终态：初始化失败、进程中断后恢复）照样在列表里，
+ * 界面靠 `generationId` 在状态区取到它。generation 行被删掉的账单也保留金额与分录。
  */
 export async function chargesOf(input: { appId: string; limit: number; includeCost: boolean }): Promise<BillingChargeView[]> {
   const rows = await db().select({
@@ -294,11 +364,10 @@ export async function chargesOf(input: { appId: string; limit: number; includeCo
       createTime: row.createTime,
       generationStatus: row.generationStatus as BillingChargeView['generationStatus'],
       stopReason: stopReasonFrom(row.stopReason),
-      entries: charges.map(entry => ({
-        pool: entry.pool,
-        credits: entry.credits,
-        reversalOf: entry.reversalOf === null ? null : String(entry.reversalOf),
-      })),
+      entries: charges.filter(entry => entry.reversalOf === null)
+        .map(entry => ({ pool: entry.pool, credits: entry.credits })),
+      reversals: charges.filter(entry => entry.reversalOf !== null)
+        .map(entry => ({ pool: entry.pool, credits: entry.credits, reason: entry.reason, createTime: entry.createTime })),
     };
     // 平台成本只对管理员返回：普通用户看售价，不看毛利。
     if (input.includeCost) view.costUsd = row.costUsd ?? null;

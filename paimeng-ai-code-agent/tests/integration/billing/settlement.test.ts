@@ -3,18 +3,20 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { and, eq, inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import {
-  applyBillingMigrations, billingRequest, createBillingUser, envelopeOf, loadBillingDatabase, type BillingTestUser,
+  applyBillingMigrations, billingBalancesOf, billingRateProvider, billingRequest, createBillingUser, envelopeOf,
+  grantBillingCredits,
+  loadBillingDatabase, purgeBillingRateCards, seedBillingApp, seedBillingGeneration, seedBillingRate, seedBillingStep,
+  type BillingTestUser,
 } from './support';
-import { db, getPool, now } from '@/server/infra/db';
-import { nextSnowflakeId } from '@/server/infra/snowflake';
+import { db, getPool } from '@/server/infra/db';
 import {
-  appAuthority, appPreviewPointers, apps, creditAccounts, creditCharges, creditEntries, creditGrants, creditRateCard,
+  appAuthority, appPreviewPointers, apps, creditAccounts, creditCharges, creditEntries, creditGrants,
   generationDeliveries, generationExecutions, generationInputs, generationQuestions, generationSteps,
   generationTransitions, generations, sessions, sourceSnapshots, users, versionRecords,
 } from '@/server/infra/schema';
-import { effectiveCreditsOf, entriesOfCharge, recordGrant } from '@/server/billing/ledger';
+import { effectiveCreditsOf, entriesOfCharge } from '@/server/billing/ledger';
 import { settleGenerationBilling } from '@/server/billing/settlement';
 import { acquireAuthority, ensureAuthority, markInputResolved } from '@/server/generation/control-store';
 import { failOrCancel, publishReady, recoverGeneration, startGeneration } from '@/server/generation/generation-lifecycle';
@@ -28,19 +30,18 @@ import type { BillingChargeView } from '@/shared/billing';
  * 定价本身是纯函数，边界情况在 tests/unit/billing/pricing.test.ts。
  */
 
-const ownerRateProvider = 'bill89-owner';
 const createdUsers: string[] = [];
 const createdApps: bigint[] = [];
 const createdGenerations: string[] = [];
 const createdWorkspaces: WorkspaceApp[] = [];
-const createdRateProviders = new Set<string>([ownerRateProvider]);
 let base = '';
 let runtimeRoot = '';
 let snapshotsRoot = '';
-let appCounter = 0;
 
 beforeAll(async () => {
-  await applyBillingMigrations('008_credit_rate_card.sql', '010_credit_grant_account.sql', '012_credit_charge_entry.sql');
+  await applyBillingMigrations(
+    '008_credit_rate_card.sql', '010_credit_grant_account.sql', '012_credit_charge_entry.sql', '014_credit_entry_audit.sql',
+  );
   base = await realpath(await mkdtemp(join(tmpdir(), 'paimeng-settlement-')));
   runtimeRoot = join(base, 'runtime');
   snapshotsRoot = join(base, 'snapshots');
@@ -77,7 +78,7 @@ afterAll(async () => {
     await db().delete(sessions).where(inArray(sessions.userId, ids));
     await db().delete(users).where(inArray(users.id, ids));
   }
-  await db().delete(creditRateCard).where(inArray(creditRateCard.providerId, [...createdRateProviders]));
+  await purgeBillingRateCards();
   for (const app of createdWorkspaces) {
     await purgeVersions(app).catch(() => undefined);
     await rm(workspace(app), { recursive: true, force: true }).catch(() => undefined);
@@ -93,90 +94,26 @@ async function newUser(role?: 'user' | 'admin'): Promise<BillingTestUser> {
   return user;
 }
 
+/** 造数在 support.ts（跨账单测试文件复用）；这里只把新行记进清理列表。 */
 async function newApp(owner: BillingTestUser): Promise<WorkspaceApp> {
-  const id = await nextSnowflakeId();
-  appCounter += 1;
-  await db().insert(apps).values({
-    id, appName: `结算测试 ${appCounter}`, initPrompt: 'settlement', codeGenType: 'html',
-    userId: BigInt(owner.id), createTime: now(), updateTime: now(),
-  });
-  const app: WorkspaceApp = { id: String(id), codeGenType: 'html' };
-  createdApps.push(id);
+  const app = await seedBillingApp(owner.id);
+  createdApps.push(BigInt(app.id));
   createdWorkspaces.push(app);
   return app;
 }
 
-/** 直接插一条终态 generation：核心结算用例不需要起工作区/执行。 */
 async function seedGeneration(input: {
   appId: string; userId: string; status?: string; stopReason?: string | null; messageId?: string | null;
 }): Promise<string> {
-  const id = randomUUID();
-  await db().insert(generations).values({
-    id, appId: BigInt(input.appId), userId: BigInt(input.userId), status: input.status ?? 'ready',
-    stopReason: input.stopReason ?? 'completed', messageId: input.messageId ?? null,
-    createTime: now(), updateTime: now(),
-  });
+  const id = await seedBillingGeneration(input);
   createdGenerations.push(id);
   return id;
 }
 
-/** 步骤行：默认一个正常的模型步骤，token 为 null 表示上游没给用量。 */
-async function seedStep(generationId: string, input: {
-  kind?: string; modelName: string; providerId?: string; upstreamModelId?: string | null;
-  input?: number | null; cacheRead?: number | null; cacheWrite?: number | null; output?: number | null;
-  reasoning?: number | null; stepNumber?: number;
-}) {
-  await db().insert(generationSteps).values({
-    generationId,
-    kind: input.kind ?? 'model',
-    round: 1,
-    stepNumber: input.stepNumber ?? 0,
-    providerId: input.providerId ?? ownerRateProvider,
-    modelName: input.modelName,
-    upstreamModelId: input.upstreamModelId ?? null,
-    inputTokens: input.input === undefined ? 0 : input.input,
-    cacheReadTokens: input.cacheRead === undefined ? 0 : input.cacheRead,
-    cacheWriteTokens: input.cacheWrite === undefined ? 0 : input.cacheWrite,
-    outputTokens: input.output === undefined ? 0 : input.output,
-    reasoningTokens: input.reasoning ?? null,
-    status: 'ok',
-    createTime: now(),
-  });
-}
-
-/** 费率版本按 modelName 区分用例，避免相互影响；生效时间固定在 2020，晚于任何步骤。 */
-async function seedRate(input: {
-  modelName: string; providerId?: string; creditInputMiss?: number; creditInputHit?: number; creditOutput?: number;
-  usdInputMiss?: string | null; usdInputHit?: string | null; usdOutput?: string | null;
-}) {
-  const providerId = input.providerId ?? ownerRateProvider;
-  createdRateProviders.add(providerId);
-  await db().insert(creditRateCard).values({
-    providerId,
-    modelName: input.modelName,
-    effectiveFrom: '2020-01-01 00:00:00.000',
-    creditInputMiss: input.creditInputMiss ?? 600,
-    creditInputHit: input.creditInputHit ?? 12,
-    creditOutput: input.creditOutput ?? 2500,
-    usdInputMiss: input.usdInputMiss ?? null,
-    usdInputHit: input.usdInputHit ?? null,
-    usdOutput: input.usdOutput ?? null,
-    costBasis: input.usdInputMiss ? 'peak' : 'unknown',
-    createTime: now(),
-  });
-}
-
-async function grant(userId: string, pool: 'quota' | 'balance', credits: number) {
-  await recordGrant({ userId, pool, credits, source: pool === 'quota' ? 'monthly_quota' : 'admin_grant', period: pool === 'quota' ? '2026-01' : null });
-}
-
-async function balancesOf(userId: string) {
-  const rows = await db().select().from(creditAccounts).where(eq(creditAccounts.userId, BigInt(userId)));
-  return {
-    quota: rows.find(row => row.pool === 'quota')?.balance ?? 0,
-    balance: rows.find(row => row.pool === 'balance')?.balance ?? 0,
-  };
-}
+const seedStep = seedBillingStep;
+const seedRate = seedBillingRate;
+const grant = grantBillingCredits;
+const balancesOf = billingBalancesOf;
 
 async function chargeRows(generationId: string) {
   return db().select().from(creditCharges).where(eq(creditCharges.generationId, generationId));
@@ -206,7 +143,7 @@ describe('结算：一次 Generation 一份 Charge、分池 entry、双池余额
       status: 'settled', estimatedSteps: 0,
     });
     expect(charge.createTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/);
-    expect(charge.rateCardSnapshot).toMatchObject([{ providerId: ownerRateProvider, modelName: 'model-pools', effectiveFrom: '2020-01-01 00:00:00.000' }]);
+    expect(charge.rateCardSnapshot).toMatchObject([{ providerId: billingRateProvider, modelName: 'model-pools', effectiveFrom: '2020-01-01 00:00:00.000' }]);
     expect(charge.usageSnapshot).toMatchObject([{ modelName: 'model-pools', input: 500_000, estimated: false, priced: true }]);
 
     const entries = await entriesOfCharge(charge.generationId);
@@ -489,9 +426,8 @@ describe('GET billing/charges：只读自己的 App，成本只给 Admin', () =>
       generationStatus: 'ready',
       stopReason: 'completed',
     });
-    expect(envelope.data[0].entries).toEqual([
-      { pool: 'quota', credits: 90, reversalOf: null },
-    ]);
+    expect(envelope.data[0].entries).toEqual([{ pool: 'quota', credits: 90 }]);
+    expect(envelope.data[0].reversals).toEqual([]);
     // 普通用户看不到平台成本
     expect(envelope.data[0]).not.toHaveProperty('costUsd');
   });

@@ -2,8 +2,10 @@ import 'server-only';
 import { and, asc, eq } from 'drizzle-orm';
 import { db, now, type Transaction } from '@/server/infra/db';
 import { generationSteps, generations } from '@/server/infra/schema';
+import { isPlatformFault, platformReversalReason } from '@/shared/billing';
+import { stopReasonFrom } from '@/server/generation/generation-accounting';
 import { readRates } from './rate-card';
-import { chargePools, insertCharge, projectCharge, reprojectCharge } from './ledger';
+import { chargePools, insertCharge, projectCharge, reprojectCharge, reverseChargeTx } from './ledger';
 import { priceSteps, resolveStepRate, type RatedStep } from './pricing';
 
 /**
@@ -16,6 +18,9 @@ import { priceSteps, resolveStepRate, type RatedStep } from './pricing';
  * 两条硬约束：
  * - 不向调用方抛错：终态写入是这一轮业务的终点，计费失败只能记日志交给对账（93）。
  * - 幂等：`credit_charge.generation_id` 唯一键冲突即视为已结算，重复终态通知不会重复扣费。
+ *
+ * 归责也在这一层落地（04-settlement-design.md §4）：平台自身故障（初始化失败 / 写权限失效）先按实收结算，
+ * 再在**同一事务**里整笔冲正；其余终态（包括 interrupted）一律按实收，不因结果不可用而免费。
  */
 
 const terminalStatuses = ['ready', 'failed', 'cancelled'];
@@ -39,6 +44,7 @@ export async function settleGenerationBillingTx(tx: Transaction, generationId: s
     appId: generations.appId,
     userId: generations.userId,
     status: generations.status,
+    stopReason: generations.stopReason,
   }).from(generations).where(eq(generations.id, generationId)).limit(1);
   if (!generation || !terminalStatuses.includes(generation.status)) return;
 
@@ -80,4 +86,10 @@ export async function settleGenerationBillingTx(tx: Transaction, generationId: s
   });
   await chargePools(tx, { chargeId: generationId, userId: generation.userId, credits: pricing.credits, createTime });
   await reprojectCharge(tx, generationId);
+
+  // 平台故障：保留原 Charge 与原扣费事实，紧接着追加反向分录把钱退回（04 §4）。
+  // 金额为 0 的账单没有分录可冲，`reverseChargeTx` 自己早退，状态保持 settled、金额为 0。
+  if (isPlatformFault(stopReasonFrom(generation.stopReason))) {
+    await reverseChargeTx(tx, generationId, { reason: platformReversalReason });
+  }
 }
