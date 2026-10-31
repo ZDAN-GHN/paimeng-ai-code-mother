@@ -3,7 +3,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import {
   applyBillingMigrations, billingBalancesOf, billingRequest, createBillingUser, envelopeOf,
   grantBillingCredits, loadBillingDatabase, purgeBillingRateCards, seedBillingApp, seedBillingGeneration,
-  seedBillingRate, seedBillingStep, type BillingTestUser,
+  seedBillingRate, seedBillingStep, withoutMonthlyQuota, type BillingTestUser,
 } from './support';
 import { db, getPool } from '@/server/infra/db';
 import {
@@ -11,7 +11,7 @@ import {
 } from '@/server/infra/schema';
 import { effectiveCreditsOf, entriesOfCharge, reverseCharge } from '@/server/billing/ledger';
 import { settleGenerationBilling } from '@/server/billing/settlement';
-import { platformReversalReason, type BillingChargeView } from '@/shared/billing';
+import { platformReversalReason, monthlyQuotaCredits, type BillingChargeView } from '@/shared/billing';
 
 /**
  * 终态归责（04-settlement-design.md §4）：失败与取消按实收，平台自身故障先结算再整笔冲正。
@@ -111,6 +111,8 @@ describe('终态归责：失败与取消按实收，平台故障自动退还', (
     ];
     for (const terminal of terminals) {
       const { owner, appId } = await fixture();
+      // 只考察「余额池承接消费」：先退掉注册即得的配额，让配额池恰好见底（票 91）
+      await withoutMonthlyQuota(owner);
       await grantBillingCredits(owner.id, 'balance', 100);
       const generationId = await seedTerminal({ owner, appId, ...terminal });
       await seedBillingStep(generationId, { modelName: model, input: 100_000 });
@@ -132,6 +134,8 @@ describe('终态归责：失败与取消按实收，平台故障自动退还', (
   it('initialization-failed 与 lease-lost 结算后整笔冲正，余额回到结算前、配额池不为负', async () => {
     for (const stopReason of ['initialization-failed', 'lease-lost']) {
       const { owner, appId } = await fixture();
+      // 一笔消费跨两池才能断言「整笔冲正把两池都还原」：配额池固定为 10（票 91 已发 500）
+      await withoutMonthlyQuota(owner);
       await grantBillingCredits(owner.id, 'quota', 10);
       await grantBillingCredits(owner.id, 'balance', 100);
       const generationId = await seedTerminal({ owner, appId, status: 'failed', stopReason, messageId: `msg-${stopReason}` });
@@ -161,6 +165,7 @@ describe('终态归责：失败与取消按实收，平台故障自动退还', (
 
   it('重复结算与重复冲正只扣一次、只退一次', async () => {
     const { owner, appId } = await fixture();
+    await withoutMonthlyQuota(owner);
     await grantBillingCredits(owner.id, 'quota', 1000);
     const generationId = await seedTerminal({ owner, appId, status: 'failed', stopReason: 'initialization-failed' });
     await seedBillingStep(generationId, { modelName: model, input: 100_000 });
@@ -218,7 +223,7 @@ describe('终态归责：失败与取消按实收，平台故障自动退还', (
     expect(charge).toMatchObject({ credits: 0, status: 'settled', estimatedSteps: 0 });
     expect(await entriesOfCharge(generationId)).toHaveLength(0);
     expect(await effectiveCreditsOf(generationId)).toBe(0);
-    expect(await billingBalancesOf(owner.id)).toEqual({ quota: 0, balance: 50 });
+    expect(await billingBalancesOf(owner.id)).toEqual({ quota: monthlyQuotaCredits, balance: 50 });
   });
 
   it('Usage 未知 + 失败：按估算或待处理结算，不因失败伪记为零', async () => {
@@ -232,7 +237,7 @@ describe('终态归责：失败与取消按实收，平台故障自动退还', (
 
     const [estimatedCharge] = await chargeRows(estimated);
     expect(estimatedCharge).toMatchObject({ credits: 3, status: 'estimated', estimatedSteps: 1 });
-    expect(await billingBalancesOf(estimatedFixture.owner.id)).toEqual({ quota: 0, balance: 97 });
+    expect(await billingBalancesOf(estimatedFixture.owner.id)).toEqual({ quota: monthlyQuotaCredits - 3, balance: 100 });
 
     // 没有任何已知样本时不可估算：进待处理，仍然不动余额（不伪记 0 也不猜数）
     const pendingFixture = await fixture();
@@ -245,7 +250,7 @@ describe('终态归责：失败与取消按实收，平台故障自动退还', (
     const [pendingCharge] = await chargeRows(pending);
     expect(pendingCharge).toMatchObject({ credits: 0, status: 'unpriced' });
     expect(await entriesOfCharge(pending)).toHaveLength(0);
-    expect(await billingBalancesOf(pendingFixture.owner.id)).toEqual({ quota: 0, balance: 100 });
+    expect(await billingBalancesOf(pendingFixture.owner.id)).toEqual({ quota: monthlyQuotaCredits, balance: 100 });
   });
 
   it('Question 与回答后的 Generation 各一条账单，Steer 不产生第二条', async () => {
@@ -274,7 +279,7 @@ describe('终态归责：失败与取消按实收，平台故障自动退还', (
     expect((await chargeRows(answered))[0].credits).toBe(30);
     expect((await chargeRows(steered))[0].credits).toBe(90);
     expect(await entriesOfCharge(steered)).toHaveLength(1);
-    expect(await billingBalancesOf(owner.id)).toEqual({ quota: 820, balance: 0 });
+    expect(await billingBalancesOf(owner.id)).toEqual({ quota: monthlyQuotaCredits + 1000 - 180, balance: 0 });
   });
 
   it('冲正老账期的 quota 分录：反向分录照样落库，但不复活当前配额', async () => {
@@ -297,7 +302,7 @@ describe('终态归责：失败与取消按实收，平台故障自动退还', (
 
     expect(result).toEqual({ reversed: true, entries: 2 });
     // quota 池余额是「当前账期」的可用额度：老账期的退还只落分录，不增加它
-    expect(await billingBalancesOf(owner.id)).toEqual({ quota: 100, balance: 0 });
+    expect(await billingBalancesOf(owner.id)).toEqual({ quota: monthlyQuotaCredits + 100, balance: 0 });
     const entries = await entriesOfCharge(generationId);
     expect(entries.map(entry => ({ pool: entry.pool, credits: entry.credits }))).toEqual([
       { pool: 'quota', credits: 40 }, { pool: 'balance', credits: 20 },
@@ -328,9 +333,10 @@ describe('GET billing/charges：终态账单能取到，冲正原因与退款去
       generationStatus: 'failed',
       stopReason: 'lease-lost',
     });
-    expect(charge?.entries).toEqual([{ pool: 'balance', credits: 60 }]);
+    // 消费落在哪一池由「哪里有钱」决定：注册配额先进配额池，所以这里的分录与反向分录都在 quota
+    expect(charge?.entries).toEqual([{ pool: 'quota', credits: 60 }]);
     expect(charge?.reversals).toEqual([
-      { pool: 'balance', credits: -60, reason: platformReversalReason, createTime: expect.any(String) },
+      { pool: 'quota', credits: -60, reason: platformReversalReason, createTime: expect.any(String) },
     ]);
   });
 

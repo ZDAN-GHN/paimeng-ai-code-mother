@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import {
   applyBillingMigrations, billingBalancesOf, billingRequest, createBillingUser, envelopeOf,
   grantBillingCredits, loadBillingDatabase, purgeBillingRateCards, seedBillingApp, seedBillingGeneration,
-  seedBillingRate, seedBillingStep, type BillingTestUser,
+  seedBillingRate, seedBillingStep, withoutMonthlyQuota, type BillingTestUser,
 } from './support';
 import { db, getPool } from '@/server/infra/db';
 import {
@@ -63,7 +63,8 @@ async function newUser(role?: 'user' | 'admin'): Promise<BillingTestUser> {
 }
 
 async function fixture(owner?: BillingTestUser): Promise<Fixture> {
-  const user = owner ?? await newUser();
+  // 注册会发当期配额（91）：需要配额池恰好见底的用例从「退掉当期配额」的已知状态出发。
+  const user = owner ?? await withoutMonthlyQuota(await newUser());
   const app = await seedBillingApp(user.id);
   createdApps.push(BigInt(app.id));
   return { owner: user, appId: app.id };
@@ -243,9 +244,8 @@ describe('POST admin/billing/charge/:id/reverse：人工整笔冲正', () => {
     // 上个月的扣费：quota 40 + balance 20（余额池当时因此是 -20），账单时间落在旧账期
     const chargeId = await seedBillingGeneration({ appId, userId: owner.id, status: 'ready', stopReason: 'completed' });
     createdGenerations.push(chargeId);
-    await db().insert(creditAccounts).values({
-      userId: BigInt(owner.id), pool: 'balance', balance: -20, updateTime: '2020-01-01 00:00:00.000',
-    });
+    await db().update(creditAccounts).set({ balance: -20, updateTime: '2020-01-01 00:00:00.000' })
+      .where(and(eq(creditAccounts.userId, BigInt(owner.id)), eq(creditAccounts.pool, 'balance')));
     await db().insert(creditCharges).values({
       generationId: chargeId, appId: BigInt(appId), userId: BigInt(owner.id), credits: 60, costUsd: null,
       rateCardSnapshot: [], usageSnapshot: [], status: 'settled', estimatedSteps: 0,

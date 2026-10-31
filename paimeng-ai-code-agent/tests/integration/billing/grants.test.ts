@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 import {
   applyBillingMigrations, billingRequest, createBillingUser, envelopeOf, loadBillingDatabase, type BillingTestUser,
 } from './support';
@@ -8,7 +8,7 @@ import { db, getPool } from '@/server/infra/db';
 import { creditAccounts, creditGrants, sessions, users } from '@/server/infra/schema';
 import { accountSnapshot, lockAccounts, recordGrant, rebuildAccount } from '@/server/billing/ledger';
 import { grantCredits } from '@/server/billing/admin';
-import type { AccountSnapshot, GrantReceipt } from '@/shared/billing';
+import { monthlyQuotaCredits, type AccountSnapshot, type GrantReceipt } from '@/shared/billing';
 
 /**
  * 入账与余额快照：真 Postgres 验证发放的幂等、事务原子性、并发与近 60 天窗口，
@@ -56,8 +56,13 @@ function daysAgo(days: number): string {
   return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 23).replace('T', ' ');
 }
 
+/**
+ * 本测试自己造的发放行。注册时发的当期配额（票 91）不在其中，
+ * 否则每个断言都要减去那一行，反而看不清「这次发放有没有重复入账」。
+ */
 async function grantRows(userId: string) {
-  return db().select().from(creditGrants).where(eq(creditGrants.userId, BigInt(userId)));
+  return db().select().from(creditGrants)
+    .where(and(eq(creditGrants.userId, BigInt(userId)), ne(creditGrants.source, 'monthly_quota')));
 }
 
 async function summaryOf(session: string): Promise<AccountSnapshot> {
@@ -66,6 +71,7 @@ async function summaryOf(session: string): Promise<AccountSnapshot> {
   return envelope.data;
 }
 
+/** 注册即得当期 500 配额（票 91），所以只看余额的断言里 `total` 比发放额多 500。 */
 describe('Credit 发放与双池余额快照', () => {
   it('发放购买后 grant 行与双池快照一致', async () => {
     const admin = await newUser('admin');
@@ -81,8 +87,9 @@ describe('Credit 发放与双池余额快照', () => {
       userId: BigInt(owner.id), pool: 'balance', credits: 300, source: 'purchase',
       note: '首充', grantedBy: BigInt(admin.id), period: null, externalRef: null,
     });
-    expect(row.createTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/);
-    expect(await accountSnapshot(owner.id)).toMatchObject({ quota: 0, balance: 300, total: 300 });
+    // PG 的 timestamp 文本输出会省略尾随零（…58.97），别把毫秒位数写死。
+    expect(row.createTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,6})?$/);
+    expect(await accountSnapshot(owner.id)).toMatchObject({ quota: monthlyQuotaCredits, balance: 300, total: monthlyQuotaCredits + 300 });
   });
 
   it('同一 requestId 重复提交只入账一次', async () => {
@@ -95,7 +102,7 @@ describe('Credit 发放与双池余额快照', () => {
     expect(second.created).toBe(false);
     expect(second.grantId).toBe(first.grantId);
     expect(await grantRows(owner.id)).toHaveLength(1);
-    expect(await accountSnapshot(owner.id)).toMatchObject({ balance: 50, total: 50 });
+    expect(await accountSnapshot(owner.id)).toMatchObject({ balance: 50, total: monthlyQuotaCredits + 50 });
   });
 
   it('同一 requestId 换了金额或来源也只认第一次', async () => {
@@ -121,30 +128,32 @@ describe('Credit 发放与双池余额快照', () => {
       grantCredits({ userId: owner.id, pool: 'balance', credits: 11, source: 'admin_grant', requestId: randomUUID(), grantedBy: owner.id }),
     ]);
     expect(await grantRows(owner.id)).toHaveLength(3);
-    expect(await accountSnapshot(owner.id)).toMatchObject({ balance: 118, total: 118 });
+    expect(await accountSnapshot(owner.id)).toMatchObject({ balance: 118, total: monthlyQuotaCredits + 118 });
   });
 
   it('lockAccounts 在调用方事务里读到两个池的当前余额', async () => {
+    // 配额池那一格由注册时的当期配额填充，余额池这一笔由购买填充。
     const owner = await newUser();
     await recordGrant({ userId: owner.id, pool: 'balance', credits: 70, source: 'purchase' });
-    await recordGrant({ userId: owner.id, pool: 'quota', credits: 500, source: 'monthly_quota', period: '2026-11' });
-    expect(await db().transaction(async tx => lockAccounts(tx, BigInt(owner.id)))).toEqual({ quota: 500, balance: 70 });
+    expect(await db().transaction(async tx => lockAccounts(tx, BigInt(owner.id))))
+      .toEqual({ quota: monthlyQuotaCredits, balance: 70 });
 
-    // 还没有余额行的用户返回零而不是抛错：89 扣减时新用户可能还没入过账。
+    // 还没有余额池行的用户返回零而不是抛错：89 扣减时新用户可能还没入过账。
     const fresh = await newUser();
-    expect(await db().transaction(async tx => lockAccounts(tx, BigInt(fresh.id)))).toEqual({ quota: 0, balance: 0 });
+    expect(await db().transaction(async tx => lockAccounts(tx, BigInt(fresh.id))))
+      .toEqual({ quota: monthlyQuotaCredits, balance: 0 });
   });
 
   it('余额快照可以只由 grant 事实重建', async () => {
     const owner = await newUser();
+    // 配额池来自注册时的当期配额，余额池来自这一笔购买。
     await recordGrant({ userId: owner.id, pool: 'balance', credits: 40, source: 'purchase' });
-    await recordGrant({ userId: owner.id, pool: 'quota', credits: 500, source: 'monthly_quota', period: '2026-10' });
 
     await db().delete(creditAccounts).where(eq(creditAccounts.userId, BigInt(owner.id)));
     expect(await accountSnapshot(owner.id)).toMatchObject({ quota: 0, balance: 0, total: 0 });
 
-    expect(await rebuildAccount(owner.id)).toEqual({ quota: 500, balance: 40 });
-    expect(await accountSnapshot(owner.id)).toMatchObject({ quota: 500, balance: 40, total: 540 });
+    expect(await rebuildAccount(owner.id)).toEqual({ quota: monthlyQuotaCredits, balance: 40 });
+    expect(await accountSnapshot(owner.id)).toMatchObject({ quota: monthlyQuotaCredits, balance: 40, total: monthlyQuotaCredits + 40 });
   });
 
   it('余额快照写失败时整笔回滚，不留半条 grant', async () => {
@@ -166,14 +175,14 @@ describe('Credit 发放与双池余额快照', () => {
     }
 
     expect(await grantRows(owner.id)).toHaveLength(1);
-    expect(await accountSnapshot(owner.id)).toMatchObject({ balance: 100, total: 100 });
+    expect(await accountSnapshot(owner.id)).toMatchObject({ balance: 100, total: monthlyQuotaCredits + 100 });
   });
 
   it('违反账本约束的写入被整笔回滚', async () => {
     const owner = await newUser();
     await expect(recordGrant({ userId: owner.id, pool: 'balance', credits: 0, source: 'admin_grant' })).rejects.toThrow();
     expect(await grantRows(owner.id)).toHaveLength(0);
-    expect(await accountSnapshot(owner.id)).toMatchObject({ balance: 0, total: 0 });
+    expect(await accountSnapshot(owner.id)).toMatchObject({ balance: 0, total: monthlyQuotaCredits });
   });
 
   it('近 60 天购买窗口：59 天前计入、61 天前不计入、补偿不计入', async () => {
@@ -181,7 +190,8 @@ describe('Credit 发放与双池余额快照', () => {
     await seedGrant({ userId: owner.id, pool: 'balance', credits: 100, source: 'purchase', createTime: daysAgo(59) });
     await seedGrant({ userId: owner.id, pool: 'balance', credits: 1000, source: 'purchase', createTime: daysAgo(61) });
     await seedGrant({ userId: owner.id, pool: 'balance', credits: 500, source: 'admin_grant', createTime: daysAgo(1) });
-    await seedGrant({ userId: owner.id, pool: 'quota', credits: 500, source: 'monthly_quota', createTime: daysAgo(2), period: '2026-10' });
+    // 用当前账期之外的月份：注册已经占用了当期那一行。
+    await seedGrant({ userId: owner.id, pool: 'quota', credits: 500, source: 'monthly_quota', createTime: daysAgo(2), period: '2020-01' });
 
     expect(await accountSnapshot(owner.id)).toMatchObject({ purchasedCredits60d: 100, overdraft: 2 });
   });
@@ -216,7 +226,7 @@ describe('Credit 发放与双池余额快照', () => {
 
     const replay = await envelopeOf<GrantReceipt>(await billingRequest('admin/billing/grant', { ...body, requestId }, admin.cookie));
     expect(replay.data).toMatchObject({ grantId: granted.data.grantId, created: false });
-    expect(await accountSnapshot(owner.id)).toMatchObject({ balance: 260, total: 260 });
+    expect(await accountSnapshot(owner.id)).toMatchObject({ balance: 260, total: monthlyQuotaCredits + 260 });
   });
 
   it('HTTP：billing/summary 只返回调用者自己的双池余额', async () => {
@@ -224,13 +234,14 @@ describe('Credit 发放与双池余额快照', () => {
     const poor = await newUser();
     await recordGrant({ userId: rich.id, pool: 'balance', credits: 900, source: 'purchase' });
 
-    expect(await summaryOf(rich.cookie)).toMatchObject({ quota: 0, balance: 900, total: 900, purchasedCredits60d: 900, overdraft: 18 });
-    expect(await summaryOf(poor.cookie)).toMatchObject({ quota: 0, balance: 0, total: 0 });
+    // 摘要会先确保当期配额（票 91），所以两位用户都带着 500 的配额池。
+    expect(await summaryOf(rich.cookie)).toMatchObject({ quota: monthlyQuotaCredits, balance: 900, total: monthlyQuotaCredits + 900, purchasedCredits60d: 900, overdraft: 18 });
+    expect(await summaryOf(poor.cookie)).toMatchObject({ quota: monthlyQuotaCredits, balance: 0, total: monthlyQuotaCredits });
     expect((await billingRequest('billing/summary')).status).toBe(401);
     // 管理员也读不到别人的余额：接口不接受 userId 参数，只有 92 的 admin/billing/usage 才有那个能力。
     const admin = await newUser('admin');
     const adminSummary = await summaryOf(admin.cookie);
-    expect(adminSummary).toMatchObject({ balance: 0, total: 0 });
+    expect(adminSummary).toMatchObject({ balance: 0, total: monthlyQuotaCredits });
     expect((await billingRequest(`billing/summary?userId=${rich.id}`, undefined, admin.cookie)).status).toBe(200);
   });
 
@@ -246,6 +257,6 @@ describe('Credit 发放与双池余额快照', () => {
     expect((await post({ ...base, pool: 'quota' })).status).toBe(400);
     expect((await post({ ...base, pool: 'quota', source: 'monthly_quota' })).status).toBe(400);
     expect((await post({ ...base, userId: '900000000000000001' })).status).toBe(404);
-    expect(await accountSnapshot(owner.id)).toMatchObject({ balance: 0, total: 0 });
+    expect(await accountSnapshot(owner.id)).toMatchObject({ balance: 0, total: monthlyQuotaCredits });
   });
 });

@@ -6,7 +6,8 @@ import { generationAccounts } from '@/server/generation/generation-accounting';
 import { chatRuntime, generationStatus, harnessCancelGeneration, harnessCancelInput, harnessChatResponse, harnessSteerGeneration, harnessSubmitInput, loadMessages } from '@/server/generation/durable-engine';
 import { applyModelConfigNow, deleteModelAlias, deleteModelProvider, probeProviderModels, readModelAdminConfig, upsertModelAlias, upsertModelProvider } from '@/server/models/admin';
 import { grantCredits, reverseChargeByAdmin, userUsage } from '@/server/billing/admin';
-import { accountSnapshot, chargesOf } from '@/server/billing/ledger';
+import { chargesOf } from '@/server/billing/ledger';
+import { ensureCurrentPeriod } from '@/server/billing/quota';
 import { uploadImages } from '@/server/generation/image-upload';
 import { appendRate, readRateCardList } from '@/server/billing/rate-card';
 import { transcribeEnabled, transcribeSpeech } from '@/server/generation/speech';
@@ -45,7 +46,7 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path.startsWith('app/download/')){const user=await requireUser(req);const id=idSchema.parse(path.slice('app/download/'.length));return await business.download(id,user);}
    if(path==='admin/billing/rate-card'){await requireAdmin(req);return success(await readRateCardList());}
    if(path==='admin/billing/usage'){await requireAdmin(req);const limit=z.coerce.number().int().min(1).max(20).default(20).parse(query.get('limit')??undefined);return success(await userUsage({userId:idSchema.parse(query.get('userId')),limit}));}
-   if(path==='billing/summary'){const user=await requireUser(req);return success(await accountSnapshot(user.id));}
+   if(path==='billing/summary'){const user=await requireUser(req);return success(await ensureCurrentPeriod(user.id));}
    if(path==='billing/charges'){const user=await requireUser(req);const limit=z.coerce.number().int().min(1).max(20).default(10).parse(query.get('limit')??undefined);
     // appId 可选：给了就只读该 App（先校验所有权），缺省就是此人的全部 App（Owner 账单页）。
     const appId=query.get('appId')?idSchema.parse(query.get('appId')):undefined;if(appId)await business.getApp(appId,user,true);
