@@ -11,6 +11,7 @@ docs/
 ├── adr/              # accepted durable decisions; numbered, append-only
 ├── plans/            # plans in flight; a finished plan here is a doc error
 │   └── archive/      # finished, superseded, abandoned; history, not current truth
+├── specs/            # specs awaiting implementation; superseded once the work ships
 ├── migrations/       # one-off migration design, data and rehearsal records
 └── prototypes/       # one directory per prototype; state is the directory
     ├── in-progress/  # production UI is written against these; reviews and edits happen here
@@ -22,7 +23,8 @@ Domain terms: root `GLOSSARY.md`. Script rules: `scripts/AGENTS.md`.
 
 ## Rules
 
-- Names: lowercase kebab-case, no dates, no `-final` / `-v2`. A plan name describes the task; a prototype name describes the surface.
+- Names: lowercase kebab-case, no dates, no `-final` / `-v2`. A plan name describes the task; a prototype name describes the surface; a spec name describes the capability.
+- A spec states what a feature must do and how it will be verified, not how it is implemented step by step. When the work ships, its settled decisions move to `adr/` and the spec is deleted or superseded — it must not become a second source of truth next to the code.
 - Links are relative. Moving a file means updating every reference — indexes, `PRODUCT.md` evidence list, code comments.
 - Applied SQL migrations are immutable history: never rewrite their comments to rename a checksum.
 - Current behavior = code + tests + top-level contracts. An archived plan explains why then, not what is true now.

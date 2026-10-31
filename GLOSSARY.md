@@ -153,3 +153,45 @@ _Avoid_: slug, public key, release key
 **Legacy app**:
 从旧平台迁移、可能没有 Version 或 Delivery 的 App；它可能回退到 App workspace 提供预览和下载。
 _Avoid_: old app, imported app
+
+## 计费
+
+**Usage**:
+一次 Generation 实际消耗的模型 token 用量，可按步骤和模型归因；它折算成 Credit 之后才会成为 Charge。
+_Avoid_: consumption, cost, 成本
+
+**Credit**:
+用户可见的用量单位，由 Usage 按 Rate card 折算而来。面额固定为 1 Credit = ¥0.01；它不可兑换成货币，也不能提现。
+_Avoid_: token, 积分, points, 点数
+
+**Rate card**:
+把 Usage 和按次动作折算成 Credit 的价目表，按模型和动作分别定价，定价基准是上游峯时真实成本乘 Markup。Rate card 带生效时间，改价不修改历史 Credit charge。
+_Avoid_: 价格表, pricing, tariff
+
+**Markup**:
+Rate card 相对上游峯时真实成本的加成倍数，当前为 3 倍；它兼作上游涨价与汇率波动的准备量。
+_Avoid_: 利润, margin, 加价率
+
+**Credit pool**:
+Credit 的来源类别：配额池按周期发放并会重置，余额池由充值或发放而来且不重置。扣减总是先配额池、后余额池。
+_Avoid_: 额度类型, account type
+
+**Credit balance**:
+Owner 当前可用的 Credit 总量，由配额池和余额池组成；它可以是负数，负值表示欠款，欠款状态下不允许开始新的 Generation。
+_Avoid_: 额度, 余额, quota
+
+**Credit grant**:
+Credit 进入系统的唯一方式，分为购买、管理员发放和月度配额三种来源；只有购买计入 Overdraft 基数。
+_Avoid_: 充值记录, topup, recharge
+
+**Credit charge**:
+一次生成结算：把该 Generation 的 Usage 折算成 Credit 并从 Credit balance 扣减的不可变记录。同一个 Charge 可以拆成多条按池区分的 Credit entry。
+_Avoid_: 流水, 交易, bill, invoice
+
+**Credit entry**:
+Credit charge 下按 Credit pool 拆分的单条扣减分录。
+_Avoid_: 明细, deduction
+
+**Overdraft**:
+允许 Credit balance 变成负数的上限：近 60 天 purchase 入账额的 2%，封顶 500 Credit；admin_grant 不计入基数，无 purchase 记录则为 0。透支线只是熔断线：结算中的欠款一旦超过它，正在运行的 Generation 被中止，然后按实际 Usage 扣减。
+_Avoid_: 欠款额度, credit limit
