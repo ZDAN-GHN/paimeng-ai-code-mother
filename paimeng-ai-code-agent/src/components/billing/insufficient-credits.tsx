@@ -18,7 +18,7 @@ export function InsufficientCreditsAlert({ message, onClose }: { message: string
     description={<span className="insufficient-credits-next">
       {message}
       获得额度后直接重新提交即可，这次的输入会保留。
-      <Link href="/">查看我的用量与额度</Link>
+      <Link href="/billing">查看我的用量与额度</Link>
     </span>}
   />;
 }

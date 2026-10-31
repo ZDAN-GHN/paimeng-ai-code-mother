@@ -290,6 +290,13 @@ export type BillingChargeView = {
   costUsd?: string | null;
   status: ChargeStatus;
   estimatedSteps: number;
+  /**
+   * 账单质量：`estimated` = 有步骤按样本均值估算、`unpriced` = 有步骤没有任何费率可用。
+   * 两者都由 `usage_snapshot` 投影得到，所以冲正把 status 改写成 `reversed` 之后仍然可读——
+   * 管理界面据此判断「这笔售价里有多少是猜的」，Owner 界面据此标记「估算 / 未定价」。
+   */
+  estimated: boolean;
+  unpriced: boolean;
   createTime: string;
   generationStatus: GenerationStatus | null;
   stopReason: GenerationStopReason | null;
@@ -297,6 +304,38 @@ export type BillingChargeView = {
   entries: ChargeEntryView[];
   /** 冲正分录；没被冲正时是空数组。退款去向（哪个池、退了多少）只能从这里读。 */
   reversals: ChargeReversalView[];
+};
+
+// ---- Admin 用量与手工冲正（92）----
+
+/** `POST admin/billing/charge/:id/reverse` 的请求体：理由必填，写进反向分录的 `reason` 与操作人。 */
+export const chargeReversalRequestSchema = z.object({
+  reason: z.string().trim().min(1, '请填写冲正理由').max(500, '冲正理由最多 500 字'),
+});
+export type ChargeReversalRequest = z.infer<typeof chargeReversalRequestSchema>;
+
+/**
+ * 冲正回执：`reversed=false` 表示这笔账单此前已经整笔冲正过，本次没有追加分录、没有重复退款。
+ * `effectiveCredits` 是冲正后由分录重算出的净额（整笔冲正后为 0）。
+ */
+export type ChargeReversalReceipt = {
+  reversed: boolean;
+  entries: number;
+  status: ChargeStatus;
+  effectiveCredits: number;
+};
+
+/**
+ * `GET admin/billing/usage?userId=`：一个用户的额度快照 + 最近账单 + 质量比例。
+ * 两个比例都按**账单条数**计（0..1，保留 4 位小数），描述「最近这些账单里有多少条含估算/未定价步骤」，
+ * 不按 Credit 加权：估算步的实际偏差不可知，加权会把它展示成精确数字。
+ */
+export type AdminUserUsage = {
+  userId: string;
+  account: AccountSnapshot;
+  charges: BillingChargeView[];
+  estimatedRatio: number;
+  unpricedRatio: number;
 };
 
 // ---- 准入（票 94；不需要迁移）----

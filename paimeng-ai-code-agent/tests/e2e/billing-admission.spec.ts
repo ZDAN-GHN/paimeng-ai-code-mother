@@ -67,7 +67,7 @@ test('额度不足时首页就地拦住「创建并生成」，额度到账后�
   await expect(blocked).toContainText('额度不足，无法开始新的生成');
   await expect(blocked).toContainText('当前可用 Credit 为 0');
   await expect(blocked).toContainText('联系管理员补充额度');
-  await expect(blocked.getByRole('link', { name: '查看我的用量与额度' })).toHaveAttribute('href', '/');
+  await expect(blocked.getByRole('link', { name: '查看我的用量与额度' })).toHaveAttribute('href', '/billing');
   // 钱没到账就不该建出一个注定生成不了的空应用，用户写的需求留在输入框里。
   await expect.poll(() => new URL(page.url()).pathname).toBe('/');
   await expect(page.getByLabel('应用描述')).toHaveValue(prompt);
