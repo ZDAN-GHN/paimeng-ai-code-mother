@@ -163,13 +163,18 @@ export async function availableCredits(
   return { quota, balance, total: quota + balance };
 }
 
-/** 只读快照：两池余额、合计、近 60 天购买额与由此推导的透支线。 */
-export async function accountSnapshot(userId: string): Promise<AccountSnapshot> {
+/**
+ * 只读快照：两池余额、合计、近 60 天购买额与由此推导的透支线。
+ *
+ * `at` 只用来定位滚动购买窗口的起点：运行期熔断（95）在每个月每步都会读一次快照，
+ * 窗口到期时透支线跟着变小；不传时就是此刻。
+ */
+export async function accountSnapshot(userId: string, at: Date = new Date()): Promise<AccountSnapshot> {
   const id = BigInt(userId);
   const { quota, balance, total } = await availableCredits(userId);
   const [purchased] = await db().select({ credits: sql<string>`coalesce(sum(${creditGrants.credits}), 0)` })
     .from(creditGrants)
-    .where(and(eq(creditGrants.userId, id), eq(creditGrants.source, 'purchase'), gt(creditGrants.createTime, purchaseWindowStart())));
+    .where(and(eq(creditGrants.userId, id), eq(creditGrants.source, 'purchase'), gt(creditGrants.createTime, purchaseWindowStart(at))));
   const purchasedCredits60d = Number(purchased?.credits ?? 0);
   return { quota, balance, total, purchasedCredits60d, overdraft: overdraftOf(purchasedCredits60d) };
 }

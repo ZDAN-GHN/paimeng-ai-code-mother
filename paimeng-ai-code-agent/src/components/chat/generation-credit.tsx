@@ -40,6 +40,11 @@ export function GenerationCredit({ charge }: { charge: BillingChargeView }) {
   if (charge.stopReason === 'question') {
     return line(`本轮暂停等待回答，已按实际用量收费 ${used} Credit${chargedDetail}${estimateNote}`);
   }
+  // 运行期熔断（95）：和「生成失败」分开说，否则用户只会看到一句「失败」而不知道为什么被掐断。
+  // 单次响应可能已越过透支线，账单照实记录，所以这里不承诺「最多只收到透支线」。
+  if (charge.stopReason === 'overdraft') {
+    return line(`本次生成因超出可用额度被中止，已按实际用量扣费 ${used} Credit${chargedDetail}${estimateNote}`);
+  }
   if (charge.generationStatus === 'cancelled') {
     return line(`用户取消，已按实际用量收费 ${used} Credit${chargedDetail}${estimateNote}`);
   }
