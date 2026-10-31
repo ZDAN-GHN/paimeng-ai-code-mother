@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { idSchema } from './contracts';
+import { idSchema, type GenerationStatus, type GenerationStopReason } from './contracts';
 
 /**
  * 计费共享契约（docs/specs/credit-billing.md）：client 与 server 都要用的 DTO、zod schema 与展示标签。
@@ -213,3 +213,65 @@ export const monthlyQuotaCredits = 500;
  * UTC 朴素时间戳，界面按北京时间显示。
  */
 export type AccountSummary = AccountSnapshot & { period: string; quotaExpiresAt: string };
+// ---- Credit Charge（migrations/012_credit_charge_entry.sql）----
+
+/**
+ * Charge 的状态：`settled` 全部真实计价、`estimated` 含估算步骤、`partial` 部分步骤待处理、
+ * `unpriced` 一步都算不出钱、`reversed` 全部原始分录已被反向分录覆盖（90 的冲正）。
+ */
+export const chargeStatuses = ['settled', 'estimated', 'partial', 'unpriced', 'reversed'] as const;
+export type ChargeStatus = typeof chargeStatuses[number];
+export const chargeStatusLabels: Record<ChargeStatus, string> = {
+  settled: '已结算',
+  estimated: '估算',
+  partial: '部分待处理',
+  unpriced: '待处理',
+  reversed: '已退还',
+};
+
+/**
+ * Charge 的逐步骤用量快照（`usage_snapshot` 的一行）：上报值原样保留，
+ * `billed*` 是本步实际参与计价的 token（估算时与上报值不同），`sampleSteps` 是估算依据的样本数。
+ * 估算绝不写回 `input`/`output`：账单要能区分「上游说用了多少」与「我们按均值推了多少」。
+ */
+export type UsageSnapshotStep = {
+  providerId: string | null;
+  modelName: string | null;
+  upstreamModelId: string | null;
+  at: string;
+  input: number | null;
+  cacheRead: number | null;
+  cacheWrite: number | null;
+  output: number | null;
+  reasoning: number | null;
+  billedInput: number | null;
+  billedCacheRead: number | null;
+  billedOutput: number | null;
+  estimated: boolean;
+  sampleSteps: number;
+  priced: boolean;
+  rate: RateCardVersionKey | null;
+};
+
+/** 一笔 Charge 的一条分录（分池）：正数为扣减，负数为退还。 */
+export type ChargeEntryView = { pool: CreditPool; credits: number; reversalOf: string | null };
+
+/**
+ * `GET billing/charges` 的一行：用户账单上那一条。
+ * `messageId` 是挂到助手气泡的唯一关联键；`credits` 是投影，`effectiveCredits` 是分录净额（冲正后变小）。
+ * `costUsd` 只对管理员返回：普通用户看售价，不看平台成本。
+ */
+export type BillingChargeView = {
+  generationId: string;
+  messageId: string | null;
+  appId: string;
+  credits: number;
+  effectiveCredits: number;
+  costUsd?: string | null;
+  status: ChargeStatus;
+  estimatedSteps: number;
+  createTime: string;
+  generationStatus: GenerationStatus | null;
+  stopReason: GenerationStopReason | null;
+  entries: ChargeEntryView[];
+};

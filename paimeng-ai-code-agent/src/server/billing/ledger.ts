@@ -1,13 +1,18 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, gt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 import { db, now, type Transaction } from '@/server/infra/db';
 import { BusinessError } from '@/server/infra/http';
-import { creditAccounts, creditGrants } from '@/server/infra/schema';
-import type { AccountSnapshot, CreditPool, GrantSource } from '@/shared/billing';
+import { creditAccounts, creditCharges, creditEntries, creditGrants, generations } from '@/server/infra/schema';
+import type {
+  AccountSnapshot, BillingChargeView, ChargeStatus, CreditPool, GrantSource, RateCardView, UsageSnapshotStep,
+} from '@/shared/billing';
+import { stopReasonFrom } from '@/server/generation/generation-accounting';
 
-export type { CreditPool, GrantSource };
+export type { ChargeStatus, CreditPool, GrantSource };
 export type CreditGrantRow = typeof creditGrants.$inferSelect;
+/** balance 池允许为负（欠款），quota 池永远不为负。 */
+export type CreditAccountBalances = { quota: number; balance: number };
 
 export type GrantInput = {
   userId: string;
@@ -76,7 +81,7 @@ export async function recordGrant(input: GrantInput): Promise<{ grant: CreditGra
 }
 
 /** 在调用方事务里锁住某用户两个池的余额行；顺序固定按 pool 升序，避免并发扣减互等。 */
-export async function lockAccounts(tx: Transaction, userId: bigint): Promise<{ quota: number; balance: number }> {
+export async function lockAccounts(tx: Transaction, userId: bigint): Promise<CreditAccountBalances> {
   const rows = await tx.select().from(creditAccounts)
     .where(eq(creditAccounts.userId, userId)).orderBy(asc(creditAccounts.pool)).for('update');
   return {
@@ -86,10 +91,10 @@ export async function lockAccounts(tx: Transaction, userId: bigint): Promise<{ q
 }
 
 /**
- * 由账本事实重算并写回余额快照，返回重算结果。目前两池都等于各自 grant 之和，
- * 89 引入 credit_entry 后在这里减去扣减净额。
+ * 由账本事实重算并写回余额快照，返回重算结果。目前两池都等于各自 grant 之和；
+ * 减去 credit_entry 净额（并把 quota 池按账期归属收敛）属于对账扫描，见 93。
  */
-export async function rebuildAccount(userId: string, tx?: Transaction): Promise<{ quota: number; balance: number }> {
+export async function rebuildAccount(userId: string, tx?: Transaction): Promise<CreditAccountBalances> {
   const run = tx ?? db();
   const id = BigInt(userId);
   const totals = await run.select({ pool: creditGrants.pool, credits: sql<string>`sum(${creditGrants.credits})` })
@@ -129,4 +134,174 @@ async function findGrantByKeys(tx: Transaction, userId: bigint, input: GrantInpu
     if (row) return row;
   }
   return null;
+}
+
+// ---- Charge 与 entry（migrations/012_credit_charge_entry.sql）----
+//
+// 钱的真值是 credit_entry（正扣负退），credit_charge.credits / cost_usd / status 只是在同一事务里
+// 重算出来的投影。一次 Generation 一条 charge，「只结算一次」由 generation_id 唯一键保证，
+// 所以 **charge 的标识就是 generation_id**（90 的冲正入口与 92 的 Admin 冲正按钮都沿用这个 id）。
+
+export type CreditChargeRow = typeof creditCharges.$inferSelect;
+export type CreditEntryRow = typeof creditEntries.$inferSelect;
+
+/**
+ * 幂等占用一次结算：插一条空投影的 charge 行，返回 null 表示这个 Generation 已经结算过。
+ * 拿到行之后必须在同一事务里补齐投影与分录；事务回滚时占位行一起消失。
+ */
+export async function insertCharge(tx: Transaction, input: {
+  generationId: string;
+  appId: bigint;
+  userId: bigint;
+  createTime: string;
+}): Promise<CreditChargeRow | null> {
+  const [row] = await tx.insert(creditCharges).values({
+    generationId: input.generationId,
+    appId: input.appId,
+    userId: input.userId,
+    credits: 0,
+    costUsd: null,
+    rateCardSnapshot: [],
+    usageSnapshot: [],
+    status: 'unpriced',
+    estimatedSteps: 0,
+    createTime: input.createTime,
+  }).onConflictDoNothing().returning();
+  return row ?? null;
+}
+
+/** 写回 charge 的投影与两个不可变快照（定价结果）；分录由 `chargePools` 另外追加。 */
+export async function projectCharge(tx: Transaction, input: {
+  chargeId: string;
+  credits: number;
+  costUsd: string | null;
+  status: ChargeStatus;
+  estimatedSteps: number;
+  usageSnapshot: UsageSnapshotStep[];
+  rateCardSnapshot: RateCardView[];
+}): Promise<void> {
+  await tx.update(creditCharges).set({
+    credits: input.credits,
+    costUsd: input.costUsd,
+    status: input.status,
+    estimatedSteps: input.estimatedSteps,
+    usageSnapshot: input.usageSnapshot,
+    rateCardSnapshot: input.rateCardSnapshot,
+  }).where(eq(creditCharges.generationId, input.chargeId));
+}
+
+/**
+ * 分池扣减：先配额后余额，配额池永不为负、余额池可以变成欠款。
+ * 锁的是该用户两行 `credit_account`（`orderBy pool` 固定顺序，避免同 Owner 多 App 并发结算互等）；
+ * 金额为 0 的池不写 entry —— 零金额分录只会让账本变噪音。
+ */
+export async function chargePools(tx: Transaction, input: {
+  chargeId: string;
+  userId: bigint;
+  credits: number;
+  createTime: string;
+}): Promise<void> {
+  if (input.credits <= 0) return;
+  const balances = await lockAccounts(tx, input.userId);
+  const fromQuota = Math.min(input.credits, Math.max(balances.quota, 0));
+  const fromBalance = input.credits - fromQuota;
+  const entries = [
+    ...(fromQuota > 0 ? [{ pool: 'quota' as const, credits: fromQuota }] : []),
+    ...(fromBalance > 0 ? [{ pool: 'balance' as const, credits: fromBalance }] : []),
+  ];
+  await tx.insert(creditEntries).values(entries.map(entry => ({
+    chargeId: input.chargeId,
+    pool: entry.pool,
+    credits: entry.credits,
+    reversalOf: null,
+    createTime: input.createTime,
+  })));
+  for (const [pool, balance] of [
+    ['quota', balances.quota - fromQuota],
+    ['balance', balances.balance - fromBalance],
+  ] as const) {
+    await tx.update(creditAccounts).set({ balance, updateTime: now() })
+      .where(and(eq(creditAccounts.userId, input.userId), eq(creditAccounts.pool, pool)));
+  }
+}
+
+/** 一个 charge 的全部分录，按写入顺序（冲正附录排在原始分录之后）。 */
+export async function entriesOfCharge(chargeId: string, tx?: Transaction): Promise<CreditEntryRow[]> {
+  const run = tx ?? db();
+  return run.select().from(creditEntries).where(eq(creditEntries.chargeId, chargeId)).orderBy(asc(creditEntries.id));
+}
+
+/** 有效金额 = Σ entries.credits：冲正之后它会小于 charge 的原投影，两者都要能读出来。 */
+export async function effectiveCreditsOf(chargeId: string, tx?: Transaction): Promise<number> {
+  const run = tx ?? db();
+  const [row] = await run.select({ credits: sql<string>`coalesce(sum(${creditEntries.credits}), 0)` })
+    .from(creditEntries).where(eq(creditEntries.chargeId, chargeId));
+  return Number(row?.credits ?? 0);
+}
+
+/**
+ * 由分录重算 charge 投影：credits 永远等于 Σ entries；全部原始分录都被反向分录覆盖时投影成 `reversed`。
+ * 90 的冲正只追加分录，然后调这里一次，不直接改 status。
+ */
+export async function reprojectCharge(tx: Transaction, chargeId: string): Promise<{ credits: number; reversed: boolean }> {
+  const entries = await entriesOfCharge(chargeId, tx);
+  const credits = entries.reduce((sum, entry) => sum + entry.credits, 0);
+  const original = entries.filter(entry => entry.reversalOf === null);
+  const reversed = original.length > 0
+    && original.every(entry => entries.some(other => other.reversalOf !== null && other.reversalOf === entry.id));
+  await tx.update(creditCharges)
+    .set(reversed ? { credits, status: 'reversed' } : { credits })
+    .where(eq(creditCharges.generationId, chargeId));
+  return { credits, reversed };
+}
+
+/**
+ * `GET billing/charges` 的读模型：一个 App 最近的 Charge + 分池分录 + 所属 Generation 的终态。
+ * `messageId` 由服务端 join generation 带出——它是把账单单挂到助手气泡上的唯一关联键
+ * （generation 行会被删除应用清掉，此时该行仍保留金额与分录，`messageId` 为 null）。
+ */
+export async function chargesOf(input: { appId: string; limit: number; includeCost: boolean }): Promise<BillingChargeView[]> {
+  const rows = await db().select({
+    generationId: creditCharges.generationId,
+    appId: creditCharges.appId,
+    credits: creditCharges.credits,
+    costUsd: creditCharges.costUsd,
+    status: creditCharges.status,
+    estimatedSteps: creditCharges.estimatedSteps,
+    createTime: creditCharges.createTime,
+    messageId: generations.messageId,
+    generationStatus: generations.status,
+    stopReason: generations.stopReason,
+  }).from(creditCharges)
+    .leftJoin(generations, eq(generations.id, creditCharges.generationId))
+    .where(eq(creditCharges.appId, BigInt(input.appId)))
+    .orderBy(desc(creditCharges.createTime), desc(creditCharges.generationId))
+    .limit(input.limit);
+  if (!rows.length) return [];
+  const entries = await db().select().from(creditEntries)
+    .where(inArray(creditEntries.chargeId, rows.map(row => row.generationId)))
+    .orderBy(asc(creditEntries.id));
+  return rows.map(row => {
+    const charges = entries.filter(entry => entry.chargeId === row.generationId);
+    const view: BillingChargeView = {
+      generationId: row.generationId,
+      messageId: row.messageId ?? null,
+      appId: String(row.appId),
+      credits: row.credits,
+      effectiveCredits: charges.reduce((sum, entry) => sum + entry.credits, 0),
+      status: row.status,
+      estimatedSteps: row.estimatedSteps,
+      createTime: row.createTime,
+      generationStatus: row.generationStatus as BillingChargeView['generationStatus'],
+      stopReason: stopReasonFrom(row.stopReason),
+      entries: charges.map(entry => ({
+        pool: entry.pool,
+        credits: entry.credits,
+        reversalOf: entry.reversalOf === null ? null : String(entry.reversalOf),
+      })),
+    };
+    // 平台成本只对管理员返回：普通用户看售价，不看毛利。
+    if (input.includeCost) view.costUsd = row.costUsd ?? null;
+    return view;
+  });
 }
