@@ -244,6 +244,13 @@ describe('Credit 发放与双池余额快照', () => {
     const replay = await envelopeOf<GrantReceipt>(await billingRequest('admin/billing/grant', { ...body, requestId }, admin.cookie));
     expect(replay.data).toMatchObject({ created: false, grant: { id: granted.data.grant.id, credits: 260 } });
     expect(await accountSnapshot(owner.id)).toMatchObject({ balance: 260, total: monthlyQuotaCredits + 260 });
+
+    // 界面不必自己维护「来源 → 池」的第二份映射：不带 pool 时由服务端按来源推导。
+    const derived = await envelopeOf<GrantReceipt>(await billingRequest(
+      'admin/billing/grant', { userId: owner.id, credits: 40, source: 'admin_grant', requestId: randomUUID() }, admin.cookie,
+    ));
+    expect(derived.code).toBe(0);
+    expect(derived.data.grant).toMatchObject({ pool: 'balance', source: 'admin_grant', credits: 40 });
   });
 
   it('HTTP：billing/summary 只返回调用者自己的双池余额', async () => {

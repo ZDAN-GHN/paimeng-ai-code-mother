@@ -87,11 +87,14 @@ test('App chat 新请求 Credit 不足时给出提示，并保留刚才写的消
   }));
 
   await page.goto('/app/chat/' + appId);
+  // 进页自动发送初始需求的行为由 chat-initial-prompt.spec.ts 覆盖；这里验证「用户发出的新请求」被准入拦下。
+  await page.getByLabel('对话消息').fill(prompt);
+  await page.getByRole('button', { name: /^发\s*送$/ }).click();
   const blocked = page.locator('.insufficient-credits');
   await expect(blocked).toBeVisible();
   await expect(blocked).toContainText('当前可用 Credit 为 0');
   await expect(blocked).toContainText('联系管理员补充 Credit');
-  // 首次进入的自动发送也一样被拦住，需求原文回到输入框，不会丢。
+  // 被拦住的消息原文回到输入框，不会丢。
   await expect(page.getByLabel('对话消息')).toHaveValue(prompt);
   await page.screenshot({ path: evidencePath('billing', 'admission-chat.png'), fullPage: true });
 

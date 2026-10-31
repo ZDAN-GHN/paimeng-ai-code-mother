@@ -14,7 +14,7 @@ import { appendRate, readRateCardList } from '@/server/billing/rate-card';
 import { transcribeEnabled, transcribeSpeech } from '@/server/generation/speech';
 import { readAttachmentOriginal } from '@/server/generation/attachment-store';
 import { idSchema } from '@/shared/contracts';
-import { grantRequestSchema, chargeReversalRequestSchema, reconcileRequestSchema } from '@/shared/billing';
+import { grantRequestSchema, chargeReversalRequestSchema, poolOfSource, reconcileRequestSchema } from '@/shared/billing';
 import { versionIdSchema } from '@/shared/versioning';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
@@ -87,7 +87,7 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path==='app/admin/list/page/vo')return success(await business.listApps(value,'admin',user));
    if(path==='app/admin/update')return success(await business.updateApp(value,user,true));
    if(path==='app/admin/delete')return success(await business.deleteApp(value,user));
-   if(path==='admin/billing/grant'){const request=grantRequestSchema.parse(value);return success(await grantCredits({...request,grantedBy:admin.id}));}
+   if(path==='admin/billing/grant'){const request=grantRequestSchema.parse(value);return success(await grantCredits({...request,pool:request.pool??poolOfSource(request.source),grantedBy:admin.id}));}
    if(path==='admin/billing/reconcile')return success(await reconcileSettlements(reconcileRequestSchema.parse(value)));
    if(path.startsWith('admin/billing/charge/')&&path.endsWith('/reverse')){const chargeId=z.string().trim().min(1).max(36).parse(path.slice('admin/billing/charge/'.length,path.length-'/reverse'.length));const {reason}=chargeReversalRequestSchema.parse(value);return success(await reverseChargeByAdmin({chargeId,reason,operatorId:admin.id}));}
   }

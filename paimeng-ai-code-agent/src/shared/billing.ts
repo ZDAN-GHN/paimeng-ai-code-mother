@@ -63,12 +63,13 @@ const optionalUsdRate = z
   .optional()
   .transform((value) => value ?? null);
 
+// 界面把留空的可选文本送成 null，所以是 nullish；只接受 undefined 会让「不填备注」直接 400。
 const optionalText = (max: number) =>
   z
     .string()
     .trim()
     .max(max)
-    .optional()
+    .nullish()
     .transform((value) => (value ? value : null));
 
 export const rateCardInputSchema = z
@@ -82,9 +83,10 @@ export const rateCardInputSchema = z
     usdInputMiss: optionalUsdRate,
     usdInputHit: optionalUsdRate,
     usdOutput: optionalUsdRate,
+    // 界面留空时送 null（「成本未知」），所以是 nullish 而不是 optional：optional 只接受 undefined。
     costBasis: z
       .enum(costBases, '成本口径只能是 peak / off-peak / unknown')
-      .optional()
+      .nullish()
       .transform((value) => value ?? null),
     costSource: optionalText(512),
     note: optionalText(2000),
@@ -162,10 +164,13 @@ export function poolOfSource(source: GrantSource): CreditPool {
   return source === 'monthly_quota' ? 'quota' : 'balance';
 }
 
-/** `POST admin/billing/grant` 的请求体。requestId 是幂等键：同一次提交的重试复用它，成功后才换新的。 */
+/**
+ * `POST admin/billing/grant` 的请求体。requestId 是幂等键：同一次提交的重试复用它，成功后才换新的。
+ * `pool` 可省略——来源决定池（`poolOfSource`），带上来只作为一致性校验，界面不必自己维护第二份映射。
+ */
 export const grantRequestSchema = z.object({
   userId: idSchema,
-  pool: creditPoolSchema,
+  pool: creditPoolSchema.optional(),
   credits: z.number().refine(
     value => Number.isInteger(value) && value >= 1 && value <= maxGrantCredits,
     `发放金额必须是 1 到 ${maxGrantCredits} 之间的整数 Credit`,

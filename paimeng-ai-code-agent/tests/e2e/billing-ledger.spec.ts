@@ -63,27 +63,29 @@ async function seedSettledCharge(ownerId: string): Promise<{ appId: string; gene
   try {
     await connection.query(
       `INSERT INTO app (id, app_name, init_prompt, code_gen_type, user_id, create_time, update_time)
-       VALUES ($1, '账单演示应用', '做一个页面', 'html', $2, now()::timestamp(3), now()::timestamp(3))`,
+       VALUES ($1, '账单演示应用', '做一个页面', 'html', $2, timezone('UTC', now())::timestamp(3), timezone('UTC', now())::timestamp(3))`,
       [appId, ownerId],
     );
     await connection.query(
       `INSERT INTO generation (id, app_id, user_id, status, stop_reason, create_time, update_time)
-       VALUES ($1, $2, $3, 'ready', 'completed', now()::timestamp(3), now()::timestamp(3))`,
+       VALUES ($1, $2, $3, 'ready', 'completed', timezone('UTC', now())::timestamp(3), timezone('UTC', now())::timestamp(3))`,
       [generationId, appId, ownerId],
     );
     await connection.query(
       `INSERT INTO credit_charge (generation_id, app_id, user_id, credits, cost_usd, rate_card_snapshot, usage_snapshot, status, estimated_steps, create_time)
-       VALUES ($1, $2, $3, 60, NULL, '[]'::jsonb, '[]'::jsonb, 'settled', 0, now()::timestamp(3))`,
+       VALUES ($1, $2, $3, 60, NULL, '[]'::jsonb, '[]'::jsonb, 'settled', 0, timezone('UTC', now())::timestamp(3))`,
       [generationId, appId, ownerId],
     );
     await connection.query(
       `INSERT INTO credit_entry (charge_id, pool, credits, create_time)
-       VALUES ($1, 'quota', 60, now()::timestamp(3))`,
+       VALUES ($1, 'quota', 60, timezone('UTC', now())::timestamp(3))`,
       [generationId],
     );
     await connection.query(
+      // 注册时会发当期配额并写入两池快照，这里改成按账本事实覆盖，避免主键冲突。
       `INSERT INTO credit_account (user_id, pool, balance, update_time)
-       VALUES ($1, 'quota', 40, now()::timestamp(3)), ($1, 'balance', 0, now()::timestamp(3))`,
+       VALUES ($1, 'quota', 40, timezone('UTC', now())::timestamp(3)), ($1, 'balance', 0, timezone('UTC', now())::timestamp(3))
+       ON CONFLICT (user_id, pool) DO UPDATE SET balance = EXCLUDED.balance, update_time = EXCLUDED.update_time`,
       [ownerId],
     );
   } finally {
@@ -130,7 +132,7 @@ test.afterAll(async () => {
 test('Owner 在 /billing 看到有效金额、分池明细与面额说明', async ({ page }) => {
   const account = 'e2e_ledger_' + randomUUID().slice(0, 8);
   const ownerId = await register(page, account);
-  const { generationId } = await seedSettledCharge(ownerId);
+  const { appId, generationId } = await seedSettledCharge(ownerId);
   await login(page, account);
 
   await page.goto('/billing');
@@ -138,7 +140,8 @@ test('Owner 在 /billing 看到有效金额、分池明细与面额说明', asyn
   await expect(page.getByRole('region', { name: '我的 Credit 概览' })).toContainText('配额池');
 
   const row = page.getByRole('row').filter({ hasText: generationId });
-  await expect(row).toContainText('账单演示应用');
+  // 账单行按 AC 显示时间、Generation、金额、分池与状态；App 用 ID 表达，筛选由页头的 App 下拉负责。
+  await expect(row).toContainText(appId);
   await expect(row).toContainText('60 Credit');
   await expect(row).toContainText('配额池 60');
   await expect(row).toContainText('已结算');
@@ -155,7 +158,7 @@ test('Owner 在 /billing 看到有效金额、分池明细与面额说明', asyn
 test('Admin 查用户用量并整笔冲正：成本未知可辨识、冲正后只退一次', async ({ page }) => {
   const ownerAccount = 'e2e_ledger_owner_' + randomUUID().slice(0, 8);
   const ownerId = await register(page, ownerAccount);
-  const { generationId } = await seedSettledCharge(ownerId);
+  const { appId, generationId } = await seedSettledCharge(ownerId);
   await adminLogin(page, 'e2e_ledger_admin_' + randomUUID().slice(0, 8));
 
   await page.goto('/admin/billing');
@@ -169,7 +172,7 @@ test('Admin 查用户用量并整笔冲正：成本未知可辨识、冲正后�
   await expect(row).toContainText('成本未知');
   await expect(row).toContainText('真实用量');
 
-  await row.getByRole('button', { name: '冲正' }).click();
+  await row.getByRole('button', { name: /^冲\s*正$/ }).click();
   await page.getByLabel('冲正理由').fill('浏览器演示：费率配置错误');
   await page.getByRole('button', { name: '确认冲正' }).click();
   await expect(page.getByText('已冲正：反向分录已按原分池记入账本')).toBeVisible();

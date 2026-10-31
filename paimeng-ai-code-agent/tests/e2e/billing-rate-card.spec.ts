@@ -45,8 +45,9 @@ async function appendVersion(page: Page, effectiveFrom: string, rates: { miss: n
   await page.getByRole('button', { name: '追加版本' }).click();
 }
 
+/** 卡片显示的是库里的原始时间戳：毫秒为 0 时 PG 会省略 `.000`，所以按秒级前缀匹配。 */
 function versionRow(page: Page, effectiveFrom: string) {
-  return page.getByRole('row').filter({ hasText: modelName }).filter({ hasText: effectiveFrom });
+  return page.getByRole('row').filter({ hasText: modelName }).filter({ hasText: effectiveFrom.slice(0, 19) });
 }
 
 test.afterAll(async () => {

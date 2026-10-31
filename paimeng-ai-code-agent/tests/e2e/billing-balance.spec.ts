@@ -89,7 +89,10 @@ test('管理员发放后 Owner 的额度条显示余额池与透支线', async (
 });
 
 test('普通用户不能发放，未登录不显示额度条', async ({ page }) => {
-  const userId = await registerUser(page, uniqueAccount());
+  const account = uniqueAccount();
+  const userId = await registerUser(page, account);
+  // 先真正登录：要验证的是「已登录但不是管理员」的 403，未登录的 401 是另一件事。
+  await login(page, account);
   const response = await page.request.post('/api/admin/billing/grant', {
     headers: { origin },
     data: { userId, pool: 'balance', credits: 100, source: 'purchase' },
