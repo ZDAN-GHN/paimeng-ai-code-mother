@@ -87,7 +87,8 @@ describe('Credit 发放与双池余额快照', () => {
       userId: BigInt(owner.id), pool: 'balance', credits: 300, source: 'purchase',
       note: '首充', grantedBy: BigInt(admin.id), period: null, externalRef: null,
     });
-    expect(row.createTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/);
+    // PG 的 timestamp 文本输出会省略尾随零（…58.97），别把毫秒位数写死。
+    expect(row.createTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,6})?$/);
     expect(await accountSnapshot(owner.id)).toMatchObject({ quota: monthlyQuotaCredits, balance: 300, total: monthlyQuotaCredits + 300 });
   });
 

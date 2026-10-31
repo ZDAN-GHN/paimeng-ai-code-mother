@@ -143,7 +143,7 @@ describe('结算：一次 Generation 一份 Charge、分池 entry、双池余额
       appId: BigInt(app.id), userId: BigInt(owner.id), credits: 300, costUsd: null,
       status: 'settled', estimatedSteps: 0,
     });
-    expect(charge.createTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/);
+    expect(charge.createTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,6})?$/);
     expect(charge.rateCardSnapshot).toMatchObject([{ providerId: billingRateProvider, modelName: 'model-pools', effectiveFrom: '2020-01-01 00:00:00.000' }]);
     expect(charge.usageSnapshot).toMatchObject([{ modelName: 'model-pools', input: 500_000, estimated: false, priced: true }]);
 
