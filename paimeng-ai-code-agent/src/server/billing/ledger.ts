@@ -9,7 +9,7 @@ import {
   type RateCardView, type UsageSnapshotStep,
 } from '@/shared/billing';
 import { stopReasonFrom } from '@/server/generation/generation-accounting';
-import { isCurrentPeriod, parseNaiveTime, periodOf } from './period';
+import { isCurrentPeriod, naiveTime, parseNaiveTime, periodOf, periodRange } from './period';
 
 export type { ChargeStatus, CreditPool, GrantSource };
 export type CreditGrantRow = typeof creditGrants.$inferSelect;
@@ -93,21 +93,57 @@ export async function lockAccounts(tx: Transaction, userId: bigint): Promise<Cre
 }
 
 /**
- * 由账本事实重算并写回余额快照，返回重算结果。目前两池都等于各自 grant 之和；
- * 减去 credit_entry 净额（并把 quota 池按账期归属收敛）属于对账扫描，见 93。
+ * 账本事实推出的两池余额（04-settlement-design.md §5）。`credit_account` 只是这份事实的快照，
+ * 所以差异由 93 的 `auditAccount` 报告，修复 = 用这份事实重写快照（`rebuildAccount`）。
+ *
+ * - 配额池：只算**当前北京账期**的 `monthly_quota` grant 与当期 Charge 的 quota 分录净额；
+ *   老账期没用完的配额已经失效，不能结转。
+ * - 余额池：跨账期累计，可以是负数（欠款）。
  */
-export async function rebuildAccount(userId: string, tx?: Transaction): Promise<CreditAccountBalances> {
+export async function expectedBalancesOf(
+  userId: string,
+  tx?: Transaction,
+  at: Date = new Date(),
+): Promise<CreditAccountBalances> {
   const run = tx ?? db();
   const id = BigInt(userId);
-  const totals = await run.select({ pool: creditGrants.pool, credits: sql<string>`sum(${creditGrants.credits})` })
-    .from(creditGrants).where(eq(creditGrants.userId, id)).groupBy(creditGrants.pool);
-  const quota = Number(totals.find(total => total.pool === 'quota')?.credits ?? 0);
-  const balance = Number(totals.find(total => total.pool === 'balance')?.credits ?? 0);
-  for (const [pool, value] of [['quota', quota], ['balance', balance]] as const) {
-    await run.insert(creditAccounts).values({ userId: id, pool, balance: value, updateTime: now() })
-      .onConflictDoUpdate({ target: [creditAccounts.userId, creditAccounts.pool], set: { balance: value, updateTime: now() } });
-  }
-  return { quota, balance };
+  const period = periodOf(at);
+  const { start, end } = periodRange(period);
+  const [granted] = await run.select({
+    quota: sql<string>`coalesce(sum(case when ${creditGrants.source} = 'monthly_quota' and ${creditGrants.period} = ${period} then ${creditGrants.credits} else 0 end), 0)`,
+    balance: sql<string>`coalesce(sum(case when ${creditGrants.pool} = 'balance' then ${creditGrants.credits} else 0 end), 0)`,
+  }).from(creditGrants).where(eq(creditGrants.userId, id));
+  // entry 不归账期：它属于父 Charge 的 create_time 所在北京月（04 §5）。
+  const used = await run.execute(sql`select
+    coalesce(sum(case when entry.pool = 'quota' then entry.credits else 0 end), 0) as quota,
+    coalesce(sum(case when entry.pool = 'balance' then entry.credits else 0 end), 0) as balance
+    from credit_entry entry
+    join credit_charge charge on charge.generation_id = entry.charge_id
+    where charge.user_id = ${id}
+      and (entry.pool <> 'quota' or (charge.create_time >= ${naiveTime(start)} and charge.create_time < ${naiveTime(end)}))`);
+  const quota = Number(granted?.quota ?? 0) - Number(used.rows[0]?.quota ?? 0);
+  const balance = Number(granted?.balance ?? 0) - Number(used.rows[0]?.balance ?? 0);
+  // 配额池永不为负（跨期失效后 grant 与当期扣减可能算出负数）。
+  return { quota: Math.max(0, quota), balance };
+}
+
+/**
+ * 由账本事实重算并写回余额快照，返回重算结果。快照是唯一允许 UPDATE 的表，
+ * 重算不会碰 grant / entry——差异只能靠可追溯的事实解释，不能篡改账本。
+ * 先按结算的同一顺序锁两池，避免把并发的扣减覆盖掉。
+ */
+export async function rebuildAccount(userId: string, tx?: Transaction): Promise<CreditAccountBalances> {
+  const write = async (run: Transaction): Promise<CreditAccountBalances> => {
+    const id = BigInt(userId);
+    await lockAccounts(run, id);
+    const expected = await expectedBalancesOf(userId, run);
+    for (const [pool, value] of [['quota', expected.quota], ['balance', expected.balance]] as const) {
+      await run.insert(creditAccounts).values({ userId: id, pool, balance: value, updateTime: now() })
+        .onConflictDoUpdate({ target: [creditAccounts.userId, creditAccounts.pool], set: { balance: value, updateTime: now() } });
+    }
+    return expected;
+  };
+  return tx ? write(tx) : db().transaction(write);
 }
 
 /**

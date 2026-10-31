@@ -17,7 +17,7 @@ import { getConfig } from '../infra/config';
 import { db, now } from '../infra/db';
 import { generationControl, generationFor } from './generation-store';
 // 读路径的 ready 修复也要补一次结算；计费只从 generation 侧 import billing，避免成环。
-import { settleGenerationBilling } from '../billing/settlement';
+import { reconcileSettlements, settleGenerationBilling } from '../billing/settlement';
 import { activeExecution, appendInput, assertAuthority, beginChecking, bindExecutionConversation, completeAttempt, heartbeatAuthority, inputsSettled, setExecutionStatus, markInputPlaced, markInputUnanswered, markInputResolved, openQuestionOf, reserveAttempt, withdrawInput, type ExecutionRecord, type InputRecord } from './control-store';
 import { CandidateInvalidatedError, failOrCancel, getInputs, pauseForQuestion, publishReady, recoverStartup, settleGeneration, startGeneration } from './generation-lifecycle';
 import { recordAssistantStep, recordBuildStep, stopReasonOf, type AccountToolCall, type EntryUsage, type GenerationStopReason, type ModelIdentity } from './generation-accounting';
@@ -1434,11 +1434,19 @@ class DetachedChannel extends ChunkChannel {
 /**
  * 启动恢复只做一次：扫描过期 authority 和遗留 editing 执行，失败收束并封存草稿。
  * 读状态不再触发接管；新任务提交前必须等这次扫描完成（启动屏障）。
+ *
+ * 恢复完成后补一次对账扫描：终态事务已提交、结算没落地（或进程恰好在两者之间被杀）的记录
+ * 没有任何别的路径会再通知计费（01-lifecycle §8.2），所以这是「重启后补结算」的落点。
+ * 只跑一次、不阻塞请求、不常驻；失败由 Admin 重试或 `npm run billing:reconcile` 兜底。
  */
+const startupReconcileLimit = 50;
 let recoveryTask: Promise<void> | undefined;
 function ensureRecovered(): Promise<void> {
   recoveryTask ??= recoverStartup({ holder: `next:${process.pid}:${randomUUID()}` })
-    .then(() => undefined)
+    .then(() => {
+      void reconcileSettlements({ limit: startupReconcileLimit })
+        .catch(problem => console.warn('启动补结算失败，稍后可用 admin/billing/reconcile 重试：', problem));
+    })
     .catch(problem => {
       recoveryTask = undefined;
       console.warn('启动恢复失败，后续请求会重试：', problem);

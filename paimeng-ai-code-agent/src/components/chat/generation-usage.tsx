@@ -32,7 +32,8 @@ const stageLabels: Record<string, string> = {
 };
 
 const statusLabels: Record<string, string> = { ok: '通过', error: '未通过', cancelled: '已取消' };
-const generationStatusLabels: Record<string, string> = { generating: '生成中', building: '构建中', ready: '已完成', failed: '失败', cancelled: '已取消' };
+/** 生成状态的中文文案：对话页用量块与 Admin 待处理列表共用。 */
+export const generationStatusLabels: Record<string, string> = { generating: '生成中', building: '构建中', ready: '已完成', failed: '失败', cancelled: '已取消' };
 
 export function formatDuration(ms: number | null) {
   if (ms === null) return '—';

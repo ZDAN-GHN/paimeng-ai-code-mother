@@ -37,6 +37,7 @@
     "check:fast": "npm run check:ui && npm run check:e2e && npm run verify:boundary",
     "durable:inspect": "tsx --env-file=.env scripts/ops/durable-inspect.ts",
     "billing:quota-issue": "tsx --conditions=react-server --env-file=.env scripts/ops/billing-quota.ts",
+    "billing:reconcile": "tsx --conditions=react-server --env-file=.env scripts/ops/billing-reconcile.ts",
     "hooks:install": "git config core.hooksPath paimeng-ai-code-agent/scripts/hooks && echo \"hooks 已启用：pre-commit=check:fast, pre-push=type-check\"",
     "test:system": "vitest run --project system",
     "test:all": "vitest run",
