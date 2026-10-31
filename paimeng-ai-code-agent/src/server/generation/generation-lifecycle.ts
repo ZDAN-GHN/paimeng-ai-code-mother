@@ -20,6 +20,8 @@ import {
   type ExecutionRecord, type InputRecord, type QuestionRecord,
 } from './control-store';
 import { generationControl, lockGenerationControl, type GenerationControl } from './generation-store';
+// 计费只从 generation 侧 import billing：billing 反向 import 本模块会成环。
+import { settleGenerationBilling } from '../billing/settlement';
 import {
   closeExecutionAndDrain, openExecution, prepareExecution, sealExecution,
   type ExecutionBaseline, type ExecutionRef,
@@ -802,7 +804,7 @@ function assertCandidateCovers(watermark: number, latestSeq: number): void {
  */
 export async function publishGeneration(input: PublishGenerationInput): Promise<PublishOutcome> {
   const { app, generationId, epoch } = input;
-  return db().transaction(async tx => {
+  const outcome = await db().transaction(async tx => {
     const appRow = await lockAppRow(tx, app.id);
     const authority = await lockAuthorityRow(tx, appRow.id);
     const control = await lockGenerationControl(tx, generationId);
@@ -917,6 +919,9 @@ export async function publishGeneration(input: PublishGenerationInput): Promise<
       alreadyPublished: false,
     };
   });
+  // 提交之后再结算：此时状态对其它连接可见，也不把 credit_account 拉进 app → authority → generation 的锁族。
+  await settleGenerationBilling(generationId);
+  return outcome;
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -936,7 +941,7 @@ export type SettleGenerationInput = {
 
 /** 终态事务：已终态不覆盖，返回既有状态；否则写 status/phase/error/stopReason 与 transition。 */
 export async function settleGeneration(input: SettleGenerationInput): Promise<{ status: string; alreadyTerminal: boolean }> {
-  return db().transaction(async tx => {
+  const result = await db().transaction(async tx => {
     const appRow = await lockAppRow(tx, input.appId);
     const authority = await lockAuthorityRow(tx, appRow.id);
     const control = await lockGenerationControl(tx, input.generationId);
@@ -957,6 +962,10 @@ export async function settleGeneration(input: SettleGenerationInput): Promise<{ 
     });
     return { status, alreadyTerminal: false };
   });
+  // 已终态的重复通知也要走一遍：进程崩在「终态已提交、结算未执行」时，靠这次重放补账；
+  // 真已结算过的由 credit_charge.generation_id 唯一键挡下，不会重复扣费。
+  await settleGenerationBilling(input.generationId);
+  return result;
 }
 
 /** 阶段是内部控制面事实：只允许当前 epoch 的 active owner 推进，避免旧进程把阶段改错。 */
@@ -1251,6 +1260,8 @@ export async function failOrCancel(input: FailOrCancelInput): Promise<FailOrCanc
     await finishDrain({ appId: app.id, epoch, draftSnapshotId });
     const settled = await settleGeneration({
       appId: app.id, generationId, epoch, outcome: input.outcome, error: input.error, stopReason: input.stopReason,
+      // 失败/取消也要把助手气泡 id 落库：账单与用量块都靠它挂到那一条回复下。
+      messageId: input.messageId ?? null,
     });
     return { draftSnapshotId, alreadyTerminal: settled.alreadyTerminal, status: settled.status };
   } catch (error) {

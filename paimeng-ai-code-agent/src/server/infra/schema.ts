@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, char, index, integer, jsonb, numeric, pgTable, primaryKey, smallint, text, timestamp, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
-import type { CreditPool, GrantSource } from '@/shared/billing';
+import type { ChargeStatus, CreditPool, GrantSource, RateCardView, UsageSnapshotStep } from '@/shared/billing';
 
 const times = { createTime: timestamp('create_time', { mode: 'string' }).notNull(), updateTime: timestamp('update_time', { mode: 'string' }).notNull() };
 export const users = pgTable('app_user', { id: bigint('id', { mode: 'bigint' }).primaryKey(), userAccount: varchar('user_account', { length: 256 }).notNull(), userPassword: varchar('user_password', { length: 512 }).notNull(), userName: varchar('user_name', { length: 256 }), userAvatar: varchar('user_avatar', { length: 1024 }), userProfile: varchar('user_profile', { length: 512 }), userRole: varchar('user_role', { length: 256 }).notNull().default('user'), ...times, isDelete: integer('is_delete').notNull().default(0) }, t => [uniqueIndex('uk_app_user_account').on(t.userAccount)]);
@@ -202,3 +202,33 @@ export const creditAccounts = pgTable('credit_account', {
   balance: bigint('balance', { mode: 'number' }).notNull().default(0),
   updateTime: timestamp('update_time', { mode: 'string', precision: 3 }).notNull(),
 }, t => [primaryKey({ columns: [t.userId, t.pool] })]);
+
+// ---- 计费（migrations/012_credit_charge_entry.sql）----
+// 出账聚合根：一次 Generation 一行（generation_id 唯一）。credits / cost_usd / status 是分红推导出来的投影，
+// 每次追加 credit_entry 后在同一事务里重写；两个快照是不可变事实（费率版本 + 逐步骤用量）。
+// 账本自带 app_id / user_id 副本且不建外键：删除应用会级联删 generation，账本必须留下。
+export const creditCharges = pgTable('credit_charge', {
+  generationId: varchar('generation_id', { length: 36 }).notNull().unique(),
+  appId: bigint('app_id', { mode: 'bigint' }).notNull(),
+  userId: bigint('user_id', { mode: 'bigint' }).notNull(),
+  credits: bigint('credits', { mode: 'number' }).notNull().default(0),
+  costUsd: numeric('cost_usd', { precision: 14, scale: 6 }),
+  rateCardSnapshot: jsonb('rate_card_snapshot').$type<RateCardView[]>().notNull(),
+  usageSnapshot: jsonb('usage_snapshot').$type<UsageSnapshotStep[]>().notNull(),
+  status: varchar('status', { length: 16 }).$type<ChargeStatus>().notNull(),
+  estimatedSteps: integer('estimated_steps').notNull().default(0),
+  createTime: timestamp('create_time', { mode: 'string', precision: 3 }).notNull(),
+}, t => [
+  index('idx_credit_charge_app_time').on(t.appId, t.createTime.desc()),
+  index('idx_credit_charge_user_time').on(t.userId, t.createTime.desc()),
+]);
+
+// 出账分录：正数为扣减、负数为退还/冲正；冲正只追加反向行（reversal_of 指向被冲正的行），绝不改历史行。
+export const creditEntries = pgTable('credit_entry', {
+  id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+  chargeId: varchar('charge_id', { length: 36 }).notNull(),
+  pool: varchar('pool', { length: 16 }).$type<CreditPool>().notNull(),
+  credits: bigint('credits', { mode: 'number' }).notNull(),
+  reversalOf: bigint('reversal_of', { mode: 'bigint' }),
+  createTime: timestamp('create_time', { mode: 'string', precision: 3 }).notNull(),
+}, t => [index('idx_credit_entry_charge').on(t.chargeId, t.id)]);

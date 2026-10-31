@@ -552,3 +552,11 @@ body.chat-resizing .chat-page .preview-frame { pointer-events: none; }
   font-size: 12px;
   pointer-events: none;
 }
+
+/* 每次助手回复下的 Credit 行：纯文本，不抢用量块的位置 */
+.chat-page .generation-credit {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #6f6259;
+  overflow-wrap: anywhere;
+}

@@ -8,7 +8,7 @@ import {
   type RateCardList,
   type RateCardView,
 } from '@/shared/billing';
-import { db, now } from '../infra/db';
+import { db, now, type Transaction } from '../infra/db';
 import { BusinessError } from '../infra/http';
 import { creditRateCard } from '../infra/schema';
 
@@ -56,9 +56,12 @@ export function resolveRate(
   return matched;
 }
 
-/** 全部版本，按 provider / model 升序、版本由新到旧，与 idx_credit_rate_card_model 的顺序一致。 */
-export async function readRates(): Promise<RateCardView[]> {
-  const rows = await db()
+/**
+ * 全部版本，按 provider / model 升序、版本由新到旧，与 idx_credit_rate_card_model 的顺序一致。
+ * 传事务句柄时在结算事务里读：费率必须与这次 Charge 的快照出自同一个可见性快照。
+ */
+export async function readRates(tx?: Transaction): Promise<RateCardView[]> {
+  const rows = await (tx ?? db())
     .select()
     .from(creditRateCard)
     .orderBy(asc(creditRateCard.providerId), asc(creditRateCard.modelName), desc(creditRateCard.effectiveFrom));
