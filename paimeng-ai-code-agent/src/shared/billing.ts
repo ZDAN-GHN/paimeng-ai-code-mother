@@ -306,6 +306,8 @@ export type BillingChargeView = {
   generationId: string;
   messageId: string | null;
   appId: string;
+  /** 账单所属 App 的名称，App 被删或没命名时为 null：界面只回退显示 appId，不隐藏这笔账。 */
+  appName: string | null;
   credits: number;
   effectiveCredits: number;
   costUsd?: string | null;

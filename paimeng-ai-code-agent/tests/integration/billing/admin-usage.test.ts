@@ -183,6 +183,10 @@ describe('GET billing/charges：appId 可选，缺省只返回自己的全部账
     const mineEnvelope = await envelopeOf<BillingChargeView[]>(mine);
     expect(mineEnvelope.data.map(charge => charge.generationId).sort()).toEqual([firstCharge, secondCharge].sort());
     expect(new Set(mineEnvelope.data.map(charge => charge.appId))).toEqual(new Set([first.appId, second.appId]));
+    // 账单自带 App 名称：账单页不再回查应用列表，避免撞上「每页最多 20 个应用」的上限。
+    const names = await db().select({ appName: apps.appName }).from(apps)
+      .where(inArray(apps.id, [BigInt(first.appId), BigInt(second.appId)]));
+    expect(new Set(mineEnvelope.data.map(charge => charge.appName))).toEqual(new Set(names.map(row => row.appName)));
 
     // 带自己的 appId 只回该 App；带别人的 appId 403
     const scoped = await envelopeOf<BillingChargeView[]>(await chargesOf(owner.cookie, `?appId=${first.appId}`));

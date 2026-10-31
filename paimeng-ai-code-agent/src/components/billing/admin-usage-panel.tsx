@@ -68,7 +68,7 @@ export function AdminUsagePanel() {
 
   const columns: ColumnsType<BillingChargeView> = [
     { title: '时间', dataIndex: 'createTime', width: 170, render: value => formatStoredTime(value) },
-    { title: '应用', dataIndex: 'appId', width: 160, render: (id: string) => <span className={styles.slotName}>{id}</span> },
+    { title: '应用', dataIndex: 'appId', width: 160, render: (id: string, charge) => <span className={styles.slotName}>{charge.appName ?? id}</span> },
     { title: 'Generation', dataIndex: 'generationId', width: 220, render: (id: string) => <span className={styles.slotName}>{id}</span> },
     {
       title: '售价（有效金额）',

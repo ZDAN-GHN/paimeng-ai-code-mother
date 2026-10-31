@@ -54,7 +54,7 @@ async function adminLogin(page: Page, account: string) {
  * 造一个 App + 一笔 60 Credit 的已结算账单（quota 池扣 60，余额 100 → 40）。
  * 冲正之后余额应当回到 100，界面显示「已退还 / 已冲正」。
  */
-async function seedSettledCharge(ownerId: string): Promise<{ appId: string; generationId: string }> {
+async function seedSettledCharge(ownerId: string): Promise<{ appId: string; appName: string; generationId: string }> {
   const appId = String(BigInt(Date.now()) * 100n + BigInt(Math.floor(Math.random() * 100)));
   const generationId = randomUUID();
   createdAppIds.push(appId);
@@ -91,7 +91,7 @@ async function seedSettledCharge(ownerId: string): Promise<{ appId: string; gene
   } finally {
     await connection.end();
   }
-  return { appId, generationId };
+  return { appId, appName: '账单演示应用', generationId };
 }
 
 async function balancesOf(userId: string): Promise<{ quota: number; balance: number }> {
@@ -132,7 +132,7 @@ test.afterAll(async () => {
 test('Owner 在 /billing 看到有效金额、分池明细与面额说明', async ({ page }) => {
   const account = 'e2e_ledger_' + randomUUID().slice(0, 8);
   const ownerId = await register(page, account);
-  const { appId, generationId } = await seedSettledCharge(ownerId);
+  const { appId, appName, generationId } = await seedSettledCharge(ownerId);
   await login(page, account);
 
   await page.goto('/billing');
@@ -140,8 +140,8 @@ test('Owner 在 /billing 看到有效金额、分池明细与面额说明', asyn
   await expect(page.getByRole('region', { name: '我的 Credit 概览' })).toContainText('配额池');
 
   const row = page.getByRole('row').filter({ hasText: generationId });
-  // 账单行按 AC 显示时间、Generation、金额、分池与状态；App 用 ID 表达，筛选由页头的 App 下拉负责。
-  await expect(row).toContainText(appId);
+  // 账单行按 AC 显示时间、应用、Generation、金额、分池与状态
+  await expect(row).toContainText(appName);
   await expect(row).toContainText('60 Credit');
   await expect(row).toContainText('配额池 60');
   await expect(row).toContainText('已结算');
@@ -160,7 +160,7 @@ test('Owner 在 /billing 看到有效金额、分池明细与面额说明', asyn
 test('Admin 查用户用量并整笔冲正：成本未知可辨识、冲正后只退一次', async ({ page }) => {
   const ownerAccount = 'e2e_ledger_owner_' + randomUUID().slice(0, 8);
   const ownerId = await register(page, ownerAccount);
-  const { appId, generationId } = await seedSettledCharge(ownerId);
+  const { appId, appName, generationId } = await seedSettledCharge(ownerId);
   await adminLogin(page, 'e2e_ledger_admin_' + randomUUID().slice(0, 8));
 
   await page.goto('/admin/billing');
@@ -169,6 +169,8 @@ test('Admin 查用户用量并整笔冲正：成本未知可辨识、冲正后�
   await page.getByRole('button', { name: '查询用量' }).click();
 
   const row = page.getByRole('row').filter({ hasText: generationId });
+  // 管理员看的是别人的账：应用名同样要能读出来，否则只能靠 ID 对
+  await expect(row).toContainText(appName);
   await expect(row).toContainText('60 Credit');
   // 没有 USD 费率时成本未知必须显式标出，不能显示成 0
   await expect(row).toContainText('成本未知');

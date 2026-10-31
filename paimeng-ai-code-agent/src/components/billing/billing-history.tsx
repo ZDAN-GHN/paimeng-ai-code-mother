@@ -65,7 +65,7 @@ export function BillingHistory() {
     if (!user) return;
     void (async () => {
       try {
-        const page = await api<Page<AppInfo>>('app/my/list/page/vo', { pageNum: 1, pageSize: 100 });
+        const page = await api<Page<AppInfo>>('app/my/list/page/vo', { pageNum: 1, pageSize: 20 });
         setApps(page.records);
       } catch {
         // 应用列表只用于筛选：拉不到就退化成「全部应用」，不挡账单本身。
@@ -82,7 +82,7 @@ export function BillingHistory() {
       title: '应用',
       dataIndex: 'appId',
       width: 180,
-      render: (id: string) => <span>{appNameOf(id)}<span className={styles.mono}>{id}</span></span>,
+      render: (id: string, charge) => <span>{charge.appName ?? appNameOf(id)}<span className={styles.mono}>{id}</span></span>,
     },
     { title: 'Generation', dataIndex: 'generationId', width: 220, render: (id: string) => <span className={styles.mono}>{id}</span> },
     {

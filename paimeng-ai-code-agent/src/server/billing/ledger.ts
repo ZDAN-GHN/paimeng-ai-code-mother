@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 import { db, now, type Transaction } from '@/server/infra/db';
 import { BusinessError } from '@/server/infra/http';
-import { creditAccounts, creditCharges, creditEntries, creditGrants, generations } from '@/server/infra/schema';
+import { apps, creditAccounts, creditCharges, creditEntries, creditGrants, generations } from '@/server/infra/schema';
 import {
   creditPools, type AccountSnapshot, type BillingChargeView, type ChargeStatus, type CreditPool, type GrantSource,
   type RateCardView, type UsageSnapshotStep,
@@ -399,6 +399,9 @@ export async function chargesOf(input: {
   const rows = await db().select({
     generationId: creditCharges.generationId,
     appId: creditCharges.appId,
+    // App 名称随账单一起返回：账单页只有 appId，靠前端再查一次应用列表会撞上「每页最多 20 个」的
+    // 上限，超过 20 个 App 的 Owner 就只剩一串数字可看。
+    appName: apps.appName,
     credits: creditCharges.credits,
     costUsd: creditCharges.costUsd,
     status: creditCharges.status,
@@ -410,6 +413,7 @@ export async function chargesOf(input: {
     stopReason: generations.stopReason,
   }).from(creditCharges)
     .leftJoin(generations, eq(generations.id, creditCharges.generationId))
+    .leftJoin(apps, eq(apps.id, creditCharges.appId))
     .where(and(
       eq(creditCharges.userId, BigInt(input.userId)),
       ...(input.appId ? [eq(creditCharges.appId, BigInt(input.appId))] : []),
@@ -426,6 +430,7 @@ export async function chargesOf(input: {
       generationId: row.generationId,
       messageId: row.messageId ?? null,
       appId: String(row.appId),
+      appName: row.appName ?? null,
       credits: row.credits,
       effectiveCredits: charges.reduce((sum, entry) => sum + entry.credits, 0),
       status: row.status,
