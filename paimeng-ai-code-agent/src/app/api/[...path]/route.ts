@@ -6,7 +6,8 @@ import { generationAccounts } from '@/server/generation/generation-accounting';
 import { chatRuntime, generationStatus, harnessCancelGeneration, harnessCancelInput, harnessChatResponse, harnessSteerGeneration, harnessSubmitInput, loadMessages } from '@/server/generation/durable-engine';
 import { applyModelConfigNow, deleteModelAlias, deleteModelProvider, probeProviderModels, readModelAdminConfig, upsertModelAlias, upsertModelProvider } from '@/server/models/admin';
 import { grantCredits } from '@/server/billing/admin';
-import { accountSnapshot, chargesOf } from '@/server/billing/ledger';
+import { chargesOf } from '@/server/billing/ledger';
+import { ensureCurrentPeriod } from '@/server/billing/quota';
 import { pendingSettlements, reconcileSettlements } from '@/server/billing/settlement';
 import { uploadImages } from '@/server/generation/image-upload';
 import { appendRate, readRateCardList } from '@/server/billing/rate-card';
@@ -46,7 +47,7 @@ async function dispatch(req:Request,context:{params:Promise<{path:string[]}>}){
    if(path.startsWith('app/download/')){const user=await requireUser(req);const id=idSchema.parse(path.slice('app/download/'.length));return await business.download(id,user);}
    if(path==='admin/billing/rate-card'){await requireAdmin(req);return success(await readRateCardList());}
    if(path==='admin/billing/reconcile'){await requireAdmin(req);const limit=z.coerce.number().int().min(1).max(200).default(50).parse(query.get('limit')??undefined);return success({items:await pendingSettlements({limit})});}
-   if(path==='billing/summary'){const user=await requireUser(req);return success(await accountSnapshot(user.id));}
+   if(path==='billing/summary'){const user=await requireUser(req);return success(await ensureCurrentPeriod(user.id));}
    if(path==='billing/charges'){const user=await requireUser(req);const appId=idSchema.parse(query.get('appId'));await business.getApp(appId,user,true);const limit=z.coerce.number().int().min(1).max(20).default(10).parse(query.get('limit')??undefined);return success(await chargesOf({appId,limit,includeCost:user.userRole==='admin'}));}
   }
   if(method==='POST'){

@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { loadEnvFile } from 'node:process';
 import { readFile } from 'node:fs/promises';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { testDatabaseUrl } from '../../support/test-database-url';
 import { GET, POST } from '@/app/api/[...path]/route';
 import { db, getPool, now } from '@/server/infra/db';
 import { nextSnowflakeId } from '@/server/infra/snowflake';
 import {
-  apps, creditAccounts, creditRateCard, generationSteps, generations, users,
+  apps, creditAccounts, creditGrants, creditRateCard, generationSteps, generations, users,
 } from '@/server/infra/schema';
-import { recordGrant } from '@/server/billing/ledger';
+import { rebuildAccount, recordGrant } from '@/server/billing/ledger';
 import type { CreditPool } from '@/shared/billing';
 import type { WorkspaceApp } from '@/server/workspace/workspace';
 
@@ -186,6 +186,18 @@ export async function billingBalancesOf(userId: string): Promise<{ quota: number
     quota: rows.find(row => row.pool === 'quota')?.balance ?? 0,
     balance: rows.find(row => row.pool === 'balance')?.balance ?? 0,
   };
+}
+
+/**
+ * 退掉注册时发的当期配额（票 91）并按账本重算两池，让用例从「配额池为 0」的已知状态出发。
+ * 只有需要配额池恰好见底的分池用例才用：注册即得 500 配额这件事本身由 `quota.test.ts`
+ * 与 `grants.test.ts` 覆盖。必须在造数发放之前调用（`rebuildAccount` 只按已有 grant 重算）。
+ */
+export async function withoutMonthlyQuota(owner: BillingTestUser): Promise<BillingTestUser> {
+  await db().delete(creditGrants)
+    .where(and(eq(creditGrants.userId, BigInt(owner.id)), eq(creditGrants.source, 'monthly_quota')));
+  await rebuildAccount(owner.id);
+  return owner;
 }
 
 /** 删除本进程插入过的全部费率版本：`_test` 库跨文件共享，费率行会互相影响。 */
