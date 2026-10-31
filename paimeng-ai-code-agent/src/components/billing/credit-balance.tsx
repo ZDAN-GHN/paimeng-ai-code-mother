@@ -34,7 +34,7 @@ export function CreditBalance({ refreshToken }: { refreshToken?: string }) {
   }, [user, load, refreshToken]);
 
   if (!user || !summary) return null;
-  return <section className={styles.creditBalance} aria-label="我的 Credit 额度">
+  return <section className={styles.creditBalance} aria-label="我的 Credit 概览">
     <p className={styles.pools}>
       <span>{poolLabels.quota}<strong>{summary.quota}</strong></span>
       <span aria-hidden="true">·</span>

@@ -6,9 +6,12 @@ import { creditCharges, users } from '@/server/infra/schema';
 import { idSchema } from '@/shared/contracts';
 import {
   maxGrantCredits, poolLabels, poolOfSource, sourceLabels,
-  type AdminUserUsage, type ChargeReversalReceipt, type ChargeStatus, type CreditPool, type GrantSource,
+  type AdminUserUsage, type ChargeReversalReceipt, type ChargeStatus, type CreditGrantView, type CreditPool,
+  type GrantReceipt, type GrantSource,
 } from '@/shared/billing';
-import { accountSnapshot, chargesOf, effectiveCreditsOf, entriesOfCharge, recordGrant, reverseCharge } from './ledger';
+import {
+  accountSnapshot, chargesOf, effectiveCreditsOf, entriesOfCharge, recordGrant, reverseCharge, type CreditGrantRow,
+} from './ledger';
 
 export type GrantCreditsInput = {
   userId: string;
@@ -24,7 +27,7 @@ export type GrantCreditsInput = {
  * 管理员发放 Credit 的用例入口：先校验「发给谁、从哪来、进哪个池」，再交给账本入账。
  * 支付回调将来复用同一入口（source=purchase + externalRef），所以业务规则必须留在这里，不能只在 HTTP 层。
  */
-export async function grantCredits(input: GrantCreditsInput): Promise<{ grantId: string; credits: number; created: boolean }> {
+export async function grantCredits(input: GrantCreditsInput): Promise<GrantReceipt> {
   const userId = idSchema.parse(input.userId);
   const [user] = await db().select({ id: users.id }).from(users)
     .where(and(eq(users.id, BigInt(userId)), eq(users.isDelete, 0))).limit(1);
@@ -45,7 +48,23 @@ export async function grantCredits(input: GrantCreditsInput): Promise<{ grantId:
     requestId: input.requestId ?? null,
     grantedBy: input.grantedBy,
   });
-  return { grantId: grant.id, credits: grant.credits, created };
+  return { grant: grantViewOf(grant), created };
+}
+
+/** 账本行 → 发放回执视图：id、时间与操作人都原样来自服务端那一行。 */
+function grantViewOf(row: CreditGrantRow): CreditGrantView {
+  return {
+    id: row.id,
+    userId: String(row.userId),
+    pool: row.pool,
+    credits: row.credits,
+    source: row.source,
+    note: row.note,
+    requestId: row.requestId,
+    grantedBy: row.grantedBy === null ? null : String(row.grantedBy),
+    period: row.period,
+    createTime: row.createTime,
+  };
 }
 
 /**

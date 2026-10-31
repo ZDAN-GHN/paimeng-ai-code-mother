@@ -17,7 +17,7 @@ import {
 import { priceSteps, resolveStepRate, type PricedStep, type RatedStep } from './pricing';
 
 /**
- * 结算与对账（04-settlement-design.md §1/§3）。
+ * 结算与对账（模块职责见 `src/server/AGENTS.md`；账本投影规则见同目录 `ledger.ts`）。
  *
  * `settleGenerationBilling` 是**唯一**计费入口，名字刻意区别于 generation-lifecycle 的 `settleGeneration`
  * （那是 SDK 层的终态事务）。它由每一条把 generation 写成终态的路径在**事务提交之后**调用：
@@ -28,9 +28,9 @@ import { priceSteps, resolveStepRate, type PricedStep, type RatedStep } from './
  * - 幂等：`credit_charge.generation_id` 唯一键冲突只说明「账单行已经存在」，不说明定价与扣款也做完了，
  *   所以冲突后必须回读既有账单，按 `usage_snapshot` 的步骤身份补齐差额（`settleGenerationBillingTx`）。
  *
- * 补结算只追加 entry 再重算投影（00-brief「后补只追加 entry」）：已计价步骤不改写，晚到或刚拿到费率的
- * 步骤按 `generation_step.id` 去重后补记一次。归责同样在这一层落地（04 §4）：平台自身故障先按实收结算，
- * 再在**同一事务**里整笔冲正；其余终态（包括 interrupted）一律按实收。
+ * 补结算只追加 entry 再重算投影（账本只追加：`ledger.ts` 的 `reprojectCharge`）：已计价步骤不改写，晚到或刚拿到费率的
+ * 步骤按 `generation_step.id` 去重后补记一次。归责同样在这一层落地（`shared/billing.ts` 的 `isPlatformFault`）：
+ * 平台自身故障先按实收结算，再在**同一事务**里整笔冲正；其余终态（包括 interrupted）一律按实收。
  */
 
 const terminalStatuses = ['ready', 'failed', 'cancelled'];
@@ -150,6 +150,15 @@ async function completeChargeTx(tx: Transaction, charge: CreditChargeRow): Promi
   if (delta > 0) {
     await chargePools(tx, { chargeId: charge.generationId, userId: charge.userId, credits: delta, createTime: now() });
   }
+  // 待处理的账单必须能被发现：结算不能因为缺费率而阻断生成，所以这里只告警（不抛错）。
+  if (pricing.status === 'unpriced' || pricing.status === 'partial') {
+    console.warn('结算未完全定价，账单待处理', {
+      generationId: charge.generationId,
+      status: pricing.status,
+      unpricedSteps: pricing.unpricedSteps,
+      missingRateKeys: missingRateKeysOf(pricing.steps),
+    });
+  }
   // 投影永远等于 Σ entries：补记后重算一次，`credits` 不会停留在本次定价的总额上。
   await reprojectCharge(tx, charge.generationId);
 
@@ -169,6 +178,13 @@ async function findCharge(tx: Transaction, generationId: string): Promise<Credit
 function pendingReasonOf(snapshot: readonly UsageSnapshotStep[]): string {
   const unpriced = snapshot.filter(row => !row.priced).length;
   return unpriced > 0 ? `缺少费率或估算样本（${unpriced} 步）` : '已结算，无待补步骤';
+}
+
+/** 未定价步骤的 (provider, model)：补齐 Rate card 后下一次对账就能补上。 */
+function missingRateKeysOf(steps: readonly UsageSnapshotStep[]): string[] {
+  return [...new Set(steps
+    .filter(row => !row.priced)
+    .map(row => `${row.providerId ?? '—'}/${row.modelName ?? '—'}`))];
 }
 
 /**
@@ -202,7 +218,9 @@ function mergeRates(existing: readonly RateCardView[], incoming: readonly RateCa
 //
 // 扫两类身份，都只认「已经结束」或「已经有账单但没做完」的记录：
 // 1. `generation.status in ('ready','failed','cancelled')` 且没有 Charge —— 终态事务已提交、结算没落地的漏账空窗；
-// 2. `credit_charge.status in ('unpriced','partial')`，或有模型步骤还没进快照的账单 —— 待补价与晚到用量。
+// 2. `credit_charge.status` 是 `unpriced`/`partial`，**或**非 `reversed` 任何状态下快照里还缺模型步骤——
+//    待补价与晚到用量。晚到步骤不限于待处理账单：`settled`/`estimated` 的账单同样要补差额，所以这一条
+//    不带状态过滤（`estimated` 的快照与当前 `generation_step` 不一致时也在这里被扫到）。
 // `generating`/`building` 永远不是终态，扫描不碰；已退还的账单也不再补扣。
 
 /** 扫描范围：limit 是本次最多处理几条（两张候选查询共享这一份额度）。 */

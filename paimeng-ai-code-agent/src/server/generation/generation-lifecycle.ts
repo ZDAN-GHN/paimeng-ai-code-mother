@@ -20,7 +20,8 @@ import {
   type ExecutionRecord, type InputRecord, type QuestionRecord,
 } from './control-store';
 import { generationControl, lockGenerationControl, type GenerationControl } from './generation-store';
-// 计费只从 generation 侧 import billing：billing 反向 import 本模块会成环。
+// 终态事务提交后要补一次结算；billing 侧不 import 本模块（否则终态路径 import 计费就成环），
+// 它只用 generation/generation-accounting 的纯函数。
 import { settleGenerationBilling } from '../billing/settlement';
 import { assertCanStartGeneration } from '../billing/quota';
 import {

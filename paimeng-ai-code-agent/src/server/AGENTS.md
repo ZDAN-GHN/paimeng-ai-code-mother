@@ -15,6 +15,7 @@ src/server/
 │   ├── prompts/            # instructions handed to the model (per Generation type + web capability)
 │   ├── tools/              # the agent's tool surface; web/ is the web-access implementation behind it
 │   └── durable/            # the harness process: attach HTTP surface, hooks, model admission, storage
+├── billing/        # Credit: Rate card, ledger, settlement, monthly quota, admin grants
 ├── delivery/      # build, immutable Delivery, preview server
 ├── versioning/    # git-backed Version history, ledger, migration, thumbnails
 ├── templates/     # versioned skeletons copied into new apps
@@ -30,3 +31,5 @@ src/server/
 - `generation/tools/` holds tool definitions and their execution; the harness entry keeps tool registration and the run-mutating hooks (effect gate, model/tool budgets, workspace path guard) together because their order is part of behaviour.
 - `generation/durable/harness-server.ts` is a process entrypoint: `package.json` (`durable:harness`), `scripts/dev/durable-dev.ts`, `scripts/verify/test-e2e.ts` and the durable integration tests resolve its path literally. Moving it means updating those entrypoints.
 - `generation/prompts/` builds prompt text only; it must not import tool registries, so reading instructions never starts the web or build stack.
+- `billing/` may import `infra/`, `shared/` and the pure `generation/generation-accounting` helpers (`stopReasonFrom`). It must not import `generation/generation-lifecycle.ts`, `generation/durable-engine.ts` or `generation/control-store.ts`: every terminal path there already imports `billing/`, so the reverse direction would close a cycle.
+- The dependency direction is generation → billing, through one entry point: `billing/settlement.ts`'s `settleGenerationBilling`. Terminal paths call it after their transaction commits; billing reads tables, never writes generation state.

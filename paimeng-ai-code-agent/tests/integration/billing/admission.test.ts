@@ -19,7 +19,7 @@ import { accountSnapshot } from '@/server/billing/ledger';
 import { periodOf } from '@/server/billing/period';
 import { insufficientCreditsCode, monthlyQuotaCredits } from '@/shared/billing';
 import type { WorkspaceApp } from '@/server/workspace/workspace';
-import { applyBillingMigrations, envelopeOf, loadBillingDatabase } from './support';
+import { applyBillingMigrations, envelopeOf, loadBillingDatabase } from '../../support/billing';
 
 /**
  * 准入：可用 Credit ≤ 0 时不创建新的 Generation（票 94）。
@@ -130,7 +130,7 @@ describe('准入判定：先补当期配额，再按配额池 + 余额池判定'
     expect(rejection.message).toContain('当前可用 Credit 为 0');
     expect(rejection.message).toContain('配额池 0');
     expect(rejection.message).toContain('余额池 0');
-    expect(rejection.message).toContain('联系管理员补充额度');
+    expect(rejection.message).toContain('联系管理员补充 Credit');
     // 支付通道还没接，文案里不能出现充值/购买入口这种兑现不了的话。
     expect(rejection.message).not.toMatch(/充值|立即购买|购买 Credit/u);
   });

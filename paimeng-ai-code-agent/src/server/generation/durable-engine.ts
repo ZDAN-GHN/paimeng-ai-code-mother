@@ -16,7 +16,7 @@ import { appForAdoption, getApp } from '../business';
 import { getConfig } from '../infra/config';
 import { db, now } from '../infra/db';
 import { generationControl, generationFor } from './generation-store';
-// 读路径的 ready 修复也要补一次结算；计费只从 generation 侧 import billing，避免成环。
+// 读路径的 ready 修复也要补一次结算；billing 侧不 import 本模块（否则终态路径 import 计费就成环）。
 import { evaluateRunningOverdraft, reconcileSettlements, settleGenerationBilling } from '../billing/settlement';
 import { activeExecution, appendInput, assertAuthority, beginChecking, bindExecutionConversation, completeAttempt, heartbeatAuthority, inputsSettled, setExecutionStatus, markInputPlaced, markInputUnanswered, markInputResolved, openQuestionOf, reserveAttempt, withdrawInput, type ExecutionRecord, type InputRecord } from './control-store';
 import { CandidateInvalidatedError, failOrCancel, getInputs, pauseForQuestion, publishReady, recoverStartup, settleGeneration, startGeneration } from './generation-lifecycle';
@@ -914,7 +914,8 @@ class RunTranslator {
   #endedTools: Set<string>;
   readonly #toolOutcomes = new Map<string, { ok: boolean; ms: number | null }>();
 
-  constructor(readonly channel: ChunkChannel, private readonly turn: AssistantTurn, private readonly anchor: TranscriptAnchor, private readonly requestId: string, private readonly model: ModelIdentity, private readonly round: number, private readonly overdraft: OverdraftGuard) {
+  /** `generationId` 就是这一轮 Generation 的 id（提交时用同一个 id 建行），不是请求幂等键。 */
+  constructor(readonly channel: ChunkChannel, private readonly turn: AssistantTurn, private readonly anchor: TranscriptAnchor, private readonly generationId: string, private readonly model: ModelIdentity, private readonly round: number, private readonly overdraft: OverdraftGuard) {
     this.#seenEntries = turn.seenEntries;
     this.#endedTools = turn.endedTools;
   }
@@ -926,7 +927,7 @@ class RunTranslator {
           const parsed = transcriptEntrySchema.safeParse(entry);
           return parsed.success ? [parsed.data] : [];
         });
-        const from = entries.findIndex(entry => entry.kind === userEntryKind && userBubbleSchema.safeParse(entry.data).data?.id === `${this.requestId}-user`);
+        const from = entries.findIndex(entry => entry.kind === userEntryKind && userBubbleSchema.safeParse(entry.data).data?.id === `${this.generationId}-user`);
         for (const entry of from < 0 ? [] : entries.slice(from)) {
           const result = toolResultMessageOf(entry);
           if (result) this.handle({ type: 'tool_execution_end', toolCallId: result.toolCallId, toolName: result.toolName, entry });
@@ -1070,7 +1071,7 @@ class RunTranslator {
     });
     const timed = calls.filter(call => call.ms !== null);
     await recordAssistantStep({
-      generationId: this.requestId,
+      generationId: this.generationId,
       round: this.round,
       stepNumber: pending.stepNumber,
       model: pending.model,
@@ -1094,8 +1095,8 @@ class RunTranslator {
    */
   async #stopOnOverdraft(): Promise<void> {
     if (this.overdraft.stop.signal.aborted) return;
-    const verdict = await evaluateRunningOverdraft(this.requestId).catch(problem => {
-      console.warn(`运行期透支评估失败（生成 ${this.requestId}）：`, problem);
+    const verdict = await evaluateRunningOverdraft(this.generationId).catch(problem => {
+      console.warn(`运行期透支评估失败（生成 ${this.generationId}）：`, problem);
       return null;
     });
     if (!verdict?.exceeded) return;
@@ -1464,7 +1465,8 @@ class DetachedChannel extends ChunkChannel {
  * 读状态不再触发接管；新任务提交前必须等这次扫描完成（启动屏障）。
  *
  * 恢复完成后补一次对账扫描：终态事务已提交、结算没落地（或进程恰好在两者之间被杀）的记录
- * 没有任何别的路径会再通知计费（01-lifecycle §8.2），所以这是「重启后补结算」的落点。
+ * 没有任何别的路径会再通知计费（终态钩子在 `generation-lifecycle.ts` 与 `control-store.ts`），
+ * 所以这是「重启后补结算」的落点。
  * 只跑一次、不阻塞请求、不常驻；失败由 Admin 重试或 `npm run billing:reconcile` 兜底。
  */
 const startupReconcileLimit = 50;

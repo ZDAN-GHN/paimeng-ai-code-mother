@@ -5,7 +5,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { api } from '@/client/api';
 import { stopReasonLabels } from '@/components/chat/generation-usage';
 import {
-  chargeStatusLabels, creditDenominationLabel,
+  chargeStatusColors, chargeStatusLabels, creditDenominationLabel,
   type AdminUserUsage, type BillingChargeView, type ChargeReversalReceipt, type ChargeStatus,
 } from '@/shared/billing';
 import { formatStoredTime } from '@/shared/display';
@@ -13,15 +13,6 @@ import styles from '@/components/admin-view.module.css';
 
 type UsageQuery = { userId: string };
 type ReversalForm = { reason: string };
-
-/** 状态色只影响可读性，文案仍来自 `chargeStatusLabels` 这一处。 */
-const statusColors: Record<ChargeStatus, string> = {
-  settled: 'green',
-  estimated: 'orange',
-  partial: 'gold',
-  unpriced: 'default',
-  reversed: 'blue',
-};
 
 const percentOf = (ratio: number) => `${(ratio * 100).toFixed(1)}%`;
 
@@ -110,7 +101,7 @@ export function AdminUsagePanel() {
       title: '状态',
       dataIndex: 'status',
       width: 110,
-      render: (status: ChargeStatus) => <Tag color={statusColors[status]}>{chargeStatusLabels[status]}</Tag>,
+      render: (status: ChargeStatus) => <Tag color={chargeStatusColors[status]}>{chargeStatusLabels[status]}</Tag>,
     },
     {
       title: '结束原因',
@@ -138,7 +129,7 @@ export function AdminUsagePanel() {
   return <>
     <div className={styles.sectionHeading}>
       <h2>用户用量与冲正</h2>
-      <span className={styles.statusHint}>查看指定用户的额度与逐笔成本；冲正需填写理由，复用自动冲正的幂等保护</span>
+      <span className={styles.statusHint}>查看指定用户的 Credit 与逐笔成本；冲正需填写理由，复用自动冲正的幂等保护</span>
     </div>
     <Form name="billing-usage" layout="inline" onFinish={(values: UsageQuery) => { void load(values.userId.trim()); }}>
       <Form.Item label="用户 ID" name="userId" rules={[{ required: true, message: '请输入用户 ID' }]}>

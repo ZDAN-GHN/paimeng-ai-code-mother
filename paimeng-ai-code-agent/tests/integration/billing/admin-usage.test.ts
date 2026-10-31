@@ -4,7 +4,7 @@ import {
   applyBillingMigrations, billingBalancesOf, billingRequest, createBillingUser, envelopeOf,
   grantBillingCredits, loadBillingDatabase, purgeBillingRateCards, seedBillingApp, seedBillingGeneration,
   seedBillingRate, seedBillingStep, withoutMonthlyQuota, type BillingTestUser,
-} from './support';
+} from '../../support/billing';
 import { db, getPool } from '@/server/infra/db';
 import {
   apps, creditAccounts, creditCharges, creditEntries, creditGrants, generations, sessions, users,

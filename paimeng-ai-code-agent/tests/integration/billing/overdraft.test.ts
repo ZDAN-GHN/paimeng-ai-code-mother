@@ -9,7 +9,7 @@ import { evaluateRunningOverdraft, settleGenerationBilling } from '@/server/bill
 import {
   applyBillingMigrations, createBillingUser, loadBillingDatabase, purgeBillingRateCards, seedBillingApp,
   seedBillingGeneration, seedBillingRate, seedBillingStep, withoutMonthlyQuota, type BillingTestUser,
-} from './support';
+} from '../../support/billing';
 
 /**
  * 运行期透支熔断（票 95）：未结算消耗从 `generation_step` 现算，判定按 Owner 而不是单个 App。

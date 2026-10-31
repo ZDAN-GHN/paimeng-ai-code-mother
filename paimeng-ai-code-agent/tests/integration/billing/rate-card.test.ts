@@ -7,7 +7,7 @@ import {
   envelopeOf,
   loadBillingDatabase,
   type BillingTestUser,
-} from './support';
+} from '../../support/billing';
 import { db, getPool } from '@/server/infra/db';
 import { creditRateCard, sessions, users } from '@/server/infra/schema';
 import { readRates, resolveRate } from '@/server/billing/rate-card';

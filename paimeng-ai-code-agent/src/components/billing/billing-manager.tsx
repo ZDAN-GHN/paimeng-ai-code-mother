@@ -2,28 +2,22 @@
 import { useState } from 'react';
 import { App, Button, Descriptions, Form, Input, InputNumber, Select, Tabs, Tag } from 'antd';
 import { api } from '@/client/api';
-import { AdminGuard, useAuth } from '@/components/providers';
+import { AdminGuard } from '@/components/providers';
 import { formatStoredTime } from '@/shared/display';
 import {
-  grantSources, maxGrantCredits, poolLabels, poolOfSource, sourceLabels,
-  type CreditGrantView, type GrantReceipt, type GrantSource,
+  grantSources, maxGrantCredits, poolLabels, sourceLabels,
+  type GrantReceipt, type GrantSource,
 } from '@/shared/billing';
 import { CreditBalance } from './credit-balance';
 import { AdminUsagePanel } from './admin-usage-panel';
 import styles from '@/components/admin-view.module.css';
 
 type GrantForm = { userId: string; source: GrantSource; credits: number; note?: string };
-type Receipt = { view: CreditGrantView; created: boolean };
 
 /** 月度配额由系统按账期发放，管理界面只能选购买与补偿。 */
 const grantOptions = grantSources
   .filter(source => source !== 'monthly_quota')
   .map(source => ({ value: source, label: sourceLabels[source] }));
-
-/** 提交时间的 UTC 朴素时间戳，与 `now()` 同格式，交给 formatStoredTime 按本地时区显示。 */
-function stamp(): string {
-  return new Date().toISOString().slice(0, 23).replace('T', ' ');
-}
 
 export function BillingManager() {
   return <AdminGuard><main className={styles.adminPage}><BillingTabs /></main></AdminGuard>;
@@ -38,32 +32,18 @@ function BillingTabs() {
 }
 
 function GrantPanel() {
-  const { user } = useAuth();
   const { message } = App.useApp();
   const [busy, setBusy] = useState(false);
-  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [receipt, setReceipt] = useState<GrantReceipt | null>(null);
   // 幂等键跟着「一次发放意图」走：表单重试与双击复用同一个 requestId，成功入账后才换新的。
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
 
   async function submit(values: GrantForm) {
     setBusy(true);
     try {
+      // 回执整份来自服务端：入账池、操作人、时间与「是否重放」都读账本里那一行，界面不自己拼。
       const result = await api<GrantReceipt>('admin/billing/grant', { ...values, requestId });
-      setReceipt({
-        created: result.created,
-        view: {
-          id: result.grantId,
-          userId: values.userId,
-          pool: poolOfSource(values.source),
-          credits: result.credits,
-          source: values.source,
-          note: values.note?.trim() ? values.note.trim() : null,
-          requestId,
-          grantedBy: user?.id ?? null,
-          period: null,
-          createTime: stamp(),
-        },
-      });
+      setReceipt(result);
       setRequestId(crypto.randomUUID());
       message.success(result.created ? '发放成功' : '这次请求之前已经入账，没有重复发放');
     } catch (error) {
@@ -77,7 +57,7 @@ function GrantPanel() {
     <div className={styles.toolbar}>
       <h1>发放 Credit</h1>
       <div style={{ marginLeft: 'auto' }}>
-        <CreditBalance refreshToken={receipt?.view.id} />
+        <CreditBalance refreshToken={receipt?.grant.id} />
       </div>
     </div>
     <div className={styles.sectionHeading}>
@@ -107,14 +87,14 @@ function GrantPanel() {
         <Tag color={receipt.created ? 'green' : 'default'}>{receipt.created ? '已入账' : '重放，未重复入账'}</Tag>
       </div>
       <Descriptions bordered size="small" column={2} items={[
-        { key: 'id', label: 'Grant ID', children: receipt.view.id },
-        { key: 'createTime', label: '提交时间', children: formatStoredTime(receipt.view.createTime) },
-        { key: 'userId', label: '用户 ID', children: receipt.view.userId },
-        { key: 'grantedBy', label: '操作人', children: receipt.view.grantedBy ?? '系统' },
-        { key: 'source', label: '来源', children: sourceLabels[receipt.view.source] },
-        { key: 'pool', label: '入账池', children: poolLabels[receipt.view.pool] },
-        { key: 'credits', label: '金额', children: `${receipt.view.credits} Credit` },
-        { key: 'note', label: '备注', children: receipt.view.note ?? '无' },
+        { key: 'id', label: 'Grant ID', children: receipt.grant.id },
+        { key: 'createTime', label: '入账时间', children: formatStoredTime(receipt.grant.createTime) },
+        { key: 'userId', label: '用户 ID', children: receipt.grant.userId },
+        { key: 'grantedBy', label: '操作人', children: receipt.grant.grantedBy ?? '系统' },
+        { key: 'source', label: '来源', children: sourceLabels[receipt.grant.source] },
+        { key: 'pool', label: '入账池', children: poolLabels[receipt.grant.pool] },
+        { key: 'credits', label: '金额', children: `${receipt.grant.credits} Credit` },
+        { key: 'note', label: '备注', children: receipt.grant.note ?? '无' },
       ]} />
     </>}
   </>;

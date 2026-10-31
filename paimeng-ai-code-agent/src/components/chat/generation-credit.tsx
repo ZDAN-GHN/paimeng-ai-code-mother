@@ -3,8 +3,8 @@ import { isPlatformFault, poolLabels, type BillingChargeView } from '@/shared/bi
 import { stopReasonLabels } from './generation-usage';
 
 /**
- * 一次生成结束后的 Credit 行（docs/specs/credit-billing.md「界面上必须出现的三件事」）：
- * 为什么结束（失败 / 用户取消 / 平台故障中止 / 等待回答）、实际收了多少、从哪个池扣的、退到了哪个池。
+ * 一次生成结束后的 Credit 行：为什么结束（失败 / 用户取消 / 平台故障中止 / 等待回答）、
+ * 实际收了多少、从哪个池扣的、退到了哪个池。字段口径见 `shared/billing.ts` 的 `BillingChargeView`。
  *
  * 金额只用有效金额（Σ entries）：冲正之后 charge 投影已经被重算成净额，把「原扣」与「退款」再相加
  * 会显示成两笔钱或负支出。退款去向只读 `reversals` 的分池金额，不自己推算。
@@ -43,7 +43,7 @@ export function GenerationCredit({ charge }: { charge: BillingChargeView }) {
   // 运行期熔断（95）：和「生成失败」分开说，否则用户只会看到一句「失败」而不知道为什么被掐断。
   // 单次响应可能已越过透支线，账单照实记录，所以这里不承诺「最多只收到透支线」。
   if (charge.stopReason === 'overdraft') {
-    return line(`本次生成因超出可用额度被中止，已按实际用量扣费 ${used} Credit${chargedDetail}${estimateNote}`);
+    return line(`本次生成因超出透支线被中止，已按实际用量扣费 ${used} Credit${chargedDetail}${estimateNote}`);
   }
   if (charge.generationStatus === 'cancelled') {
     return line(`用户取消，已按实际用量收费 ${used} Credit${chargedDetail}${estimateNote}`);

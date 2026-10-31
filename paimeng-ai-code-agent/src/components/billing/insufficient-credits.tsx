@@ -3,9 +3,9 @@ import Link from 'next/link';
 import { Alert } from 'antd';
 
 /**
- * 额度不足的错误条：原文用服务端 402 的文案（当前可用 Credit 是多少），再补一条真正能走下去的下一步。
+ * Credit 不足的错误条：原文用服务端 402 的文案（当前可用 Credit 是多少），再补一条真正能走下去的下一步。
  *
- * 支付通道尚未开通，所以只给「联系管理员补充额度」+ 看额度条这两条真实可用的路径，
+ * 支付通道尚未开通，所以只给「联系管理员补充 Credit」+ 看额度条这两条真实可用的路径，
  * 不放充值/购买按钮——那是兑现不了的入口。`onClose` 用于手动收起；不传就是不可关闭。
  */
 export function InsufficientCreditsAlert({ message, onClose }: { message: string; onClose?: () => void }) {
@@ -14,11 +14,11 @@ export function InsufficientCreditsAlert({ message, onClose }: { message: string
     type="warning"
     showIcon
     closable={onClose ? { onClose } : false}
-    title="额度不足，无法开始新的生成"
+    title="Credit 不足，无法开始新的生成"
     description={<span className="insufficient-credits-next">
       {message}
-      获得额度后直接重新提交即可，这次的输入会保留。
-      <Link href="/billing">查看我的用量与额度</Link>
+      获得 Credit 后直接重新提交即可，这次的输入会保留。
+      <Link href="/billing">查看我的 Credit 与账单</Link>
     </span>}
   />;
 }

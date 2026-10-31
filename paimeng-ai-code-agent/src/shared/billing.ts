@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { idSchema, type GenerationStatus, type GenerationStopReason } from './contracts';
 
 /**
- * 计费共享契约（docs/specs/credit-billing.md）：client 与 server 都要用的 DTO、zod schema 与展示标签。
+ * 计费共享契约（决策见 `docs/adr/0004-credit-billing.md`）：client 与 server 都要用的 DTO、zod schema 与展示标签。
  * 只追加、不重排——87（Rate card）、89（Charge）、92（Admin 用量）各自往这里加自己的段落。
  * 这里不许 import `server-only` 或 drizzle：它同时被浏览器打包。
  */
@@ -176,8 +176,12 @@ export const grantRequestSchema = z.object({
 });
 export type GrantRequest = z.infer<typeof grantRequestSchema>;
 
-/** 发放接口的回执：`created=false` 表示这次是重放，账本没有新增行。 */
-export type GrantReceipt = { grantId: string; credits: number; created: boolean };
+/**
+ * 发放接口的回执：`created=false` 表示这次是重放，账本没有新增行。
+ * `grant` 是服务端刚落库（或重放命中的）那一行的完整视图——时间、操作人、池与来源都来自账本，
+ * 界面不再用浏览器时钟或表单值拼一份回执。
+ */
+export type GrantReceipt = { created: boolean; grant: CreditGrantView };
 
 /** 一笔 Credit grant 的可追溯形状，管理界面的发放回执用它展示。 */
 export type CreditGrantView = {
@@ -229,6 +233,15 @@ export const chargeStatusLabels: Record<ChargeStatus, string> = {
   reversed: '已退还',
 };
 
+/** Tag 颜色只影响可读性，文案仍来自 `chargeStatusLabels`；两个账单列表共用这一份。 */
+export const chargeStatusColors: Record<ChargeStatus, string> = {
+  settled: 'green',
+  estimated: 'orange',
+  partial: 'gold',
+  unpriced: 'default',
+  reversed: 'blue',
+};
+
 /**
  * Charge 的逐步骤用量快照（`usage_snapshot` 的一行）：上报值原样保留，
  * `billed*` 是本步实际参与计价的 token（估算时与上报值不同），`sampleSteps` 是估算依据的样本数。
@@ -265,8 +278,9 @@ export type ChargeEntryView = { pool: CreditPool; credits: number };
 export type ChargeReversalView = { pool: CreditPool; credits: number; reason: string | null; createTime: string };
 
 /**
- * 平台自身故障导致的终止：先按实收结算，再由 90 自动整笔冲正，用户实际不承担费用
- * （04-settlement-design.md §4）。其余终态一律按实收——`interrupted` 也是：进程崩溃时 token 确实烧掉了。
+ * 平台自身故障导致的终止：先按实收结算，再自动整笔冲正，用户实际不承担费用
+ * （`docs/adr/0004-credit-billing.md`「Outcome decides reversibility, not amount」）。
+ * 其余终态一律按实收——`interrupted` 也是：进程崩溃时 token 确实烧掉了。
  */
 export const platformFaultStopReasons = ['initialization-failed', 'lease-lost'] as const satisfies readonly GenerationStopReason[];
 
@@ -394,19 +408,19 @@ export type AccountAudit = {
 // ---- 准入（票 94；不需要迁移）----
 
 /**
- * 额度不足的唯一错误码：`BusinessError(402, insufficientCreditsCode, …)`。
+ * Credit 不足的唯一错误码：`BusinessError(402, insufficientCreditsCode, …)`。
  * 界面按它识别（不复用 40900 / 40300），服务端只有准入这一处会抛出。
  */
 export const insufficientCreditsCode = 40201;
 
 /**
- * 额度不足的完整文案：说清当前可用 Credit 与下一步。服务端（402 的 message）与界面（首页预检）
+ * Credit 不足的完整文案：说清当前可用 Credit 与下一步。服务端（402 的 message）与界面（首页预检）
  * 共用这一处措辞，界面不再自己拼一遍数字。
  *
- * 支付通道尚未开通，所以唯一可执行的下一步是「联系管理员补充额度」——不给充值/购买入口，
+ * 支付通道尚未开通，所以唯一可执行的下一步是「联系管理员补充 Credit」——不给充值/购买入口，
  * 那是兑现不了的按钮。
  */
 export function insufficientCreditsMessage(available: { quota: number; balance: number; total: number }): string {
   return `当前可用 Credit 为 ${available.total}（${poolLabels.quota} ${available.quota} + ${poolLabels.balance} ${available.balance}），`
-    + '不足以开始新的生成。请联系管理员补充额度后再提交。';
+    + '不足以开始新的生成。请联系管理员补充 Credit 后再提交。';
 }

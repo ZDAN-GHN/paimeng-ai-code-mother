@@ -78,7 +78,7 @@ test('管理员发放后 Owner 的额度条显示余额池与透支线', async (
   const ownerPage = await ownerContext.newPage();
   try {
     await login(ownerPage, ownerAccount);
-    const bar = ownerPage.getByRole('region', { name: '我的 Credit 额度' });
+    const bar = ownerPage.getByRole('region', { name: '我的 Credit 概览' });
     await expect(bar).toContainText('余额池');
     await expect(bar).toContainText('300');
     await expect(bar).toContainText('透支线 6 Credit');
@@ -97,5 +97,5 @@ test('普通用户不能发放，未登录不显示额度条', async ({ page }) 
   expect(response.status()).toBe(403);
 
   await page.goto('/');
-  await expect(page.getByRole('region', { name: '我的 Credit 额度' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: '我的 Credit 概览' })).toHaveCount(0);
 });

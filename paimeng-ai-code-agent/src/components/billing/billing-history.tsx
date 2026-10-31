@@ -7,7 +7,7 @@ import { api } from '@/client/api';
 import { useAuth } from '@/components/providers';
 import { stopReasonLabels } from '@/components/chat/generation-usage';
 import {
-  chargeStatusLabels, creditDenominationLabel, poolLabels,
+  chargeStatusColors, chargeStatusLabels, creditDenominationLabel, poolLabels,
   type BillingChargeView, type ChargeStatus,
 } from '@/shared/billing';
 import type { AppInfo, Page } from '@/shared/contracts';
@@ -18,15 +18,6 @@ import styles from './billing-history.module.css';
 /** 服务端一次最多返回 20 条：账单页只展示最近的，不做分页。 */
 const chargeLimit = 20;
 
-/** 状态色只影响可读性，文案仍来自 `chargeStatusLabels` 这一处。 */
-const statusColors: Record<ChargeStatus, string> = {
-  settled: 'green',
-  estimated: 'orange',
-  partial: 'gold',
-  unpriced: 'default',
-  reversed: 'blue',
-};
-
 function splitOf(entries: { pool: keyof typeof poolLabels; credits: number }[], sign: 1 | -1): string {
   return entries
     .filter(entry => entry.credits * sign > 0)
@@ -35,7 +26,7 @@ function splitOf(entries: { pool: keyof typeof poolLabels; credits: number }[], 
 }
 
 /**
- * Owner 查账（92）：自己的双池额度 + 最近账单。
+ * Owner 查账（92）：自己的双池 Credit balance + 最近账单。
  * 金额一律显示有效金额（Σ entries）：「原扣多少 / 退了多少 / 分哪个池」都来自服务端的分录投影，
  * 界面不自己相加，也不把示例金额说成「还能生成几次」的承诺。
  */
@@ -114,7 +105,7 @@ export function BillingHistory() {
       dataIndex: 'status',
       width: 200,
       render: (_: ChargeStatus, charge) => <div className={styles.tags}>
-        <Tag color={statusColors[charge.status]}>{chargeStatusLabels[charge.status]}</Tag>
+        <Tag color={chargeStatusColors[charge.status]}>{chargeStatusLabels[charge.status]}</Tag>
         {charge.estimated && <Tag color="orange">估算</Tag>}
         {charge.unpriced && <Tag>未定价</Tag>}
       </div>,
@@ -131,7 +122,7 @@ export function BillingHistory() {
   if (!user) {
     return <main className="page-container">
       <div className={styles.login}>
-        <Empty description="登录后可查看自己的 Credit 额度与账单" />
+        <Empty description="登录后可查看自己的 Credit 与账单" />
         <Link href="/user/login?redirect=%2Fbilling"><Button type="primary">去登录</Button></Link>
       </div>
     </main>;

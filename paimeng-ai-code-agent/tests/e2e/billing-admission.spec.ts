@@ -5,7 +5,7 @@ import { appOrigin } from './support/app-origin';
 import { evidencePath } from './support/evidence';
 
 /**
- * 额度不足时的准入提示（票 94，浏览器层）。
+ * Credit 不足时的准入提示（票 94，浏览器层）。
  *
  * 服务端的准入由 `tests/integration/billing/admission.test.ts` 用真库验证；这里只验证界面：
  * 首页「创建并生成」就地拦住、chat 新请求与回答提问失败后给出可用额度与下一步、并保留用户输入。
@@ -15,7 +15,7 @@ import { evidencePath } from './support/evidence';
 
 const origin = appOrigin();
 const prompt = '额度不足的准入测试';
-const zeroMessage = '当前可用 Credit 为 0（配额池 0 + 余额池 0），不足以开始新的生成。请联系管理员补充额度后再提交。';
+const zeroMessage = '当前可用 Credit 为 0（配额池 0 + 余额池 0），不足以开始新的生成。请联系管理员补充 Credit 后再提交。';
 
 const summary = (total: number) => ({
   quota: total, balance: 0, total, purchasedCredits60d: 0, overdraft: 0,
@@ -51,7 +51,7 @@ async function loginWithApp(page: Page, options: { task?: object | null; runtime
   return appId;
 }
 
-test('额度不足时首页就地拦住「创建并生成」，额度到账后重新提交即可', async ({ page }) => {
+test('Credit 不足时首页就地拦住「创建并生成」，Credit 到账后重新提交即可', async ({ page }) => {
   const userAccount = 'ts_admission_home_' + randomUUID().slice(0, 8);
   const credentials = { userAccount, userPassword: 'admission-password', checkPassword: 'admission-password' };
   expect((await page.request.post('/api/user/register', { headers: { origin }, data: credentials })).status()).toBe(200);
@@ -64,10 +64,10 @@ test('额度不足时首页就地拦住「创建并生成」，额度到账后�
 
   const blocked = page.locator('.insufficient-credits');
   await expect(blocked).toBeVisible();
-  await expect(blocked).toContainText('额度不足，无法开始新的生成');
+  await expect(blocked).toContainText('Credit 不足，无法开始新的生成');
   await expect(blocked).toContainText('当前可用 Credit 为 0');
-  await expect(blocked).toContainText('联系管理员补充额度');
-  await expect(blocked.getByRole('link', { name: '查看我的用量与额度' })).toHaveAttribute('href', '/billing');
+  await expect(blocked).toContainText('联系管理员补充 Credit');
+  await expect(blocked.getByRole('link', { name: '查看我的 Credit 与账单' })).toHaveAttribute('href', '/billing');
   // 钱没到账就不该建出一个注定生成不了的空应用，用户写的需求留在输入框里。
   await expect.poll(() => new URL(page.url()).pathname).toBe('/');
   await expect(page.getByLabel('应用描述')).toHaveValue(prompt);
@@ -80,7 +80,7 @@ test('额度不足时首页就地拦住「创建并生成」，额度到账后�
   await expect(page.locator('.insufficient-credits')).toHaveCount(0);
 });
 
-test('App chat 新请求额度不足时给出提示，并保留刚才写的消息', async ({ page }) => {
+test('App chat 新请求 Credit 不足时给出提示，并保留刚才写的消息', async ({ page }) => {
   const appId = await loginWithApp(page);
   await page.route('**/api/app/chat/gen/code', route => route.fulfill({
     status: 402, json: { code: 40201, data: null, message: zeroMessage },
@@ -90,12 +90,12 @@ test('App chat 新请求额度不足时给出提示，并保留刚才写的消�
   const blocked = page.locator('.insufficient-credits');
   await expect(blocked).toBeVisible();
   await expect(blocked).toContainText('当前可用 Credit 为 0');
-  await expect(blocked).toContainText('联系管理员补充额度');
+  await expect(blocked).toContainText('联系管理员补充 Credit');
   // 首次进入的自动发送也一样被拦住，需求原文回到输入框，不会丢。
   await expect(page.getByLabel('对话消息')).toHaveValue(prompt);
   await page.screenshot({ path: evidencePath('billing', 'admission-chat.png'), fullPage: true });
 
-  // 额度到账后再发一次：错误条收起，消息真的发出去了。
+  // Credit 到账后再发一次：错误条收起，消息真的发出去了。
   await page.unroute('**/api/app/chat/gen/code');
   await page.route('**/api/app/chat/gen/code', async route => {
     const response = chatStream('已收到');
@@ -106,7 +106,7 @@ test('App chat 新请求额度不足时给出提示，并保留刚才写的消�
   await expect(page.getByText('已收到', { exact: true })).toBeVisible();
 });
 
-test('回答提问时额度不足同样给出提示，问题继续等着回答', async ({ page }) => {
+test('回答提问时 Credit 不足同样给出提示，问题继续等着回答', async ({ page }) => {
   const question = { id: 'admission-question', prompt: '这一版要保留深色页头吗？', generationId: 'admission-asked' };
   const appId = await loginWithApp(page, {
     task: { id: 'admission-asked', status: 'failed', stopReason: 'question' },
@@ -123,7 +123,7 @@ test('回答提问时额度不足同样给出提示，问题继续等着回答',
 
   const blocked = page.locator('.insufficient-credits');
   await expect(blocked).toBeVisible();
-  await expect(blocked).toContainText('联系管理员补充额度');
+  await expect(blocked).toContainText('联系管理员补充 Credit');
   await expect(page.getByLabel('对话消息')).toHaveValue('保留深色页头');
   await expect(page.locator('.message-question')).toContainText(question.prompt);
 });

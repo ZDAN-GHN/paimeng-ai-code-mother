@@ -4,7 +4,7 @@ import {
   applyBillingMigrations, billingBalancesOf, billingRequest, createBillingUser, envelopeOf,
   grantBillingCredits, loadBillingDatabase, purgeBillingRateCards, seedBillingApp, seedBillingGeneration,
   seedBillingRate, seedBillingStep, withoutMonthlyQuota, type BillingTestUser,
-} from './support';
+} from '../../support/billing';
 import { db, getPool } from '@/server/infra/db';
 import {
   apps, creditAccounts, creditCharges, creditEntries, creditGrants, generations, sessions, users,
@@ -14,7 +14,8 @@ import { settleGenerationBilling } from '@/server/billing/settlement';
 import { platformReversalReason, monthlyQuotaCredits, type BillingChargeView } from '@/shared/billing';
 
 /**
- * 终态归责（04-settlement-design.md §4）：失败与取消按实收，平台自身故障先结算再整笔冲正。
+ * 终态归责（`docs/adr/0004-credit-billing.md`「Outcome decides reversibility, not amount」）：
+ * 失败与取消按实收，平台自身故障先结算再整笔冲正。
  * 金额固定按费率 600 Credit / 1M 未命中输入：「100k 输入 = 60 Credit」，
  * 断言的是账本事实（charge 投影、分池分录、双池余额），不是定价细节——定价在 tests/unit/billing。
  */

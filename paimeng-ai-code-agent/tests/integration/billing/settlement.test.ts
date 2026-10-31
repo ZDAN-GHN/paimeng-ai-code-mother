@@ -10,7 +10,7 @@ import {
   loadBillingDatabase, purgeBillingRateCards, seedBillingApp, seedBillingGeneration, seedBillingRate, seedBillingStep,
   withoutMonthlyQuota,
   type BillingTestUser,
-} from './support';
+} from '../../support/billing';
 import { db, getPool } from '@/server/infra/db';
 import {
   appAuthority, appPreviewPointers, apps, creditAccounts, creditCharges, creditEntries, creditGrants,

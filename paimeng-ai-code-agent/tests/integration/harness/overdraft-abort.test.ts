@@ -15,7 +15,7 @@ import { recordGrant } from '@/server/billing/ledger';
 import { harnessChatResponse } from '@/server/generation/durable-engine';
 import { generationFor } from '@/server/generation/generation-store';
 import { testDatabaseUrl } from '../../support/test-database-url';
-import { applyBillingMigrations, billingRateProvider, purgeBillingRateCards, seedBillingRate } from '../billing/support';
+import { applyBillingMigrations, billingRateProvider, purgeBillingRateCards, seedBillingRate } from '../../support/billing';
 import { baseUrl, freePort, harnessAvailable, postgresReachable, postgresUrl, startHarness, stopHarness, waitHealthy } from './support';
 
 /**

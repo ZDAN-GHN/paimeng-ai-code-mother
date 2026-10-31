@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import {
@@ -9,7 +8,7 @@ import {
   envelopeOf,
   loadBillingDatabase,
   type BillingTestUser,
-} from './support';
+} from '../../support/billing';
 import { db, getPool, now } from '@/server/infra/db';
 import { creditAccounts, creditGrants, sessions, users } from '@/server/infra/schema';
 import { naiveTime, nextPeriodStart, periodOf, periodRange } from '@/server/billing/period';
@@ -22,8 +21,6 @@ import { monthlyQuotaCredits, type AccountSummary } from '@/shared/billing';
  */
 
 const chargeEntryMigration = '012_credit_charge_entry.sql';
-/** `credit_charge` / `credit_entry` 属于结算票的迁移；并行开发期间还没有这个文件时跳过账期归属用例。 */
-const hasChargeEntries = existsSync(new URL(`../../../migrations/${chargeEntryMigration}`, import.meta.url));
 
 const created: BillingTestUser[] = [];
 
@@ -67,18 +64,18 @@ async function summaryOf(user: BillingTestUser): Promise<AccountSummary> {
 
 beforeAll(async () => {
   loadBillingDatabase();
-  await applyBillingMigrations('010_credit_grant_account.sql');
+  // 配额余额是「当期 grant − 当期 quota entry」的重算（`quotaUsageOfPeriod` 直接查 `credit_entry`，
+  // 缺表就是部署没迁移到位），所以配额用例必须把结算表一起应用上。
+  await applyBillingMigrations('010_credit_grant_account.sql', chargeEntryMigration);
 });
 
 afterAll(async () => {
   const ids = created.map(idOf);
-  if (hasChargeEntries && ids.length > 0) {
+  if (ids.length > 0) {
     const scope = sql.join(ids.map(id => sql`${id}`), sql`, `);
     await db().execute(sql`delete from credit_entry
       where charge_id in (select generation_id from credit_charge where user_id in (${scope}))`);
     await db().execute(sql`delete from credit_charge where user_id in (${scope})`);
-  }
-  if (ids.length > 0) {
     await db().delete(creditGrants).where(inArray(creditGrants.userId, ids));
     await db().delete(creditAccounts).where(inArray(creditAccounts.userId, ids));
     await db().delete(sessions).where(inArray(sessions.userId, ids));
@@ -170,11 +167,7 @@ describe('月度配额发放', () => {
   });
 });
 
-describe.skipIf(!hasChargeEntries)('配额的账期归属（需要 credit_charge / credit_entry）', () => {
-  beforeAll(async () => {
-    await applyBillingMigrations(chargeEntryMigration);
-  });
-
+describe('配额的账期归属', () => {
   /** 造一条 Charge 与它的配额 entry；金额为负代表冲正。 */
   async function insertCharge(user: BillingTestUser, at: Date, credits: number[]) {
     const id = randomUUID();

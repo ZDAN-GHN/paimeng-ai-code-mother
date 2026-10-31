@@ -3,7 +3,8 @@ import { generationStopReasons, type GenerationStopReason } from '@/shared/contr
 import { isPlatformFault, platformFaultStopReasons, platformReversalReason } from '@/shared/billing';
 
 /**
- * 终态归责表（04-settlement-design.md §4）：只有平台自身故障整笔冲正，其余终态一律按实收。
+ * 终态归责表（`docs/adr/0004-credit-billing.md`「Outcome decides reversibility, not amount」）：
+ * 只有平台自身故障整笔冲正，其余终态一律按实收。
  * 这张表是纯数据，用全词汇表断言，保证「新增一个停止原因」时不会悄悄落进免费或收费的任何一侧。
  */
 

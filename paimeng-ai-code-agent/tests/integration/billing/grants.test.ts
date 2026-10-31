@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, ne } from 'drizzle-orm';
 import {
   applyBillingMigrations, billingRequest, createBillingUser, envelopeOf, loadBillingDatabase, type BillingTestUser,
-} from './support';
+} from '../../support/billing';
 import { db, getPool } from '@/server/infra/db';
 import { creditAccounts, creditGrants, sessions, users } from '@/server/infra/schema';
 import { accountSnapshot, lockAccounts, recordGrant, rebuildAccount } from '@/server/billing/ledger';
@@ -76,13 +76,22 @@ describe('Credit 发放与双池余额快照', () => {
   it('发放购买后 grant 行与双池快照一致', async () => {
     const admin = await newUser('admin');
     const owner = await newUser();
+    const requestId = randomUUID();
     const granted = await grantCredits({
       userId: owner.id, pool: 'balance', credits: 300, source: 'purchase',
-      note: '首充', requestId: randomUUID(), grantedBy: admin.id,
+      note: '首充', requestId, grantedBy: admin.id,
     });
 
-    expect(granted).toMatchObject({ credits: 300, created: true });
-    const [row] = await db().select().from(creditGrants).where(eq(creditGrants.id, granted.grantId));
+    expect(granted).toMatchObject({
+      created: true,
+      grant: {
+        credits: 300, userId: owner.id, pool: 'balance', source: 'purchase',
+        note: '首充', grantedBy: admin.id, period: null, requestId,
+      },
+    });
+    // 回执里的时间就是账本那一行的提交时间（服务端事实），界面不再用浏览器时钟拼。
+    expect(granted.grant.createTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,6})?$/);
+    const [row] = await db().select().from(creditGrants).where(eq(creditGrants.id, granted.grant.id));
     expect(row).toMatchObject({
       userId: BigInt(owner.id), pool: 'balance', credits: 300, source: 'purchase',
       note: '首充', grantedBy: BigInt(admin.id), period: null, externalRef: null,
@@ -100,7 +109,7 @@ describe('Credit 发放与双池余额快照', () => {
 
     expect(first.created).toBe(true);
     expect(second.created).toBe(false);
-    expect(second.grantId).toBe(first.grantId);
+    expect(second.grant).toEqual(first.grant);
     expect(await grantRows(owner.id)).toHaveLength(1);
     expect(await accountSnapshot(owner.id)).toMatchObject({ balance: 50, total: monthlyQuotaCredits + 50 });
   });
@@ -111,7 +120,7 @@ describe('Credit 发放与双池余额快照', () => {
     await grantCredits({ userId: owner.id, pool: 'balance', credits: 50, source: 'purchase', requestId, grantedBy: owner.id });
     const replay = await grantCredits({ userId: owner.id, pool: 'balance', credits: 5000, source: 'admin_grant', requestId, grantedBy: owner.id });
 
-    expect(replay).toMatchObject({ credits: 50, created: false });
+    expect(replay).toMatchObject({ created: false, grant: { credits: 50, source: 'purchase' } });
     expect(await accountSnapshot(owner.id)).toMatchObject({ balance: 50 });
   });
 
@@ -121,7 +130,7 @@ describe('Credit 发放与双池余额快照', () => {
     const same = await Promise.all(Array.from({ length: 4 }, () =>
       grantCredits({ userId: owner.id, pool: 'balance', credits: 100, source: 'purchase', requestId, grantedBy: owner.id })));
     expect(same.filter(result => result.created)).toHaveLength(1);
-    expect(new Set(same.map(result => result.grantId)).size).toBe(1);
+    expect(new Set(same.map(result => result.grant.id)).size).toBe(1);
 
     await Promise.all([
       grantCredits({ userId: owner.id, pool: 'balance', credits: 7, source: 'admin_grant', requestId: randomUUID(), grantedBy: owner.id }),
@@ -221,11 +230,19 @@ describe('Credit 发放与双池余额快照', () => {
     const requestId = randomUUID();
     const granted = await envelopeOf<GrantReceipt>(await billingRequest('admin/billing/grant', { ...body, requestId }, admin.cookie));
     expect(granted.code).toBe(0);
-    expect(granted.data).toMatchObject({ credits: 260, created: true });
-    expect(granted.data.grantId).toMatch(/^[0-9a-f-]{36}$/);
+    // 回执整份来自服务端：金额、池、来源、备注、操作人与提交时间都不由界面拼。
+    expect(granted.data).toMatchObject({
+      created: true,
+      grant: {
+        credits: 260, userId: owner.id, pool: 'balance', source: 'purchase', note: '后台发放',
+        grantedBy: admin.id, period: null, requestId,
+      },
+    });
+    expect(granted.data.grant.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(granted.data.grant.createTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,6})?$/);
 
     const replay = await envelopeOf<GrantReceipt>(await billingRequest('admin/billing/grant', { ...body, requestId }, admin.cookie));
-    expect(replay.data).toMatchObject({ grantId: granted.data.grantId, created: false });
+    expect(replay.data).toMatchObject({ created: false, grant: { id: granted.data.grant.id, credits: 260 } });
     expect(await accountSnapshot(owner.id)).toMatchObject({ balance: 260, total: monthlyQuotaCredits + 260 });
   });
 

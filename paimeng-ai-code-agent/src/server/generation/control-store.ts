@@ -9,7 +9,7 @@ import {
   generationTransitions, generations,
   type AttemptKind, type AttemptStatus, type AuthorityState, type ExecutionStatus, type InputMode, type InputStatus,
 } from '../infra/schema';
-// 计费只从控制侧 import billing：billing 反向 import 本模块会成环。
+// 收束的 Generation 在提交后要补一次结算；billing 侧不 import 本模块（否则终态路径 import 计费就成环），它只读表。
 import { settleGenerationBilling } from '../billing/settlement';
 
 /**

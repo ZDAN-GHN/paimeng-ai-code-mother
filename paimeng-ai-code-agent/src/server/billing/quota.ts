@@ -48,12 +48,13 @@ async function rebuildQuotaPool(tx: Transaction, userId: bigint, period: string)
 
 /**
  * 某个账期里 Charge 在配额池上的净扣减。entry 不归账期，归属看父 Charge 的 `create_time`
- * （04-settlement-design §5）：所以冲正老账期 Charge 的反向 entry 仍记在老账期，不会让过期配额复活。
+ * （`ledger.ts` 的 `expectedBalancesOf` 是同一口径的另一处表达）：所以冲正老账期 Charge 的反向 entry
+ * 仍记在老账期，不会让过期配额复活。
  *
- * `credit_charge` / `credit_entry` 由结算票的迁移建立，本文件只读不建；两张表还不存在时按 0 计。
+ * `credit_charge` / `credit_entry` 由 `012_credit_charge_entry.sql` 建立，本文件只读不建；
+ * 迁移保证两张表存在，所以缺表就是部署没迁移到位，让它直接报错而不是默默地按 0 处理。
  */
 async function quotaUsageOfPeriod(tx: Transaction, userId: bigint, period: string): Promise<number> {
-  if (!await hasCreditEntries(tx)) return 0;
   const { start, end } = periodRange(period);
   const result = await tx.execute(sql`select coalesce(sum(entry.credits), 0) as credits
     from credit_entry entry
@@ -63,11 +64,6 @@ async function quotaUsageOfPeriod(tx: Transaction, userId: bigint, period: strin
       and charge.create_time >= ${naiveTime(start)}
       and charge.create_time < ${naiveTime(end)}`);
   return Number(result.rows[0]?.credits ?? 0);
-}
-
-async function hasCreditEntries(tx: Transaction): Promise<boolean> {
-  const result = await tx.execute(sql`select to_regclass('public.credit_entry') as name`);
-  return result.rows[0]?.name != null;
 }
 
 /**

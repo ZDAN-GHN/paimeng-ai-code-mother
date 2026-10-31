@@ -79,10 +79,10 @@ test('被透支熔断中止：中断说明 + 停止原因 + 最终账单三处�
   await expect(note).toBeVisible();
   await expect(note).toContainText('生成中断：已超出透支线，生成已中止');
 
-  // 账单行说的是「超出可用额度」而不是「生成失败」，并给出实收金额与分池明细。
+  // 账单行说的是「超出透支线」而不是「生成失败」，并给出实收金额与分池明细。
   const credit = page.locator('.generation-credit').first();
   await expect(credit).toBeVisible();
-  await expect(credit).toContainText('本次生成因超出可用额度被中止，已按实际用量扣费 900 Credit');
+  await expect(credit).toContainText('本次生成因超出透支线被中止，已按实际用量扣费 900 Credit');
   await expect(credit).toContainText('配额池 500');
   await expect(credit).toContainText('余额池 400');
   // 不是平台故障：不能显示成「已全额退还」。
@@ -90,10 +90,10 @@ test('被透支熔断中止：中断说明 + 停止原因 + 最终账单三处�
 
   // 用量块的停止原因也要是新文案，与「生成失败」区分开。
   const usage = page.locator('.generation-usage').first();
-  await expect(usage).toContainText('额度不足，已中止');
+  await expect(usage).toContainText('超出透支线，已中止');
 
   // 当前余额就在页面顶部：欠款 −400 与账单对得上。
-  const balance = page.getByLabel('我的 Credit 额度');
+  const balance = page.getByLabel('我的 Credit 概览');
   await expect(balance).toBeVisible();
   await expect(balance).toContainText('合计');
   await expect(balance).toContainText('-400');

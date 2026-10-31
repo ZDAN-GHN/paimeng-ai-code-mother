@@ -303,7 +303,7 @@ function Chat({ id }: { id: string }) {
     onFinish: async () => { await refresh(); },
     onError: e => {
       if (!mounted.current) return;
-      // 额度不足单独渲染：它有自己的下一步（联系管理员补充额度），盖掉普通的请求失败文案。
+      // Credit 不足单独渲染：它有自己的下一步（联系管理员补充 Credit），盖掉普通的请求失败文案。
       if (isInsufficientCredits(e)) {
         creditRejected.current = true;
         setCreditError(e.message);
@@ -370,6 +370,11 @@ function Chat({ id }: { id: string }) {
   // 最后一条助手气泡：`data-steer` 只给 part 数，分段要落到那一刻正在流的那条气泡上。
   useEffect(() => { lastAssistantId.current = [...messages].reverse().find(message => message.role === 'assistant')?.id ?? null; }, [messages]);
   const taskStatus = task?.status;
+  /**
+   * 额度条的刷新键：生成进入终态后重取一次双池余额（结算发生在那之后），否则额度条会停在开跑前的数。
+   * `updateTime` 让同一任务的下一次终态（继续生成/重试）也能触发重取。
+   */
+  const creditRefreshToken = `${task?.id ?? ''}:${taskStatus ?? ''}:${task?.updateTime ?? ''}`;
   // 每次生成结束时取一次用量：一条助手回复对应一次生成，按消息 id 挂到气泡上；生成中不轮询明细。
   const assetUrl = useCallback((path: string) => '/api/app/asset?appId=' + encodeURIComponent(id) + '&path=' + encodeURIComponent(path), [id]);
   const refreshUsage = useCallback(async () => {
@@ -809,7 +814,7 @@ function Chat({ id }: { id: string }) {
       {app?.codeGenType && <Tag color="blue">{formatCodeGenType(app.codeGenType)}</Tag>}
       {task && statusLabel && <Tag color={statusColor}>{statusLabel}</Tag>}
       <Space wrap>
-        <CreditBalance />
+        <CreditBalance refreshToken={creditRefreshToken} />
         {!previewShown && <Button icon={<DesktopOutlined aria-hidden="true" />} onClick={togglePreview}>网页展示</Button>}
         <Button icon={<InfoCircleOutlined aria-hidden="true" />} disabled={!app} onClick={() => setDetailOpen(true)}>应用详情</Button>
         <Button icon={<HistoryOutlined aria-hidden="true" />} disabled={!app} onClick={() => setVersionOpen(true)}>版本</Button>

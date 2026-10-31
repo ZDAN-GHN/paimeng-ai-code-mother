@@ -73,7 +73,7 @@ export function ReconcilePanel() {
         <Button loading={loading} onClick={() => void reload()}>刷新待处理</Button>
       </Space>
     </div>
-    {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
+    {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />}
     <Table<PendingSettlementItem>
       rowKey="generationId"
       size="small"

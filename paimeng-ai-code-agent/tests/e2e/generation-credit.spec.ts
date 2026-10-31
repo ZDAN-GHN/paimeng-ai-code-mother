@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 
 /**
- * 每次生成结束后的 Credit 行（docs/specs/credit-billing.md「界面上必须出现的三件事」第 1 条）。
+ * 每次生成结束后的 Credit 行（组件在 `src/components/chat/generation-credit.tsx`）。
  * 全部走 `page.route` 打桩：这里只验证渲染与状态文案，不验证结算——结算在
  * tests/integration/billing/{settlement,failures}.test.ts 里对真库断言。
  *

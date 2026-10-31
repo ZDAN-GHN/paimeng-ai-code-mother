@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { loadEnvFile } from 'node:process';
 import { readFile } from 'node:fs/promises';
 import { and, eq, inArray } from 'drizzle-orm';
-import { testDatabaseUrl } from '../../support/test-database-url';
+import { testDatabaseUrl } from './test-database-url';
 import { GET, POST } from '@/app/api/[...path]/route';
 import { db, getPool, now } from '@/server/infra/db';
 import { nextSnowflakeId } from '@/server/infra/snowflake';
@@ -16,6 +16,8 @@ import type { WorkspaceApp } from '@/server/workspace/workspace';
 /**
  * 计费集成测试的共享入口：只操作隔离的 `_test` 库，迁移可重复执行。
  * 与 `tests/integration/generation/generation-budget.test.ts` 同一套做法，抽出来避免每个文件复制一份。
+ * 它同时被 `tests/integration/billing/` 与 `tests/integration/harness/` 使用，所以按 `tests/AGENTS.md`
+ * 的「跨套件 helper 放 `tests/support/`」放在这里。
  */
 
 const duplicateCodes = new Set(['42P07', '42701', '42710', '42P06']);
@@ -94,7 +96,7 @@ export async function createBillingUser(options: { role?: 'user' | 'admin' } = {
 // ---- 账单夹具 ----
 //
 // 结算与归责用例只需要「一个 App + 若干终态 Generation + 步骤行 + 费率 + 余额」，
-// 这些造数助手放在这里复用，避免每个账单测试文件各抄一份（00-brief.md「不要复制粘贴第三份」）。
+// 这些造数助手放在这里复用，避免每个账单测试文件各抄一份。
 // 它们只写数据、不做断言；清理由各文件的 afterAll 负责（费率行除外，见 purgeBillingRateCards）。
 
 export const billingRateProvider = 'billing-fixture';

@@ -32,11 +32,12 @@ const purchaseWindowMs = 60 * 86_400_000;
 const maxOverdraftCredits = 500;
 
 /**
- * 近 60 天购买窗口的起点：滚动 60×24 小时之前，UTC 朴素时间戳（与 `now()` 同格式）。
- * 与 `create_time` 比较用严格大于；「现在」由调用方传入，纯函数里不读时钟。
+ * 近 60 天购买窗口的起点：滚动 60×24 小时之前，UTC 朴素时间戳（`period.ts` 的 `naiveTime`，与 `now()` 同格式）。
+ * 与 `create_time` 比较用严格大于。窗口的「现在」一律由调用方传入（`accountSnapshot` 的参数透传到这里）——
+ * 默认值只为调用方便，用例里全部传显式时刻。
  */
 export function purchaseWindowStart(asOf: Date = new Date()): string {
-  return new Date(asOf.getTime() - purchaseWindowMs).toISOString().slice(0, 23).replace('T', ' ');
+  return naiveTime(new Date(asOf.getTime() - purchaseWindowMs));
 }
 
 /** Overdraft = min(近 60 天 purchase 入账总额 × 2%, 500)。它是熔断线，不是准入额度，也不加最低保底。 */
@@ -93,8 +94,8 @@ export async function lockAccounts(tx: Transaction, userId: bigint): Promise<Cre
 }
 
 /**
- * 账本事实推出的两池余额（04-settlement-design.md §5）。`credit_account` 只是这份事实的快照，
- * 所以差异由 93 的 `auditAccount` 报告，修复 = 用这份事实重写快照（`rebuildAccount`）。
+ * 账本事实推出的两池余额（口径与核对命令见 `docs/billing-operations.md`「余额核对与修复」）。
+ * `credit_account` 只是这份事实的快照，所以差异由 `auditAccount` 报告，修复 = 用这份事实重写快照（`rebuildAccount`）。
  *
  * - 配额池：只算**当前北京账期**的 `monthly_quota` grant 与当期 Charge 的 quota 分录净额；
  *   老账期没用完的配额已经失效，不能结转。
@@ -331,13 +332,13 @@ export type ReversalResult = {
 
 /**
  * 幂等整笔冲正：为每条还没有反向分录的 entry 追加一条同池、同额取负、`reversal_of` 指向原行的分录，
- * 再把 charge 投影重算一次（04-settlement-design.md §4）。只追加、不改历史行。
+ * 再把 charge 投影重算一次（`reprojectCharge`）。只追加、不改历史行。
  *
  * 两个容易写错的地方：
  * - 先 `FOR UPDATE` 锁住 charge 行、再锁两池账户：两个并发冲正撞在同一笔账单上时，第二个进来
  *   已经看不到「未冲正的分录」，不会退两次钱。
- * - quota 池按账期归属（§5）：只有还在当前北京月的 Charge 才把配额退回去；老账期的反向分录照样落库，
- *   但不动当前配额池余额——否则已过期的配额会复活成新额度。
+ * - quota 池按账期归属（见 `expectedBalancesOf`）：只有还在当前北京月的 Charge 才把配额退回去；
+ *   老账期的反向分录照样落库，但不动当前配额池余额——否则已过期的配额会复活成新额度。
  */
 export async function reverseCharge(chargeId: string, input: ReversalInput): Promise<ReversalResult> {
   return db().transaction(tx => reverseChargeTx(tx, chargeId, input));

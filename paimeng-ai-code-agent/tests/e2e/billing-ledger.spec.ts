@@ -135,7 +135,7 @@ test('Owner 在 /billing 看到有效金额、分池明细与面额说明', asyn
 
   await page.goto('/billing');
   await expect(page.getByRole('heading', { name: '我的账单' })).toBeVisible();
-  await expect(page.getByRole('region', { name: '我的 Credit 额度' })).toContainText('配额池');
+  await expect(page.getByRole('region', { name: '我的 Credit 概览' })).toContainText('配额池');
 
   const row = page.getByRole('row').filter({ hasText: generationId });
   await expect(row).toContainText('账单演示应用');
@@ -186,7 +186,7 @@ test('Admin 查用户用量并整笔冲正：成本未知可辨识、冲正后�
 
 test('权限：未登录看不了账单页，普通用户读不到别人的用量', async ({ page }) => {
   await page.goto('/billing');
-  await expect(page.getByText('登录后可查看自己的 Credit 额度与账单')).toBeVisible();
+  await expect(page.getByText('登录后可查看自己的 Credit 与账单')).toBeVisible();
 
   const account = 'e2e_ledger_plain_' + randomUUID().slice(0, 8);
   const userId = await register(page, account);

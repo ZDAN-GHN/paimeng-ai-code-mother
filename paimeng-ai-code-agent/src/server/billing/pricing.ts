@@ -2,8 +2,9 @@ import type { ChargeStatus, RateCardVersionKey, RateCardView, UsageSnapshotStep 
 import { resolveRate } from './rate-card';
 
 /**
- * 计价：`步骤用量 + 每步费率 → 整数 Credit + USD 成本`（docs/specs/credit-billing.md「结算」、
- * 04-settlement-design.md §2）。纯函数，不碰数据库；「按哪个费率版本」由调用方先解析好再传进来。
+ * 计价：`步骤用量 + 每步费率 → 整数 Credit + USD 成本`（折算单位与 3 倍 Markup 见
+ * `docs/adr/0004-credit-billing.md`「Usage converts to Credit through a Rate card」）。
+ * 纯函数，不碰数据库；「按哪个费率版本」由调用方先解析好再传进来。
  *
  * 三条不能动的账务规则：
  * 1. 只算 `kind = 'model'` 的步骤（调用方筛行）；cacheWrite 与 reasoning 不单独计价
@@ -51,7 +52,7 @@ export type PricingResult = {
 };
 
 /**
- * 费率候选键的固定顺序（04-settlement-design.md「补充决策 4」）：
+ * 费率候选键的固定顺序（为什么不能只认 (provider_id, model_name)：见下一段）：
  * 1. (provider_id, model_name)　2. (provider_id 去掉 `#…` 后缀, model_name)
  * 3. (provider_id, upstream_model_id)　4. (provider_id 去后缀, upstream_model_id)
  *

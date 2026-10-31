@@ -5,7 +5,7 @@ Credit 有两个运维面：**月度配额**（发放、补发、查账）与**�
 
 ## 月度配额
 
-按 [ADR-0004](adr/0004-credit-billing.md) 与规格 [`credit-billing`](specs/credit-billing.md) 的「配额」一节实现的月度配额，操作面只有三件事：什么时候发、怎么补、怎么核对。代码在 `src/server/billing/quota.ts`。
+按 [ADR-0004](adr/0004-credit-billing.md) 的「Two pools, deducted quota first」实现的月度配额，操作面只有三件事：什么时候发、怎么补、怎么核对。代码在 `src/server/billing/quota.ts`。
 
 ### 账期口径
 
@@ -62,7 +62,7 @@ docker exec -i zslm-postgres psql -U postgres -d paimeng_app -c \
 
 ## 补结算与余额对账
 
-终态事务已提交、结算没落地（或进程正好在两者之间被杀）的 Generation 不会自己产生账单——没有别的路径会再通知计费。补结算把这类漏账补上，并给「缺费率」「晚到用量」的账单补差额。代码在 `src/server/billing/settlement.ts`；账本口径见 `docs/specs/credit-billing.md` 与 `04-settlement-design.md`。
+终态事务已提交、结算没落地（或进程正好在两者之间被杀）的 Generation 不会自己产生账单——没有别的路径会再通知计费。补结算把这类漏账补上，并给「缺费率」「晚到用量」的账单补差额。代码在 `src/server/billing/settlement.ts`；账本口径见 `src/server/billing/ledger.ts` 的注释与 [ADR-0004](adr/0004-credit-billing.md)。
 
 ### 扫描口径
 

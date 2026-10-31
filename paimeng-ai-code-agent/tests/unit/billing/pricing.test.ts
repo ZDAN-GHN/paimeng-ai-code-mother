@@ -3,8 +3,8 @@ import { candidateRateKeys, priceSteps, resolveStepRate, type PricedStep, type R
 import type { RateCardView } from '@/shared/billing';
 
 /**
- * 计价接缝：纯函数、无数据库（docs/specs/credit-billing.md「Testing Decisions」第 2 条）。
- * 这里断言的规则全部来自 docs/specs/credit-billing.md 与 04-settlement-design.md §2：
+ * 计价接缝：纯函数、无数据库（`docs/adr/0004-credit-billing.md` 的 Credit 折算 + `pricing.ts` 的接口）。
+ * 这里断言的规则全部来自 `src/server/billing/pricing.ts` 的注释与 ADR-0004：
  * 三类 token 分开乘、整数累加、总额层四舍五入一次、缓存与推理不重复计价、缺用量估算、缺费率为待处理。
  */
 

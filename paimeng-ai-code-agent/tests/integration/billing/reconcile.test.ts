@@ -6,7 +6,7 @@ import {
   applyBillingMigrations, billingBalancesOf, billingRequest, createBillingUser, envelopeOf, grantBillingCredits,
   loadBillingDatabase, purgeBillingRateCards, seedBillingApp, seedBillingGeneration, seedBillingRate, seedBillingStep,
   type BillingTestUser,
-} from './support';
+} from '../../support/billing';
 import { db, getPool, type Transaction } from '@/server/infra/db';
 import * as schema from '@/server/infra/schema';
 import {
@@ -214,6 +214,33 @@ describe('对账扫描：待处理与后补', () => {
     expect(again.scanned).toBe(0);
     expect(await entriesOfCharge(generationId)).toHaveLength(2);
     expect(await effectiveCreditsOf(generationId)).toBe(stepCredits * 2);
+    expect(await totalCreditsOf(owner.id)).toBe(before - stepCredits);
+  });
+
+  it('estimated 账单加一个新步骤后补一次差额，第二次扫描不再新增', async () => {
+    const owner = await newUser();
+    await seedRate({ modelName: 'reconcile-estimated-late' });
+    await grant(owner.id, 'balance', 200);
+    const app = await newApp(owner);
+    const generationId = await seedGeneration({ appId: app.id, userId: owner.id });
+    // 第一步有真实用量当样本，第二步缺用量：账单是 estimated，两步各按 60 Credit 计。
+    await seedStep(generationId, { modelName: 'reconcile-estimated-late', input: 100_000, stepNumber: 0 });
+    await seedStep(generationId, { modelName: 'reconcile-estimated-late', input: null, cacheRead: null, output: null, stepNumber: 1 });
+    await settleGenerationBilling(generationId);
+    expect(await chargeRows(generationId)).toMatchObject([{ status: 'estimated', credits: stepCredits * 2 }]);
+    const before = await totalCreditsOf(owner.id);
+
+    // 结算之后才落库的第三步：estimated 不是终态，扫描同样要给它补差额。
+    await seedStep(generationId, { modelName: 'reconcile-estimated-late', input: 100_000, stepNumber: 2 });
+    const run = await reconcileSettlements({ userId: owner.id });
+
+    expect(run.results[0]).toMatchObject({ generationId, outcome: 'retried' });
+    expect(await effectiveCreditsOf(generationId)).toBe(stepCredits * 3);
+    expect(await totalCreditsOf(owner.id)).toBe(before - stepCredits);
+
+    const again = await reconcileSettlements({ userId: owner.id });
+    expect(again.scanned).toBe(0);
+    expect(await effectiveCreditsOf(generationId)).toBe(stepCredits * 3);
     expect(await totalCreditsOf(owner.id)).toBe(before - stepCredits);
   });
 
