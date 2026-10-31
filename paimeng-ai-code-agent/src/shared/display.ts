@@ -40,3 +40,17 @@ export function formatStoredTime(value: string | null | undefined, fallback = ''
   if (!date) return fallback;
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
+
+const beijingOffsetMs = 8 * 60 * 60 * 1000;
+
+/**
+ * 按北京时间（固定 UTC+8，无夏令时）显示存储时间（YYYY-MM-DD HH:mm）。
+ * 账期到期这类「按北京自然月定义」的事实不能走 formatStoredTime：那按浏览器时区显示，
+ * 人在别的时区会看到月底不清零的假象。
+ */
+export function formatBeijingTime(value: string | null | undefined, fallback = ''): string {
+  const date = parseStoredTime(value);
+  if (!date) return fallback;
+  const beijing = new Date(date.getTime() + beijingOffsetMs);
+  return `${beijing.getUTCFullYear()}-${pad(beijing.getUTCMonth() + 1)}-${pad(beijing.getUTCDate())} ${pad(beijing.getUTCHours())}:${pad(beijing.getUTCMinutes())}`;
+}

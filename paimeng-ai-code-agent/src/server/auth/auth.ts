@@ -6,6 +6,7 @@ import { db, now } from '../infra/db';
 import { nextSnowflakeId } from '../infra/snowflake';
 import { sessions, users } from '../infra/schema';
 import { hashPassword, verifyPassword, tokenHash } from './password';
+import { ensurePeriodQuota } from '../billing/quota';
 import { BusinessError, success } from '../infra/http';
 import { getConfig } from '../infra/config';
 import type { User } from '@/shared/contracts';
@@ -23,7 +24,10 @@ export async function requireUser(req:Request){return (await currentUser(req))!;
 export async function requireAdmin(req:Request){const user=await requireUser(req);if(user.userRole!=='admin')throw new BusinessError(403,40300,'需要管理员权限');return user;}
 const credentials=z.object({userAccount:z.string().min(4).max(256).refine(v=>Boolean(v.trim()),'账号不能为空'),userPassword:z.string().min(8).max(128).refine(v=>Boolean(v.trim()),'密码不能为空')});
 export async function register(raw:unknown){const value=credentials.extend({checkPassword:z.string()}).parse(raw);if(value.checkPassword!==value.userPassword)throw new BusinessError(400,40000,'两次密码不一致');
- try{const password=await hashPassword(value.userPassword);const id=await nextSnowflakeId();await db().insert(users).values({id,userAccount:value.userAccount,userPassword:password,userName:'无名',userRole:'user',createTime:now(),updateTime:now()});return id.toString();}catch(error){const code=(error as {cause?:{code?:string};code?:string}).cause?.code??(error as {code?:string}).code;if(code==='23505'){const [duplicate]=await db().select({id:users.id}).from(users).where(eq(users.userAccount,value.userAccount)).limit(1);if(duplicate)throw new BusinessError(409,40000,'账号已存在');}throw error;}}
+ try{const password=await hashPassword(value.userPassword);const id=await nextSnowflakeId();await db().insert(users).values({id,userAccount:value.userAccount,userPassword:password,userName:'无名',userRole:'user',createTime:now(),updateTime:now()});
+  // 注册即得当月配额。发放失败不能让注册失败：读额度摘要时会再确保一次，重跑也幂等。
+  try{await ensurePeriodQuota(id.toString());}catch(error){console.error('注册发放月度配额失败',id.toString(),error);}
+  return id.toString();}catch(error){const code=(error as {cause?:{code?:string};code?:string}).cause?.code??(error as {code?:string}).code;if(code==='23505'){const [duplicate]=await db().select({id:users.id}).from(users).where(eq(users.userAccount,value.userAccount)).limit(1);if(duplicate)throw new BusinessError(409,40000,'账号已存在');}throw error;}}
 export async function login(raw:unknown){const value=credentials.parse(raw);const [row]=await db().select().from(users).where(and(eq(users.userAccount,value.userAccount),eq(users.isDelete,0))).limit(1);
  if(!row||!await verifyPassword(value.userPassword,row.userPassword))throw new BusinessError(400,40000,'账号或密码错误');
  if(!row.userPassword.startsWith('scrypt$'))await db().update(users).set({userPassword:await hashPassword(value.userPassword),updateTime:now()}).where(eq(users.id,row.id));

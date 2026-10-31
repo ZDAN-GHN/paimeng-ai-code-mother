@@ -8,6 +8,7 @@ import {
   applyBillingMigrations, billingBalancesOf, billingRateProvider, billingRequest, createBillingUser, envelopeOf,
   grantBillingCredits,
   loadBillingDatabase, purgeBillingRateCards, seedBillingApp, seedBillingGeneration, seedBillingRate, seedBillingStep,
+  withoutMonthlyQuota,
   type BillingTestUser,
 } from './support';
 import { db, getPool } from '@/server/infra/db';
@@ -22,7 +23,7 @@ import { acquireAuthority, ensureAuthority, markInputResolved } from '@/server/g
 import { failOrCancel, publishReady, recoverGeneration, startGeneration } from '@/server/generation/generation-lifecycle';
 import { purgeVersions } from '@/server/versioning/version-store';
 import { workspace, type WorkspaceApp } from '@/server/workspace/workspace';
-import type { BillingChargeView } from '@/shared/billing';
+import { monthlyQuotaCredits, type BillingChargeView } from '@/shared/billing';
 
 /**
  * 结算接缝（主）：真 Postgres 断言账本——charge 行、分池 entry、双池余额、幂等与并发，
@@ -126,7 +127,7 @@ async function chargesOf(session: string, appId: string, limit?: number) {
 
 describe('结算：一次 Generation 一份 Charge、分池 entry、双池余额', () => {
   it('先扣配额再扣余额，配额不负、余额可为负，charge 是 entries 的投影', async () => {
-    const owner = await newUser();
+    const owner = await withoutMonthlyQuota(await newUser());
     await seedRate({ modelName: 'model-pools' });
     await grant(owner.id, 'quota', 100);
     await grant(owner.id, 'balance', 10);
@@ -155,7 +156,7 @@ describe('结算：一次 Generation 一份 Charge、分池 entry、双池余额
   });
 
   it('配额为零时只扣余额，余额可以变成欠款', async () => {
-    const owner = await newUser();
+    const owner = await withoutMonthlyQuota(await newUser());
     await seedRate({ modelName: 'model-debt' });
     await grant(owner.id, 'balance', 5);
     const app = await newApp(owner);
@@ -187,7 +188,7 @@ describe('结算：一次 Generation 一份 Charge、分池 entry、双池余额
     expect(charges).toHaveLength(1);
     expect(charges[0].credits).toBe(60);
     expect(await entriesOfCharge(charges[0].generationId)).toHaveLength(1);
-    expect(await balancesOf(owner.id)).toEqual({ quota: 940, balance: 0 });
+    expect(await balancesOf(owner.id)).toEqual({ quota: monthlyQuotaCredits + 1000 - 60, balance: 0 });
   });
 
   it('只有 build 步骤的终态也写一条 0 Credit 的 charge，不写 entry', async () => {
@@ -204,7 +205,23 @@ describe('结算：一次 Generation 一份 Charge、分池 entry、双池余额
     const [charge] = await chargeRows(generationId);
     expect(charge).toMatchObject({ credits: 0, status: 'settled', estimatedSteps: 0 });
     expect(await entriesOfCharge(charge.generationId)).toHaveLength(0);
-    expect(await balancesOf(owner.id)).toEqual({ quota: 100, balance: 0 });
+    expect(await balancesOf(owner.id)).toEqual({ quota: monthlyQuotaCredits + 100, balance: 0 });
+  });
+
+  it('注册即得的当期配额先于余额池被扣减', async () => {
+    const owner = await newUser();
+    await seedRate({ modelName: 'model-signup' });
+    await grant(owner.id, 'balance', 100);
+    const app = await newApp(owner);
+    const generationId = await seedGeneration({ appId: app.id, userId: owner.id });
+    // 50k 未命中输入 × 600 / 1M = 30 Credit
+    await seedStep(generationId, { modelName: 'model-signup', input: 50_000 });
+
+    await settleGenerationBilling(generationId);
+
+    expect((await entriesOfCharge(generationId)).map(entry => ({ pool: entry.pool, credits: entry.credits })))
+      .toEqual([{ pool: 'quota', credits: 30 }]);
+    expect(await balancesOf(owner.id)).toEqual({ quota: monthlyQuotaCredits - 30, balance: 100 });
   });
 
   it('非终态的 generation 不结算', async () => {
@@ -232,7 +249,7 @@ describe('结算：一次 Generation 一份 Charge、分池 entry、双池余额
     expect(charge).toMatchObject({ credits: 0, status: 'unpriced', estimatedSteps: 0 });
     expect(charge.usageSnapshot).toMatchObject([{ priced: false, estimated: false, input: 100_000 }]);
     expect(await entriesOfCharge(charge.generationId)).toHaveLength(0);
-    expect(await balancesOf(owner.id)).toEqual({ quota: 0, balance: 50 });
+    expect(await balancesOf(owner.id)).toEqual({ quota: monthlyQuotaCredits, balance: 50 });
   });
 
   it('用量缺失时按已知步骤均值估算，账单标记 estimated 并保留估算依据', async () => {
@@ -253,7 +270,7 @@ describe('结算：一次 Generation 一份 Charge、分池 entry、双池余额
       { estimated: false, sampleSteps: 1 },
       { estimated: true, sampleSteps: 1, input: null, billedInput: 1_000, billedOutput: 400 },
     ]);
-    expect(await balancesOf(owner.id)).toEqual({ quota: 0, balance: 97 });
+    expect(await balancesOf(owner.id)).toEqual({ quota: monthlyQuotaCredits - 3, balance: 100 });
   });
 });
 
@@ -284,7 +301,7 @@ describe('终态路径都接上了结算', () => {
     const charges = await chargeRows(started.generationId);
     expect(charges).toHaveLength(1);
     expect(charges[0]).toMatchObject({ credits: 60, status: 'settled' });
-    expect(await balancesOf(owner.id)).toEqual({ quota: 940, balance: 0 });
+    expect(await balancesOf(owner.id)).toEqual({ quota: monthlyQuotaCredits + 1000 - 60, balance: 0 });
   });
 
   it('没有源码改动（no-changes）同样结算', async () => {
@@ -309,7 +326,7 @@ describe('终态路径都接上了结算', () => {
 
     const [charge] = await chargeRows(started.generationId);
     expect(charge).toMatchObject({ credits: 30, status: 'settled' });
-    expect(await balancesOf(owner.id)).toEqual({ quota: 0, balance: 70 });
+    expect(await balancesOf(owner.id)).toEqual({ quota: monthlyQuotaCredits - 30, balance: 100 });
   });
 
   it('取消（cancelled）也结算，并把 messageId 带到 generation 上', async () => {
@@ -364,7 +381,7 @@ describe('终态路径都接上了结算', () => {
     const charges = await chargeRows(started.generationId);
     expect(charges).toHaveLength(1);
     expect(charges[0].credits).toBe(30);
-    expect(await balancesOf(owner.id)).toEqual({ quota: 0, balance: 70 });
+    expect(await balancesOf(owner.id)).toEqual({ quota: monthlyQuotaCredits - 30, balance: 100 });
   });
 
   it('接管写权限时被收束的多条 generation 全部结算', async () => {
@@ -391,7 +408,7 @@ describe('终态路径都接上了结算', () => {
       expect(charges).toHaveLength(1);
       expect(charges[0].credits).toBe(60);
     }
-    expect(await balancesOf(owner.id)).toEqual({ quota: 880, balance: 0 });
+    expect(await balancesOf(owner.id)).toEqual({ quota: monthlyQuotaCredits + 1000 - 120, balance: 0 });
   });
 });
 
