@@ -465,11 +465,14 @@ describe('GET billing/charges：只读自己的 App，成本只给 Admin', () =>
     expect(envelope.data[0].costUsd).toBe('0.000900');
   });
 
-  it('limit 上限 20、缺 appId 一律 400', async () => {
+  it('limit 上限 20；缺 appId 时返回自己的全部账单', async () => {
     const owner = await newUser();
     const app = await newApp(owner);
     expect((await chargesOf(owner.cookie, app.id, 0)).status).toBe(400);
     expect((await chargesOf(owner.cookie, app.id, 21)).status).toBe(400);
-    expect((await billingRequest('billing/charges', undefined, owner.cookie)).status).toBe(400);
+    expect((await billingRequest('billing/charges?limit=21', undefined, owner.cookie)).status).toBe(400);
+    const all = await envelopeOf<BillingChargeView[]>(await billingRequest('billing/charges', undefined, owner.cookie));
+    expect(all.code).toBe(0);
+    expect(all.data).toEqual([]);
   });
 });

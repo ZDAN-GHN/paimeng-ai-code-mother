@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { App, Button, Descriptions, Form, Input, InputNumber, Select, Tag } from 'antd';
+import { App, Button, Descriptions, Form, Input, InputNumber, Select, Tabs, Tag } from 'antd';
 import { api } from '@/client/api';
 import { AdminGuard, useAuth } from '@/components/providers';
 import { formatStoredTime } from '@/shared/display';
@@ -9,6 +9,7 @@ import {
   type CreditGrantView, type GrantReceipt, type GrantSource,
 } from '@/shared/billing';
 import { CreditBalance } from './credit-balance';
+import { AdminUsagePanel } from './admin-usage-panel';
 import styles from '@/components/admin-view.module.css';
 
 type GrantForm = { userId: string; source: GrantSource; credits: number; note?: string };
@@ -25,7 +26,15 @@ function stamp(): string {
 }
 
 export function BillingManager() {
-  return <AdminGuard><GrantPanel /></AdminGuard>;
+  return <AdminGuard><main className={styles.adminPage}><BillingTabs /></main></AdminGuard>;
+}
+
+/** 发放与查账是同一个后台页面的两个分区：用 Tabs 切换，保持键盘可达，不另开路由。 */
+function BillingTabs() {
+  return <Tabs items={[
+    { key: 'grant', label: '发放 Credit', children: <GrantPanel /> },
+    { key: 'usage', label: '用户用量与冲正', children: <AdminUsagePanel /> },
+  ]} />;
 }
 
 function GrantPanel() {
@@ -64,9 +73,9 @@ function GrantPanel() {
     }
   }
 
-  return <main className={styles.adminPage}>
+  return <>
     <div className={styles.toolbar}>
-      <h1>计费管理</h1>
+      <h1>发放 Credit</h1>
       <div style={{ marginLeft: 'auto' }}>
         <CreditBalance refreshToken={receipt?.view.id} />
       </div>
@@ -108,5 +117,5 @@ function GrantPanel() {
         { key: 'note', label: '备注', children: receipt.view.note ?? '无' },
       ]} />
     </>}
-  </main>;
+  </>;
 }
