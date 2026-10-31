@@ -82,6 +82,8 @@ test('管理员发放后 Owner 的额度条显示余额池与透支线', async (
     await expect(bar).toContainText('余额池');
     await expect(bar).toContainText('300');
     await expect(bar).toContainText('透支线 6 Credit');
+    await ownerPage.getByRole('region', { name: '我的 Credit 概览' })
+      .screenshot({ path: evidencePath('billing', 'credit-summary-bar.png') });
     await ownerPage.screenshot({ path: evidencePath('billing', 'owner-balance.png'), fullPage: true });
   } finally {
     await ownerContext.close();

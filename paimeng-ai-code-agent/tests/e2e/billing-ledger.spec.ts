@@ -149,10 +149,12 @@ test('Owner 在 /billing 看到有效金额、分池明细与面额说明', asyn
   await expect(page.getByText('1 Credit = ¥0.01').first()).toBeVisible();
   await expect(page.getByText('不可兑换、不可提现').first()).toBeVisible();
 
+  await page.screenshot({ path: evidencePath('billing', 'owner-ledger-wide.png'), fullPage: true });
+
   // 窄屏下表格横向滚动，页面本身不溢出
   await page.setViewportSize({ width: 480, height: 800 });
   await expect(page.getByLabel('按应用筛选')).toBeVisible();
-  await page.screenshot({ path: evidencePath('billing', 'owner-ledger.png'), fullPage: true });
+  await page.screenshot({ path: evidencePath('billing', 'owner-ledger-narrow.png'), fullPage: true });
 });
 
 test('Admin 查用户用量并整笔冲正：成本未知可辨识、冲正后只退一次', async ({ page }) => {
