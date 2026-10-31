@@ -1,0 +1,7 @@
+reset: 008_credit_rate_card.sql, 010_credit_grant_account.sql, 012_credit_charge_entry.sql, 014_credit_entry_audit.sql, 018_credit_entry_reason_length.sql
+已执行 008_credit_rate_card.sql
+已执行 010_credit_grant_account.sql
+已执行 012_credit_charge_entry.sql
+已执行 014_credit_entry_audit.sql
+已执行 018_credit_entry_reason_length.sql
+Dedicated test databases are ready; development and legacy databases are unchanged

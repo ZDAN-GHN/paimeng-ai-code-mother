@@ -1,0 +1,80 @@
+  1) [chromium] › tests/e2e/billing-admission.spec.ts:83:1 › App chat 新请求 Credit 不足时给出提示，并保留刚才写的消息 ─
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('.insufficient-credits')
+    Expected: visible
+    Timeout: 15000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" locator('.insufficient-credits') with timeout 15000ms
+      - waiting for locator('.insufficient-credits')
+
+
+      90 |   await page.goto('/app/chat/' + appId);
+      91 |   const blocked = page.locator('.insufficient-credits');
+    > 92 |   await expect(blocked).toBeVisible();
+         |                         ^
+      93 |   await expect(blocked).toContainText('当前可用 Credit 为 0');
+      94 |   await expect(blocked).toContainText('联系管理员补充 Credit');
+      95 |   // 首次进入的自动发送也一样被拦住，需求原文回到输入框，不会丢。
+        at /home/zdan/github/zdan/wt-paimeng/integration/paimeng-ai-code-agent/tests/e2e/billing-admission.spec.ts:92:25
+  2) [chromium] › tests/e2e/billing-ledger.spec.ts:132:1 › Owner 在 /billing 看到有效金额、分池明细与面额说明 ───────
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByRole('row').filter({ hasText: '0d529515-e7ff-4408-bd69-8e79256bbb47' })
+    Expected substring: "账单演示应用"
+    Received string:    "2026-11-01 02:59:041793444344726591793444344726590d529515-e7ff-4408-bd69-8e79256bbb4760 Credit扣除：配额池 60已结算已完成"
+    Timeout: 15000ms
+
+    Call log:
+      - Expect "toContainText" getByRole('row').filter({ hasText: '0d529515-e7ff-4408-bd69-8e79256bbb47' }) with timeout 15000ms
+      - waiting for getByRole('row').filter({ hasText: '0d529515-e7ff-4408-bd69-8e79256bbb47' })
+        34 × locator resolved to <tr class="ant-table-row ant-table-row-level-0" data-row-key="0d529515-e7ff-4408-bd69-8e79256bbb47">…</tr>
+           - unexpected value "2026-11-01 02:59:041793444344726591793444344726590d529515-e7ff-4408-bd69-8e79256bbb4760 Credit扣除：配额池 60已结算已完成"
+
+
+      141 |
+      142 |   const row = page.getByRole('row').filter({ hasText: generationId });
+    > 143 |   await expect(row).toContainText('账单演示应用');
+          |                     ^
+      144 |   await expect(row).toContainText('60 Credit');
+      145 |   await expect(row).toContainText('配额池 60');
+      146 |   await expect(row).toContainText('已结算');
+        at /home/zdan/github/zdan/wt-paimeng/integration/paimeng-ai-code-agent/tests/e2e/billing-ledger.spec.ts:143:21
+  3) [chromium] › tests/e2e/billing-ledger.spec.ts:157:1 › Admin 查用户用量并整笔冲正：成本未知可辨识、冲正后只退一次 ────────
+
+    Test timeout of 60000ms exceeded.
+
+    Error: locator.click: Test timeout of 60000ms exceeded.
+    Call log:
+      - waiting for getByRole('row').filter({ hasText: '68f68254-d642-426c-ac6e-13633a2f558a' }).getByRole('button', { name: '冲正' })
+
+
+      172 |   await expect(row).toContainText('真实用量');
+      173 |
+    > 174 |   await row.getByRole('button', { name: '冲正' }).click();
+          |                                                 ^
+      175 |   await page.getByLabel('冲正理由').fill('浏览器演示：费率配置错误');
+      176 |   await page.getByRole('button', { name: '确认冲正' }).click();
+      177 |   await expect(page.getByText('已冲正：反向分录已按原分池记入账本')).toBeVisible();
+        at /home/zdan/github/zdan/wt-paimeng/integration/paimeng-ai-code-agent/tests/e2e/billing-ledger.spec.ts:174:49
+  4) [chromium] › tests/e2e/billing-rate-card.spec.ts:62:1 › 管理员追加费率版本，历史版本仍然在表里 ───────────────────
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByRole('row').filter({ hasText: 'e2e-rate-model' }).filter({ hasText: '2020-01-01 00:00:00' })
+    Expected: visible
+    Timeout: 15000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" getByRole('row').filter({ hasText: 'e2e-rate-model' }).filter({ hasText: '2020-01-01 00:00:00' }) with timeout 15000ms
+      - waiting for getByRole('row').filter({ hasText: 'e2e-rate-model' }).filter({ hasText: '2020-01-01 00:00:00' })
+
+
+      73 |   await appendVersion(page, firstEffectiveFrom, { miss: 100, hit: 10, output: 400 });
+      74 |   const firstRow = versionRow(page, firstEffectiveFrom);
+    > 75 |   await expect(firstRow).toBeVisible();
